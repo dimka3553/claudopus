@@ -1,9 +1,12 @@
 import { atom, read, update } from 'claude-code'
-import type { ElementTable, EngineInterface, McpToolResult, Register, SessionMessage, ToolUseSummary } from 'claude-code'
+import type { ElementTable, EngineInterface, McpToolResult, Register, RenderSurface, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
 
 import type { Entry, Flow, FlowAgent, Item, Me, Report, Server, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
+import { loadStats, statsView, view as statsShown } from './stats'
+import { configView, editing, editText, fillModels, inForce, modelsOf, modelsShort, putBack, readConfig, saveText, setConfig, TEXTS } from './config'
+import type { ConfigShown, Models } from './config'
 
 // The panel beside the chat: one small card per piece of work under way; pressed, a card shows all its to-dos and its own chat
 const LIST = 'claudopus'
@@ -69,11 +72,17 @@ const NO_PAGES = /^(postgres|redis-server|mysqld|mongod)\b/
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'Answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). A message about work already listed is a steer: it goes to the agent that has that work instead, with SendMessage, in their words.'
+  'Answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). A message about work already listed goes to the agent that has that work instead, with SendMessage, in their words.'
 const REFUSED =
   'This chat\'s own thread does no work itself. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
-const NO_COPY =
-  'Work is never started as a copy of this chat. Start a fresh agent instead: subagent_type "general-purpose", the model named ("opus" for most work, "sonnet" for long legwork, "fable" only for heavy 3D or really complicated work), and a brief as the prompt.'
+const NO_COPY = () =>
+  `Work is never started as a copy of this chat. Start a fresh agent instead: subagent_type "general-purpose", the model named (${modelsShort(models)}), and a brief as the prompt.`
+// A command that would print a password or key the keychain keeps. Work uses a kept key only through `bin/secret`, which reads it itself
+// or that would point the runner at another store or another box
+const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_SECRET_(?:SERVICE|ASK)\b/
+const NO_READ = 'A kept key or password is never read or printed. Use it as an environment variable through the secret runner the work rules name; it hides the value from what the command prints.'
+// How long the names of kept keys are trusted before they are asked again
+const SECRETS_MS = 60_000
 // The first line of what the mod adds to every brief: the work's own rules and where the chat's words are. The panel leaves it out
 const workHead = () => `What follows is told to every piece of work started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
 const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
@@ -82,15 +91,15 @@ const KEEP =
 const KEEP_AGENTS = 'Keep the name or id of each background agent with its subject and where it stands.'
 // What every piece of background work is told as it starts: it keeps its own to-do in the panel true
 const PANEL_RULE =
-  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code.'
+  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`; clear it with empty `text` once it is done.'
 // What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
 // own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
 const STEER =
-  'The message sent to you just now is a steer from {name}, sent while you work. Stop: take no other step until you have thought about it. Decide which of three it is. A new to-do under this work: add it. A new task of its own: do not do it; hand it back with the `note` tool, its `task` set to the ask in one line, and the chat starts it. A change in how you are working: change your to-dos to match. Then say with the `note` tool, in one line, which it is and what you now do, and carry on.'
+  'The message sent to you just now is from {name}, in their words, sent while you work. Stop: take no other step until you have thought about it. Decide which of three it is. More for this work: add it to your to-do list. A new task of its own: do not do it; hand it back with the `note` tool, its `task` set to the ask in one line, and the chat starts it. A change in how you are working: change your to-dos to match. Then say with the `note` tool, in one plain line, what you did with their message, such as that you added it to your to-do list, and carry on. Call it {name}\'s message, by no other name.'
 // What the work is told when it has gone on after a steer without saying what it decided
 // What the work is told when a message under way is not the person's: who sent it, and that it is no steer of theirs
 const FROM = (sender: string) =>
-  `The message sent to you just now is from ${sender}, not from {name}: it is no steer of theirs. Take it as ${sender}'s and carry on.`
+  `The message sent to you just now is from ${sender}, not from {name}: it is not theirs. Take it as ${sender}'s and carry on.`
 // The chat sends a steer in the person's words: a message carries them when it holds a stretch of what they wrote, word for word
 const STRETCH = 40
 const carries = (message: string, words: string) => {
@@ -104,7 +113,7 @@ const carries = (message: string, words: string) => {
   return starts.some(i => m.includes(w.slice(i, i + STRETCH)))
 }
 const OWED =
-  'A steer from {name} is waiting for your decision, and you have gone on working. Stop now and decide: a new to-do, a new task to hand back with the `note` tool and its `task`, or a change in how you work. Change your to-dos to match, then say with the `note` tool, in one line, what you decided.'
+  'A message from {name} is waiting for your decision, and you have gone on working. Stop now and decide: more for your to-do list, a new task to hand back with the `note` tool and its `task`, or a change in how you work. Change your to-dos to match, then say with the `note` tool, in one plain line, what you did with their message.'
 // What the work is told when it has taken many steps without touching its to-dos or saying where it stands
 const drifted = (steps: number) =>
   `You have taken ${steps} steps since you last touched your to-dos or said where the work stands. Look at your to-do list now: tick what is done, mark the one you are on as doing, add what you took on, and say where the work stands with the \`note\` tool. If all of it is already true, carry on.`
@@ -144,6 +153,16 @@ let heard: string[] = []
 let isOff = false
 // config.json can name the person the mod works for; without a name the texts say "the person"
 let person = ''
+// config.json can say which model does which work; the chat's and the work's rules name them
+let models: Models = modelsOf({})
+// The settings read again: at a session's start, and after a change in the Config tab
+const loadSettings = async ($: EngineInterface) => {
+  const config = await readConfig($, dir)
+  isOff = config.agents === false
+  person = typeof config.name === 'string' ? config.name.trim() : ''
+  models = modelsOf(config)
+  return config
+}
 const who = (isStart = false) => person || (isStart ? 'The person' : 'the person')
 // A text of the mod's with {name} or {Name} where the person is named
 const named = (text: string) => text.replace(/\{name\}/g, who()).replace(/\{Name\}/g, who(true))
@@ -190,6 +209,32 @@ const append = async ($: EngineInterface, path: string, text: string) => $.fs.wr
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
 const log = ($: EngineInterface, line: string) =>
   append($, `${dir}/log.md`, `${new Date().toISOString()} ${line.replace(/\s+/g, ' ').slice(0, 400)}\n`).catch(() => undefined)
+
+// Kept keys stay out of every chat: a command that would read one from the keychain is refused, and once any key is kept, what a
+// tool answers comes back with every kept value hidden. The values never reach the mod: `bin/secret --hide` swaps them in a pipe
+let secrets = { at: -SECRETS_MS, names: [] as string[] }
+async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult): Promise<ToolCallResult> {
+  const command = e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+  if (r.deny || OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return r
+  const runner = `${$.plugin.root}/bin/secret`
+  const now = await $.clock.now()
+  if (now - secrets.at >= SECRETS_MS || command.includes('bin/secret')) {
+    // A list that cannot be read keeps the names known before, so hiding never stops on a failure
+    const listed = await $.process.run([runner, '--list']).catch(() => undefined)
+    if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean) }
+  }
+  if (!secrets.names.length) return r
+  try {
+    const text = JSON.stringify({ result: r.result, context: r.context })
+    const hidden = await $.process.run([runner, '--hide', '--json', ...secrets.names], { stdin: text })
+    if (hidden.exitCode !== 0 || hidden.isStdoutTruncated) throw new Error('not hidden')
+    if (hidden.stdout === text) return r
+    const swapped = JSON.parse(hidden?.stdout ?? '') as { result: typeof r.result; context: typeof r.context }
+    return { ...r, result: swapped.result, context: swapped.context } as ToolCallResult
+  } catch {
+    return { deny: `${e.tool} ran, and what it answered was withheld: it could not be checked for kept keys.` }
+  }
+}
 
 // ---- The index: one line per subject, "- name | repo | session | state | summary" ----
 
@@ -246,7 +291,8 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   endedAt: 0,
   status: 'working',
 })
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at })
+// Work that ends needs nothing more of the person's hands: its ask goes with it, unless it waits on an answer from its buttons
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at, ask: one.ask?.choices?.length ? one.ask : undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
 const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0 })
 
@@ -1319,16 +1365,189 @@ const openReports = async ($: EngineInterface) => {
 const day = (at: number, now: number) => dated(at, now).split(',')[0] ?? ''
 const time = (at: number, now: number) => (day(at, now) === day(now, now) ? (dated(at, now).split(', ')[1] ?? '') : dated(at, now))
 
-// On the Claudopus pane the reports are one small button, with a mark while one waits on the person. It sits on the line above the
-// cards, beside the chat's own size, so nothing below it moves when a report arrives
+// On the Claudopus pane the reports are one small button. It sits on the line above the cards, beside the chat's own size, so
+// nothing below it moves when a report arrives
 const reportsButton = ($: EngineInterface, ui: Ui, all: Report[]) => {
-  const { Box, Button, Text } = ui
+  const { Box, Button } = ui
   const list = all.filter(r => !r.archived)
   if (!list.length) return null
   return (
     <Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      {entriesOf(list).some(entry => isOpenQuestion(entry[0] as Report)) ? <Text color={LIVE}>●</Text> : null}
       <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
+    </Box>
+  )
+}
+
+// Stats: what the work added up to, in a tab of its own, opened in front like Results
+const STATS_PANE = 'stats'
+const STATS_TITLE = 'Stats'
+const statsRead = async ($: EngineInterface, scope: 'chat' | 'all') => {
+  const home = (await $.env.get('HOME')) ?? ''
+  const { id } = await read($, me)
+  await loadStats($, scope, home, dir, id, `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`, await $.clock.now())
+}
+const openStats = async ($: EngineInterface) => {
+  presses += 1
+  void statsRead($, statsShown.scope).catch(err => log($, `stats not read: ${String(err)}`))
+  await front($, STATS_PANE, STATS_TITLE)
+}
+const statsButton = ($: EngineInterface, ui: Ui) => (
+  <ui.Box key="stats-button" flexShrink={0}>
+    <ui.Button key={`stats-open-${presses}`} label="Stats" onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
+  </ui.Box>
+)
+
+// Memory: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on
+const showMemory = async ($: EngineInterface) => {
+  const opened = await $.process.run(['open', dir]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stderr}`)
+}
+const memoryButton = ($: EngineInterface, ui: Ui) => (
+  <ui.Box key="memory-button" flexShrink={0}>
+    <ui.Button key={`memory-open-${presses}`} label="Memory" onPress={() => void showMemory($).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
+  </ui.Box>
+)
+
+// About: what Claudopus is, its version and the app's, the site, the code and its licence
+const ABOUT_PANE = 'about'
+const ABOUT_TITLE = 'About'
+const SITE = 'https://claudopus.ai'
+const REPO = 'https://github.com/dimka3553/claudopus'
+// Each opening of About is a new drawing of the octopus, so it waves once each time and then rests
+let aboutOpens = 0
+const openAbout = async ($: EngineInterface) => {
+  presses += 1
+  aboutOpens += 1
+  await front($, ABOUT_PANE, ABOUT_TITLE)
+}
+const aboutButton = ($: EngineInterface, ui: Ui) => (
+  <ui.Box key="about-button" flexShrink={0}>
+    <ui.Button key={`about-open-${presses}`} label="About" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
+  </ui.Box>
+)
+// Config: each thing the person can set, what is in force, and a way to change it or put it back to what shipped
+const CONFIG_PANE = 'config'
+const CONFIG_TITLE = 'Config'
+let configFailed = ''
+const openConfig = async ($: EngineInterface) => {
+  presses += 1
+  configFailed = ''
+  await front($, CONFIG_PANE, CONFIG_TITLE)
+}
+const configButton = ($: EngineInterface, ui: Ui) => (
+  <ui.Box key="config-button" flexShrink={0}>
+    <ui.Button key={`config-open-${presses}`} label="Config" onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
+  </ui.Box>
+)
+const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
+  texts: await Promise.all(
+    TEXTS.map(async text => {
+      const { isOwn, isStale, path, text: body } = await inForce($, $.plugin.root, dir, text.path)
+      return { text, isOwn, isStale, path, body }
+    }),
+  ),
+  config: await readConfig($, dir),
+  // A config.json that does not read is said at once: until it is fixed every setting is as shipped
+  failed:
+    configFailed ||
+    (await readOr($, `${dir}/config.json`).then(text => {
+      try {
+        JSON.parse(text || '{}')
+        return ''
+      } catch {
+        return `${dir}/config.json does not read as JSON, so every setting is as shipped. Fix it or remove it.`
+      }
+    })),
+})
+// Each act says what failed under the tab, logs it, and reads the settings again so the chat goes on with what is in force
+const configAct = ($: EngineInterface, what: string, act: () => Promise<string | void>) => {
+  presses += 1
+  void act()
+    .then(failed => {
+      configFailed = failed ? `${what}: ${failed}` : ''
+    })
+    .catch(err => {
+      configFailed = `${what}: ${String(err instanceof Error ? err.message : err)}`
+    })
+    .then(async () => {
+      if (configFailed) await log($, `config: ${configFailed}`)
+      await loadSettings($)
+      redraw($)
+    })
+}
+const configActs = ($: EngineInterface) => ({
+  open: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not opened`, () => editText($, $.plugin.root, dir, text.path)),
+  // Edit opens the text in the tab itself; Save makes it the person's own copy
+  edit: (text: (typeof TEXTS)[number], body: string) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
+  save: (text: (typeof TEXTS)[number], body: string) =>
+    configAct($, `${text.name} not saved`, async () => {
+      const failed = body.trim() ? await saveText($, $.plugin.root, dir, text.path, body) : 'the text was empty, so nothing changed'
+      Object.assign(editing, { key: '', draft: '' })
+      return failed
+    }),
+  cancel: () => configAct($, '', async () => void Object.assign(editing, { key: '', draft: '' })),
+  putBack: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not reset`, () => putBack($, dir, text.path)),
+  set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) => configAct($, 'Not saved', () => setConfig($, dir, key, value, role)),
+})
+const aboutView = async ($: EngineInterface, ui: Ui) => {
+  const { Box, Link, Text } = ui
+  const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
+  const version = (() => {
+    try {
+      return String(JSON.parse(manifest).version ?? '')
+    } catch {
+      return ''
+    }
+  })()
+  const app = await (async () => (await $.session.version()).version)().catch(() => '')
+  const line = (key: string, name: string, body: JSX.Element) => (
+    <Box key={key} flexDirection="row" alignItems="flex-start" gap={2} flexShrink={0}>
+      <Box width={9} flexShrink={0}>
+        <Text dimColor>{name}</Text>
+      </Box>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
+        {body}
+      </Box>
+    </Box>
+  )
+  return (
+    <Box key="about" flexDirection="column" gap={1} flexGrow={1}>
+      <Box key="about-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+        {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving')}
+        <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+          <Text bold>Claudopus</Text>
+          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
+        </Box>
+      </Box>
+      {band(
+        ui,
+        'about-what',
+        'What it does',
+        '',
+        <Box flexDirection="column" gap={1}>
+          <Text wrap="wrap">Every chat hands each of your messages to an agent that works in the background, so the chat stays small and free to talk.</Text>
+          <Text wrap="wrap">This panel shows each piece of work as a card with its to-dos. What finished work leaves is kept under Results.</Text>
+          <Text wrap="wrap">Your words, the subjects you work on and every result are kept as plain files under Memory. Stats adds up what the work cost and the time it saved.</Text>
+        </Box>,
+      )}
+      {band(
+        ui,
+        'about-links',
+        'Links',
+        '',
+        <Box flexDirection="column" gap={1}>
+          {line('about-site', 'Website', <Text><Link href={SITE} label="claudopus.ai" /></Text>)}
+          {line(
+            'about-repo',
+            'GitHub',
+            <Box flexDirection="column">
+              <Text><Link href={REPO} label="dimka3553/claudopus" /></Text>
+              <Text dimColor wrap="wrap">If Claudopus helps you, a star on GitHub helps others find it.</Text>
+            </Box>,
+          )}
+          {line('about-licence', 'Licence', <Text><Link href={`${REPO}/blob/main/LICENSE`} label="MIT" /></Text>)}
+        </Box>,
+      )}
     </Box>
   )
 }
@@ -1366,10 +1585,8 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
     return (
       <Box key={`entry-${r.id}`} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
         <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
-          {/* The mark's place is kept on every row, so every title starts in one column */}
-          <Box width={1} flexShrink={0}>
-            {isOpenQuestion(r) ? <Text color={LIVE}>●</Text> : null}
-          </Box>
+          {/* In the column the folded rows' labels start in */}
+          <Box width={1} flexShrink={0} />
           <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
             <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - 22)} plain onPress={() => openReport($, r.id)} />
           </Box>
@@ -1475,7 +1692,15 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
             </Box>,
           )
         : null}
-      {r.gist ? band(ui, 'report-finding', 'Finding', '', <Text wrap="wrap">{r.gist}</Text>) : null}
+      {r.gist
+        ? band(
+            ui,
+            'report-finding',
+            'Finding',
+            '',
+            <Text wrap="wrap">{r.gist}</Text>,
+          )
+        : null}
       {pictures.length
         ? band(
             ui,
@@ -1503,13 +1728,13 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         '',
         // A link it names never leaves the app: one of its pictures is shown above, anything else stays as text
         <Markdown
-          key={`report-text-${r.id}`}
-          text={text.length > REPORT_CHARS ? `${text.slice(0, REPORT_CHARS)}\n\n…` : text}
-          onLinkPress={link => {
-            const to = pictures.findIndex(one => link.href.endsWith(`/${fileName(one.file)}`) || link.href === one.path)
-            if (to >= 0) show(to)
-          }}
-        />,
+            key={`report-text-${r.id}`}
+            text={text.length > REPORT_CHARS ? `${text.slice(0, REPORT_CHARS)}\n\n…` : text}
+            onLinkPress={link => {
+              const to = pictures.findIndex(one => link.href.endsWith(`/${fileName(one.file)}`) || link.href === one.path)
+              if (to >= 0) show(to)
+            }}
+          />,
       )}
       {band(
         ui,
@@ -1544,14 +1769,16 @@ const dots = (color: string, height: number) =>
     .join('')}</svg>`
 // Claudopus purple, the colour of work that is under way: Claude is orange, its opposite purple
 const LIVE = '#8A63F0'
+// Work that needs the person's hands now: its card's bar and its ask
+const NEEDS = '#E5A50A'
 const LIVE_DOTS = dots(LIVE, LINE)
 // The mark of work that finished
 const DONE = 'success'
 // The octopus: resting, working at its computers (drawn from 32 px up), and lifting its arms (for 16 to 24 px). Each is an SVG
 // file of the mod's, art/<name>.svg, read when the session starts: a drawing is swapped by replacing its file. Happy is the
 // octopus in the finished green, bouncing with its arms up once over the two seconds finished work pauses, then still
-const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '' }
-const ART_FILES: Record<keyof typeof ART, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg' }
+const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '' }
+const ART_FILES: Record<keyof typeof ART, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
 // Whether the octopus is happy at a time: work of this chat's that finished, not stopped or failed, is in its pause. A new drawing
 // starts its animation, so it plays from the first finish and holds its last picture through any finish that follows in the pause
 const isHappy = (cards: { parentId?: string; status: string; endedAt: number }[], at: number) =>
@@ -2048,14 +2275,60 @@ const announce = async ($: EngineInterface) => {
   const done = items.filter(one => one.isDone).length
   const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} pieces of work are ready` : `${items.length} pieces of work ended`
   const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${one.isDone ? 'ready' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
-  const sent = await $.ui.notify(text, { title, key: `ready-${ids.map(one => one.id).join('-')}`.slice(0, 200) }).catch(err => ({ isSent: false as const, reason: String(err) }))
-  if (sent.isSent || sent.reason === 'disabled' || sent.reason === 'refused') return void log($, `ready: ${title} — ${sent.isSent ? `notified through ${sent.channel}` : `not notified (${sent.reason})`}`)
+  await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
+}
+
+// One notification, through the app, else this Mac's own Notification Centre; `what` names it in the log
+const alertPerson = async ($: EngineInterface, what: string, title: string, text: string, key: string) => {
+  const sent = await $.ui.notify(text, { title, key: key.slice(0, 200) }).catch(err => ({ isSent: false as const, reason: String(err) }))
+  if (sent.isSent || sent.reason === 'disabled' || sent.reason === 'refused') return void log($, `${what}: ${title} — ${sent.isSent ? `notified through ${sent.channel}` : `not notified (${sent.reason})`}`)
   // The desktop app takes no notification from a mod yet (no-surface): this Mac's own Notification Centre is told instead.
   // Elsewhere osascript is missing and nothing is shown
   const mac = await $.process
     .run(['osascript', '-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', title, text])
     .catch(err => ({ exitCode: -1, stderr: String(err) }))
-  void log($, `ready: ${title} — app said ${sent.reason}; ${mac.exitCode === 0 ? 'notified through macOS' : `macOS notification failed: ${mac.stderr.slice(0, 120)}`}`)
+  void log($, `${what}: ${title} — app said ${sent.reason}; ${mac.exitCode === 0 ? 'notified through macOS' : `macOS notification failed: ${mac.stderr.slice(0, 120)}`}`)
+}
+
+// Work that needs the person's hands says so at once: the panel comes up with its card standing out, a chime unless config.json
+// turned sound off, and a notification unless it turned those off
+const askAloud = async ($: EngineInterface, one: Todo, text: string) => {
+  let config: { sound?: unknown; notifications?: unknown } = {}
+  try {
+    config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
+  } catch {
+    // A config.json being edited leaves both on
+  }
+  if (config.sound !== false) void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ask sound not played: ${String(err)}`))
+  if (config.notifications !== false) await alertPerson($, 'ask', `${titleOf(one)} needs you`, text, `ask-${one.id}`)
+}
+
+// An ask's text put on the clipboard; its button says so for two seconds, and a later copy starts its own two seconds
+let copiedKey = ''
+let copies = 0
+const copyAsk = ($: EngineInterface, id: string, text: string, surface: RenderSurface) =>
+  void $.ui
+    .copy({ text, surface })
+    .then(r => {
+      presses += 1
+      const made = (copies += 1)
+      copiedKey = r.isCopied ? id : ''
+      if (!r.isCopied) void log($, `copy not made: ${r.reason}`)
+      redraw($)
+      $.clock.after(2000, () => void (copies === made && ((copiedKey = ''), redraw($))))
+    })
+    .catch(err => log($, `copy not made: ${String(err)}`))
+
+// The person's answer to an ask's buttons: to work under way, a message it reads at its next step; to work that has ended, a
+// message to the chat, which carries the work on. Either way the ask goes, and the answer is kept on the card as the person's
+const answerAsk = async ($: EngineInterface, one: Todo, choice: string) => {
+  const ask = one.ask
+  if (!ask) return
+  const at = await $.clock.now()
+  await update($, todos, list => list.map(card => (card.id === one.id ? { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: `${choice} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) } : card)))
+  const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
+  if (working) await tell($, ask.from ?? one.id, `${who(true)} pressed "${choice}" in answer to your ask: ${ask.text}`)
+  else await sendForPerson($, `${choice}. That answers what the work "${titleOf(one)}" asked me before it ended: ${ask.text}`)
 }
 
 export const register: Register = on => {
@@ -2070,9 +2343,7 @@ export const register: Register = on => {
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
     }
     cwd = e.cwd
-    const config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as { agents?: boolean; name?: unknown }
-    isOff = config.agents === false
-    person = typeof config.name === 'string' ? config.name.trim() : ''
+    await loadSettings($)
 
     // The engine's id names this chat's files, as its transcript is named
     const id = await $.session.id()
@@ -2125,7 +2396,23 @@ export const register: Register = on => {
         type: 'object',
         properties: {
           text: { type: 'string' },
-          task: { type: 'string', description: 'Only after a steer that is a new task of its own, which you do not do: the ask in one line. The chat starts it as its own piece of work' },
+          task: { type: 'string', description: named('Only after a message from {name} that is a new task of its own, which you do not do: the ask in one line. The chat starts it as its own piece of work') },
+        },
+        required: ['text'],
+      },
+      isDeferred: false,
+    })
+    await $.tool.register({
+      name: 'ask',
+      description: named(
+        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and tells {name}. `text` says what to do, in one plain line; `copy` is the exact text {name} copies for it, if any; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need. The answer pressed arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Call it again with empty `text` once it is done; without choices it also goes when you finish.",
+      ),
+      inputSchema: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
+          copy: { type: 'string', description: 'The exact text to copy for it, such as a one-time code, a command or a link' },
+          choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now; the one pressed comes back to you as a message' },
         },
         required: ['text'],
       },
@@ -2200,7 +2487,7 @@ export const register: Register = on => {
 
     if (!isOff) {
       // The role goes out with the person's first message, after a compaction, and again when its text has changed
-      const role = named(await readOr($, `${$.plugin.root}/roles/chat.md`))
+      const role = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models))
       const roleSent = mark(role)
       if (!m.isChat || m.needsContext || roleSent !== m.roleSent) {
         // Each subject with the path of its brief, so a brief for work on it can name that path without a search
@@ -2281,8 +2568,8 @@ export const register: Register = on => {
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
     const files = r.instructionFiles ?? e.instructionFiles
-    const path = `${$.plugin.root}/rules/CLAUDE.md`
-    const content = await readOr($, path)
+    // The person's own copy in the memory folder when there is one, the shipped principles otherwise
+    const { path, text: content } = await inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')
     if (!files || !content.trim()) return r
     const others = files.filter(one => one.content.trim() !== content.trim())
     const at = others.findIndex(one => one.kind !== 'managed')
@@ -2299,7 +2586,12 @@ export const register: Register = on => {
   })
 
   // A chat's own thread starts agents and talks to them; the work runs in the agents, which carry an agent id
-  on('tool.call', async ($, e, next) => {
+  on('tool.call', async ($, e, run) => {
+    if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
+      await log($, 'refused a command that reads the keychain')
+      return { deny: NO_READ }
+    }
+    const next = async (call: typeof e) => hideKept($, call, await run(call))
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
     // a line saying what it decided. It is kept by the card in their words. Any other message to work under way, a helper's reply,
     // one between pieces of work or the chat's own note, is told as its sender's
@@ -2379,7 +2671,7 @@ export const register: Register = on => {
       const call = e as unknown as { subagent_type?: unknown; model?: unknown }
       if (call.subagent_type === 'fork' || !String(call.model ?? '').trim()) {
         await log($, `refused an Agent call ${call.subagent_type === 'fork' ? 'that copies the chat' : 'with no model'}`)
-        return { deny: NO_COPY }
+        return { deny: NO_COPY() }
       }
     }
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
@@ -2427,7 +2719,8 @@ export const register: Register = on => {
     // Work the chat starts is told to keep its to-do true; one that goes on after a message already knows
     const isTold = isOwn && Boolean(dir) && !isOff && !e.resume && !e.workflow && (await read($, me)).isChat
     // and is handed, after its brief, the rules every piece of work follows and where the chat's words are, so the brief stays short
-    const work = isTold ? named(await readOr($, `${$.plugin.root}/roles/work.md`)).trim() : ''
+    // and where the runner is that does an admin command with a Mac's kept password
+    const work = isTold ? named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).trim() : ''
     const words = isTold ? `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md` : ''
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : e)
     if (!dir || !r.agentId) return r
@@ -2525,6 +2818,26 @@ export const register: Register = on => {
     return { result: items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing waits on ${who()}.` }
   })
 
+  // Work that needs the person's hands now: its card stands out with the ask and its Copy, until it is cleared or the work ends
+  on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
+    const input = e as unknown as { text?: unknown; copy?: unknown; choices?: unknown }
+    if (e.agentId === undefined) return { result: `Only background work asks through the panel; a chat's own thread asks ${who()} in its reply.` }
+    const text = oneLine(typeof input.text === 'string' ? input.text : '').slice(0, 300)
+    const copy = (typeof input.copy === 'string' ? input.copy : '').trim().slice(0, 4000)
+    const choices = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].slice(0, 4)
+    const at = await $.clock.now()
+    const before = await read($, todos)
+    const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
+    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(copy ? { copy } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), at } : undefined }))
+    if (!text) return { result: 'Cleared: your card no longer asks for anything.' }
+    const list = await read($, todos)
+    const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
+    // The same ask said again is not told again
+    if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+    const shown = [copy ? 'a Copy button for the text' : '', choices.length ? `the buttons ${choices.join(', ')}; the one pressed comes back to you as a message` : ''].filter(Boolean).join(' and ') || 'nothing to copy or press'
+    return { result: `Shown on your card with ${shown}, and ${who()} was told. Clear it with empty text once it is done.` }
+  })
+
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides
   on('tool.call', { tool: 'mcp__claudopus__note' }, async ($, e) => {
     const input = e as unknown as { text?: string; decision?: boolean; task?: string }
@@ -2542,7 +2855,7 @@ export const register: Register = on => {
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     const words = [...(card?.entries ?? [])].reverse().find(entry => entry.kind === 'steer')?.text ?? ''
     said = words || task
-    const handed = `A steer from ${who()} to the work "${card?.title || 'in the background'}" is a new task of its own, not part of that work, and the work has not done it. Start it as its own piece of work: ${task}${words ? `\n${who(true)}'s words: “${words}”` : ''}`
+    const handed = `A message from ${who()} to the work "${card?.title || 'in the background'}" is a new task of its own, not part of that work, and the work has not done it. Start it as its own piece of work: ${task}${words ? `\n${who(true)}'s words: “${words}”` : ''}`
 
     return { result: `Noted. Hand the task to the chat now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${handed}\nThen carry on with your own work; do not do that task here.` }
   })
@@ -2597,7 +2910,7 @@ export const register: Register = on => {
     const at = await $.clock.now()
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at))
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask)
     // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of the chat always does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
@@ -2662,6 +2975,30 @@ export const register: Register = on => {
         <Text color={LIVE}>▸</Text>
       )
 
+    // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button
+    const askBlock = (one: Todo, key: string) =>
+      one.ask ? (
+        <Box key={key} flexDirection="column" gap={1}>
+          <Text wrap="wrap" color={NEEDS} bold>{one.ask.text}</Text>
+          {/* The exact text to paste somewhere, with one Copy button: the panel's text cannot be selected with the pointer */}
+          {one.ask.copy ? (
+            <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={2}>
+              <Box flexShrink={1} minWidth={0}>
+                <Text mono wrap="wrap">{one.ask.copy}</Text>
+              </Box>
+              <Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} onPress={press => copyAsk($, one.id, one.ask?.copy ?? '', press.surface)} />
+            </Box>
+          ) : null}
+          {one.ask.choices?.length ? (
+            <Box flexDirection="row" flexWrap="wrap" gap={1}>
+              {one.ask.choices.map((choice, n) => (
+                <Button key={`${key}-choice-${n}-${presses}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
+              ))}
+            </Box>
+          ) : null}
+        </Box>
+      ) : null
+
     // The small card: a title, where it stands, the line the work last wrote beside the three dots, and how many to-dos are done.
     // Each part has a fixed number of rows and is clipped to them, so a card never changes height as the work goes
     const small = (one: Todo) => {
@@ -2670,13 +3007,15 @@ export const register: Register = on => {
       return (
         <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
           {/* Purple while it works, green once it finished; work stopped or stopped by an error has no mark */}
-          {one.status === 'working' || one.status === 'done' ? <Box width={1} flexShrink={0} backgroundColor={one.status === 'working' ? LIVE : DONE} /> : <Box width={1} flexShrink={0} />}
+          {/* Amber while it needs the person's hands */}
+          {one.status === 'working' || one.status === 'done' ? <Box width={1} flexShrink={0} backgroundColor={one.ask ? NEEDS : one.status === 'working' ? LIVE : DONE} /> : <Box width={1} flexShrink={0} />}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
             <Box flexDirection="column">
               <Text bold wrap="truncate-end">{titleOf(one)}</Text>
               {facts(one, false)}
             </Box>
-            <Box flexDirection="row" alignItems="flex-start" gap={1} height={2} overflow="hidden">
+            {one.ask ? askBlock(one, `ask-${one.id}`) : null}
+            <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden">
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
@@ -2685,7 +3024,7 @@ export const register: Register = on => {
                     {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : 'Stopped'}
                   </Text>
                 ) : (
-                  <Text wrap="wrap" dimColor={one.status !== 'working'}>{cut(now(one), room) || (one.status === 'working' ? 'Starting' : 'It wrote no line about itself')}</Text>
+                  <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || Boolean(one.ask)}>{cut(now(one), room) || (one.status === 'working' ? 'Starting' : 'It wrote no line about itself')}</Text>
                 )}
               </Box>
             </Box>
@@ -3026,7 +3365,10 @@ export const register: Register = on => {
                 </Box>
               )
             }
-            if (first?.kind === 'said') return <Markdown key={`talk-${i}`} text={first.text} />
+            if (first?.kind === 'said')
+              return (
+<Markdown key={`talk-${i}`} text={first.text} />
+              )
             // A move to another model is one quiet line where it happened, with its time
             if (first?.kind === 'model')
               return (
@@ -3052,7 +3394,9 @@ export const register: Register = on => {
               </Box>
             )
           })}
-          {!lines && one.answer ? <Markdown text={one.answer} /> : null}
+          {!lines && one.answer ? (
+<Markdown text={one.answer} />
+          ) : null}
         </Box>
       )
     }
@@ -3078,6 +3422,15 @@ export const register: Register = on => {
               ) : null}
             </Box>
           </Box>
+          {one.ask ? (
+            <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+              <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
+              <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
+                <Text bold dimColor>Needs you now</Text>
+                {askBlock(one, `ask-big-${one.id}`)}
+              </Box>
+            </Box>
+          ) : null}
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {part('part-chat', 'Its chat', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading its chat…</Text>)}
@@ -3246,24 +3599,35 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
         {!alone ? (
-          <Box key="head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-            {/* Happy too for a workflow in its pause whose card turned green: it finished and its last round did not fail */}
-            {isHappy(own, at) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false)
-              ? octopus(ui, 'head-mark', 'happy', HEAD_MARK, 'Claudopus, work finished')
-              : octopus(ui, 'head-mark', working.length + runningFlows.length ? 'working' : 'mark', HEAD_MARK, working.length + runningFlows.length ? 'Claudopus at work' : 'Claudopus')}
-            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-              <Text bold wrap="truncate-end">Claudopus</Text>
-              <Text dimColor wrap="truncate-end">
-                {working.length + runningFlows.length === 0 ? 'Nothing is running' : working.length + runningFlows.length === 1 ? 'Working on 1 thing' : `Working on ${working.length + runningFlows.length} things`}
-              </Text>
-              <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
+          // The mark and its lines across the whole width, so the chat's size is read whole; the buttons on a row of their own under
+          // them, which wraps onto a second row in a narrow pane rather than cutting anything off
+          <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+            <Box flexDirection="row" alignItems="center" gap={2}>
+              {/* Happy too for a workflow in its pause whose card turned green: it finished and its last round did not fail */}
+              {isHappy(own, at) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false)
+                ? octopus(ui, 'head-mark', 'happy', HEAD_MARK, 'Claudopus, work finished')
+                : octopus(ui, 'head-mark', working.length + runningFlows.length ? 'working' : 'mark', HEAD_MARK, working.length + runningFlows.length ? 'Claudopus at work' : 'Claudopus')}
+              <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+                <Text bold wrap="truncate-end">Claudopus</Text>
+                <Text dimColor wrap="truncate-end">
+                  {working.length + runningFlows.length === 0 ? 'Nothing is running' : working.length + runningFlows.length === 1 ? 'Working on 1 thing' : `Working on ${working.length + runningFlows.length} things`}
+                </Text>
+                <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
+              </Box>
             </Box>
-            {reportsButton($, ui, kept)}
+            <Box key="head-buttons" flexDirection="row" flexWrap="wrap" gap={1}>
+              {reportsButton($, ui, kept)}
+              {statsButton($, ui)}
+              {memoryButton($, ui)}
+              {configButton($, ui)}
+              {aboutButton($, ui)}
+            </Box>
           </Box>
         ) : null}
         {alone
           ? big(alone, talked?.lines)
-          : [...shownWork.map(one => ({ at: one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card())}
+          : // Work that needs the person's hands comes first
+            [...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card())}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}
         {!alone && (finished.length || endedFlows.length) ? <Box key="finished-gap" flexGrow={1} /> : null}
         {!alone ? finishedPart(isFinishedOpen) : null}
@@ -3280,6 +3644,36 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
         {reportsView($, $.ui.resolve(e), kept, await $.clock.now(), line)}
+      </Box>
+    )
+  })
+
+  // Stats, in a pane of its own: drawn at once from what was read last, while the records are read again at most once a minute
+  on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    void statsRead($, statsShown.scope).catch(() => undefined)
+    return (
+      <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+        {statsView($, $.ui.resolve(e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
+      </Box>
+    )
+  })
+
+  // About, in a pane of its own
+  on('ui.render', { component: 'Pane', requestId: CONFIG_PANE }, async ($, e) => {
+    const ui = $.ui.resolve(e)
+    return (
+      <ui.Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+        {configView(ui, await configShown($), configActs($), band, presses, dir)}
+      </ui.Box>
+    )
+  })
+
+  on('ui.render', { component: 'Pane', requestId: ABOUT_PANE }, async ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+        {await aboutView($, $.ui.resolve(e))}
       </Box>
     )
   })

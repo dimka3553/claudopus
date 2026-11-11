@@ -23,12 +23,12 @@ const LIST = {
   props: { title: 'Claudopus', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
 } as const
 // The principles and working rules the mod ships
-const PRINCIPLES = '# How I work with Claude\n\n1. My words are the spec.\n'
+const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; app?: { noSurface: boolean } } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean } } = {}) => {
   const files = new Map<string, string>()
   const titles: string[] = []
   const compacts: (string | undefined)[] = []
@@ -50,6 +50,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const notified: string[] = []
   // What was handed to osascript
   const osa: string[][] = []
+  // What was handed to open: a folder shown in Finder
+  const shown: string[][] = []
   prompts.length = 0
   let spawned = 0
   mock.env(on, { HOME })
@@ -63,9 +65,12 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     // The octopus drawings, each an SVG naming its file, when a test asks for them
     const drawing = options.art ? /\/art\/([\w-]+)\.svg$/.exec(e.path)?.[1] : undefined
     if (drawing) return { value: `<svg xmlns="http://www.w3.org/2000/svg"><title>${drawing}</title></svg>` }
-    if (e.path.endsWith('roles/chat.md')) return { value: 'CHAT ROLE' }
-    if (e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE' }
-    if (e.path.endsWith('rules/CLAUDE.md')) return { value: PRINCIPLES }
+    // The texts the mod ships; a copy of one in the memory folder is the person's own, kept in files
+    const isShipped = !e.path.startsWith(MEMORY)
+    if (isShipped && e.path.endsWith('roles/chat.md')) return { value: options.chatRole ?? 'CHAT ROLE' }
+    if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`' }
+    if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: PRINCIPLES }
+    if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
     return { value: text }
@@ -92,6 +97,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { value: { content: [{ type: 'text', text }], isError: false } }
   })
   on('session.id', () => ({ value: 'engine-id' }))
+  on('session.version', () => ({ value: { version: '2.1.321', base: '2.1.321' } }))
   // The chat of a piece of work as the engine keeps it, or its refusal to read one
   // A promise given as the chat is one the app is slow to give
   on('session.messages', async () => ({ value: (await (options.talk ?? [])) as never }))
@@ -130,12 +136,23 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   on('process.run', (_, e) => {
     const [tool, ...rest] = e.argv
     if (tool === 'osascript') osa.push([...e.argv])
+    if (tool === 'open') shown.push([...e.argv])
     if (tool === 'kill') killed.push(String(rest[0]))
+    // A file moved aside
+    if (tool === 'mv') (files.set(String(rest[2]), files.get(String(rest[1])) ?? ''), files.delete(String(rest[1])))
     // A copy the mod makes of a file
     if (tool === 'cp') (copied.push(String(rest[2])), files.set(String(rest[2]), files.get(String(rest[1])) ?? ''))
     const isGone = killed.includes('700')
-    const stdout =
-      tool === 'grep'
+    // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
+    const kept = files.get('keychain:API_KEY')
+    if (tool?.endsWith('bin/secret')) {
+      const said = rest[0] === '--list' ? (kept ? 'API_KEY\n' : '') : kept ? String(e.init?.stdin ?? '').replaceAll(kept, '[hidden API_KEY]') : String(e.init?.stdin ?? '')
+      return { value: { exitCode: 0, stdout: said, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    const stdout = tool?.endsWith('jq')
+      ? // What jq makes of a transcript: the test lays it beside it
+        (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
+      : tool === 'grep'
         ? `${MEMORY}/words/local_1.md:2:the nose is flawed\n`
         : tool === 'lsof' && rest.includes('-iTCP')
           ? `p635\nn*:7000\n${isGone ? '' : 'p700\nn127.0.0.1:3100\nn[::1]:3100\n'}`
@@ -162,6 +179,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   on('tool.call', (_, e) => {
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
     if (e.tool === 'SendMessage') sent.push(String((e as { message?: string }).message))
+    // A command that prints the key, as one could print it by mistake
+    if (e.tool === 'Bash' && String((e as { command?: string }).command).includes('echo $API_KEY')) return { result: { stdout: `token is ${files.get('keychain:API_KEY') ?? 'none'}`, stderr: '', interrupted: false } } as never
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     if (e.tool === 'Workflow') return { result: { status: 'async_launched', taskId: 'wt1', runId: 'wf_1', taskType: 'local_workflow', workflowName: 'rounds', transcriptDir: '/t/wf_1', scriptPath: '/t/wf_1.js' } } as never
     return { result: 'ran' } as never
@@ -195,7 +214,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, shown }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -223,7 +242,7 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(first.context?.join('\n')).toContain('Subjects so far')
   expect(first.context?.join('\n')).toContain(`This chat's saved words: ${MEMORY}/words/engine-id.md`)
   expect(first.context?.join('\n')).toContain('start a fresh agent')
-  expect(first.context?.join('\n')).toContain('is a steer')
+  expect(first.context?.join('\n')).toContain('goes to the agent that has that work')
 
   // One sent while the chat is mid-turn is its own piece of work too
   const second = await $.prompt.submit({ text: 'and the nose', wait: false, origin: composer, turnId: 'turn-1' })
@@ -251,6 +270,40 @@ test('work never starts as a copy of the chat: a fork or an agent with no model 
   expect(prompts[0]?.startsWith('BRIEF')).toBe(true)
   expect(prompts[0]).toContain('WORK ROLE')
   expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`)
+})
+
+test("the work's rules name where the admin runner is, the one way work uses a Mac's password", async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'clear the disk', wait: false, origin: composer })
+
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
+  expect(prompts[0]).toMatch(/an admin command runs through `\/\S*mods\/claudopus\/bin\/admin`/)
+  expect(prompts[0]).not.toContain('{admin}')
+})
+
+test('work uses a kept key without reading it: the keychain is not read, and what a tool answers comes back with the key hidden', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
+  expect(prompts[0]).toMatch(/\/\S*mods\/claudopus\/bin\/secret NAME/)
+  expect(prompts[0]).not.toContain('{secret}')
+
+  const read = await $.tool.call({ tool: 'Bash', tool_use_id: 'k1', command: 'security find-generic-password -s claudopus-secret -a API_KEY -w', agentId: 'w1' } as never)
+  expect(read.deny).toContain('never read or printed')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'k2', command: 'security dump-keychain -d', agentId: 'w1' } as never)).deny).toContain('never read')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'k5', command: 'security find-generic-password -wa API_KEY', agentId: 'w1' } as never)).deny).toContain('never read')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'k6', command: 'CLAUDOPUS_SECRET_SERVICE=other bin/secret API_KEY here "env"', agentId: 'w1' } as never)).deny).toContain('never read')
+  // A command that only lists what the keychain holds, with no value, runs
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'k7', command: 'security find-generic-password -s claudopus-secret -a API_KEY', agentId: 'w1' } as never)).deny).toBeUndefined()
+
+  // Nothing kept: what the tool answers passes as it was
+  expect(JSON.stringify((await $.tool.call({ tool: 'Bash', tool_use_id: 'k3', command: 'echo $API_KEY', agentId: 'w1' } as never)).result)).toContain('token is none')
+  files.set('keychain:API_KEY', 'sk-live-123456')
+  const shown = await $.tool.call({ tool: 'Bash', tool_use_id: 'k4', command: 'bin/secret API_KEY here "echo $API_KEY"', agentId: 'w1' } as never)
+  expect(JSON.stringify(shown.result)).toContain('token is [hidden API_KEY]')
+  expect(JSON.stringify(shown.result)).not.toContain('sk-live-123456')
 })
 
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
@@ -522,7 +575,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect((await pane.find({ type: 'Text', text: /^Nothing/ }))?.text).toBe('Nothing is running')
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Details'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Details'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeDefined()
   await clock.advance(1_100)
@@ -531,8 +584,8 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /^Nothing/ }))?.text).toBe('Nothing is running')
   // It is one folded row, "Finished", under the running cards; unfolded, a card as running work has, with Details and no Stop
   const buttons = await pane.findAll({ type: 'Button' })
-  expect(buttons.map(b => b.props.label)).toEqual(['▸ Finished 1'])
-  await pane.press({ key: String(buttons[0]?.key) })
+  expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', '▸ Finished 1'])
+  await pane.press({ key: String(buttons[4]?.key) })
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.wrap).toBe('truncate-end')
   expect((await pane.find({ type: 'Text', text: /^Finished ·/ }))?.text).toBe('Finished · 2m 00s')
   expect(await pane.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
@@ -634,8 +687,10 @@ test('a steer is sent as written and the work is told it is one, the work is rem
   // The chat's call goes on as it was made; the work is told in its own chat what a steer asks of it
   expect(sent[0]).toBe('Sam: “Also make me a chart of the ears.”')
   expect(appended).toHaveLength(1)
-  expect(appended[0]).toContain('a1: The message sent to you just now is a steer from the person')
+  expect(appended[0]).toContain('a1: The message sent to you just now is from the person, in their words')
   expect(appended[0]).toContain('Decide which of three it is')
+  expect(appended[0]).toContain('added it to your to-do list')
+  expect(appended.join('\n')).not.toMatch(/steer/i)
 
   // The work goes on without saying what it decided: after two steps it is told so, once
   await step('Bash')
@@ -643,7 +698,7 @@ test('a steer is sent as written and the work is told it is one, the work is rem
   await step('Bash')
   await step('Bash')
   expect(appended).toHaveLength(2)
-  expect(appended[1]).toContain('a1: A steer from the person is waiting for your decision')
+  expect(appended[1]).toContain('a1: A message from the person is waiting for your decision')
 
   // Its line is the decision; a task of its own goes back to the chat in the person's words, and nothing more is owed
   const noted = await step('mcp__claudopus__note', { text: 'Your chart of the ears is a new task; I go on with the nose.', task: 'Make a chart of the ears' })
@@ -677,7 +732,7 @@ test("only the person's words sent on by the chat are their steer: a helper's re
 
   // A helper replies to the work that started it, and that work writes to its helper
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'There are two nostrils.', agentId: 'a3' } as never)
-  expect(appended.at(-1)).toBe('a1: The message sent to you just now is from your helper "Count nostrils", not from the person: it is no steer of theirs. Take it as your helper "Count nostrils"\'s and carry on.')
+  expect(appended.at(-1)).toBe('a1: The message sent to you just now is from your helper "Count nostrils", not from the person: it is not theirs. Take it as your helper "Count nostrils"\'s and carry on.')
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a3', message: 'Count them again.', agentId: 'a1' } as never)
   expect(appended.at(-1)).toContain('a3: The message sent to you just now is from the work that started you, not from the person')
   // One piece of work writes to another
@@ -686,7 +741,7 @@ test("only the person's words sent on by the chat are their steer: a helper's re
   // The chat's own note, which carries none of the person's words, is the chat's
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's4', to: 'a1', message: 'A fault seen from the chat: the card shows the wrong model.' } as never)
   expect(appended.at(-1)).toContain('a1: The message sent to you just now is from the chat, not from the person')
-  expect(appended.join('\n')).not.toContain('steer from the person')
+  expect(appended.join('\n')).not.toContain('from the person, in their words')
   // Nothing is owed for them: going on, the work is not reminded of a steer
   await steps('a1')
   expect(appended.join('\n')).not.toContain('waiting for your decision')
@@ -698,9 +753,9 @@ test("only the person's words sent on by the chat are their steer: a helper's re
   // The person's words, sent on by the chat, are their steer, and the card keeps them
   await $.prompt.submit({ text: 'Make the left nostril a little wider than the right one.', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's5', to: 'a1', message: 'Sam on the nose, in their words: “Make the left nostril — a little wider than the right one”' } as never)
-  expect(appended.at(-1)).toContain('a1: The message sent to you just now is a steer from the person')
+  expect(appended.at(-1)).toContain('a1: The message sent to you just now is from the person, in their words')
   await steps('a1')
-  expect(appended.at(-1)).toContain('a1: A steer from the person is waiting for your decision')
+  expect(appended.at(-1)).toContain('a1: A message from the person is waiting for your decision')
   // The same words sent by a piece of work are still not the person's steer
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's6', to: 'a2', message: 'Make the left nostril a little wider than the right one.', agentId: 'a1' } as never)
   expect(appended.at(-1)).toContain('a2: The message sent to you just now is from the work "Fix the nose"')
@@ -1294,10 +1349,10 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect([...files.keys()].filter(path => path.endsWith('/meta.json'))).toHaveLength(1)
 
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  // On the Claudopus pane the reports are one small button, marked while one waits on the person
+  // On the Claudopus pane the reports are one small button, with no mark: the list's first group says what waits
   expect(await pane.find({ type: 'Text', text: /^Results$/ })).toBeUndefined()
   expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Results 1')
-  expect((await pane.find({ type: 'Text', text: /^●$/ }))?.props.color).toBe('#8A63F0')
+  expect(await pane.find({ type: 'Text', text: /^●$/ })).toBeUndefined()
   // Pressed, it opens the list as a pane of its own; the Claudopus pane stays as it was
   await pressed(pane, 'reports-open')
   expect(opened).toContain('reports')
@@ -1305,10 +1360,10 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
   expect((await list.find({ type: 'Text', text: /^Results$/ }))?.props.bold).toBe(true)
   expect((await list.find({ type: 'Text', text: /^Waiting on you$/ }))?.props.bold).toBe(true)
-  // One line a row: its title, when, the mark that it waits, and Archive; nothing under it
+  // One line a row: its title, when, and Archive; nothing under it, and no mark: its group says it waits
   expect((await keyed(list, `report-${folder.split('/').pop()}`))?.props.label).toBe('Weekly revenue')
   expect(await list.find({ type: 'Text', text: /^\d\d:\d\d$/ })).toBeDefined()
-  expect((await list.find({ type: 'Text', text: /^●$/ }))?.props.color).toBe('#8A63F0')
+  expect(await list.find({ type: 'Text', text: /^●$/ })).toBeUndefined()
   expect(await list.find({ type: 'Text', text: /Revenue rose/ })).toBeUndefined()
   expect((await keyed(list, `archive-${folder.split('/').pop()}`))?.props.label).toBe('Archive')
 
@@ -1776,9 +1831,9 @@ test('the results list is one line a row: what waits first, the five newest, the
   expect(await list.find({ type: 'Text', text: /^10$/ })).toBeDefined()
   expect((await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)).toEqual(['Results', 'Waiting on you', 'Recent'])
   expect(await titles()).toEqual(['Video third cut', 'Panel change 0', 'Panel change 1', 'Panel change 2', 'Panel change 3', 'Panel change 4'])
-  // Nothing under a title: no finding, no subject, no line saying it waits; one mark, the time, Archive
+  // Nothing under a title: no finding, no subject, no line saying it waits, no mark; the time, Archive
   expect(await list.find({ type: 'Text', text: /long line|waiting on you|Claude workflow/ })).toBeUndefined()
-  expect((await list.findAll({ type: 'Text', text: /^●$/ })).length).toBe(1)
+  expect((await list.findAll({ type: 'Text', text: /^●$/ })).length).toBe(0)
   const rowBoxes = (await list.drawn()) as unknown as { props?: { key?: string; height?: number }; children?: unknown[] }
   const heights: number[] = []
   const walk = (n: unknown) => {
@@ -1829,4 +1884,193 @@ test('work whose brief names one result on what it is about is a round of that w
     return all.length === 5 ? all : undefined
   })
   expect(['a1', 'a2', 'a3'].map(id => metas?.find(one => one.agent === id)?.from ?? '')).toEqual(['20261111-1853-explainer-video', '', ''])
+})
+
+test('Stats opens in front from its button beside Results, and adds up this chat\'s work from its records: tokens, work, time saved, cost', async ($, on) => {
+  const { files, opened, tabs } = world(on)
+  const M = 60_000
+  const now = 1_700_000_000_000
+  const chat = `${HOME}/.claude/projects/-repo`
+  const subs = `${chat}/engine-id/subagents`
+  files.set(`${chat}/engine-id.jsonl`, '{}')
+  files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [], d: [], h: [[now - 30 * M, now - 30 * M + 20_000]] }))
+  // Two pieces of work that ran side by side for ten minutes
+  for (const [id, from, to, output] of [['w1', now - 30 * M, now - 10 * M, 1_000_000], ['w2', now - 20 * M, now - 10 * M, 500_000]] as const) {
+    files.set(`${subs}/agent-${id}.jsonl`, '{}')
+    files.set(`${subs}/agent-${id}.meta.json`, JSON.stringify({ description: `Work ${id}`, spawnDepth: 1, finished: true }))
+    files.set(`${subs}/agent-${id}.jsonl.sum`, JSON.stringify({ s: [[from, to]], u: [[`m-${id}`, 'claude-opus-5-5', from + M, 0, 0, 0, 0, 0, 0, output]], d: [[from + M, 'Do it', 'done', '']] }))
+  }
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect((await keyed(pane, 'stats-open'))?.props.label).toBe('Stats')
+  await pressed(pane, 'stats-open')
+  expect(opened).toContain('stats')
+  expect(tabs).toContain('stats: Stats')
+  const stats = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, title: 'Stats', bodyColumns: 80 }, surface: 'desktop' } as never)
+  // At the top, what is counted: this chat, today, each chosen one filled and bold
+  expect((await stats.find({ type: 'Text', text: 'This chat' }))?.props.bold).toBe(true)
+  expect((await stats.find({ type: 'Text', text: 'Today' }))?.props.bold).toBe(true)
+  expect((await keyed(stats, 'scope-All chats'))?.props.label).toBe('All chats')
+  // Once read: 1.5M output tokens on Opus 5.5 at $20 a million, two pieces finished, two to-dos, 30 minutes of work in 20
+  expect(await until(async () => stats.find({ type: 'Text', text: 'Saved by running side by side' }))).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: 'Opus 5.5' })).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: '1.5M' })).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: '$30.00' })).toBeDefined()
+  const value = async (name: string) => {
+    const rows = (await stats.findAll({ type: 'Text' })).map(one => one.text)
+    return rows[rows.indexOf(name) + 1]
+  }
+  // The headline: time saved, cost, work done
+  expect(await value('10m')).toBe('time saved')
+  expect(await value('Pieces of work done')).toBe('2')
+  expect(await value('To-dos done')).toBe('2')
+  expect(await value('Work added up')).toBe('30m')
+  expect(await value('On the clock')).toBe('20m')
+  expect(await value('Saved by running side by side')).toBe('10m')
+  expect(await value('The chat’s reply, on average')).toBe('20s')
+  // The sums are kept, so the transcripts are read again only when they change
+  expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').folder).toBe(chat)
+})
+
+test('Memory, beside Stats, opens the memory folder in Finder', async ($, on) => {
+  const { shown } = world(on)
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect((await keyed(pane, 'memory-open'))?.props.label).toBe('Memory')
+  await pressed(pane, 'memory-open')
+  expect(await until(async () => shown.find(argv => argv[1] === MEMORY))).toEqual(['open', MEMORY])
+})
+
+test('the bar keeps its buttons whole on a row of their own under the header, wrapping in a narrow pane', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 30 }, surface: 'desktop' } as never)
+  const row = (await pane.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')
+  expect(row?.props.flexWrap).toBe('wrap')
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About'])
+  // The chat's size is no longer squeezed beside the buttons
+  expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
+})
+
+test('About says what Claudopus is, its version and the app\'s, and links the site, the code and its licence', async ($, on) => {
+  const { tabs } = world(on)
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  await pressed(list, 'about-open')
+  expect(await until(async () => tabs.find(tab => tab === 'about: About'))).toBe('about: About')
+  const about = await $.ui.mount({ ...LIST, requestId: 'about', props: { ...LIST.props, title: 'About', bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect(await about.find({ type: 'Text', text: 'Version 0.1.0 · Claude Code 2.1.321' })).toBeDefined()
+  expect(await about.find({ type: 'Text', text: 'What it does' })).toBeDefined()
+  // The principles are not shown there
+  expect(await about.find({ type: 'Text', text: 'My words are the spec.' })).toBeUndefined()
+  const links = (await about.findAll({ type: 'Link' })).map(one => one.props.href)
+  expect(links).toEqual(['https://claudopus.ai', 'https://github.com/dimka3553/claudopus', 'https://github.com/dimka3553/claudopus/blob/main/LICENSE'])
+  expect(await about.find({ type: 'Text', text: /a star on GitHub/ })).toBeDefined()
+})
+
+test('a copy of the principles in the memory folder is the person\'s own: every conversation carries it in place of the shipped ones', async ($, on) => {
+  const { files } = world(on)
+  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
+  const MINE = '# Mine\n\n## Core truths\n\n- Mine come first.\n\n## Checking\n\n1. Look at it.\n'
+  files.set(`${MEMORY}/rules/CLAUDE.md`, MINE)
+  await $.session.start(start)
+  const told = await $.prompt.context({ blocks: [], instructionFiles: [{ path: '/repo/CLAUDE.md', kind: 'project', content: 'REPO RULES' }] })
+  expect(told.instructionFiles?.find(one => one.kind === 'user')).toEqual({ path: `${MEMORY}/rules/CLAUDE.md`, kind: 'user', content: MINE })
+  expect(told.instructionFiles?.some(one => one.content === PRINCIPLES)).toBe(false)
+})
+
+test('Config lists each thing a person can set with what is in force, edits a text as their own copy, changes a setting and puts each back', async ($, on) => {
+  const { files, shown, tabs } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', other: 1 }))
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  await pressed(list, 'config-open')
+  expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config')
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  for (const name of ['Principles', "The chat's rules", 'Work rules', 'Your name', 'Background work', 'Sound', 'Notifications', 'Most work', 'Long legwork', 'Heavy work'])
+    expect(await config.find({ type: 'Text', text: name })).toBeDefined()
+  // Only what differs from what shipped has a Reset: here the name
+  expect((await config.findAll({ type: 'Button' })).filter(one => one.props.label === 'Reset').length).toBe(1)
+  // Open file makes the person's own copy from the shipped text and opens it in their editor
+  await pressed(config, 'config-text-principles-open')
+  expect(files.get(`${MEMORY}/rules/CLAUDE.md`)).toBe(PRINCIPLES)
+  expect(shown.at(-1)).toEqual(['open', '-t', `${MEMORY}/rules/CLAUDE.md`])
+  // A copy still the same as what shipped is no change of theirs
+  expect((await config.findAll({ type: 'Text', text: /As shipped\.$/ })).length).toBe(3)
+  // Edit opens the text in the tab; Save makes it the person's own
+  await pressed(config, 'config-text-work-edit')
+  await config.input({ key: 'config-text-work-input', text: 'MY WORK RULES' })
+  expect(files.get(`${MEMORY}/roles/work.md`)).toBe('MY WORK RULES\n')
+  expect(await config.find({ type: 'Input', key: 'config-text-work-input' })).toBeUndefined()
+  // Without the places the shipped rules fill, it is said to lack what an update added
+  expect(await config.find({ type: 'Text', text: /Edited by you, before an update added parts yours lacks/ })).toBeDefined()
+  // Reset moves it aside, and the shipped text is in force again
+  await pressed(config, 'config-text-work-back')
+  expect(files.has(`${MEMORY}/roles/work.md`)).toBe(false)
+  expect([...files.entries()].find(([path]) => /\/roles\/work\.md\.\d{8}-\d{6}\.old$/.test(path))?.[1]).toBe('MY WORK RULES\n')
+  expect((await config.findAll({ type: 'Text', text: /As shipped\.$/ })).length).toBe(3)
+  // A setting is written to config.json, every other key kept; Reset takes the key out
+  await pressed(config, 'config-sound-off')
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, sound: false })
+  await pressed(config, 'config-sound-back')
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 })
+  await config.input({ key: 'config-name-input', text: 'Alex' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').name).toBe('Alex')
+  await pressed(config, 'config-name-back')
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').name).toBeUndefined()
+})
+
+test('the model each kind of work runs on comes from Config, and the chat\'s and work\'s rules name it', async ($, on) => {
+  const { files } = world(on, { chatRole: 'CHAT ROLE\n- {models}' })
+  await $.session.start(start)
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  await config.select({ key: 'config-model-legwork-pick', value: 'opus' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ models: { legwork: 'opus' } })
+  // The chat is told at its next message, and the work's rules name the helpers' model
+  const told = (await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })) as { context?: string[] }
+  expect((told.context ?? []).join('\n')).toContain('Long legwork such as indexing runs on Opus 5.5, `model: "opus"`.')
+  await $.agent.spawn({ ...spawn, prompt: 'index the photos' } as never)
+  expect(prompts[0]).not.toContain('{helpers}')
+  // Picking what shipped takes the key out again
+  await config.select({ key: 'config-model-legwork-pick', value: 'sonnet' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
+})
+
+test('work that needs the person\'s hands asks: its card stands out first with the ask, the text to paste with its Copy, and answers that go back to it', async ($, on) => {
+  const { played, notified, appended } = world(on)
+  const clip: string[] = []
+  on('ui.copy', (_, e) => (clip.push(e.text), { value: { isCopied: true } }) as never)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the repo private', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a2', text: 'Paste this code on the GitHub page that opened.', copy: 'ABCD-1234' } as never)
+  expect(asked.result).toContain('Shown on your card')
+  expect(played.length).toBeGreaterThan(0)
+  expect(notified).toContain('Check the ears needs you | Paste this code on the GitHub page that opened.')
+  const titles = (await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)
+  expect(titles.indexOf('Check the ears')).toBeGreaterThan(-1)
+  expect(titles.indexOf('Check the ears')).toBeLessThan(titles.indexOf('Hide the repo'))
+  expect((await list.find({ type: 'Text', text: 'Paste this code on the GitHub page that opened.' }))?.props.color).toBe('#E5A50A')
+  // The code is shown with one Copy button, which puts it on the clipboard and says so
+  expect((await list.find({ type: 'Text', text: 'ABCD-1234' }))?.props.mono).toBe(true)
+  await pressed(list, 'ask-a2-copy')
+  expect(clip).toEqual(['ABCD-1234'])
+  expect((await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === '✓ Copied')))).toBeDefined()
+  // Its Details tab has it at the top, and clearing it takes it away
+  const ears = await $.ui.mount({ ...LIST, requestId: 'work-a2', surface: 'desktop' } as never)
+  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: '' } as never)
+  expect(await list.find({ type: 'Text', text: 'ABCD-1234' })).toBeUndefined()
+  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeUndefined()
+
+  // An ask for a go-ahead carries buttons; the one pressed goes back to the work and the ask goes
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a2', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  const approve = (await ears.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')
+  expect(approve).toBeDefined()
+  await ears.press({ key: approve?.key ?? '' })
+  expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Approve"')))).toContain('May I delete the old repo?')
+  expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')).toBeUndefined()
+  await Promise.all([list.unmount(), ears.unmount()])
 })

@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claudopus design system</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<style>
+/* ---- Claudopus design system: tokens (see design-system.html) ---- */
+:root{
+  color-scheme:dark;
+  /* one cell is the unit of everything: the octopus, the corners, the spacing */
+  --cell:4px;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s6:24px;--s8:32px;--s12:48px;--s16:64px;--s24:96px;--s32:128px;
+  /* faces */
+  --sans:"Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  /* type scale */
+  --t-note:13px;--t-small:15px;--t-body:18px;--t-lead:22px;--t-title:22px;
+  --t-head:clamp(30px,5vw,44px);--t-display:clamp(40px,7.2vw,68px);
+  /* the page, dark */
+  --ground:#111112;--raised:#1C1C1F;--line:#2F2F35;
+  --ink:#F3F2EF;--soft:#A6A6AB;--faint:#6A6A70;
+  /* purple is the octopus and the one thing to press */
+  --purple:#8A63F0;--purple-lift:#A58BFA;--purple-deep:#6A45D8;--purple-ink:#A58BFA;--on-purple:#111112;
+  /* green only says finished, coral only says trouble */
+  --green:#4EBA65;--green-ink:#5FC553;--coral:#FF6B4A;--coral-ink:#FF8163;
+  /* screens show the app, which is dark, so they stay dark in both themes */
+  --screen:#0A0A0B;--screen-raised:#252527;--screen-line:#34343A;--screen-key:#3A3A41;
+  --screen-ink:#F3F2EF;--screen-soft:#A6A6AB;--screen-purple:#A58BFA;--screen-green:#5FC553;
+  /* motion: quarter-second beats, moved in steps */
+  --beat:250ms;
+  /* measures */
+  --page:1120px;--text:640px;--rail:96px;--gutter:24px;
+}
+@media (prefers-color-scheme:light){:root{
+  color-scheme:light;
+  --ground:#FAF9F5;--raised:#EFEDE5;--line:#D9D6CB;
+  --ink:#18181A;--soft:#5C5C63;--faint:#9A9AA2;
+  --purple-ink:#6A45D8;--green-ink:#2B7A3D;--coral-ink:#C2401F;
+}}
+@media (max-width:640px){:root{--t-body:17px;--t-lead:19px;--t-title:20px;--gutter:16px}}
+
+/* ---- base ---- */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:var(--s6)}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 var(--t-body)/1.55 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+h1,h2,h3,p,ul,ol,figure{margin:0}
+ul,ol{padding:0;list-style:none}
+img,video,svg{display:block;max-width:100%}
+h1{font:700 var(--t-display)/1.04 var(--sans);letter-spacing:-.035em;text-wrap:balance}
+h2{font:700 var(--t-head)/1.1 var(--sans);letter-spacing:-.03em;text-wrap:balance}
+h3{font:700 var(--t-title)/1.25 var(--sans);letter-spacing:-.01em}
+.lead{font-size:var(--t-lead);line-height:1.45;color:var(--soft);max-width:var(--text);text-wrap:pretty}
+.small{font-size:var(--t-small);line-height:1.5}
+.note{font:400 var(--t-note)/1.4 var(--mono);color:var(--soft)}
+.soft{color:var(--soft)}
+.name{color:var(--purple-ink)}
+a{color:inherit;text-decoration:underline;text-decoration-color:var(--purple);text-decoration-thickness:2px;text-underline-offset:4px}
+a:hover{color:var(--purple-ink)}
+:focus-visible{outline:2px solid var(--purple-ink);outline-offset:3px}
+code,kbd{font:400 .88em/1.4 var(--mono)}
+p code,li code{background:var(--raised);padding:0 var(--s1);white-space:nowrap}
+code.long{white-space:normal;overflow-wrap:anywhere}
+::selection{background:var(--purple);color:var(--on-purple)}
+
+/* ---- the pixel motif ---- */
+/* corners step in by one cell, never curve */
+.notch,.btn>span,.btn::before{--n:var(--cell);clip-path:polygon(var(--n) 0,calc(100% - var(--n)) 0,calc(100% - var(--n)) var(--n),100% var(--n),100% calc(100% - var(--n)),calc(100% - var(--n)) calc(100% - var(--n)),calc(100% - var(--n)) 100%,var(--n) 100%,var(--n) calc(100% - var(--n)),0 calc(100% - var(--n)),0 var(--n),var(--n) var(--n))}
+.notch.big{--n:var(--s2)}
+/* a rule is a row of cells */
+.rule{height:var(--cell);border:0;margin:0;background:repeating-linear-gradient(90deg,var(--line) 0 var(--cell),transparent var(--cell) var(--s3))}
+/* drawings made of cells: the octopus, numerals, icons */
+.px{fill:currentColor;flex:none;shape-rendering:crispEdges}
+.octo{color:var(--purple);flex:none;image-rendering:pixelated}
+.octo.happy{color:var(--green)}
+.octo-spot{position:relative;display:inline-block;line-height:0}
+.octo-spot .happy{display:none}
+.octo-spot.is-happy .happy{display:block}
+.octo-spot.is-happy .octo:not(.happy){display:none}
+/* a list marks each line with one cell, coloured by what it says */
+.cells>li{position:relative;padding-left:var(--s6)}
+.cells>li::before{content:"";position:absolute;left:0;top:.5em;width:var(--s2);height:var(--s2);background:var(--purple)}
+.cells.trouble>li::before{background:var(--coral)}
+.cells.done>li::before{background:var(--green)}
+.cells.plain>li::before,.cells>li.is-plain::before{background:var(--faint)}
+.cells>li.is-trouble::before{background:var(--coral)}
+.cells>li.is-done::before{background:var(--green)}
+
+/* ---- buttons ---- */
+.btn{position:relative;display:inline-block;padding:0;border:0;background:none;color:var(--on-purple);font:700 var(--t-body)/1 var(--sans);text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.btn::before{content:"";position:absolute;inset:0;transform:translate(var(--cell),var(--cell));background:var(--purple-deep)}
+.btn>span{position:relative;display:flex;align-items:center;gap:var(--s3);min-height:var(--s12);padding:var(--s3) var(--s6);background:var(--purple)}
+.btn:hover{color:var(--on-purple)}
+.btn:hover>span{background:var(--purple-lift)}
+.btn:active>span{transform:translate(var(--cell),var(--cell))}
+.btn.quiet{color:var(--ink)}
+.btn.quiet::before{background:var(--line)}
+.btn.quiet>span{background:var(--raised)}
+.btn.quiet:hover{color:var(--ink)}
+.btn.quiet:hover>span{background:var(--line)}
+
+/* ---- screens: the terminal, the video, the panel ---- */
+.screen{background:var(--screen);color:var(--screen-ink)}
+.term{padding:var(--s4) var(--s6) var(--s6)}
+.term-bar{display:flex;gap:var(--s2);margin-bottom:var(--s3)}
+.term-bar i{width:var(--s2);height:var(--s2);background:var(--screen-key)}
+.cmd{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:var(--s3);padding:var(--s2) 0;font:600 var(--t-body)/1.45 var(--mono)}
+.cmd+.cmd{border-top:var(--cell) solid transparent;background:repeating-linear-gradient(90deg,var(--screen-line) 0 var(--cell),transparent var(--cell) var(--s3)) top/100% var(--cell) no-repeat}
+.cmd .pr{color:var(--purple);user-select:none}
+.cmd code{font:inherit;overflow-wrap:anywhere}
+.cmd code b{font-weight:inherit;color:var(--screen-purple)}
+.copy{min-width:96px;min-height:44px;padding:0 var(--s3);border:0;background:var(--screen-key);color:var(--screen-ink);font:600 var(--t-note)/1 var(--mono);cursor:pointer}
+.copy:focus-visible{outline-offset:-4px}
+.copy:hover{background:var(--purple);color:var(--on-purple)}
+.copy:active{transform:translate(0,var(--cell))}
+.copy .said,.copy .fail{display:none}
+.copy.is-failed .say{display:none}
+.copy.is-failed .fail{display:inline}
+.copy.is-copied{background:var(--green);color:var(--on-purple)}
+.copy.is-copied .say{display:none}
+.copy.is-copied .said{display:inline-flex;align-items:center;gap:var(--s2)}
+@media (max-width:640px){.term{padding:var(--s3) var(--s4) var(--s4)}.cmd{grid-template-columns:auto 1fr;align-items:start;font-size:var(--t-small);padding:var(--s3) 0}.copy{grid-column:1/-1;width:100%}}
+
+/* ---- motion: steps on the beat, and stillness when asked ---- */
+@keyframes dots{0%{opacity:1}33.4%,100%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* ---- this document's own layout ---- */
+.wrap{max-width:calc(var(--page) + 2*var(--gutter));margin:0 auto;padding:0 var(--gutter) var(--s24)}
+.top{display:flex;align-items:center;gap:var(--s3);padding:var(--s4) 0;font:700 var(--t-title)/1 var(--sans);letter-spacing:-.02em}
+.top a{text-decoration:none;display:flex;align-items:center;gap:var(--s3)}
+.intro{padding:var(--s12) 0 var(--s16)}
+.intro .lead{margin-top:var(--s6)}
+.sec{padding:var(--s16) 0}
+.sec h2+*{margin-top:var(--s8)}
+.sec h3{margin:var(--s12) 0 var(--s4)}
+.rules{display:grid;gap:var(--s2);max-width:var(--text)}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:var(--s4)}
+.sw{background:var(--raised);padding:var(--s3)}
+.sw .chips{display:grid;grid-template-columns:1fr 1fr;height:var(--s16)}
+.sw .chips i{display:flex;align-items:flex-end;padding:var(--s1) var(--s2);font:400 var(--t-note)/1.2 var(--mono);font-style:normal}
+.sw b{display:block;margin-top:var(--s2);font:600 var(--t-note)/1.4 var(--mono)}
+.sw span{display:block;font-size:var(--t-small);line-height:1.4;color:var(--soft)}
+.scale{display:grid;gap:var(--s6)}
+.scale>div{display:grid;grid-template-columns:140px minmax(0,1fr);gap:var(--s4);align-items:baseline}
+.space{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--s4)}
+.space div{display:grid;justify-items:center;gap:var(--s2)}
+.space i{display:block;width:var(--s4);background:var(--purple)}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s8)}
+.row.top-align{align-items:flex-start}
+.tile{background:var(--raised);padding:var(--s6);display:grid;gap:var(--s3);justify-items:start}
+.sizes{display:flex;align-items:flex-end;gap:var(--s6);flex-wrap:wrap}
+.sizes div{display:grid;gap:var(--s2);justify-items:center}
+.demo-term{max-width:640px}
+.marks .px{color:var(--purple)}
+@media (max-width:900px){.scale>div{grid-template-columns:1fr;gap:var(--s1)}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top"><a href="./"><svg class="octo mark" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg>Claudopus</a></header>
+
+<section class="intro">
+  <h1>The design system</h1>
+  <p class="lead">Everything Claudopus shows the public is built from cells, like its octopus. The Claudopus page uses only what is defined here, and both files carry the same tokens at the top of their styles.</p>
+</section>
+
+<hr class="rule">
+<section class="sec">
+  <div>
+    <h2>Colour</h2>
+    <ul class="rules cells">
+      <li>The page is near-black or warm paper, and follows the reader's light or dark setting.</li>
+      <li>Purple belongs to the octopus and to the one thing to press. It is never a background.</li>
+      <li>Green only says finished. Coral only says trouble.</li>
+      <li>Screens (the terminal, the video, the panel) show the app, which is dark, so they stay dark in both settings.</li>
+    </ul>
+    <h3>The page <span class="note">dark · light</span></h3>
+    <div class="swatches">
+      <div class="sw notch"><div class="chips"><i style="background:#111112;color:#F3F2EF">#111112</i><i style="background:#FAF9F5;color:#111112">#FAF9F5</i></div><b>--ground</b><span>The page itself.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#1C1C1F;color:#F3F2EF">#1C1C1F</i><i style="background:#EFEDE5;color:#111112">#EFEDE5</i></div><b>--raised</b><span>Boxes that sit on the page.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#2F2F35;color:#F3F2EF">#2F2F35</i><i style="background:#D9D6CB;color:#111112">#D9D6CB</i></div><b>--line</b><span>Cell rules and pressed shadows of quiet buttons.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#F3F2EF;color:#111112">#F3F2EF</i><i style="background:#18181A;color:#F3F2EF">#18181A</i></div><b>--ink</b><span>Headings and body text.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#A6A6AB;color:#111112">#A6A6AB</i><i style="background:#5C5C63;color:#F3F2EF">#5C5C63</i></div><b>--soft</b><span>Secondary text and notes.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#6A6A70;color:#F3F2EF">#6A6A70</i><i style="background:#9A9AA2;color:#111112">#9A9AA2</i></div><b>--faint</b><span>Marks only, never text.</span></div>
+    </div>
+    <h3>The accents</h3>
+    <div class="swatches">
+      <div class="sw notch"><div class="chips"><i style="background:#8A63F0;color:#F3F2EF">#8A63F0</i><i style="background:#8A63F0;color:#F3F2EF">#8A63F0</i></div><b>--purple</b><span>The octopus, button faces, cell marks.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#A58BFA;color:#111112">#A58BFA</i><i style="background:#A58BFA;color:#111112">#A58BFA</i></div><b>--purple-lift</b><span>A button under the pointer.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#6A45D8;color:#F3F2EF">#6A45D8</i><i style="background:#6A45D8;color:#F3F2EF">#6A45D8</i></div><b>--purple-deep</b><span>The cell of shadow under a button.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#A58BFA;color:#111112">#A58BFA</i><i style="background:#6A45D8;color:#F3F2EF">#6A45D8</i></div><b>--purple-ink</b><span>Purple words on the page.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#111112;color:#F3F2EF">#111112</i><i style="background:#111112;color:#F3F2EF">#111112</i></div><b>--on-purple</b><span>Words on a purple or green face.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#4EBA65;color:#111112">#4EBA65</i><i style="background:#4EBA65;color:#111112">#4EBA65</i></div><b>--green</b><span>The happy octopus and finished marks.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#5FC553;color:#111112">#5FC553</i><i style="background:#2B7A3D;color:#F3F2EF">#2B7A3D</i></div><b>--green-ink</b><span>Green words on the page.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#FF6B4A;color:#111112">#FF6B4A</i><i style="background:#FF6B4A;color:#111112">#FF6B4A</i></div><b>--coral</b><span>Trouble marks.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#FF8163;color:#111112">#FF8163</i><i style="background:#C2401F;color:#F3F2EF">#C2401F</i></div><b>--coral-ink</b><span>Coral words on the page.</span></div>
+    </div>
+    <h3>Screens <span class="note">the same in both settings</span></h3>
+    <div class="swatches">
+      <div class="sw notch"><div class="chips"><i style="background:#0A0A0B;color:#F3F2EF">#0A0A0B</i><i style="background:#0A0A0B;color:#F3F2EF">#0A0A0B</i></div><b>--screen</b><span>A screen's ground, the darkest thing on the page.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#252527;color:#F3F2EF">#252527</i><i style="background:#252527;color:#F3F2EF">#252527</i></div><b>--screen-raised</b><span>A card on a screen.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#34343A;color:#F3F2EF">#34343A</i><i style="background:#34343A;color:#F3F2EF">#34343A</i></div><b>--screen-line</b><span>Rules on a screen.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#3A3A41;color:#F3F2EF">#3A3A41</i><i style="background:#3A3A41;color:#F3F2EF">#3A3A41</i></div><b>--screen-key</b><span>Keys and copy buttons on a screen.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#F3F2EF;color:#111112">#F3F2EF</i><i style="background:#F3F2EF;color:#111112">#F3F2EF</i></div><b>--screen-ink</b><span>Words on a screen.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#A6A6AB;color:#111112">#A6A6AB</i><i style="background:#A6A6AB;color:#111112">#A6A6AB</i></div><b>--screen-soft</b><span>Quiet words on a screen.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#A58BFA;color:#111112">#A58BFA</i><i style="background:#A58BFA;color:#111112">#A58BFA</i></div><b>--screen-purple</b><span>The part of a command that names Claudopus.</span></div>
+      <div class="sw notch"><div class="chips"><i style="background:#5FC553;color:#111112">#5FC553</i><i style="background:#5FC553;color:#111112">#5FC553</i></div><b>--screen-green</b><span>A finished line on a screen.</span></div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+<section class="sec">
+  <div>
+    <h2>Type</h2>
+    <ul class="rules cells">
+      <li>Two faces, both already on the reader's machine, so no font is downloaded.</li>
+      <li>Sans is Helvetica Neue, then Helvetica, then Arial: the face of the wordmark and of the video's sentences.</li>
+      <li>Mono is the system's own (SF Mono, Menlo, Consolas): commands, paths and small notes.</li>
+      <li>Headings are bold and set tight. Body text is regular. Nothing is set in capitals, and nothing is italic.</li>
+      <li>A page has three levels: one display line that says what the reader gets, head-size titles for the few parts they came for, and title-size headings for the reference below.</li>
+      <li>Every size on the page is one of the seven below. On a screen, words are small and facts are note size.</li>
+      <li>The words say what the reader gets, in words anyone knows, before anything else. The reader is never left to work out the problem.</li>
+      <li>Sentences are whole, short and plain: an add-on, a job, a panel, a result.</li>
+    </ul>
+    <div class="scale" style="margin-top:var(--s12)">
+      <div><span class="note">display · 40 to 68 · bold</span><h1 style="margin:0">Many things at once.</h1></div>
+      <div><span class="note">head · 30 to 44 · bold</span><h2>Install it with two lines.</h2></div>
+      <div><span class="note">title · 22 · bold</span><h3 style="margin:0">One panel shows every job.</h3></div>
+      <div><span class="note">lead · 22 · regular</span><p class="lead">Each thing you ask for runs in the background.</p></div>
+      <div><span class="note">body · 18 · regular</span><p>The chat answers in one line and is free for your next message.</p></div>
+      <div><span class="note">small · 15 · regular</span><p class="small">An independent add-on for Claude Code.</p></div>
+      <div><span class="note">note · 13 · mono</span><p class="note">It has music, and it starts only when you press play.</p></div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+<section class="sec">
+  <div>
+    <h2>Space</h2>
+    <ul class="rules cells">
+      <li>One cell is 4 pixels. Every gap, padding and size is a whole number of cells.</li>
+      <li>The steps are 1, 2, 3, 4, 6, 8, 12, 16, 24 and 32 cells.</li>
+      <li>The page is 1120 wide at most, text 640. Sections sit 24 cells apart, 16 on a phone.</li>
+      <li>Everything hangs from one left edge.</li>
+      <li>The one thing to do, install, is the only part that sits whole in a raised box.</li>
+    </ul>
+    <div class="space" style="margin-top:var(--s12)">
+      <div><i style="height:4px"></i><span class="note">1</span></div><div><i style="height:8px"></i><span class="note">2</span></div><div><i style="height:12px"></i><span class="note">3</span></div><div><i style="height:16px"></i><span class="note">4</span></div><div><i style="height:24px"></i><span class="note">6</span></div><div><i style="height:32px"></i><span class="note">8</span></div><div><i style="height:48px"></i><span class="note">12</span></div><div><i style="height:64px"></i><span class="note">16</span></div><div><i style="height:96px"></i><span class="note">24</span></div><div><i style="height:128px"></i><span class="note">32</span></div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+<section class="sec">
+  <div>
+    <h2>The pixel motif</h2>
+    <ul class="rules cells">
+      <li>Nothing has a round corner. Corners step in by one cell, or two on a big box.</li>
+      <li>Nothing has an outline, a soft shadow, a gradient or a blur. Boxes are flat fills.</li>
+      <li>A rule is a row of cells.</li>
+      <li>A list marks each line with one cell, coloured by what the line says.</li>
+      <li>Numerals, icons and marks are drawn on a cell grid, never typed as symbols. Numerals are three cells wide and five tall.</li>
+      <li>Numerals count real steps only. Sections are not numbered.</li>
+    </ul>
+    <h3>Corners, rules and marks</h3>
+    <div class="row top-align">
+      <div class="tile notch"><span class="note">one cell</span><span>.notch</span></div>
+      <div class="tile notch big"><span class="note">two cells</span><span>.notch.big</span></div>
+      <div style="flex:1;min-width:220px;display:grid;gap:var(--s4)">
+        <hr class="rule">
+        <ul class="cells"><li>What you get.</li></ul>
+        <ul class="cells trouble"><li>What goes wrong.</li></ul>
+        <ul class="cells done"><li>What is finished.</li></ul>
+        <ul class="cells plain"><li>What is not known yet.</li></ul>
+      </div>
+    </div>
+    <h3>Numerals and icons</h3>
+    <div class="row marks"><svg class="px" viewBox="0 0 39 5" width="312" height="40" role="img" aria-label="0123456789"><rect x="0" y="0" width="3" height="1"/><rect x="5" y="0" width="1" height="1"/><rect x="8" y="0" width="3" height="1"/><rect x="12" y="0" width="3" height="1"/><rect x="16" y="0" width="1" height="1"/><rect x="18" y="0" width="1" height="1"/><rect x="20" y="0" width="3" height="1"/><rect x="24" y="0" width="3" height="1"/><rect x="28" y="0" width="3" height="1"/><rect x="32" y="0" width="3" height="1"/><rect x="36" y="0" width="3" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="4" y="1" width="2" height="1"/><rect x="10" y="1" width="1" height="1"/><rect x="14" y="1" width="1" height="1"/><rect x="16" y="1" width="1" height="1"/><rect x="18" y="1" width="1" height="1"/><rect x="20" y="1" width="1" height="1"/><rect x="24" y="1" width="1" height="1"/><rect x="30" y="1" width="1" height="1"/><rect x="32" y="1" width="1" height="1"/><rect x="34" y="1" width="1" height="1"/><rect x="36" y="1" width="1" height="1"/><rect x="38" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="5" y="2" width="1" height="1"/><rect x="8" y="2" width="3" height="1"/><rect x="12" y="2" width="3" height="1"/><rect x="16" y="2" width="3" height="1"/><rect x="20" y="2" width="3" height="1"/><rect x="24" y="2" width="3" height="1"/><rect x="30" y="2" width="1" height="1"/><rect x="32" y="2" width="3" height="1"/><rect x="36" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="5" y="3" width="1" height="1"/><rect x="8" y="3" width="1" height="1"/><rect x="14" y="3" width="1" height="1"/><rect x="18" y="3" width="1" height="1"/><rect x="22" y="3" width="1" height="1"/><rect x="24" y="3" width="1" height="1"/><rect x="26" y="3" width="1" height="1"/><rect x="30" y="3" width="1" height="1"/><rect x="32" y="3" width="1" height="1"/><rect x="34" y="3" width="1" height="1"/><rect x="38" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="4" y="4" width="3" height="1"/><rect x="8" y="4" width="3" height="1"/><rect x="12" y="4" width="3" height="1"/><rect x="18" y="4" width="1" height="1"/><rect x="20" y="4" width="3" height="1"/><rect x="24" y="4" width="3" height="1"/><rect x="30" y="4" width="1" height="1"/><rect x="32" y="4" width="3" height="1"/><rect x="36" y="4" width="3" height="1"/></svg><span class="row" style="gap:var(--s6)"><svg class="px" viewBox="0 0 4 7" width="12" height="21" aria-hidden="true"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="0" y="5" width="2" height="1"/><rect x="0" y="6" width="1" height="1"/></svg><svg class="px" viewBox="0 0 5 5" width="15" height="15" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="3" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><svg class="px" viewBox="0 0 5 5" width="15" height="15" aria-hidden="true"><rect x="1" y="0" width="4" height="1"/><rect x="3" y="1" width="2" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg><svg class="px" viewBox="0 0 7 5" width="21" height="15" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><svg class="px" viewBox="0 0 5 5" width="15" height="15" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="5" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><svg class="px" viewBox="0 0 5 5" width="15" height="15" aria-hidden="true"><rect x="0" y="2" width="5" height="1"/></svg><svg class="px" viewBox="0 0 5 3" width="15" height="9" aria-hidden="true"><rect x="0" y="0" width="5" height="1"/><rect x="1" y="1" width="3" height="1"/><rect x="2" y="2" width="1" height="1"/></svg></span></div>
+  </div>
+</section>
+
+<hr class="rule">
+<section class="sec">
+  <div>
+    <h2>The octopus</h2>
+    <ul class="rules cells">
+      <li>It has three states, as in the mod: resting, working, and happy when work finishes.</li>
+      <li>It is purple. Only the happy one is green.</li>
+      <li>The drawings are the mod's own files, on a 16 or 24 cell grid, and are never redrawn by hand.</li>
+      <li>It is shown at whole multiples of its grid, so every cell stays square and sharp.</li>
+      <li>It is never rotated, stretched, outlined, shadowed or put on a purple ground.</li>
+      <li>The big octopus appears once, at the top, and may look at the pointer, one cell at a time.</li>
+      <li>A small one sits only where work is shown or done: in the panel, and on the install lines.</li>
+    </ul>
+    <h3>States</h3>
+    <div class="sizes">
+      <div><svg class="octo mark" viewBox="0 0 16 16" width="96" height="96" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg><span class="note">resting</span></div>
+      <div><svg class="octo working" viewBox="0 0 24 24" width="96" height="96" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="5" height="1"/><rect x="15" y="5" width="3" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="12" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="0" y="10" width="5" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="19" y="10" width="5" height="1"/><rect x="0" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="19" y="11" width="1" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="0" y="12" width="1" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="19" y="12" width="1" height="1"/><rect x="23" y="12" width="1" height="1"/><rect x="0" y="13" width="5" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="19" y="13" width="5" height="1"/><rect x="1" y="14" width="3" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="20" y="14" width="3" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="0" y="17" width="5" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="19" y="17" width="5" height="1"/><rect x="0" y="18" width="1" height="1"/><rect x="4" y="18" width="1" height="1"/><rect x="6" y="18" width="5" height="1"/><rect x="13" y="18" width="5" height="1"/><rect x="19" y="18" width="1" height="1"/><rect x="23" y="18" width="1" height="1"/><rect x="0" y="19" width="1" height="1"/><rect x="4" y="19" width="1" height="1"/><rect x="6" y="19" width="5" height="1"/><rect x="13" y="19" width="5" height="1"/><rect x="19" y="19" width="1" height="1"/><rect x="23" y="19" width="1" height="1"/><rect x="0" y="20" width="5" height="1"/><rect x="19" y="20" width="5" height="1"/><rect x="1" y="21" width="3" height="1"/><rect x="20" y="21" width="3" height="1"/><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="11" width="1" height="1"/><rect x="3" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="18" width="1" height="1"/><rect x="3" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="11" width="1" height="1"/><rect x="2" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="11" width="1" height="1"/><rect x="22" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="11" width="1" height="1"/><rect x="18" y="11" width="1" height="1"/><rect x="5" y="12" width="1" height="1"/><rect x="18" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="18" width="1" height="1"/><rect x="2" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="11" width="1" height="1"/><rect x="1" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="18" width="1" height="1"/><rect x="22" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="18" width="1" height="1"/><rect x="21" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="18" width="1" height="1"/><rect x="18" y="18" width="1" height="1"/><rect x="5" y="19" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="18" width="1" height="1"/><rect x="20" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="11" width="1" height="1"/><rect x="21" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="11" width="1" height="1"/><rect x="20" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="18" width="1" height="1"/><rect x="1" y="19" width="1" height="1"/></g></g></svg><span class="note">working</span></div>
+      <div><svg class="octo happy loop" viewBox="0 0 24 24" width="96" height="96" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden;visible;hidden;visible;visible" dur="2s" calcMode="discrete" fill="freeze"/><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="3" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="15" y="4" width="3" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="1" height="1"/><rect x="11" y="5" width="2" height="1"/><rect x="14" y="5" width="1" height="1"/><rect x="16" y="5" width="2" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="4" height="1"/><rect x="11" y="7" width="2" height="1"/><rect x="14" y="7" width="4" height="1"/><rect x="6" y="8" width="5" height="1"/><rect x="13" y="8" width="5" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="3" y="14" width="1" height="1"/><rect x="6" y="14" width="2" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="16" y="14" width="2" height="1"/><rect x="20" y="14" width="1" height="1"/><rect x="3" y="15" width="5" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="16" y="15" width="5" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="7" y="17" width="1" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="16" y="17" width="1" height="1"/><rect x="7" y="18" width="4" height="1"/><rect x="13" y="18" width="4" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="9" y="0" width="6" height="1"/><rect x="7" y="1" width="10" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="6" y="2" width="12" height="1"/><rect x="21" y="2" width="1" height="1"/><rect x="2" y="3" width="2" height="1"/><rect x="6" y="3" width="3" height="1"/><rect x="10" y="3" width="4" height="1"/><rect x="15" y="3" width="3" height="1"/><rect x="20" y="3" width="2" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="9" y="4" width="1" height="1"/><rect x="11" y="4" width="2" height="1"/><rect x="14" y="4" width="1" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="20" y="4" width="2" height="1"/><rect x="3" y="5" width="2" height="1"/><rect x="6" y="5" width="12" height="1"/><rect x="19" y="5" width="2" height="1"/><rect x="4" y="6" width="6" height="1"/><rect x="11" y="6" width="2" height="1"/><rect x="14" y="6" width="6" height="1"/><rect x="6" y="7" width="5" height="1"/><rect x="13" y="7" width="5" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="13" y="9" width="2" height="1"/><rect x="16" y="9" width="2" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="20" y="13" width="1" height="1"/><rect x="3" y="14" width="5" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="16" y="14" width="5" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="7" y="16" width="1" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="16" y="16" width="1" height="1"/><rect x="7" y="17" width="4" height="1"/><rect x="13" y="17" width="4" height="1"/></g></g><g fill="currentColor" visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="22" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="0" y="8" width="1" height="1"/><rect x="23" y="9" width="1" height="1"/></g></svg><span class="note">happy</span></div>
+    </div>
+    <h3>Sizes</h3>
+    <div class="sizes">
+      <div><svg class="octo mark" viewBox="0 0 16 16" width="16" height="16" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg><span class="note">16</span></div>
+      <div><svg class="octo mark" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg><span class="note">32</span></div>
+      <div><svg class="octo mark" viewBox="0 0 16 16" width="48" height="48" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg><span class="note">48</span></div>
+      <div><svg class="octo working" viewBox="0 0 24 24" width="48" height="48" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="5" height="1"/><rect x="15" y="5" width="3" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="12" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="0" y="10" width="5" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="19" y="10" width="5" height="1"/><rect x="0" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="19" y="11" width="1" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="0" y="12" width="1" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="19" y="12" width="1" height="1"/><rect x="23" y="12" width="1" height="1"/><rect x="0" y="13" width="5" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="19" y="13" width="5" height="1"/><rect x="1" y="14" width="3" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="20" y="14" width="3" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="0" y="17" width="5" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="19" y="17" width="5" height="1"/><rect x="0" y="18" width="1" height="1"/><rect x="4" y="18" width="1" height="1"/><rect x="6" y="18" width="5" height="1"/><rect x="13" y="18" width="5" height="1"/><rect x="19" y="18" width="1" height="1"/><rect x="23" y="18" width="1" height="1"/><rect x="0" y="19" width="1" height="1"/><rect x="4" y="19" width="1" height="1"/><rect x="6" y="19" width="5" height="1"/><rect x="13" y="19" width="5" height="1"/><rect x="19" y="19" width="1" height="1"/><rect x="23" y="19" width="1" height="1"/><rect x="0" y="20" width="5" height="1"/><rect x="19" y="20" width="5" height="1"/><rect x="1" y="21" width="3" height="1"/><rect x="20" y="21" width="3" height="1"/><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="11" width="1" height="1"/><rect x="3" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="18" width="1" height="1"/><rect x="3" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="11" width="1" height="1"/><rect x="2" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="11" width="1" height="1"/><rect x="22" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="11" width="1" height="1"/><rect x="18" y="11" width="1" height="1"/><rect x="5" y="12" width="1" height="1"/><rect x="18" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="18" width="1" height="1"/><rect x="2" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="11" width="1" height="1"/><rect x="1" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="18" width="1" height="1"/><rect x="22" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="18" width="1" height="1"/><rect x="21" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="18" width="1" height="1"/><rect x="18" y="18" width="1" height="1"/><rect x="5" y="19" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="18" width="1" height="1"/><rect x="20" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="11" width="1" height="1"/><rect x="21" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="11" width="1" height="1"/><rect x="20" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="18" width="1" height="1"/><rect x="1" y="19" width="1" height="1"/></g></g></svg><span class="note">48</span></div>
+      <div><svg class="octo working" viewBox="0 0 24 24" width="144" height="144" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="5" height="1"/><rect x="15" y="5" width="3" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="12" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="0" y="10" width="5" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="19" y="10" width="5" height="1"/><rect x="0" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="19" y="11" width="1" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="0" y="12" width="1" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="19" y="12" width="1" height="1"/><rect x="23" y="12" width="1" height="1"/><rect x="0" y="13" width="5" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="19" y="13" width="5" height="1"/><rect x="1" y="14" width="3" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="20" y="14" width="3" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="0" y="17" width="5" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="19" y="17" width="5" height="1"/><rect x="0" y="18" width="1" height="1"/><rect x="4" y="18" width="1" height="1"/><rect x="6" y="18" width="5" height="1"/><rect x="13" y="18" width="5" height="1"/><rect x="19" y="18" width="1" height="1"/><rect x="23" y="18" width="1" height="1"/><rect x="0" y="19" width="1" height="1"/><rect x="4" y="19" width="1" height="1"/><rect x="6" y="19" width="5" height="1"/><rect x="13" y="19" width="5" height="1"/><rect x="19" y="19" width="1" height="1"/><rect x="23" y="19" width="1" height="1"/><rect x="0" y="20" width="5" height="1"/><rect x="19" y="20" width="5" height="1"/><rect x="1" y="21" width="3" height="1"/><rect x="20" y="21" width="3" height="1"/><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="11" width="1" height="1"/><rect x="3" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="18" width="1" height="1"/><rect x="3" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="11" width="1" height="1"/><rect x="2" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="11" width="1" height="1"/><rect x="22" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="11" width="1" height="1"/><rect x="18" y="11" width="1" height="1"/><rect x="5" y="12" width="1" height="1"/><rect x="18" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="18" width="1" height="1"/><rect x="2" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="11" width="1" height="1"/><rect x="1" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="18" width="1" height="1"/><rect x="22" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="18" width="1" height="1"/><rect x="21" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="18" width="1" height="1"/><rect x="18" y="18" width="1" height="1"/><rect x="5" y="19" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="18" width="1" height="1"/><rect x="20" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="11" width="1" height="1"/><rect x="21" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="11" width="1" height="1"/><rect x="20" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="18" width="1" height="1"/><rect x="1" y="19" width="1" height="1"/></g></g></svg><span class="note">144</span></div>
+      <div><svg class="octo working" viewBox="0 0 24 24" width="240" height="240" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="5" height="1"/><rect x="15" y="5" width="3" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="12" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="0" y="10" width="5" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="19" y="10" width="5" height="1"/><rect x="0" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="19" y="11" width="1" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="0" y="12" width="1" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="19" y="12" width="1" height="1"/><rect x="23" y="12" width="1" height="1"/><rect x="0" y="13" width="5" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="19" y="13" width="5" height="1"/><rect x="1" y="14" width="3" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="20" y="14" width="3" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="0" y="17" width="5" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="19" y="17" width="5" height="1"/><rect x="0" y="18" width="1" height="1"/><rect x="4" y="18" width="1" height="1"/><rect x="6" y="18" width="5" height="1"/><rect x="13" y="18" width="5" height="1"/><rect x="19" y="18" width="1" height="1"/><rect x="23" y="18" width="1" height="1"/><rect x="0" y="19" width="1" height="1"/><rect x="4" y="19" width="1" height="1"/><rect x="6" y="19" width="5" height="1"/><rect x="13" y="19" width="5" height="1"/><rect x="19" y="19" width="1" height="1"/><rect x="23" y="19" width="1" height="1"/><rect x="0" y="20" width="5" height="1"/><rect x="19" y="20" width="5" height="1"/><rect x="1" y="21" width="3" height="1"/><rect x="20" y="21" width="3" height="1"/><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="11" width="1" height="1"/><rect x="3" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="18" width="1" height="1"/><rect x="3" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="11" width="1" height="1"/><rect x="2" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="11" width="1" height="1"/><rect x="22" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="11" width="1" height="1"/><rect x="18" y="11" width="1" height="1"/><rect x="5" y="12" width="1" height="1"/><rect x="18" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="18" width="1" height="1"/><rect x="2" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="11" width="1" height="1"/><rect x="1" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="18" width="1" height="1"/><rect x="22" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="18" width="1" height="1"/><rect x="21" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="18" width="1" height="1"/><rect x="18" y="18" width="1" height="1"/><rect x="5" y="19" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="18" width="1" height="1"/><rect x="20" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="11" width="1" height="1"/><rect x="21" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="11" width="1" height="1"/><rect x="20" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="18" width="1" height="1"/><rect x="1" y="19" width="1" height="1"/></g></g></svg><span class="note">240</span></div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+<section class="sec">
+  <div>
+    <h2>Buttons and code</h2>
+    <ul class="rules cells">
+      <li>A button is a purple face with dark words, resting one cell above its shadow. Pressed, it drops onto the shadow.</li>
+      <li>Purple buttons are the page's few real actions: install, play, open the code. Any other button is the quiet one.</li>
+      <li>Links are underlined in purple, two pixels thick.</li>
+      <li>Commands sit on a screen, in mono, behind a purple prompt mark, each with its own copy key.</li>
+      <li>The part of a command that names Claudopus is light purple. A copied key turns green for two seconds. If copying fails, the line is selected and the key says so.</li>
+      <li>Short code inside a sentence sits on a raised fill.</li>
+    </ul>
+    <h3>Buttons and links</h3>
+    <div class="row">
+      <a class="btn" href="#"><span>Install it <svg class="px" viewBox="0 0 5 5" width="15" height="15" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="3" height="1"/><rect x="2" y="4" width="1" height="1"/></svg></span></a>
+      <a class="btn quiet" href="#"><span><svg class="px" viewBox="0 0 4 7" width="8" height="14" aria-hidden="true"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="0" y="5" width="2" height="1"/><rect x="0" y="6" width="1" height="1"/></svg> Watch the video</span></a>
+      <a href="#">Read the principles</a>
+    </div>
+    <h3>Commands</h3>
+    <div class="term screen notch big demo-term">
+      <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="cmd"><span class="pr">&gt;</span><code>/plugin install <b>claudopus@claudopus</b></code><button class="copy notch" type="button" data-copy="/plugin install claudopus@claudopus" aria-label="Copy: /plugin install claudopus@claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
+      <div class="cmd"><span class="pr">&gt;</span><code>/plugin disable <b>claudopus@claudopus</b></code><button class="copy notch is-copied" type="button"><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span></button></div>
+    </div>
+    <p style="margin-top:var(--s6)">Everything it keeps is in <code>~/.claude/claudopus</code> as plain files.</p>
+  </div>
+</section>
+
+<hr class="rule">
+<section class="sec">
+  <div>
+    <h2>Motion</h2>
+    <ul class="rules cells">
+      <li>Things move the way the octopus does: in steps, on a beat of a quarter second.</li>
+      <li>Nothing eases, fades slowly, scrolls smoothly, slides in on scroll or bounces.</li>
+      <li>A press moves a button one cell. A finish is two seconds of cheering, then back to work.</li>
+      <li>Only what shows work is allowed to keep moving: the octopus, the three dots, a clock, and the small picture of the panel.</li>
+      <li>The video never starts by itself.</li>
+      <li>When the reader asks for less motion, everything holds its resting frame.</li>
+    </ul>
+  </div>
+</section>
+</div>
+<script>
+(() => {
+  const still = matchMedia('(prefers-reduced-motion: reduce)')
+  const settle = () => document.querySelectorAll('svg.octo').forEach(svg => { if (still.matches) { svg.pauseAnimations(); svg.setCurrentTime(0) } else svg.unpauseAnimations() })
+  settle(); still.addEventListener('change', settle)
+  setInterval(() => { if (!still.matches) document.querySelectorAll('svg.octo.loop').forEach(svg => svg.setCurrentTime(0)) }, 3000)
+  document.querySelectorAll('a[href="#"]').forEach(a => a.addEventListener('click', e => e.preventDefault()))
+})()
+</script>
+</body>
+</html>

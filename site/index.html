@@ -1,0 +1,646 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claudopus: ask Claude for many things at once</title>
+<meta name="description" content="Claudopus is an add-on for Claude Code. Ask for a bug fix, then the tests, then the docs, without waiting. Each one runs in the background, and a panel beside the chat shows how each is going.">
+<link rel="canonical" href="https://claudopus.ai/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#111112" media="(prefers-color-scheme:dark)">
+<meta name="theme-color" content="#FAF9F5" media="(prefers-color-scheme:light)">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Claudopus: ask Claude for many things at once">
+<meta property="og:description" content="An add-on for Claude Code. Ask for the next thing without waiting: each one runs in the background, and a panel shows how each is going.">
+<meta property="og:url" content="https://claudopus.ai/">
+<meta property="og:image" content="https://claudopus.ai/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+/* ---- Claudopus design system: tokens (see design-system.html) ---- */
+:root{
+  color-scheme:dark;
+  /* one cell is the unit of everything: the octopus, the corners, the spacing */
+  --cell:4px;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s6:24px;--s8:32px;--s12:48px;--s16:64px;--s24:96px;--s32:128px;
+  /* faces */
+  --sans:"Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  /* type scale */
+  --t-note:13px;--t-small:15px;--t-body:18px;--t-lead:22px;--t-title:22px;
+  --t-head:clamp(30px,5vw,44px);--t-display:clamp(40px,7.2vw,68px);
+  /* the page, dark */
+  --ground:#111112;--raised:#1C1C1F;--line:#2F2F35;
+  --ink:#F3F2EF;--soft:#A6A6AB;--faint:#6A6A70;
+  /* purple is the octopus and the one thing to press */
+  --purple:#8A63F0;--purple-lift:#A58BFA;--purple-deep:#6A45D8;--purple-ink:#A58BFA;--on-purple:#111112;
+  /* green only says finished, coral only says trouble */
+  --green:#4EBA65;--green-ink:#5FC553;--coral:#FF6B4A;--coral-ink:#FF8163;
+  /* screens show the app, which is dark, so they stay dark in both themes */
+  --screen:#0A0A0B;--screen-raised:#252527;--screen-line:#34343A;--screen-key:#3A3A41;
+  --screen-ink:#F3F2EF;--screen-soft:#A6A6AB;--screen-purple:#A58BFA;--screen-green:#5FC553;
+  /* motion: quarter-second beats, moved in steps */
+  --beat:250ms;
+  /* measures */
+  --page:1120px;--text:640px;--rail:96px;--gutter:24px;
+}
+@media (prefers-color-scheme:light){:root{
+  color-scheme:light;
+  --ground:#FAF9F5;--raised:#EFEDE5;--line:#D9D6CB;
+  --ink:#18181A;--soft:#5C5C63;--faint:#9A9AA2;
+  --purple-ink:#6A45D8;--green-ink:#2B7A3D;--coral-ink:#C2401F;
+}}
+@media (max-width:640px){:root{--t-body:17px;--t-lead:19px;--t-title:20px;--gutter:16px}}
+
+/* ---- base ---- */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:var(--s6)}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 var(--t-body)/1.55 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+h1,h2,h3,p,ul,ol,figure{margin:0}
+ul,ol{padding:0;list-style:none}
+img,video,svg{display:block;max-width:100%}
+h1{font:700 var(--t-display)/1.04 var(--sans);letter-spacing:-.035em;text-wrap:balance}
+h2{font:700 var(--t-head)/1.1 var(--sans);letter-spacing:-.03em;text-wrap:balance}
+h3{font:700 var(--t-title)/1.25 var(--sans);letter-spacing:-.01em}
+.lead{font-size:var(--t-lead);line-height:1.45;color:var(--soft);max-width:var(--text);text-wrap:pretty}
+.small{font-size:var(--t-small);line-height:1.5}
+.note{font:400 var(--t-note)/1.4 var(--mono);color:var(--soft)}
+.soft{color:var(--soft)}
+.name{color:var(--purple-ink)}
+a{color:inherit;text-decoration:underline;text-decoration-color:var(--purple);text-decoration-thickness:2px;text-underline-offset:4px}
+a:hover{color:var(--purple-ink)}
+:focus-visible{outline:2px solid var(--purple-ink);outline-offset:3px}
+code,kbd{font:400 .88em/1.4 var(--mono)}
+p code,li code{background:var(--raised);padding:0 var(--s1);white-space:nowrap}
+code.long{white-space:normal;overflow-wrap:anywhere}
+::selection{background:var(--purple);color:var(--on-purple)}
+
+/* ---- the pixel motif ---- */
+/* corners step in by one cell, never curve */
+.notch,.btn>span,.btn::before{--n:var(--cell);clip-path:polygon(var(--n) 0,calc(100% - var(--n)) 0,calc(100% - var(--n)) var(--n),100% var(--n),100% calc(100% - var(--n)),calc(100% - var(--n)) calc(100% - var(--n)),calc(100% - var(--n)) 100%,var(--n) 100%,var(--n) calc(100% - var(--n)),0 calc(100% - var(--n)),0 var(--n),var(--n) var(--n))}
+.notch.big{--n:var(--s2)}
+/* a rule is a row of cells */
+.rule{height:var(--cell);border:0;margin:0;background:repeating-linear-gradient(90deg,var(--line) 0 var(--cell),transparent var(--cell) var(--s3))}
+/* drawings made of cells: the octopus, numerals, icons */
+.px{fill:currentColor;flex:none;shape-rendering:crispEdges}
+.octo{color:var(--purple);flex:none;image-rendering:pixelated}
+.octo.happy{color:var(--green)}
+.octo-spot{position:relative;display:inline-block;line-height:0}
+.octo-spot .happy{display:none}
+.octo-spot.is-happy .happy{display:block}
+.octo-spot.is-happy .octo:not(.happy){display:none}
+/* a list marks each line with one cell, coloured by what it says */
+.cells>li{position:relative;padding-left:var(--s6)}
+.cells>li::before{content:"";position:absolute;left:0;top:.5em;width:var(--s2);height:var(--s2);background:var(--purple)}
+.cells.trouble>li::before{background:var(--coral)}
+.cells.done>li::before{background:var(--green)}
+.cells.plain>li::before,.cells>li.is-plain::before{background:var(--faint)}
+.cells>li.is-trouble::before{background:var(--coral)}
+.cells>li.is-done::before{background:var(--green)}
+
+/* ---- buttons ---- */
+.btn{position:relative;display:inline-block;padding:0;border:0;background:none;color:var(--on-purple);font:700 var(--t-body)/1 var(--sans);text-decoration:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.btn::before{content:"";position:absolute;inset:0;transform:translate(var(--cell),var(--cell));background:var(--purple-deep)}
+.btn>span{position:relative;display:flex;align-items:center;gap:var(--s3);min-height:var(--s12);padding:var(--s3) var(--s6);background:var(--purple)}
+.btn:hover{color:var(--on-purple)}
+.btn:hover>span{background:var(--purple-lift)}
+.btn:active>span{transform:translate(var(--cell),var(--cell))}
+.btn.quiet{color:var(--ink)}
+.btn.quiet::before{background:var(--line)}
+.btn.quiet>span{background:var(--raised)}
+.btn.quiet:hover{color:var(--ink)}
+.btn.quiet:hover>span{background:var(--line)}
+
+/* ---- screens: the terminal, the video, the panel ---- */
+.screen{background:var(--screen);color:var(--screen-ink)}
+.term{padding:var(--s4) var(--s6) var(--s6)}
+.term-bar{display:flex;gap:var(--s2);margin-bottom:var(--s3)}
+.term-bar i{width:var(--s2);height:var(--s2);background:var(--screen-key)}
+.cmd{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:var(--s3);padding:var(--s2) 0;font:600 var(--t-body)/1.45 var(--mono)}
+.cmd+.cmd{border-top:var(--cell) solid transparent;background:repeating-linear-gradient(90deg,var(--screen-line) 0 var(--cell),transparent var(--cell) var(--s3)) top/100% var(--cell) no-repeat}
+.cmd .pr{color:var(--purple);user-select:none}
+.cmd code{font:inherit;overflow-wrap:anywhere}
+.cmd code b{font-weight:inherit;color:var(--screen-purple)}
+.copy{min-width:96px;min-height:44px;padding:0 var(--s3);border:0;background:var(--screen-key);color:var(--screen-ink);font:600 var(--t-note)/1 var(--mono);cursor:pointer}
+.copy:focus-visible{outline-offset:-4px}
+.copy:hover{background:var(--purple);color:var(--on-purple)}
+.copy:active{transform:translate(0,var(--cell))}
+.copy .said,.copy .fail{display:none}
+.copy.is-failed .say{display:none}
+.copy.is-failed .fail{display:inline}
+.copy.is-copied{background:var(--green);color:var(--on-purple)}
+.copy.is-copied .say{display:none}
+.copy.is-copied .said{display:inline-flex;align-items:center;gap:var(--s2)}
+@media (max-width:640px){.term{padding:var(--s3) var(--s4) var(--s4)}.cmd{grid-template-columns:auto 1fr;align-items:start;font-size:var(--t-small);padding:var(--s3) 0}.copy{grid-column:1/-1;width:100%}}
+
+/* ---- motion: steps on the beat, and stillness when asked ---- */
+@keyframes dots{0%{opacity:1}33.4%,100%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* ---- this page: layout only, built from the tokens above ---- */
+.wrap{max-width:calc(var(--page) + 2*var(--gutter));margin:0 auto;padding:0 var(--gutter)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:var(--s4);padding:var(--s4) 0}
+.brand{display:flex;align-items:center;gap:var(--s3);font:700 var(--t-title)/1 var(--sans);letter-spacing:-.02em;text-decoration:none}
+.brand:hover{color:var(--ink)}
+.top nav{display:flex;gap:var(--s6);font-size:var(--t-small)}
+.top nav a{text-decoration:none;color:var(--soft);padding:var(--s3) 0}
+.top nav a:hover{color:var(--ink)}
+.ext{display:inline-flex;align-items:center;gap:var(--s2)}
+
+.hero{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:var(--s16);padding:var(--s16) 0 var(--s12)}
+.hero h1{max-width:11em}
+.hero h1 .name{display:block;text-wrap:balance}
+.hero .lead{margin-top:var(--s6);max-width:30em}
+.hero .acts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s6);margin-top:var(--s12)}
+.hero .octo-spot{position:relative;display:block;cursor:pointer;margin-right:var(--s8);padding:0;border:0;background:none;-webkit-tap-highlight-color:transparent}
+.hero .octo-spot svg{width:240px;height:240px}
+.hero .stage{position:relative;justify-self:end}
+
+.sec{padding:var(--s24) 0}
+.show{padding:0 0 var(--s24)}
+/* the one thing to do sits in a box of its own */
+.sec.install{background:var(--raised);padding:var(--s16);margin:var(--s2) 0}
+.install .ways details{background:var(--ground)}
+.install p code{background:var(--ground)}
+/* the reference below is a level quieter */
+.sec.ref{padding:var(--s16) 0}
+.ref h2{font:700 var(--t-title)/1.25 var(--sans);letter-spacing:-.01em}
+.ref h3{font-size:var(--t-body)}
+.ref .body>*+.block{margin-top:var(--s6)}
+.sec h2{max-width:16em}
+.sec h2+.lead{margin-top:var(--s6)}
+.sec .body>*+.block{margin-top:var(--s12)}
+
+.film{position:relative;padding:var(--s2);background:var(--screen-raised)}
+.film video{width:100%;height:auto;aspect-ratio:16/9;background:var(--screen)}
+.film .play{position:absolute;inset:0;width:100%;display:flex;align-items:flex-end;justify-content:flex-start;padding:var(--s8);border:0;background:none;cursor:pointer}
+.film .play[hidden]{display:none}
+.film .play .btn>span{padding-right:var(--s8)}
+.film .play:hover .btn>span{background:var(--purple-lift)}
+.film .play:active .btn>span{transform:translate(var(--cell),var(--cell))}
+.film .play:focus-visible{outline-offset:-8px}
+
+.pairs{display:grid;gap:var(--s2)}
+.pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s2)}
+.pair p{position:relative;background:var(--raised);padding:var(--s4) var(--s6) var(--s4) var(--s12);font-size:var(--t-lead);line-height:1.35}
+.pair p::before{content:"";position:absolute;left:var(--s6);top:calc(var(--s4) + .45em);width:var(--s2);height:var(--s2);background:var(--coral)}
+.pair .was{color:var(--soft)}
+.pair .now{font-weight:700}
+.pair .now::before{background:var(--purple)}
+.pair.heads p{background:none;padding-top:0;padding-bottom:var(--s2);font:400 var(--t-note)/1.4 var(--mono);color:var(--soft)}
+.pair.heads p::before{top:.25em}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+.get{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,440px);gap:var(--s16);align-items:center}
+.gets h2{margin-bottom:var(--s4)}
+.gets{display:grid;gap:var(--s8)}
+.gets h3+p{margin-top:var(--s1);color:var(--soft)}
+
+.panel{font:400 var(--t-small)/1.45 var(--sans);padding:var(--s3)}
+.panel .p-head{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) var(--s3) var(--s4)}
+.panel .p-head b,.panel .p-head span{display:block}
+.panel .p-head .octo-spot svg{width:48px;height:48px}
+.panel .dim{color:var(--screen-soft)}
+.panel .p-list{display:grid;gap:var(--s2)}
+.panel .p-card{position:relative;background:var(--screen-raised);padding:var(--s3) var(--s4) var(--s3) var(--s6)}
+.panel .p-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:var(--s2);background:var(--purple)}
+.panel .p-card.done::before{background:var(--green)}
+.panel .p-card b{display:block}
+.panel .facts,.panel .p-head span,.panel .count,.panel .key,.panel .p-fold{font-size:var(--t-note)}
+.panel .say .px{display:inline-block;margin-right:var(--s2)}
+.panel .fold{display:flex;align-items:center;gap:var(--s2)}
+.panel .p-line{display:flex;gap:var(--s2);height:2.9em;margin:var(--s2) 0;overflow:hidden}
+.panel .p-card.done .p-line{color:var(--screen-soft)}
+.panel .p-card.cheer .p-line{color:var(--screen-green)}
+.panel .dots{display:flex;gap:var(--cell);padding-top:var(--s2);flex:none}
+.panel .dots i{width:var(--cell);height:var(--cell);background:var(--purple);animation:dots calc(3*var(--beat)) steps(1) infinite}
+.panel .dots i:nth-child(2){animation-delay:var(--beat)}
+.panel .dots i:nth-child(3){animation-delay:calc(2*var(--beat))}
+.panel .p-card.done .dots,.panel .p-card.done .stop{display:none}
+.panel .p-row{display:flex;align-items:center;gap:var(--s2)}
+.panel .key{background:var(--screen-key);padding:var(--s1) var(--s3)}
+.panel .count{margin-left:auto}
+.panel .p-fold{display:flex;justify-content:space-between;background:var(--screen-raised);padding:var(--s2) var(--s4);margin:var(--s4) 0 var(--s2)}
+.panel.is-reset .p-list,.panel.is-reset .p-head,.panel.is-reset .p-fold{opacity:0}
+figure .note{margin-top:var(--s4)}
+
+.install .perch{position:relative}
+.install .perch>.term .cmd{font-size:var(--t-lead);padding:var(--s3) 0}
+.install .before-line{margin-top:var(--s3);max-width:var(--text)}
+.install .perch .octo-spot{position:absolute;right:var(--s8);top:-44px}
+.install .perch .octo-spot svg{width:48px;height:48px}
+.install .after-term{color:var(--soft)}
+.install .two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s16);align-items:start}
+.ways{display:grid;gap:var(--s2);margin-top:var(--s8)}
+.ways details{background:var(--raised)}
+.ways summary{display:flex;align-items:center;gap:var(--s3);padding:var(--s4) var(--s6);font-weight:700;cursor:pointer;list-style:none}
+.ways summary::-webkit-details-marker{display:none}
+.ways summary .px{color:var(--purple)}
+.ways details[open] summary .px:first-child,.ways details:not([open]) summary .px:nth-child(2){display:none}
+.ways .in{padding:0 var(--s6) var(--s6)}
+.ways .in .term{margin-top:var(--s2)}
+.ways .in .cmd{font-size:var(--t-small)}
+.install .ways .in code{background:var(--raised)}
+.ways .in .cmd code{background:none}
+.ways .in p+p{margin-top:var(--s2)}
+.steps{display:grid;gap:var(--s4);margin-top:var(--s6)}
+.steps li{display:grid;grid-template-columns:var(--s8) 1fr;align-items:start}
+.steps .px{color:var(--purple);margin-top:.22em}
+
+.needs{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--s4)}
+.needs>div{grid-column:span 2}
+.needs>div:nth-child(-n+2){grid-column:span 3}
+.needs>div{background:var(--raised);padding:var(--s6)}
+.needs h3{margin-bottom:var(--s3)}
+.needs p{line-height:1.5}
+.needs p+p{margin-top:var(--s3)}
+.needs ul{display:grid;gap:var(--s3);line-height:1.5}
+.needs .cells>li{padding-left:var(--s4)}
+.needs .cells>li::before{width:var(--cell);height:var(--cell);top:.6em}
+
+.repo .addr{font:600 var(--t-lead)/1.3 var(--mono);color:var(--ink);overflow-wrap:anywhere}
+.code-two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s16);align-items:start}
+.code-notes{display:grid;gap:var(--s4);color:var(--soft)}
+.tree{padding:var(--s6);font:400 var(--t-small)/1.9 var(--mono)}
+.tree b{display:block;font-weight:600;color:var(--screen-purple);margin-bottom:var(--s2)}
+.tree div{display:grid;grid-template-columns:13ch minmax(0,1fr);gap:var(--s3);line-height:1.5;padding:var(--cell) 0}
+.tree div span{color:var(--screen-soft)}
+
+.foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--s4);padding:var(--s12) 0 var(--s16);color:var(--soft);font-size:var(--t-small)}
+.foot .brand{font-size:var(--t-body);color:var(--ink)}
+.foot a.ext{padding:var(--s3) 0}
+
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr;gap:var(--s8);padding:var(--s8) 0 var(--s16)}
+  .hero .stage{order:-1;justify-self:start}
+  .hero .octo-spot{margin:0}
+  .hero .octo-spot svg{width:144px;height:144px}
+  .get,.install .two,.code-two{grid-template-columns:1fr;gap:var(--s12)}
+  .needs{grid-template-columns:1fr}
+  .needs>div,.needs>div:nth-child(-n+2){grid-column:auto}
+  .sec{padding:var(--s16) 0}
+  .show{padding:0 0 var(--s16)}
+  .sec.ref{padding:var(--s12) 0}
+  .sec.install{padding:var(--s12) var(--s8)}
+}
+@media (max-width:640px){
+  .top nav{gap:var(--s4)}
+  .top nav .opt{display:none}
+  .hero .acts{gap:var(--s4)}
+  .film .play{padding:var(--s4)}
+  .film .play .btn{font-size:var(--t-small)}
+  .film .play .btn>span{min-height:40px;padding:var(--s2) var(--s3);gap:var(--s2)}
+  .ways summary{padding:var(--s4)}
+  .ways .in{padding:0 var(--s4) var(--s4)}
+  .sec.install{padding:var(--s12) var(--gutter);margin:0 calc(-1*var(--gutter));clip-path:none}
+  .pair{grid-template-columns:1fr;gap:0}
+  .pair.heads{display:none}
+  .pair .vh{position:static;display:block;width:auto;height:auto;clip-path:none;font:400 var(--t-note)/1.6 var(--mono);color:var(--soft)}
+  .pair p{padding:var(--s3) var(--s4) var(--s3) var(--s8)}
+  .pair p::before{left:var(--s3);top:calc(var(--s3) + .45em)}
+  .pair .was{padding-bottom:0}
+  .install .perch>.term .cmd{font-size:var(--t-small);padding:var(--s3) 0}
+  .tree{padding:var(--s4);font-size:var(--t-note)}
+  .tree div{grid-template-columns:1fr;gap:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <a class="brand" href="#top" id="top"><svg class="octo mark" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg>Claudopus</a>
+  <nav aria-label="On this page">
+    <a class="opt" href="#why">What changes</a>
+    <a href="#install">Install</a>
+    <a class="ext" href="https://github.com/dimka3553/claudopus">GitHub <svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="1" y="0" width="4" height="1"/><rect x="3" y="1" width="2" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg></a>
+  </nav>
+</header>
+
+<main>
+<section class="hero">
+  <div>
+    <h1>Ask Claude for <span class="name">many things at once.</span></h1>
+    <p class="lead"><b>Claudopus</b> is an add-on for Claude Code. Ask for a bug fix, then the tests, then the docs, without waiting. Each one runs in the background, and a panel beside the chat shows how each is going.</p>
+    <div class="acts">
+      <a class="btn" href="#install"><span>Install it <svg class="px" viewBox="0 0 5 5" width="15" height="15" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="3" height="1"/><rect x="2" y="4" width="1" height="1"/></svg></span></a>
+      <a class="btn quiet" href="#video"><span><svg class="px" viewBox="0 0 4 7" width="8" height="14" aria-hidden="true"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="0" y="5" width="2" height="1"/><rect x="0" y="6" width="1" height="1"/></svg> Watch the video</span></a>
+    </div>
+  </div>
+  <div class="stage">
+    <button class="octo-spot" id="hero-octo" type="button" aria-label="The Claudopus octopus at work. Press it and it cheers.">
+      <svg class="octo working" viewBox="0 0 24 24" width="240" height="240" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="6" y="5" width="2" height="1"/><rect class="pupil" data-x="8" data-y="4" x="9" y="5" width="1" height="1"/><rect x="10" y="5" width="4" height="1"/><rect class="pupil" data-x="14" data-y="4" x="15" y="5" width="1" height="1"/><rect x="16" y="5" width="2" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="12" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="0" y="10" width="5" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="19" y="10" width="5" height="1"/><rect x="0" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="19" y="11" width="1" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="0" y="12" width="1" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="19" y="12" width="1" height="1"/><rect x="23" y="12" width="1" height="1"/><rect x="0" y="13" width="5" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="19" y="13" width="5" height="1"/><rect x="1" y="14" width="3" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="20" y="14" width="3" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="0" y="17" width="5" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="19" y="17" width="5" height="1"/><rect x="0" y="18" width="1" height="1"/><rect x="4" y="18" width="1" height="1"/><rect x="6" y="18" width="5" height="1"/><rect x="13" y="18" width="5" height="1"/><rect x="19" y="18" width="1" height="1"/><rect x="23" y="18" width="1" height="1"/><rect x="0" y="19" width="1" height="1"/><rect x="4" y="19" width="1" height="1"/><rect x="6" y="19" width="5" height="1"/><rect x="13" y="19" width="5" height="1"/><rect x="19" y="19" width="1" height="1"/><rect x="23" y="19" width="1" height="1"/><rect x="0" y="20" width="5" height="1"/><rect x="19" y="20" width="5" height="1"/><rect x="1" y="21" width="3" height="1"/><rect x="20" y="21" width="3" height="1"/><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="11" width="1" height="1"/><rect x="3" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="18" width="1" height="1"/><rect x="3" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="11" width="1" height="1"/><rect x="2" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="11" width="1" height="1"/><rect x="22" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="11" width="1" height="1"/><rect x="18" y="11" width="1" height="1"/><rect x="5" y="12" width="1" height="1"/><rect x="18" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="18" width="1" height="1"/><rect x="2" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="11" width="1" height="1"/><rect x="1" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="18" width="1" height="1"/><rect x="22" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="18" width="1" height="1"/><rect x="21" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="18" width="1" height="1"/><rect x="18" y="18" width="1" height="1"/><rect x="5" y="19" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="18" width="1" height="1"/><rect x="20" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="11" width="1" height="1"/><rect x="21" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="11" width="1" height="1"/><rect x="20" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="18" width="1" height="1"/><rect x="1" y="19" width="1" height="1"/></g></g></svg><svg class="octo happy" viewBox="0 0 24 24" width="240" height="240" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden;visible;hidden;visible;visible" dur="2s" calcMode="discrete" fill="freeze"/><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="3" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="15" y="4" width="3" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="1" height="1"/><rect x="11" y="5" width="2" height="1"/><rect x="14" y="5" width="1" height="1"/><rect x="16" y="5" width="2" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="4" height="1"/><rect x="11" y="7" width="2" height="1"/><rect x="14" y="7" width="4" height="1"/><rect x="6" y="8" width="5" height="1"/><rect x="13" y="8" width="5" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="3" y="14" width="1" height="1"/><rect x="6" y="14" width="2" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="16" y="14" width="2" height="1"/><rect x="20" y="14" width="1" height="1"/><rect x="3" y="15" width="5" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="16" y="15" width="5" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="7" y="17" width="1" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="16" y="17" width="1" height="1"/><rect x="7" y="18" width="4" height="1"/><rect x="13" y="18" width="4" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="9" y="0" width="6" height="1"/><rect x="7" y="1" width="10" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="6" y="2" width="12" height="1"/><rect x="21" y="2" width="1" height="1"/><rect x="2" y="3" width="2" height="1"/><rect x="6" y="3" width="3" height="1"/><rect x="10" y="3" width="4" height="1"/><rect x="15" y="3" width="3" height="1"/><rect x="20" y="3" width="2" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="9" y="4" width="1" height="1"/><rect x="11" y="4" width="2" height="1"/><rect x="14" y="4" width="1" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="20" y="4" width="2" height="1"/><rect x="3" y="5" width="2" height="1"/><rect x="6" y="5" width="12" height="1"/><rect x="19" y="5" width="2" height="1"/><rect x="4" y="6" width="6" height="1"/><rect x="11" y="6" width="2" height="1"/><rect x="14" y="6" width="6" height="1"/><rect x="6" y="7" width="5" height="1"/><rect x="13" y="7" width="5" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="13" y="9" width="2" height="1"/><rect x="16" y="9" width="2" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="20" y="13" width="1" height="1"/><rect x="3" y="14" width="5" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="16" y="14" width="5" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="7" y="16" width="1" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="16" y="16" width="1" height="1"/><rect x="7" y="17" width="4" height="1"/><rect x="13" y="17" width="4" height="1"/></g></g><g fill="currentColor" visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="22" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="0" y="8" width="1" height="1"/><rect x="23" y="9" width="1" height="1"/></g></svg>
+    </button>
+  </div>
+</section>
+
+<section class="show" id="video">
+  <div class="body">
+    <figure>
+      <div class="film notch big">
+        <video id="film" controls playsinline preload="none" poster="poster.jpg" width="1920" height="1080">
+          <source src="claudopus.mp4" type="video/mp4">
+          <a href="claudopus.mp4">Download the video</a>
+        </video>
+        <button class="play" id="play" type="button" hidden aria-label="Play the video, which has music"><span class="btn"><span><svg class="px" viewBox="0 0 4 7" width="12" height="21" aria-hidden="true"><rect x="0" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="4" height="1"/><rect x="0" y="4" width="3" height="1"/><rect x="0" y="5" width="2" height="1"/><rect x="0" y="6" width="1" height="1"/></svg> Play</span></span></button>
+      </div>
+      <figcaption class="note">The whole idea in 1 minute 50. It has music, and it starts only when you press play.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section class="sec" id="why">
+  <div class="body">
+    <h2>What changes when you install it.</h2>
+    <div class="pairs block">
+      <div class="pair heads" aria-hidden="true"><p class="was">Without it</p><p class="now">With Claudopus</p></div>
+      <div class="pair"><p class="was"><span class="vh">Without it: </span>Your next ask waits until Claude is done.</p><p class="now"><span class="vh">With Claudopus: </span>Your next ask starts right away.</p></div>
+      <div class="pair"><p class="was"><span class="vh">Without it: </span>You open more chats and lose track of them.</p><p class="now"><span class="vh">With Claudopus: </span>One panel beside the chat shows every job.</p></div>
+      <div class="pair"><p class="was"><span class="vh">Without it: </span>A long chat forgets what you said at the start.</p><p class="now"><span class="vh">With Claudopus: </span>Your words are saved, so Claude can look them up.</p></div>
+      <div class="pair"><p class="was"><span class="vh">Without it: </span>The result you wanted is buried far up the chat.</p><p class="now"><span class="vh">With Claudopus: </span>Every result is kept in a list.</p></div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section class="sec" id="get">
+  <div class="body">
+    <div class="get">
+      <div class="gets">
+        <h2>A panel beside the chat shows every job.</h2>
+        <div><h3>See where each job stands.</h3><p>Every job is a card with its to-do list and a line saying what it is doing now.</p></div>
+        <div><h3>Change a job while it runs.</h3><p>Say something about a running job, and your message goes to that job.</p></div>
+        <div><h3>Know when a job is done.</h3><p>A short chime and a notification tell you, so you can be somewhere else.</p></div>
+        <div><h3>Find every result later.</h3><p>Finished jobs stay in a list with their results, and you can open it any time.</p></div>
+      </div>
+      <figure>
+        <div class="panel screen notch big" id="panel" aria-hidden="true">
+          <div class="p-head">
+            <span class="octo-spot" id="panel-octo"><svg class="octo working" viewBox="0 0 24 24" width="48" height="48" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="5" height="1"/><rect x="15" y="5" width="3" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="12" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="0" y="10" width="5" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="19" y="10" width="5" height="1"/><rect x="0" y="11" width="1" height="1"/><rect x="4" y="11" width="1" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="19" y="11" width="1" height="1"/><rect x="23" y="11" width="1" height="1"/><rect x="0" y="12" width="1" height="1"/><rect x="4" y="12" width="1" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="19" y="12" width="1" height="1"/><rect x="23" y="12" width="1" height="1"/><rect x="0" y="13" width="5" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="19" y="13" width="5" height="1"/><rect x="1" y="14" width="3" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="20" y="14" width="3" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="0" y="17" width="5" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="19" y="17" width="5" height="1"/><rect x="0" y="18" width="1" height="1"/><rect x="4" y="18" width="1" height="1"/><rect x="6" y="18" width="5" height="1"/><rect x="13" y="18" width="5" height="1"/><rect x="19" y="18" width="1" height="1"/><rect x="23" y="18" width="1" height="1"/><rect x="0" y="19" width="1" height="1"/><rect x="4" y="19" width="1" height="1"/><rect x="6" y="19" width="5" height="1"/><rect x="13" y="19" width="5" height="1"/><rect x="19" y="19" width="1" height="1"/><rect x="23" y="19" width="1" height="1"/><rect x="0" y="20" width="5" height="1"/><rect x="19" y="20" width="5" height="1"/><rect x="1" y="21" width="3" height="1"/><rect x="20" y="21" width="3" height="1"/><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="11" width="1" height="1"/><rect x="3" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="18" width="1" height="1"/><rect x="3" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="11" width="1" height="1"/><rect x="2" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="11" width="1" height="1"/><rect x="22" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="11" width="1" height="1"/><rect x="18" y="11" width="1" height="1"/><rect x="5" y="12" width="1" height="1"/><rect x="18" y="12" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="2" y="18" width="1" height="1"/><rect x="2" y="19" width="1" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="11" width="1" height="1"/><rect x="1" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="22" y="18" width="1" height="1"/><rect x="22" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="18" width="1" height="1"/><rect x="21" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="5" y="18" width="1" height="1"/><rect x="18" y="18" width="1" height="1"/><rect x="5" y="19" width="1" height="1"/><rect x="18" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="18" width="1" height="1"/><rect x="20" y="19" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="21" y="11" width="1" height="1"/><rect x="21" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;hidden;visible" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="20" y="11" width="1" height="1"/><rect x="20" y="12" width="1" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;visible;hidden" dur="1s" calcMode="discrete" repeatCount="indefinite"/><rect x="1" y="18" width="1" height="1"/><rect x="1" y="19" width="1" height="1"/></g></g></svg><svg class="octo happy" viewBox="0 0 24 24" width="48" height="48" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden;visible;hidden;visible;visible" dur="2s" calcMode="discrete" fill="freeze"/><rect x="9" y="1" width="6" height="1"/><rect x="7" y="2" width="10" height="1"/><rect x="6" y="3" width="12" height="1"/><rect x="6" y="4" width="3" height="1"/><rect x="10" y="4" width="4" height="1"/><rect x="15" y="4" width="3" height="1"/><rect x="6" y="5" width="2" height="1"/><rect x="9" y="5" width="1" height="1"/><rect x="11" y="5" width="2" height="1"/><rect x="14" y="5" width="1" height="1"/><rect x="16" y="5" width="2" height="1"/><rect x="6" y="6" width="12" height="1"/><rect x="6" y="7" width="4" height="1"/><rect x="11" y="7" width="2" height="1"/><rect x="14" y="7" width="4" height="1"/><rect x="6" y="8" width="5" height="1"/><rect x="13" y="8" width="5" height="1"/><rect x="6" y="9" width="12" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="3" y="14" width="1" height="1"/><rect x="6" y="14" width="2" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="16" y="14" width="2" height="1"/><rect x="20" y="14" width="1" height="1"/><rect x="3" y="15" width="5" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="16" y="15" width="5" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="7" y="17" width="1" height="1"/><rect x="9" y="17" width="2" height="1"/><rect x="13" y="17" width="2" height="1"/><rect x="16" y="17" width="1" height="1"/><rect x="7" y="18" width="4" height="1"/><rect x="13" y="18" width="4" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="9" y="0" width="6" height="1"/><rect x="7" y="1" width="10" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="6" y="2" width="12" height="1"/><rect x="21" y="2" width="1" height="1"/><rect x="2" y="3" width="2" height="1"/><rect x="6" y="3" width="3" height="1"/><rect x="10" y="3" width="4" height="1"/><rect x="15" y="3" width="3" height="1"/><rect x="20" y="3" width="2" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="2" height="1"/><rect x="9" y="4" width="1" height="1"/><rect x="11" y="4" width="2" height="1"/><rect x="14" y="4" width="1" height="1"/><rect x="16" y="4" width="2" height="1"/><rect x="20" y="4" width="2" height="1"/><rect x="3" y="5" width="2" height="1"/><rect x="6" y="5" width="12" height="1"/><rect x="19" y="5" width="2" height="1"/><rect x="4" y="6" width="6" height="1"/><rect x="11" y="6" width="2" height="1"/><rect x="14" y="6" width="6" height="1"/><rect x="6" y="7" width="5" height="1"/><rect x="13" y="7" width="5" height="1"/><rect x="6" y="8" width="12" height="1"/><rect x="6" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="13" y="9" width="2" height="1"/><rect x="16" y="9" width="2" height="1"/><rect x="6" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="13" y="10" width="2" height="1"/><rect x="16" y="10" width="2" height="1"/><rect x="6" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="13" y="11" width="2" height="1"/><rect x="16" y="11" width="2" height="1"/><rect x="6" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="13" y="12" width="2" height="1"/><rect x="16" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="6" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="13" y="13" width="2" height="1"/><rect x="16" y="13" width="2" height="1"/><rect x="20" y="13" width="1" height="1"/><rect x="3" y="14" width="5" height="1"/><rect x="9" y="14" width="2" height="1"/><rect x="13" y="14" width="2" height="1"/><rect x="16" y="14" width="5" height="1"/><rect x="9" y="15" width="2" height="1"/><rect x="13" y="15" width="2" height="1"/><rect x="7" y="16" width="1" height="1"/><rect x="9" y="16" width="2" height="1"/><rect x="13" y="16" width="2" height="1"/><rect x="16" y="16" width="1" height="1"/><rect x="7" y="17" width="4" height="1"/><rect x="13" y="17" width="4" height="1"/></g></g><g fill="currentColor" visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="22" y="0" width="1" height="1"/><rect x="1" y="1" width="1" height="1"/><rect x="0" y="8" width="1" height="1"/><rect x="23" y="9" width="1" height="1"/></g></svg></span>
+            <div><b id="p-count">Working on 2 things</b><span class="dim">This chat: 6% · 31k of 500k</span></div>
+          </div>
+          <div class="p-list" id="p-live">
+            <div class="p-card" id="p-a">
+              <b>Fix the login redirect</b>
+              <span class="dim facts">Opus 5.5 · context 38k · <span class="clock" data-s="130">2m 10s</span></span>
+              <div class="p-line"><span class="dots"><i></i><i></i><i></i></span><span class="say">I found the cause and am writing the fix.</span></div>
+              <div class="p-row"><span class="key">Details</span><span class="key stop">Stop</span><span class="dim count">2 of 4 done</span></div>
+            </div>
+            <div class="p-card" id="p-b">
+              <b>Index the docs folder</b>
+              <span class="dim facts">Sonnet 5.5 · context 61k · <span class="clock" data-s="302">5m 02s</span></span>
+              <div class="p-line"><span class="dots"><i></i><i></i><i></i></span><span class="say">I have read 40 of the 62 pages.</span></div>
+              <div class="p-row"><span class="key">Details</span><span class="key stop">Stop</span><span class="dim count">1 of 3 done</span></div>
+            </div>
+          </div>
+          <div class="p-fold"><span class="fold"><svg class="px" viewBox="0 0 5 3" width="10" height="6" aria-hidden="true"><rect x="0" y="0" width="5" height="1"/><rect x="1" y="1" width="3" height="1"/><rect x="2" y="2" width="1" height="1"/></svg><span id="p-fold">Finished 1</span></span><span class="dim">this chat</span></div>
+          <div class="p-list" id="p-done">
+            <div class="p-card done">
+              <b>Rename the settings page</b>
+              <span class="dim facts">Finished · Opus 5.5 · context 52k · 4m 31s</span>
+              <div class="p-line"><span class="say">The page is renamed everywhere, and the tests pass.</span></div>
+              <div class="p-row"><span class="key">Details</span><span class="dim count">3 of 3 done</span></div>
+            </div>
+          </div>
+        </div>
+        <figcaption class="note">The panel, redrawn for this page. The jobs and their numbers are made up.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section class="sec install notch big" id="install">
+  <div class="body">
+    <h2>Install it with two lines.</h2>
+    <p class="lead">Type them at the Claude Code prompt, in a terminal.</p>
+    <p class="before-line soft">It needs <a href="#know">a recent Claude Code</a>, and it <a href="#before">adds its author's working principles</a> to every chat.</p>
+    <div class="block perch">
+      <span class="octo-spot" id="copy-octo" aria-hidden="true"><svg class="octo working" viewBox="0 0 16 16" width="48" height="48" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><g visibility="hidden"><animate attributeName="visibility" values="hidden;hidden;hidden;visible" dur="1.2s" calcMode="discrete" repeatCount="indefinite"/><rect x="15" y="8" width="1" height="1"/><rect x="14" y="9" width="2" height="1"/><rect x="3" y="12" width="2" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;hidden" dur="1.2s" calcMode="discrete" repeatCount="indefinite"/><rect x="0" y="8" width="1" height="1"/><rect x="0" y="9" width="2" height="1"/><rect x="11" y="12" width="2" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;visible" dur="1.2s" calcMode="discrete" repeatCount="indefinite"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="9" y="14" width="4" height="1"/></g><g visibility="visible"><animate attributeName="visibility" values="visible;visible;visible;hidden" dur="1.2s" calcMode="discrete" repeatCount="indefinite"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="3" y="14" width="4" height="1"/></g></g></svg><svg class="octo happy" viewBox="0 0 16 16" width="48" height="48" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><g visibility="visible"><animate attributeName="visibility" values="visible;hidden;visible;hidden;visible;hidden;visible;visible" dur="2s" calcMode="discrete" fill="freeze"/><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="3" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="11" y="4" width="3" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="1" height="1"/><rect x="7" y="5" width="2" height="1"/><rect x="10" y="5" width="1" height="1"/><rect x="12" y="5" width="2" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="4" height="1"/><rect x="7" y="7" width="2" height="1"/><rect x="10" y="7" width="4" height="1"/><rect x="2" y="8" width="5" height="1"/><rect x="9" y="8" width="5" height="1"/><rect x="2" y="9" width="12" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="0" y="11" width="1" height="1"/><rect x="2" y="11" width="2" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="2" height="1"/><rect x="15" y="11" width="1" height="1"/><rect x="0" y="12" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="12" y="12" width="4" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g><g visibility="hidden"><animate attributeName="visibility" values="hidden;visible;hidden;visible;hidden;visible;hidden;hidden" dur="2s" calcMode="discrete" fill="freeze"/><rect x="5" y="0" width="6" height="1"/><rect x="3" y="1" width="10" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="2" y="2" width="12" height="1"/><rect x="15" y="2" width="1" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="2" y="3" width="3" height="1"/><rect x="6" y="3" width="4" height="1"/><rect x="11" y="3" width="3" height="1"/><rect x="15" y="3" width="1" height="1"/><rect x="0" y="4" width="4" height="1"/><rect x="5" y="4" width="1" height="1"/><rect x="7" y="4" width="2" height="1"/><rect x="10" y="4" width="1" height="1"/><rect x="12" y="4" width="4" height="1"/><rect x="1" y="5" width="14" height="1"/><rect x="2" y="6" width="4" height="1"/><rect x="7" y="6" width="2" height="1"/><rect x="10" y="6" width="4" height="1"/><rect x="2" y="7" width="5" height="1"/><rect x="9" y="7" width="5" height="1"/><rect x="2" y="8" width="12" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="3" y="12" width="1" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="12" y="12" width="1" height="1"/><rect x="3" y="13" width="4" height="1"/><rect x="9" y="13" width="4" height="1"/></g></g></svg></span>
+      <div class="term screen notch big">
+        <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="cmd"><span class="pr" aria-hidden="true">&gt;</span><code>/plugin marketplace add <b>dimka3553/claudopus</b></code><button class="copy notch" type="button" data-copy="/plugin marketplace add dimka3553/claudopus" aria-label="Copy: /plugin marketplace add dimka3553/claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
+        <div class="cmd"><span class="pr" aria-hidden="true">&gt;</span><code>/plugin install <b>claudopus@claudopus</b></code><button class="copy notch" type="button" data-copy="/plugin install claudopus@claudopus" aria-label="Copy: /plugin install claudopus@claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
+      </div>
+    </div>
+
+    <div class="two block">
+    <div>
+    <p class="after-term">Answer <code>y</code> to add the marketplace, then press Enter to pick the first choice, the user scope. That is all. Nothing has to be typed in each chat.</p>
+    <div class="ways">
+      <details open>
+        <summary><svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="5" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="0" y="2" width="5" height="1"/></svg>In the Claude desktop app</summary>
+        <div class="in"><p>Click + next to the prompt box, then Plugins. Add a marketplace with <code>dimka3553/claudopus</code>, then add the plugin named <code>claudopus</code>.</p></div>
+      </details>
+      <details>
+        <summary><svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="5" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="0" y="2" width="5" height="1"/></svg>From a shell</summary>
+        <div class="in">
+          <div class="term screen notch">
+            <div class="cmd"><span class="pr" aria-hidden="true">$</span><code>claude plugin marketplace add <b>dimka3553/claudopus</b></code><button class="copy notch" type="button" data-copy="claude plugin marketplace add dimka3553/claudopus" aria-label="Copy: claude plugin marketplace add dimka3553/claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
+            <div class="cmd"><span class="pr" aria-hidden="true">$</span><code>claude plugin install <b>claudopus@claudopus</b></code><button class="copy notch" type="button" data-copy="claude plugin install claudopus@claudopus" aria-label="Copy: claude plugin install claudopus@claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
+          </div>
+        </div>
+      </details>
+      <details>
+        <summary><svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="5" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="0" y="2" width="5" height="1"/></svg>If the short form fails over SSH</summary>
+        <div class="in"><p>Use the full address in its place:</p><p><code class="long">https://github.com/dimka3553/claudopus.git</code></p></div>
+      </details>
+    </div>
+    </div>
+
+    <div>
+      <h3>What you see afterwards</h3>
+      <ol class="steps">
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="1"><rect x="1" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>Claudopus is on in every chat you open from then on, in every folder.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="2"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>You send a message. The chat answers in one line, starts the job in the background, and is free for your next message.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="3"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>The panel opens beside the chat by itself the first time work starts in that chat. If you close it, it stays closed for that chat, and <code>/claudopus</code> opens it again.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="4"><rect x="0" y="0" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><span>A short band above the prompt says what is being done right now.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="5"><rect x="0" y="0" width="3" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>When a job finishes, the chat passes on its result, and the panel lists it under Finished.</span></li>
+      </ol>
+    </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec ref" id="know">
+  <div class="body">
+    <h2>Good to know before you install.</h2>
+    <div class="needs block">
+      <div class="notch big" id="before">
+        <h3>It adds its author's principles</h3>
+        <p>Claudopus adds its author's working principles to every chat, and they shape how Claude answers. They are short rules, such as giving short replies and bringing solutions before questions. <a href="https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/rules/CLAUDE.md">Read the principles</a> before you install.</p>
+      </div>
+      <div class="notch big">
+        <h3>It can ask for your Mac's password</h3>
+        <p>When a job needs an admin command, a box asks you once for that Mac's password and hides what you type. The password stays in that Mac's keychain, and the job never sees it.</p>
+      </div>
+      <div class="notch big">
+        <h3>It needs</h3>
+        <ul class="cells">
+          <li>Claude Code 2.1.287 or newer in the terminal, or the desktop app 2.1.286 or newer.</li>
+          <li>Claude Code 2.1.299 or newer for the panel to draw in VS Code.</li>
+          <li>Access to the model the chat picks for each job: Opus for most, Sonnet for long legwork, Fable only for heavy work.</li>
+          <li>The panel's Stats tab reads Claude's records with <code>jq</code>, which macOS 15 and later include.</li>
+        </ul>
+      </div>
+      <div class="notch big">
+        <h3>Where it works, and where it does not</h3>
+        <ul class="cells">
+          <li class="is-done">It has been seen working in the macOS desktop app.</li>
+          <li class="is-plain">The terminal and VS Code have not been tried yet.</li>
+          <li class="is-trouble">It does not work on Windows under WSL, because plugins do not load there.</li>
+          <li class="is-trouble">It does not work where your organization's admins block mods.</li>
+          <li class="is-plain">In <code>claude -p</code> print mode and in cloud sessions there is no panel.</li>
+        </ul>
+      </div>
+      <div class="notch big">
+        <h3>You can turn it off</h3>
+        <p>Type <code class="long">/plugin disable claudopus@claudopus</code> at the prompt. The same line with <code>enable</code> turns it back on, and with <code>uninstall</code> it is removed.</p>
+        <p>Your memory folder is left in place.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<section class="sec ref" id="code">
+  <div class="body">
+    <h2>Where the code is.</h2>
+    <div class="code-two block">
+      <div class="code-notes">
+        <p class="repo"><span class="addr">github.com/dimka3553/claudopus</span></p>
+        <p>The README there has the settings and the rest of the detail. The code is under the MIT licence.</p>
+        <p><a class="btn" href="https://github.com/dimka3553/claudopus"><span>Open it on GitHub <svg class="px" viewBox="0 0 5 5" width="15" height="15" aria-hidden="true"><rect x="1" y="0" width="4" height="1"/><rect x="3" y="1" width="2" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg></span></a></p>
+      </div>
+      <figure>
+        <div class="tree screen notch big">
+          <b>~/.claude/claudopus</b>
+          <div>index.md<span>your subjects, one line each</span></div>
+          <div>streams/<span>one brief per subject</span></div>
+          <div>words/<span>your messages, word for word</span></div>
+          <div>reports/<span>what finished work left for you</span></div>
+          <div>asks/<span>what you asked and what was done</span></div>
+          <div>finished/<span>the Finished list of each chat</span></div>
+          <div>servers.json<span>the local servers it last saw</span></div>
+          <div>log.md<span>its own log</span></div>
+        </div>
+        <figcaption class="note">Everything Claudopus keeps is in this one folder, as plain files. Delete the folder to start over.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+</main>
+
+<hr class="rule">
+
+<footer class="foot">
+  <a class="brand" href="#top"><svg class="octo mark" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg>Claudopus</a>
+  <span>Claudopus is an independent add-on for Claude Code. It is not affiliated with or endorsed by Anthropic.</span>
+  <a class="ext" href="https://github.com/dimka3553/claudopus">GitHub <svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="1" y="0" width="4" height="1"/><rect x="3" y="1" width="2" height="1"/><rect x="2" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="4" y="3" width="1" height="1"/><rect x="0" y="4" width="1" height="1"/></svg></a>
+</footer>
+
+</div>
+<div id="said" class="note" role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)"></div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)]
+  const still = matchMedia('(prefers-reduced-motion: reduce)')
+
+  // The octopus drawings are the mod's own. They hold still when motion is not wanted.
+  const settle = () => $$('svg.octo').forEach(svg => {
+    if (still.matches) { svg.pauseAnimations(); svg.setCurrentTime(0) } else svg.unpauseAnimations()
+  })
+  settle(); still.addEventListener?.('change', settle)
+
+  // A finish: the octopus turns green and cheers for two seconds, then goes back to work.
+  const cheer = spot => {
+    const happy = $('.octo.happy', spot)
+    spot.classList.add('is-happy')
+    happy.setCurrentTime(0)
+    clearTimeout(spot.timer)
+    spot.timer = setTimeout(() => spot.classList.remove('is-happy'), 2500)
+  }
+
+  // The big octopus looks where you point: each pupil is one cell that moves inside its two-by-two eye.
+  const hero = $('#hero-octo'), pupils = $$('.pupil', hero)
+  let waiting = 0
+  addEventListener('pointermove', e => {
+    if (waiting) return
+    waiting = requestAnimationFrame(() => {
+      waiting = 0
+      const box = hero.getBoundingClientRect()
+      const right = e.clientX >= box.left + box.width / 2, down = e.clientY >= box.top + box.height * 0.2
+      pupils.forEach(p => { p.setAttribute('x', +p.dataset.x + (right ? 1 : 0)); p.setAttribute('y', +p.dataset.y + (down ? 1 : 0)) })
+    })
+  }, { passive: true })
+  hero.addEventListener('click', () => cheer(hero))
+
+  // The video waits for a press and never starts by itself.
+  const film = $('#film'), play = $('#play')
+  film.controls = false; play.hidden = false
+  play.addEventListener('click', () => { play.hidden = true; film.controls = true; film.focus(); film.play()?.catch(() => {}) })
+
+  // Copy buttons
+  const said = $('#said')
+  $$('[data-copy]').forEach(button => button.addEventListener('click', async () => {
+    const text = button.dataset.copy
+    let copied = true
+    try { await navigator.clipboard.writeText(text) } catch {
+      const area = Object.assign(document.createElement('textarea'), { value: text })
+      area.style.cssText = 'position:fixed;opacity:0'; document.body.append(area); area.select()
+      try { copied = document.execCommand('copy') } catch { copied = false }
+      area.remove()
+    }
+    if (!copied) {
+      getSelection().selectAllChildren(button.previousElementSibling)
+      button.classList.add('is-failed'); said.textContent = 'It could not be copied. The line is selected, so copy it with your keyboard.'
+      clearTimeout(button.timer)
+      button.timer = setTimeout(() => { button.classList.remove('is-failed'); said.textContent = '' }, 3000)
+      return
+    }
+    button.classList.add('is-copied'); said.textContent = 'Copied: ' + text
+    cheer($('#copy-octo'))
+    clearTimeout(button.timer)
+    button.timer = setTimeout(() => { button.classList.remove('is-copied'); said.textContent = '' }, 2000)
+  }))
+
+  // The panel plays one short story on a loop: a job goes on, finishes, and joins the Finished list.
+  const panel = $('#panel'), start = panel.innerHTML
+  const clock = s => (s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's')
+  const ticked = '<svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>'
+  const set = (card, line, count) => { if (line) $('#' + card + ' .say').innerHTML = line; if (count) $('#' + card + ' .count').textContent = count }
+  const story = [
+    [2400, () => set('p-a', 'The fix is in, and I am running the tests.', '3 of 4 done')],
+    [2000, () => set('p-b', 'I have read 55 of the 62 pages.')],
+    [2400, () => {
+      const a = $('#p-a'); a.classList.add('done', 'cheer'); set('p-a', ticked + 'Finished', '4 of 4 done')
+      $('#p-a .facts').textContent = 'Finished · Opus 5.5 · context 44k · ' + clock(+$('#p-a .clock').dataset.s)
+      $('#p-count').textContent = 'Working on 1 thing'; cheer($('#panel-octo'))
+    }],
+    [2600, () => {
+      const a = $('#p-a'); a.classList.remove('cheer'); set('p-a', 'The redirect is fixed, and the tests pass.')
+      $('#p-done').prepend(a); $('#p-fold').textContent = 'Finished 2'
+    }],
+    [2200, () => set('p-b', 'All 62 pages are read, and I am writing the index.', '2 of 3 done')],
+    [3600, () => panel.classList.add('is-reset')],
+    [500, () => { panel.innerHTML = start; panel.classList.remove('is-reset'); settle() }],
+  ]
+  let at = 0, next = 0, tick = 0, seen = false
+  const step = () => {
+    const [wait, act] = story[at]
+    next = setTimeout(() => { act(); at = (at + 1) % story.length; step() }, wait)
+  }
+  const run = on => {
+    clearTimeout(next); clearInterval(tick)
+    if (!on || still.matches) return
+    step()
+    tick = setInterval(() => $$('.clock', panel).forEach(c => { c.dataset.s = +c.dataset.s + 1; c.textContent = clock(+c.dataset.s) }), 1000)
+  }
+  new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; run(seen) }, { threshold: 0.25 }).observe(panel)
+  still.addEventListener?.('change', () => run(seen))
+})()
+</script>
+</body>
+</html>
