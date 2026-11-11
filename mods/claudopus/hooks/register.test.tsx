@@ -2075,6 +2075,18 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await ears.press({ key: approve?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Approve"')))).toContain('May I delete the old repo?')
   expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')).toBeUndefined()
+  // Or a reply in the person's own words: the list has no box (it redraws each second) and its Reply opens Details, where the box
+  // is; a reply goes to the work and the ask stays
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a2', text: 'Submit it to the plugin directory.', choices: ['Submitted', 'Not now'] } as never)
+  expect(await list.find({ type: 'Input' } as never)).toBeUndefined()
+  expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Reply…')).toBe(true)
+  const box = (await ears.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await ears.input({ key: box?.key ?? '', text: 'Where do I do that?' })
+  expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('Where do I do that?')))).toContain('Submit it to the plugin directory.')
+  expect(await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' })).toBeDefined()
+  // Instructions passed as text to copy get no Copy: only what is pasted elsewhere does
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k6', agentId: 'a2', text: 'Open the plugin directory and submit the form.', copy: 'Open the plugin directory page and fill in the form with the details' } as never)
+  expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Copy')).toBe(false)
 
   // A command for the person to type is shown with its Copy, and the work is told to open a terminal for it (the app opens one
   // only for Claude, never for a plugin's own code)

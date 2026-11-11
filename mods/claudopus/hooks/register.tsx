@@ -2321,14 +2321,25 @@ const copyAsk = ($: EngineInterface, id: string, text: string, surface: RenderSu
 
 // The person's answer to an ask's buttons: to work under way, a message it reads at its next step; to work that has ended, a
 // message to the chat, which carries the work on. Either way the ask goes, and the answer is kept on the card as the person's
-const answerAsk = async ($: EngineInterface, one: Todo, choice: string) => {
+// A reply in the person's own words goes the same way, and leaves the ask in place for the work to clear or ask again: a question
+// back ("where do I do that?") does not answer it
+const replies = new Map<string, number>()
+// What the person has typed into a reply box and not sent, by the work, so a redraw keeps it
+const drafts = new Map<string, string>()
+const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   const ask = one.ask
-  if (!ask) return
+  const said = choice.trim()
+  if (!ask || !said) return
   const at = await $.clock.now()
-  await update($, todos, list => list.map(card => (card.id === one.id ? { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: `${choice} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) } : card)))
+  if (isReply) replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
+  await update($, todos, list =>
+    list.map(card => (card.id === one.id ? { ...card, ask: isReply ? card.ask : undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) } : card)),
+  )
+  redraw($)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
-  if (working) await tell($, ask.from ?? one.id, `${who(true)} pressed "${choice}" in answer to your ask: ${ask.text}`)
-  else await sendForPerson($, `${choice}. That answers what the work "${titleOf(one)}" asked me before it ended: ${ask.text}`)
+  const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"): ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
+  if (working) await tell($, ask.from ?? one.id, to)
+  else await sendForPerson($, isReply ? `${said}\n(That is my reply to what the work "${titleOf(one)}" asked me before it ended: ${ask.text})` : `${said}. That answers what the work "${titleOf(one)}" asked me before it ended: ${ask.text}`)
 }
 
 export const register: Register = on => {
@@ -2405,13 +2416,13 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and tells {name}. `text` says what to do, in one plain line; `copy` is the exact text {name} copies for it, if any; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need; `command` is a command {name} types themselves: the answer tells you to open a terminal for it with the terminal tools. The answer pressed arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Call it again with empty `text` once it is done; without choices it also goes when you finish.",
+        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and tells {name}. `text` says what to do, in one plain line; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need; `command` is a command {name} types themselves: the answer tells you to open a terminal for it with the terminal tools. The answer pressed arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Call it again with empty `text` once it is done; without choices it also goes when you finish.",
       ),
       inputSchema: {
         type: 'object',
         properties: {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
-          copy: { type: 'string', description: 'The exact text to copy for it, such as a one-time code, a command or a link' },
+          copy: { type: 'string', description: 'Only text they must paste somewhere else, such as a one-time code or a link; leave it out when they only read or press something' },
           choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now; the one pressed comes back to you as a message' },
           command: { type: 'string', description: 'A command for them to type themselves, one line, shown with a Copy button; then open a terminal for it with mcp__terminal__open_terminal_tab' },
           cwd: { type: 'string', description: 'The folder the command runs in, a full path; the chat\'s folder when left out' },
@@ -2826,7 +2837,10 @@ export const register: Register = on => {
     if (e.agentId === undefined) return { result: `Only background work asks through the panel; a chat's own thread asks ${who()} in its reply.` }
     const text = oneLine(typeof input.text === 'string' ? input.text : '').slice(0, 300)
     const command = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
-    const copy = command || (typeof input.copy === 'string' ? input.copy : '').trim().slice(0, 4000)
+    // Copy is for text pasted elsewhere: a sentence of instructions, or the ask's own words, gets none
+    const given = (typeof input.copy === 'string' ? input.copy : '').trim().slice(0, 4000)
+    const isProse = given.split(/\s+/).length > 8 && /[a-z]{3,} [a-z]{3,} [a-z]{3,}/i.test(given) && !/[\/=_$`@]|https?:/.test(given)
+    const copy = command || (isProse || flat(text).includes(flat(given)) ? '' : given)
     const folder = typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : cwd
     const choices = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].slice(0, 4)
     const at = await $.clock.now()
@@ -2983,28 +2997,48 @@ export const register: Register = on => {
       )
 
     // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button
-    const askBlock = (one: Todo, key: string) =>
-      one.ask ? (
+    // On the small card: what to do, the text to paste with its Copy on a filled row of its own, then one row of answers ending in
+    // Reply, which opens its Details. The reply box is in Details alone: the list redraws each second, and a text box there lost its
+    // place and threw the panel to the bottom while the person typed
+    const askBlock = (one: Todo, key: string, isWhole = false) => {
+      const ask = one.ask
+      if (!ask) return null
+      const answers = ask.choices ?? []
+      return (
         <Box key={key} flexDirection="column" gap={1}>
-          <Text wrap="wrap" color={NEEDS} bold>{one.ask.text}</Text>
-          {/* The exact text to paste somewhere, with one Copy button: the panel's text cannot be selected with the pointer */}
-          {one.ask.copy ? (
-            <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={2}>
-              <Box flexShrink={1} minWidth={0}>
-                <Text mono wrap="wrap">{one.ask.copy}</Text>
+          {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
+          <Text wrap="wrap" color={NEEDS} bold>{isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6))}</Text>
+          {ask.copy ? (
+            <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                <Text mono wrap="wrap">{ask.copy}</Text>
               </Box>
-              <Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} onPress={press => copyAsk($, one.id, one.ask?.copy ?? '', press.surface)} />
+              <Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} />
             </Box>
           ) : null}
-          {one.ask.choices?.length ? (
+          {isWhole && 'Input' in table ? (
+            <Box width="100%" flexDirection="column">
+            <table.Input
+              key={`${key}-reply-${replies.get(one.id) ?? 0}`}
+              placeholder="Reply in your own words"
+              value={drafts.get(one.id) ?? ''}
+              submitLabel="send"
+              onInput={value => void drafts.set(one.id, value)}
+              onSubmit={value => void (drafts.delete(one.id), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)))}
+            />
+            </Box>
+          ) : null}
+          {answers.length || !isWhole ? (
             <Box flexDirection="row" flexWrap="wrap" gap={1}>
-              {one.ask.choices.map((choice, n) => (
+              {answers.map((choice, n) => (
                 <Button key={`${key}-choice-${n}-${presses}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
               ))}
+              {isWhole ? null : <Button key={`${key}-reply-open-${presses}`} label="Reply…" plain dimColor onPress={() => openWork($, one.id)} />}
             </Box>
           ) : null}
         </Box>
-      ) : null
+      )
+    }
 
     // The small card: a title, where it stands, the line the work last wrote beside the three dots, and how many to-dos are done.
     // Each part has a fixed number of rows and is clipped to them, so a card never changes height as the work goes
@@ -3434,7 +3468,7 @@ export const register: Register = on => {
               <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
                 <Text bold dimColor>Needs you now</Text>
-                {askBlock(one, `ask-big-${one.id}`)}
+                {askBlock(one, `ask-big-${one.id}`, true)}
               </Box>
             </Box>
           ) : null}
