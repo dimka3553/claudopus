@@ -472,7 +472,7 @@ figure .note{margin-top:var(--s4)}
       </div>
       <div class="notch big">
         <h3>It can ask for your Mac's password</h3>
-        <p>When a job needs an admin command, a box asks you once for that Mac's password and hides what you type. The password stays in that Mac's keychain, and the job never sees it.</p>
+        <p>When a job needs an admin command, a box asks you once for that Mac's password and hides what you type. The password stays in this Mac's keychain and is never put in a chat, a file or a log. Once it is kept, later admin commands on that Mac run without asking you again.</p>
       </div>
       <div class="notch big">
         <h3>It needs</h3>
@@ -486,6 +486,7 @@ figure .note{margin-top:var(--s4)}
       <div class="notch big">
         <h3>Where it works, and where it does not</h3>
         <ul class="cells">
+          <li class="is-trouble">It runs on macOS only.</li>
           <li class="is-done">It has been seen working in the macOS desktop app.</li>
           <li class="is-plain">The terminal and VS Code have not been tried yet.</li>
           <li class="is-trouble">It does not work on Windows under WSL, because plugins do not load there.</li>

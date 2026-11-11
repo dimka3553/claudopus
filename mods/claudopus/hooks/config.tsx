@@ -48,9 +48,9 @@ const name = (model: string) => MODEL_NAMES[model] ?? model
 const noHaiku = (m: Models) => !Object.values(m).includes('haiku')
 // The chat's rule for which model each piece of work runs on, from the settings
 export const modelsRule = (m: Models) =>
-  `Most work runs on ${name(m.work)}, \`model: "${m.work}"\`. Long legwork such as indexing runs on ${name(m.legwork)}, \`model: "${m.legwork}"\`. ${name(m.heavy)}, \`model: "${m.heavy}"\`, is only for heavy 3D work or a really complicated task.${noHaiku(m) ? ' Never Haiku.' : ''}`
+  `Most work runs on ${name(m.work)}, \`model: "${m.work}"\`. Long legwork such as indexing runs on ${name(m.legwork)}, \`model: "${m.legwork}"\`. ${name(m.heavy)}, \`model: "${m.heavy}"\`, is only for heavy or really complicated work.${noHaiku(m) ? ' Never Haiku.' : ''}`
 // The same said short, as the chat is reminded when it tried to copy itself
-export const modelsShort = (m: Models) => `"${m.work}" for most work, "${m.legwork}" for long legwork, "${m.heavy}" only for heavy 3D or really complicated work`
+export const modelsShort = (m: Models) => `"${m.work}" for most work, "${m.legwork}" for long legwork, "${m.heavy}" only for heavy or really complicated work`
 export const fillModels = (text: string, m: Models) =>
   text.replace(/\{models\}/g, modelsRule(m)).replace(/\{helpers\}/g, `${name(m.legwork)}${noHaiku(m) ? ', never Haiku' : ''}`)
 
@@ -181,7 +181,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             item(
               `config-model-${one.key}`,
               one.name,
-              one.key === 'work' ? 'The model most work runs on.' : one.key === 'legwork' ? 'Long, simple work such as indexing. Helpers run on it too.' : 'Only heavy 3D or really complicated work.',
+              one.key === 'work' ? 'The model most work runs on.' : one.key === 'legwork' ? 'Long, simple work such as indexing. Helpers run on it too.' : 'Only heavy or really complicated work.',
               <Select key={`config-model-${one.key}-pick`} options={choices} value={models[one.key]} onSelect={value => acts.set('models', value === one.shipped ? undefined : value, one.key)} />,
               models[one.key] !== one.shipped,
               () => acts.set('models', undefined, one.key),

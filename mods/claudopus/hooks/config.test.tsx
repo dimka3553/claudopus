@@ -5,7 +5,7 @@ import { fillModels, modelsOf, parse, sectionsOf } from './config'
 test('as shipped, the models rule says what the chat was told before Config existed', async () => {
   const m = modelsOf({})
   expect(fillModels('- {models}', m)).toBe(
-    '- Most work runs on Opus 5.5, `model: "opus"`. Long legwork such as indexing runs on Sonnet 5.5, `model: "sonnet"`. Fable 5.2, `model: "fable"`, is only for heavy 3D work or a really complicated task. Never Haiku.',
+    '- Most work runs on Opus 5.5, `model: "opus"`. Long legwork such as indexing runs on Sonnet 5.5, `model: "sonnet"`. Fable 5.2, `model: "fable"`, is only for heavy or really complicated work. Never Haiku.',
   )
   expect(fillModels('Helpers run on {helpers}.', m)).toBe('Helpers run on Sonnet 5.5, never Haiku.')
   // A model picked is named; with Haiku picked the rules no longer forbid it; a name it does not know is as shipped

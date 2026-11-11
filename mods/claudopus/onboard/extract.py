@@ -6,6 +6,9 @@ what Claude answered, so `recall` finds both) and adds the chat to a digest for
 its project in <out dir>, which the stream analysis reads.
 
     python3 extract.py <out dir>
+
+A chat is grouped by its repo: the folder under ~/Documents/GitHub, or under the
+folder CLAUDOPUS_REPOS names.
 """
 import glob
 import json
@@ -17,6 +20,8 @@ HOME = os.path.expanduser('~')
 PROJECTS = f'{HOME}/.claude/projects'
 WORDS = f'{HOME}/.claude/claudopus/words'
 MARK = '<!-- from the transcript -->'
+# The folder that holds one folder per repo; GitHub Desktop's default unless CLAUDOPUS_REPOS names another
+REPOS = os.environ.get('CLAUDOPUS_REPOS', f'{HOME}/Documents/GitHub').rstrip('/')
 # Folders that hold no work of mine: test runs and the app's spare sessions
 SKIP = ('scratchpad', 'claude-spares')
 # What a digest keeps of one message and of the chat's last reply
@@ -92,8 +97,8 @@ def read_chat(path):
 def project_of(cwd):
     if '/.claude/worktrees/' in cwd:
         cwd = cwd.split('/.claude/worktrees/')[0]
-    if cwd.startswith(f'{HOME}/Documents/GitHub/'):
-        return cwd.split('/')[5] if len(cwd.split('/')) > 5 else 'github'
+    if cwd.startswith(f'{REPOS}/'):
+        return cwd[len(REPOS) + 1:].split('/')[0] or 'github'
     return 'other'
 
 
