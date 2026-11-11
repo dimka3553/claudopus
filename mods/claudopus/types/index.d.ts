@@ -64,8 +64,8 @@ export type Todo = {
   waits?: string[]
   // What it needs the person's own hands for now, said with the `ask` tool: what to do, and the exact text to copy for it. Its card
   // stands out with the ask in view until the work clears it or ends
-  // `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card)
-  ask?: { text: string; copy?: string; choices?: string[]; from?: string; at: number }
+  // `isCommand`: `copy` is a command the person types in a terminal opened in `cwd`. `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card)
+  ask?: { text: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; from?: string; at: number }
   startedAt: number
   // 0 while it works
   endedAt: number

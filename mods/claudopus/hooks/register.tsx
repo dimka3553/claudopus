@@ -91,7 +91,7 @@ const KEEP =
 const KEEP_AGENTS = 'Keep the name or id of each background agent with its subject and where it stands.'
 // What every piece of background work is told as it starts: it keeps its own to-do in the panel true
 const PANEL_RULE =
-  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`; clear it with empty `text` once it is done.'
+  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, a command for {name} to type in `command`, then open a terminal for it with mcp__terminal__open_terminal_tab; clear it with empty `text` once it is done.'
 // What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
 // own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
 const STEER =
@@ -2405,7 +2405,7 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and tells {name}. `text` says what to do, in one plain line; `copy` is the exact text {name} copies for it, if any; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need. The answer pressed arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Call it again with empty `text` once it is done; without choices it also goes when you finish.",
+        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and tells {name}. `text` says what to do, in one plain line; `copy` is the exact text {name} copies for it, if any; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need; `command` is a command {name} types themselves: the answer tells you to open a terminal for it with the terminal tools. The answer pressed arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Call it again with empty `text` once it is done; without choices it also goes when you finish.",
       ),
       inputSchema: {
         type: 'object',
@@ -2413,6 +2413,8 @@ export const register: Register = on => {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
           copy: { type: 'string', description: 'The exact text to copy for it, such as a one-time code, a command or a link' },
           choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now; the one pressed comes back to you as a message' },
+          command: { type: 'string', description: 'A command for them to type themselves, one line, shown with a Copy button; then open a terminal for it with mcp__terminal__open_terminal_tab' },
+          cwd: { type: 'string', description: 'The folder the command runs in, a full path; the chat\'s folder when left out' },
         },
         required: ['text'],
       },
@@ -2820,22 +2822,27 @@ export const register: Register = on => {
 
   // Work that needs the person's hands now: its card stands out with the ask and its Copy, until it is cleared or the work ends
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
-    const input = e as unknown as { text?: unknown; copy?: unknown; choices?: unknown }
+    const input = e as unknown as { text?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown }
     if (e.agentId === undefined) return { result: `Only background work asks through the panel; a chat's own thread asks ${who()} in its reply.` }
     const text = oneLine(typeof input.text === 'string' ? input.text : '').slice(0, 300)
-    const copy = (typeof input.copy === 'string' ? input.copy : '').trim().slice(0, 4000)
+    const command = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
+    const copy = command || (typeof input.copy === 'string' ? input.copy : '').trim().slice(0, 4000)
+    const folder = typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : cwd
     const choices = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].slice(0, 4)
     const at = await $.clock.now()
     const before = await read($, todos)
     const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
-    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(copy ? { copy } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), at } : undefined }))
+    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), at } : undefined }))
     if (!text) return { result: 'Cleared: your card no longer asks for anything.' }
     const list = await read($, todos)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     // The same ask said again is not told again
     if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
-    const shown = [copy ? 'a Copy button for the text' : '', choices.length ? `the buttons ${choices.join(', ')}; the one pressed comes back to you as a message` : ''].filter(Boolean).join(' and ') || 'nothing to copy or press'
-    return { result: `Shown on your card with ${shown}, and ${who()} was told. Clear it with empty text once it is done.` }
+    // A command for the person gets a terminal at once, so they type it there without looking for one. The app runs its terminal
+    // tools only for Claude, never for a plugin's own code, so the work opens it
+    const terminal = command ? ` Now open a terminal for it yourself, at once: mcp__terminal__open_terminal_tab with cwd "${folder}" and a short title; never type or run the command in it.` : ''
+    const shown = [command ? 'the command with a Copy button' : copy ? 'a Copy button for the text' : '', choices.length ? `the buttons ${choices.join(', ')}; the one pressed comes back to you as a message` : ''].filter(Boolean).join(' and ') || 'nothing to copy or press'
+    return { result: `Shown on your card with ${shown}, and ${who()} was told. Clear it with empty text once it is done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides

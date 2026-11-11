@@ -40,6 +40,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const closed: string[] = []
   const logged: string[] = []
   const copied: string[] = []
+  // The terminal tabs opened beside the chat, by what they were opened with
+  const terminals: unknown[] = []
   // What was sent on to an agent, what the mod wrote into an agent's chat, and what it submitted to this one
   const sent: string[] = []
   const appended: string[] = []
@@ -92,6 +94,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { value: { kind, size: 1, mtimeMs: 0, isLink: false } as never }
   })
   on('mcp.call', (_, e) => {
+    if (e.server === 'terminal') terminals.push(e.args)
     if (e.tool === 'set_session_title') titles.push(String(e.args.title))
     const text = e.tool === 'get_session' ? JSON.stringify({ sessionId: 'local_1', title: 'Old title' }) : '[]'
     return { value: { content: [{ type: 'text', text }], isError: false } }
@@ -214,7 +217,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, shown }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, shown, terminals }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -2037,7 +2040,7 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
 })
 
 test('work that needs the person\'s hands asks: its card stands out first with the ask, the text to paste with its Copy, and answers that go back to it', async ($, on) => {
-  const { played, notified, appended } = world(on)
+  const { played, notified, appended, terminals } = world(on)
   const clip: string[] = []
   on('ui.copy', (_, e) => (clip.push(e.text), { value: { isCopied: true } }) as never)
   await $.session.start(start)
@@ -2072,5 +2075,12 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await ears.press({ key: approve?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Approve"')))).toContain('May I delete the old repo?')
   expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')).toBeUndefined()
+
+  // A command for the person to type is shown with its Copy, and the work is told to open a terminal for it (the app opens one
+  // only for Claude, never for a plugin's own code)
+  const told = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a2', text: 'Sign in to GitHub in the terminal that opened.', command: 'gh auth login', cwd: '/repo/site' } as never)
+  expect(told.result).toContain('mcp__terminal__open_terminal_tab with cwd "/repo/site"')
+  expect((await list.find({ type: 'Text', text: 'gh auth login' }))?.props.mono).toBe(true)
+  expect(terminals).toEqual([])
   await Promise.all([list.unmount(), ears.unmount()])
 })
