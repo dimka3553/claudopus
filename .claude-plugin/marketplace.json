@@ -1,0 +1,5 @@
+{
+  "name": "claudopus",
+  "owner": { "name": "dimka3553" },
+  "plugins": [{ "name": "claudopus", "source": "./mods/claudopus" }]
+}

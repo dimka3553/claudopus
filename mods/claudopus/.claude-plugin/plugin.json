@@ -1,0 +1,1 @@
+{ "name": "claudopus", "version": "0.1.0", "description": "Every chat does its work in the background and says how it is going: saves my words and Claude's answers, keeps the subjects, keeps chats small", "types": "./types/index.d.ts" }
