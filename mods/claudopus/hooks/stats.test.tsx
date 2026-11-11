@@ -74,7 +74,7 @@ test('stats add up tokens by model once each, work and its helpers as one piece,
     run({
       id: 'chat',
       kind: 'chat',
-      sum: { s: [[day - 60 * M, day + 30 * M]], u: [msg('m3', 'claude-sonnet-5-5', day + 2 * M, { output: 20 }), msg('m5', 'claude-opus-5-5', day - 30 * M, { output: 1 })], d: [], h: [[day - 60 * M, day - 59 * M], [day + 20 * M, day + 20 * M + 30_000]] },
+      sum: { s: [[day - 60 * M, day + 30 * M]], u: [msg('m3', 'claude-sonnet-5-5', day + 2 * M, { output: 20 }), msg('m5', 'claude-opus-5-5', day - 30 * M, { output: 1 })], d: [], turns: [[day - 60 * M, day - 59 * M], [day + 20 * M, day + 20 * M + 30_000]] },
     }),
   ]
   const s = statsOf(runs, 0, Infinity)

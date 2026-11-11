@@ -14,7 +14,7 @@ export type TodoCall = [at: number, item: string, state: string, was: string]
 // What jq makes of one transcript: the stretches it was busy (rows less than GAP apart), its responses, its to-do calls
 // and, in a chat's own transcript, each turn that began with the person's message: from it to the chat's last row before the next
 // turn began
-export type FileSum = { s: Span[]; u: Msg[]; d: TodoCall[]; h?: Span[] }
+export type FileSum = { s: Span[]; u: Msg[]; d: TodoCall[]; turns?: Span[] }
 // One transcript, and what it was: a piece of work the chat started, a helper a piece of work started, an agent of a workflow,
 // or the chat's own thread
 export type Run = { id: string; kind: 'work' | 'helper' | 'flow' | 'chat'; parent: string; title: string; isFinished: boolean; sum: FileSum }
@@ -192,7 +192,7 @@ export const statsOf = (runs: Run[], from: number, to: number, now = to): Stats 
     .filter(p => p.spans.length)
   const ended = pieces.filter(p => p.isFinished && p.ended >= from && p.ended < to)
   const todosDone = pieces.reduce((sum, p) => sum + todosOf(p.calls).filter(item => item.state === 'done' && item.at >= from && item.at < to).length, 0)
-  const turns = runs.filter(r => r.kind === 'chat').flatMap(r => r.sum.h ?? []).filter(([a]) => a >= from && a < to)
+  const turns = runs.filter(r => r.kind === 'chat').flatMap(r => r.sum.turns ?? []).filter(([a]) => a >= from && a < to)
   // How long a piece of work took, whole, even where it began before the range
   const lasted = piecesOf(runs).filter(p => !p.isFlow && p.isFinished && p.ended >= from && p.ended < to).map(p => lengthOf(p.spans))
   return {
@@ -232,7 +232,7 @@ reduce (inputs | fromjson? | select(type == "object" and (.timestamp | type) == 
 | (.r | sort_by(.[0])) as $r
 | ($r | map(.[0])) as $t
 | {s: (if ($t | length) == 0 then [] else reduce $t[1:][] as $x ([[$t[0], $t[0]]]; if $x - .[length - 1][1] > $gap then . + [[$x, $x]] else .[length - 1][1] = $x end) end),
-   h: (reduce $r[] as $x ({cur: null, out: []}; if $x[1] != "r" then (if .cur then .out += [.cur] else . end) | .cur = [$x[0], $x[0], ($x[1] == "h")] elif .cur then .cur[1] = $x[0] else . end)
+   turns: (reduce $r[] as $x ({cur: null, out: []}; if $x[1] != "r" then (if .cur then .out += [.cur] else . end) | .cur = [$x[0], $x[0], ($x[1] == "h")] elif .cur then .cur[1] = $x[0] else . end)
        | (if .cur then .out + [.cur] else .out end) | map(select(.[2]) | [.[0], .[1]])),
    u: [.u | to_entries[] | [.key] + .value], d: .d}`
 
@@ -246,7 +246,7 @@ export const parsed = <T,>(text: string, or: T): T => {
     return or
   }
 }
-export const CACHE_V = 3
+export const CACHE_V = 4
 
 // ---- Drawing ----
 
@@ -267,8 +267,8 @@ export const tokensText = (n: number) =>
   n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(n >= 1e8 ? 0 : 1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(n >= 1e5 ? 0 : 1)}k` : String(n)
 export const hours = (ms: number) => {
   const m = Math.round(ms / 60_000)
-  const [d, h, min] = [Math.floor(m / 1440), Math.floor(m / 60) % 24, m % 60]
-  return d ? `${d}d ${h}h ${String(min).padStart(2, '0')}m` : h ? `${h}h ${String(min).padStart(2, '0')}m` : `${min}m`
+  const [d, hrs, min] = [Math.floor(m / 1440), Math.floor(m / 60) % 24, m % 60]
+  return d ? `${d}d ${hrs}h ${String(min).padStart(2, '0')}m` : hrs ? `${hrs}h ${String(min).padStart(2, '0')}m` : `${min}m`
 }
 // A short wait, to the second: "48s", "4m 05s"; longer ones as hours()
 export const shortly = (ms: number) => {
@@ -332,7 +332,7 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
   // The same height whatever the work: rows grow thinner when more ran at once
   const step = Math.min(11, BARS / Math.max(1, count))
   const [row, top] = [step * 0.73, 0]
-  const h = BARS + 18
+  const tall = BARS + 18
   const base = BARS + 2
   // Each cut-out gap is a short dashed tick on the axis
   const breaks = parts.slice(1).map(p => `<line x1="${(p.x - gapOf(parts) / 2).toFixed(1)}" x2="${(p.x - gapOf(parts) / 2).toFixed(1)}" y1="${base - 7}" y2="${base - 1}" stroke="#8C8C8C" stroke-width="1" stroke-dasharray="2 2"/>`)
@@ -356,7 +356,7 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
   )
   const text = (x: number, anchor: string, words: string) => `<text x="${x}" y="${base + 13}" ${font} fill="#8C8C8C" text-anchor="${anchor}">${esc(words)}</text>`
   const style = '<style>.tip{visibility:hidden}.bar:hover .tip{visibility:visible}.bar:hover rect:not(.hit){opacity:0.6}svg:has(.bar:hover) .axis{visibility:hidden}</style>'
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${h}" viewBox="0 0 ${width} ${h}">${style}${breaks.join('')}<g class="axis">${parts.length ? text(0, 'start', label(first)) + text(width, 'end', label(last)) : ''}</g>${bars.join('')}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${tall}" viewBox="0 0 ${width} ${tall}">${style}${breaks.join('')}<g class="axis">${parts.length ? text(0, 'start', label(first)) + text(width, 'end', label(last)) : ''}</g>${bars.join('')}</svg>`
 }
 
 type Ui = ElementTable

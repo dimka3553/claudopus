@@ -1897,7 +1897,7 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   const chat = `${HOME}/.claude/projects/-repo`
   const subs = `${chat}/engine-id/subagents`
   files.set(`${chat}/engine-id.jsonl`, '{}')
-  files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [], d: [], h: [[now - 30 * M, now - 30 * M + 20_000]] }))
+  files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [], d: [], turns: [[now - 30 * M, now - 30 * M + 20_000]] }))
   // Two pieces of work that ran side by side for ten minutes
   for (const [id, from, to, output] of [['w1', now - 30 * M, now - 10 * M, 1_000_000], ['w2', now - 20 * M, now - 10 * M, 500_000]] as const) {
     files.set(`${subs}/agent-${id}.jsonl`, '{}')

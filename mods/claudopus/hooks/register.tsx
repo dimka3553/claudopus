@@ -179,9 +179,9 @@ const textOf = (r: McpToolResult) => r.content.map(b => ('text' in b && typeof b
 // How long work has run, to the second: "42s", "12m 08s", "1h 04m 31s"
 const took = (ms: number) => {
   const all = Math.max(0, Math.floor(ms / 1000))
-  const [h, m, sec] = [Math.floor(all / 3600), Math.floor(all / 60) % 60, all % 60]
+  const [hrs, m, sec] = [Math.floor(all / 3600), Math.floor(all / 60) % 60, all % 60]
   const two = (n: number) => String(n).padStart(2, '0')
-  return h ? `${h}h ${two(m)}m ${two(sec)}s` : m ? `${m}m ${two(sec)}s` : `${sec}s`
+  return hrs ? `${hrs}h ${two(m)}m ${two(sec)}s` : m ? `${m}m ${two(sec)}s` : `${sec}s`
 }
 // A count of tokens as the app writes it
 const thousands = (tokens: number) => `${(tokens / 1000).toFixed(tokens < 100_000 ? 1 : 0)}k`
