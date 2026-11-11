@@ -3,7 +3,7 @@
 // its model and the tokens it used, by kind: input, cache writes (5-minute and 1-hour), cache reads, output. A transcript can run
 // to a hundred megabytes, more than the mod may read, so jq sums each one outside the mod, and the sums are kept by file size
 // and time in ~/.claude/claudopus/stats/<chat id>.json, so a file is read once until it changes
-import type { ElementTable, EngineInterface } from 'claude-code'
+import type { ElementTable } from 'claude-code'
 
 export type Span = [from: number, to: number]
 // One response: its id (the same response can sit in two transcripts, a fork and its chat), model, time, whether it ran fast,
@@ -236,87 +236,17 @@ reduce (inputs | fromjson? | select(type == "object" and (.timestamp | type) == 
        | (if .cur then .out + [.cur] else .out end) | map(select(.[2]) | [.[0], .[1]])),
    u: [.u | to_entries[] | [.key] + .value], d: .d}`
 
-type Cache = { v?: number; folder?: string; files: Record<string, { size: number; mtime: number; sum: FileSum }> }
-type Meta = { description?: string; agentType?: string; spawnDepth?: number; parentAgentId?: string; finished?: boolean }
-function readOr($: EngineInterface, path: string) {
-  return $.fs.read(path).catch(() => '')
-}
-const parsed = <T,>(text: string, or: T): T => {
+export type Cache = { v?: number; folder?: string; files: Record<string, { size: number; mtime: number; sum: FileSum }> }
+export type Meta = { description?: string; agentType?: string; spawnDepth?: number; parentAgentId?: string; finished?: boolean }
+
+export const parsed = <T,>(text: string, or: T): T => {
   try {
     return text ? (JSON.parse(text) as T) : or
   } catch {
     return or
   }
 }
-const CACHE_V = 3
-let jqPath = ''
-async function sumOf($: EngineInterface, path: string): Promise<FileSum> {
-  for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
-    const r = await $.process.run([jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined)
-    if (!r || r.exitCode !== 0) continue
-    jqPath = jq
-    return parsed<FileSum>(r.stdout.trim(), { s: [], u: [], d: [] })
-  }
-  throw new Error('jq')
-}
-// Where a chat's records are: its own folder under ~/.claude/projects, found by its id
-async function folderOf($: EngineInterface, home: string, chatId: string, known?: string) {
-  if (known && (await $.fs.stat(`${known}/${chatId}.jsonl`).catch(() => undefined))) return known
-  const root = `${home}/.claude/projects`
-  for (const entry of await $.fs.list(root).catch(() => [])) {
-    if (entry.kind !== 'dir') continue
-    if (await $.fs.stat(`${root}/${entry.name}/${chatId}.jsonl`).catch(() => undefined)) return `${root}/${entry.name}`
-  }
-  return ''
-}
-// Every transcript of one chat, summed, with what each was
-export async function runsOf($: EngineInterface, home: string, memory: string, chatId: string, hint = ''): Promise<Run[]> {
-  const cachePath = `${memory}/stats/${chatId}.json`
-  const read = parsed<Cache>(await readOr($, cachePath), { files: {} })
-  // Sums made by an earlier program are made again
-  const cache: Cache = read.v === CACHE_V ? read : { files: {} }
-  const folder = await folderOf($, home, chatId, hint || cache.folder)
-  if (!folder) return []
-  const subs = `${folder}/${chatId}/subagents`
-  const flowDirs = (await $.fs.list(`${subs}/workflows`).catch(() => [])).filter(e => e.kind === 'dir').map(e => e.name)
-  const listed = [
-    ...(await $.fs.list(subs).catch(() => [])).map(e => ({ ...e, dir: subs, flow: '' })),
-    ...(await Promise.all(flowDirs.map(async name => (await $.fs.list(`${subs}/workflows/${name}`).catch(() => [])).map(e => ({ ...e, dir: `${subs}/workflows/${name}`, flow: name }))))).flat(),
-  ].filter(e => /^agent-\w+\.jsonl$/.test(e.name))
-  const chatFile = (await $.fs.list(folder).catch(() => [])).find(e => e.name === `${chatId}.jsonl`)
-  const files = [...listed.map(e => ({ path: `${e.dir}/${e.name}`, size: e.size, mtime: e.mtimeMs, flow: e.flow, id: e.name.slice(6, -6) })), ...(chatFile ? [{ path: `${folder}/${chatFile.name}`, size: chatFile.size, mtime: chatFile.mtimeMs, flow: '', id: '' }] : [])]
-  const next: Cache = { v: CACHE_V, folder, files: {} }
-  let isChanged = folder !== cache.folder
-  // A few at a time: each is a process
-  for (let at = 0; at < files.length; at += 6)
-    await Promise.all(
-      files.slice(at, at + 6).map(async f => {
-        const was = cache.files[f.path]
-        if (was && was.size === f.size && was.mtime === f.mtime) next.files[f.path] = was
-        else {
-          next.files[f.path] = { size: f.size, mtime: f.mtime, sum: await sumOf($, f.path) }
-          isChanged = true
-        }
-      }),
-    )
-  if (isChanged || Object.keys(cache.files).length !== files.length) await $.fs.write(cachePath, JSON.stringify(next)).catch(() => undefined)
-  const flowTitle = new Map<string, string>()
-  for (const name of flowDirs) flowTitle.set(name, parsed<{ title?: string; name?: string }>(await readOr($, `${memory}/flows/${name}.json`), {}).title || 'Workflow')
-  return Promise.all(
-    files.map(async (f): Promise<Run> => {
-      const sum = next.files[f.path]?.sum ?? { s: [], u: [], d: [] }
-      if (!f.id) return { id: chatId, kind: 'chat', parent: '', title: 'This chat', isFinished: false, sum }
-      const meta = parsed<Meta>(await readOr($, f.path.replace(/\.jsonl$/, '.meta.json')), {})
-      if (f.flow) return { id: f.id, kind: 'flow', parent: f.flow, title: flowTitle.get(f.flow) ?? 'Workflow', isFinished: Boolean(meta.finished) || (sum.s.at(-1)?.[1] ?? 0) < Date.now() - GAP, sum }
-      return { id: f.id, kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background work', isFinished: Boolean(meta.finished), sum }
-    }),
-  )
-}
-// The chats the mod has kept work for (finished/<chat id>.json), and this one
-export async function chatsKept($: EngineInterface, memory: string, chatId: string) {
-  const kept = (await $.fs.list(`${memory}/finished`).catch(() => [])).map(e => /^(.+)\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean)
-  return [...new Set([chatId, ...kept])]
-}
+export const CACHE_V = 3
 
 // ---- Drawing ----
 
@@ -430,55 +360,18 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
 }
 
 type Ui = ElementTable
-type Scope = 'chat' | 'all'
+export type Scope = 'chat' | 'all'
 type Range = 'today' | 'all'
 export const view = { scope: 'chat' as Scope, range: 'today' as Range, presses: 0 }
 // What was read for each scope, and when; a scope being read is drawn from what it held last
-const held = new Map<Scope, { runs: Run[]; at: number; error?: string }>()
-const reading = new Set<Scope>()
-const READ_EVERY = 60_000
-export async function loadStats($: EngineInterface, scope: Scope, home: string, memory: string, chatId: string, hint: string, now: number) {
-  if (reading.has(scope) || !chatId) return
-  const was = held.get(scope)
-  if (was && now - was.at < READ_EVERY) return
-  reading.add(scope)
-  try {
-    await loadMemory($, memory).catch(() => undefined)
-    const ids = scope === 'chat' ? [chatId] : await chatsKept($, memory, chatId)
-    const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat()
-    held.set(scope, { runs, at: now })
-  } catch (err) {
-    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? 'Stats reads Claude’s records with jq, and jq was not found on this Mac.' : `The records could not be read: ${String(err)}` })
-  } finally {
-    reading.delete(scope)
-    $.ui.invalidate('ui.render')
-  }
-}
+export const held = new Map<Scope, { runs: Run[]; at: number; error?: string }>()
+export const reading = new Set<Scope>()
+export const READ_EVERY = 60_000
+
 // What the mod keeps in its memory folder, as it stands: each part's count and its size on disk
 export type MemoryPart = { name: string; count: number; bytes: number; extra?: string }
-let memoryHeld: { parts: MemoryPart[]; bytes: number } | undefined
+export const memoryHeld: { now?: { parts: MemoryPart[]; bytes: number } } = {}
 export const sizeText = (bytes: number) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`)
-export async function loadMemory($: EngineInterface, memory: string) {
-  const names = async (folder: string) => (await $.fs.list(`${memory}/${folder}`).catch(() => [])).filter(e => !e.name.startsWith('.'))
-  // Sizes as the disk counts them, the whole of each folder
-  const du = await $.process.run(['du', '-skL', ...['index.md', 'streams', 'words', 'asks', 'reports', 'finished', 'flows', 'stats', 'thumbs'].map(one => `${memory}/${one}`)]).catch(() => undefined)
-  const kb = new Map((du?.stdout ?? '').split('\n').map(row => row.split('\t')).filter(([n, path]) => n && path).map(([n, path]) => [String(path).slice(memory.length + 1), Number(n) * 1024]))
-  const index = await $.fs.read(`${memory}/index.md`).catch(() => '')
-  const subjects = index.split('\n').filter(row => row.startsWith('- ')).length
-  const reports = await names('reports')
-  const parts: MemoryPart[] = [
-    { name: 'Subjects', count: subjects, bytes: kb.get('index.md') ?? 0 },
-    { name: 'Briefs', count: (await names('streams')).length, bytes: kb.get('streams') ?? 0 },
-    { name: 'Your words, by chat', count: (await names('words')).length, bytes: kb.get('words') ?? 0 },
-    { name: 'Asks and answers, by chat', count: (await names('asks')).length, bytes: kb.get('asks') ?? 0 },
-    { name: 'Results', count: reports.filter(e => e.kind === 'dir').length, bytes: kb.get('reports') ?? 0 },
-    { name: 'Finished work, by chat', count: (await names('finished')).length, bytes: kb.get('finished') ?? 0 },
-    { name: 'Workflow runs', count: (await names('flows')).length, bytes: kb.get('flows') ?? 0 },
-    { name: 'Thumbnails and sums', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
-  ]
-  const bytes = [...kb.values()].reduce((sum, n) => sum + n, 0)
-  memoryHeld = { parts, bytes }
-}
 // Local midnight of the day `now` falls in
 export const dayStart = (now: number) => {
   const d = new Date(now)
@@ -541,13 +434,13 @@ const tile = (ui: Ui, key: string, value: string, label: string) => (
   </ui.Box>
 )
 
-export function statsView($: EngineInterface, ui: Ui, now: number, reload: (scope: Scope) => void, surface: string, px: number) {
+export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (scope: Scope) => void, surface: string, px: number) {
   const { Box, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number; isInteractive?: boolean }) => JSX.Element }
   const kept = held.get(view.scope)
   const from = view.range === 'today' ? dayStart(now) : 0
   const s = kept ? statsOf(kept.runs, from, Infinity, now) : undefined
-  const press = (fn: () => void) => () => void ((view.presses += 1), fn(), $.ui.invalidate('ui.render'))
+  const press = (fn: () => void) => () => void ((view.presses += 1), fn(), invalidate())
   const chats = new Set(kept?.runs.filter(r => r.kind === 'chat').map(r => r.id)).size
   // What is counted, chosen at the top: which chats, and over what time
   const nav = (
@@ -676,15 +569,15 @@ export function statsView($: EngineInterface, ui: Ui, now: number, reload: (scop
     </Box>,
   )
   // The memory, as it stands now: the same in every view
-  const mem = memoryHeld
+  const mem = memoryHeld.now
     ? band(
         ui,
         'stats-memory',
         'Memory',
-        sizeText(memoryHeld.bytes),
+        sizeText(memoryHeld.now.bytes),
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="column" flexShrink={0}>
-            {memoryHeld.parts.map(part => line(ui, `memory-${part.name}`, part.name, `${count(part.count)} · ${sizeText(part.bytes)}`))}
+            {memoryHeld.now.parts.map(part => line(ui, `memory-${part.name}`, part.name, `${count(part.count)} · ${sizeText(part.bytes)}`))}
           </Box>
           {note(ui, 'memory-how', 'Not filtered by the switches above. Plain files in ~/.claude/claudopus; no database.')}
         </Box>,

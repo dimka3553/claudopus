@@ -4,9 +4,10 @@ import type { ElementTable, EngineInterface, McpToolResult, Register, RenderSurf
 import type { Entry, Flow, FlowAgent, Item, Me, Report, Server, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
-import { loadStats, statsView, view as statsShown } from './stats'
-import { configView, editing, editText, fillModels, inForce, modelsOf, modelsShort, putBack, readConfig, saveText, setConfig, TEXTS } from './config'
-import type { ConfigShown, Models } from './config'
+import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
+import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
+import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
+import type { Config, ConfigShown, Models, Role } from './config'
 
 // The panel beside the chat: one small card per piece of work under way; pressed, a card shows all its to-dos and its own chat
 const LIST = 'claudopus'
@@ -205,10 +206,93 @@ const movedTo = (name: string, at: number) => {
 }
 
 const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() => '')
-const append = async ($: EngineInterface, path: string, text: string) => $.fs.write(path, `${await readOr($, path)}${text}`)
+// Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
-const log = ($: EngineInterface, line: string) =>
-  append($, `${dir}/log.md`, `${new Date().toISOString()} ${line.replace(/\s+/g, ' ').slice(0, 400)}\n`).catch(() => undefined)
+const log = async ($: EngineInterface, line: string) =>
+  $.fs.write(`${dir}/log.md`, `${await readOr($, `${dir}/log.md`)}${new Date().toISOString()} ${line.replace(/\s+/g, ' ').slice(0, 400)}\n`).catch(() => undefined)
+// A chat's saved words, words/<chat id>.md: the person's messages and Claude's answers, added to the end
+const appendWords = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/words/${chatId}.md`, `${await readOr($, `${dir}/words/${chatId}.md`)}${text}`)
+// A chat's asks and answers, asks/<chat id>.md, added to the end
+const appendAsks = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/asks/${chatId}.md`, `${await readOr($, `${dir}/asks/${chatId}.md`)}${text}`)
+
+// ---- Config: the texts in force and the settings (the tab and its pure parts are in ./config) ----
+
+// The person's own copy of one of the three texts the mod ships (TEXTS in ./config), each written at its own fixed place in the
+// memory folder; the Config tab is the only writer, and nothing else is written there
+async function writeOwnText($: EngineInterface, memory: string, path: string, text: string) {
+  if (path === 'rules/CLAUDE.md') return $.fs.write(`${memory}/rules/CLAUDE.md`, text)
+  if (path === 'roles/chat.md') return $.fs.write(`${memory}/roles/chat.md`, text)
+  if (path === 'roles/work.md') return $.fs.write(`${memory}/roles/work.md`, text)
+  throw new Error(`${path} is not one of the texts the mod ships`)
+}
+// The text in force: the person's own copy when it holds anything, the shipped one otherwise
+async function inForce($: EngineInterface, root: string, memory: string, path: string) {
+  const own = memory ? await readOr($, `${memory}/${path}`) : ''
+  const shipped = await readOr($, `${root}/${path}`)
+  // A copy the same as what shipped is no change of the person's
+  // A copy made before an update can lack a place the shipped text now fills (a setting such as the models): it is stale
+  const places = (text: string) => new Set(text.match(/\{[a-z]+\}/gi) ?? [])
+  const isStale = (own: string) => [...places(shipped)].some(place => !places(own).has(place))
+  if (own.trim() && own.trim() !== shipped.trim()) return { text: own, path: `${memory}/${path}`, isOwn: true, isStale: isStale(own) }
+  return { text: shipped, path: `${root}/${path}`, isOwn: false, isStale: false }
+}
+
+async function readConfig($: EngineInterface, memory: string) {
+  return parse(await readOr($, `${memory}/config.json`))
+}
+// Sets one key, or with undefined puts it back to what shipped; every other key, ones this tab does not know included, is kept
+async function setConfig($: EngineInterface, memory: string, key: keyof Config, value: unknown, role?: Role) {
+  const path = `${memory}/config.json`
+  const text = await readOr($, path)
+  const config = (() => {
+    try {
+      return JSON.parse(text || '{}') as Record<string, unknown>
+    } catch {
+      return undefined
+    }
+  })()
+  // A file that does not parse is someone's edit under way: it is left as it is
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('config.json does not parse')
+  if (key === 'models' && role) {
+    const models = { ...((config.models as Record<string, unknown>) ?? {}) }
+    if (value === undefined) delete models[role]
+    else models[role] = value
+    if (Object.keys(models).length) config.models = models
+    else delete config.models
+  } else if (value === undefined) delete config[key]
+  else config[key] = value
+  await $.fs.write(`${memory}/config.json`, `${JSON.stringify(config, null, 2)}\n`)
+}
+
+async function openedInEditor($: EngineInterface, path: string) {
+  // The text editor the Mac opens .md files in; elsewhere the desktop's own opener
+  const mac = await $.process.run(['open', '-t', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  if (mac.exitCode === 0) return ''
+  const other = await $.process.run(['xdg-open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  return other.exitCode === 0 ? '' : mac.stderr || other.stderr || 'no editor opened'
+}
+// Edit: the person's own copy, made from the shipped text the first time, opened in their editor
+async function editText($: EngineInterface, root: string, memory: string, path: string) {
+  const own = `${memory}/${path}`
+  if (!(await readOr($, own)).trim()) await writeOwnText($, memory, path, await readOr($, `${root}/${path}`))
+  return openedInEditor($, own)
+}
+// Put back: the person's copy moves aside as .old, and the shipped text is in force again
+async function putBack($: EngineInterface, memory: string, path: string) {
+  const own = `${memory}/${path}`
+  // Each copy put back is kept under a name of its own, so a second Reset never loses the first
+  const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
+  const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  return r.exitCode === 0 ? '' : r.stderr || 'not put back'
+}
+
+// Save: what the person wrote in the tab becomes their own copy
+async function saveText($: EngineInterface, root: string, memory: string, path: string, text: string) {
+  // Saved as it shipped, it is no copy of the person's: the shipped text stays in force through updates
+  if (text.trim() === (await readOr($, `${root}/${path}`)).trim()) return (await readOr($, `${memory}/${path}`)) ? putBack($, memory, path) : ''
+  await writeOwnText($, memory, path, text.endsWith('\n') ? text : `${text}\n`)
+  return ''
+}
 
 // Kept keys stay out of every chat: a command that would read one from the keychain is refused, and once any key is kept, what a
 // tool answers comes back with every kept value hidden. The values never reach the mod: `bin/secret --hide` swaps them in a pipe
@@ -421,7 +505,7 @@ const saveFinished = async ($: EngineInterface) => {
   if (!id || !dir || !ended.length || sign === finishedSaved) return
   const old = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   const kept = [...old.filter(one => !ended.some(card => card.id === one.id)), ...ended].sort((a, b) => a.endedAt - b.endedAt).slice(-KEPT)
-  await $.fs.write(finishedPath(id), JSON.stringify(kept))
+  await $.fs.write(`${dir}/finished/${id}.json`, JSON.stringify(kept))
   finishedSaved = sign
 }
 // Work that ended before the mod kept it (before a rename, or before this list was kept) is read back from the app's own record
@@ -549,6 +633,23 @@ const quoted = (text: string, most: number) => {
 const cut = (text: string, most: number) => {
   const end = text.lastIndexOf(' ', most)
   return text.length <= most ? text : `${text.slice(0, end > most / 2 ? end : most)} …`
+}
+
+// Each web address in a text as a link to press, the rest as it stands: only an address whole in `whole` is linked, so one a
+// small card cut short is never a link to half an address
+const URL_IN = /https?:\/\/[^\s<>()"'`…]*[^\s<>()"'`….,;:!?]/g
+const withLinks = (Link: ElementTable['Link'], text: string, key: string, whole = text) => {
+  const full = new Set(whole.match(URL_IN) ?? [])
+  const parts: (string | JSX.Element)[] = []
+  let at = 0
+  for (const m of text.matchAll(URL_IN)) {
+    const end = (m.index ?? 0) + m[0].length
+    if (!full.has(m[0]) || /[^\s<>()"'`.,;:!?]/.test(text[end] ?? ' ')) continue
+    parts.push(text.slice(at, m.index), <Link key={`${key}-${parts.length}`} href={m[0]} />)
+    at = end
+  }
+  parts.push(text.slice(at))
+  return parts.filter(part => part !== '')
 }
 
 // ---- A piece of work's own chat: what it was told, what it wrote, and each tool step, in order ----
@@ -837,7 +938,7 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
   await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
   // What Claude answered is kept beside what the person said, so a search finds what happened as well as what was asked
   if (answer.trim()) {
-    await append($, `${dir}/words/${m.id}.md`, `### Claude ${new Date().toISOString()}\n${answer.trim()}\n\n`).catch(err => log($, `answer not saved: ${String(err)}`))
+    await appendWords($, m.id, `### Claude ${new Date().toISOString()}\n${answer.trim()}\n\n`).catch(err => log($, `answer not saved: ${String(err)}`))
   }
   // A reply with no message of the person's before it relays an agent's result: it is logged when it says something
   const isRelay = !text.trim()
@@ -853,7 +954,7 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
   const lines = r.text.split('\n').map(line => line.trim())
   // The index of this chat: what was asked and what came of it, one line each under the time it happened
   const asks = lines.filter(line => line.startsWith('- ') || /^did:/i.test(line))
-  if (asks.length) await append($, `${dir}/asks/${m.id}.md`, `## ${new Date().toISOString()}\n${asks.join('\n')}\n\n`)
+  if (asks.length) await appendAsks($, m.id, `## ${new Date().toISOString()}\n${asks.join('\n')}\n\n`)
   const named = lines.find(line => /^title:/i.test(line))?.replace(/^title:\s*/i, '').trim() ?? ''
   if (named && named !== m.title && named.length <= 80) {
     await $.mcp
@@ -1004,7 +1105,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   const id = kept.some(r => r.id === base) ? `${base}-${slug(one.id).slice(0, 8)}` : base
   const into = `${reportsDir()}/${id}`
   const chat = await read($, me)
-  await $.fs.write(`${into}/report.md`, `${text.trim()}\n`)
+  await $.fs.write(`${dir}/reports/${id}/report.md`, `${text.trim()}\n`)
   const files = await copyNamed($, text, into).catch(err => (void log($, `pictures of report ${id} not copied: ${String(err)}`), [] as string[]))
   await makeThumbs($, { id, files } as Report).catch(err => log($, `small copies of report ${id} not made: ${String(err)}`))
   const report: Report = {
@@ -1024,7 +1125,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
     ...(one.waits?.length ? { waiting: one.waits.map(wait => ({ text: wait })) } : {}),
     ...(one.from ? { from: one.from } : {}),
   }
-  await $.fs.write(`${into}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
+  await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
   // Its report holds them now: the work's next round records what still waits afresh
   if (one.waits?.length) await update($, todos, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
   await loadReports($)
@@ -1074,7 +1175,7 @@ let marking: Promise<unknown> = Promise.resolve()
 const markReport = ($: EngineInterface, r: Report, patch: Partial<Report> | ((stored: Report) => Partial<Report>)) => {
   const run = marking.then(async () => {
     const stored = { ...r, ...(JSON.parse((await readOr($, `${reportPath(r)}/meta.json`)) || '{}') as Partial<Report>) }
-    await $.fs.write(`${reportPath(r)}/meta.json`, `${JSON.stringify({ ...stored, ...(typeof patch === 'function' ? patch(stored) : patch) }, null, 2)}\n`)
+    await $.fs.write(`${dir}/reports/${r.id}/meta.json`, `${JSON.stringify({ ...stored, ...(typeof patch === 'function' ? patch(stored) : patch) }, null, 2)}\n`)
     await loadReports($)
   })
   marking = run.catch(() => undefined)
@@ -1093,7 +1194,8 @@ const reportsTold = (all: Report[], now: number, list = all.filter(r => !r.archi
     : ''
 }
 
-// Sends the chat a message for the person, as if typed: it starts work as any message of theirs does
+// Sends the chat a message from the panel about what the person pressed or replied there: it starts work as a message of
+// theirs does, framed by the engine as the mod's and worded as the panel's, never as words the person typed
 const sendForPerson = async ($: EngineInterface, text: string) => {
   sentForPerson.add(text)
   await $.prompt.submit({ text }).catch(err => log($, `message from a report not sent: ${String(err)}`))
@@ -1119,7 +1221,7 @@ const answerWait = async ($: EngineInterface, r: Report, index: number, said: 'Y
   // A second press before the answer is kept sends nothing more
   if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return
   answering.add(`${r.id}:${index}`)
-  if (said !== 'Not now') await sendForPerson($, `${said}. That answers what the result "${r.title}" (${dated(r.at, now)}) waits on me for: ${wait.text}\nThe result: ${reportPath(r)}/report.md`)
+  if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" in answer to what the result "${r.title}" (${dated(r.at, now)}) waits on them for: ${wait.text}\nThe result: ${reportPath(r)}/report.md`)
   // Not now kept nowhere can be pressed again; a Yes or No already sent is not sent twice
   await markReport($, r, stored => ({ waiting: waitsOf(stored).map((one, at) => (at === index ? { ...one, answer: said } : one)) })).catch(err => {
     if (said === 'Not now') answering.delete(`${r.id}:${index}`)
@@ -1376,6 +1478,116 @@ const reportsButton = ($: EngineInterface, ui: Ui, all: Report[]) => {
       <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
     </Box>
   )
+}
+
+// ---- Stats: reading Claude's records (the sums and drawing are in ./stats) ----
+
+let jqPath = ''
+async function sumOf($: EngineInterface, path: string): Promise<FileSum> {
+  for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
+    const r = await $.process.run([jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined)
+    if (!r || r.exitCode !== 0) continue
+    jqPath = jq
+    return parsed<FileSum>(r.stdout.trim(), { s: [], u: [], d: [] })
+  }
+  throw new Error('jq')
+}
+// Where a chat's records are: its own folder under ~/.claude/projects, found by its id
+async function chatFolderOf($: EngineInterface, home: string, chatId: string, known?: string) {
+  if (known && (await $.fs.stat(`${known}/${chatId}.jsonl`).catch(() => undefined))) return known
+  const root = `${home}/.claude/projects`
+  for (const entry of await $.fs.list(root).catch(() => [])) {
+    if (entry.kind !== 'dir') continue
+    if (await $.fs.stat(`${root}/${entry.name}/${chatId}.jsonl`).catch(() => undefined)) return `${root}/${entry.name}`
+  }
+  return ''
+}
+// Every transcript of one chat, summed, with what each was
+async function runsOf($: EngineInterface, home: string, memory: string, chatId: string, hint = ''): Promise<Run[]> {
+  const cachePath = `${memory}/stats/${chatId}.json`
+  const read = parsed<Cache>(await readOr($, cachePath), { files: {} })
+  // Sums made by an earlier program are made again
+  const cache: Cache = read.v === CACHE_V ? read : { files: {} }
+  const folder = await chatFolderOf($, home, chatId, hint || cache.folder)
+  if (!folder) return []
+  const subs = `${folder}/${chatId}/subagents`
+  const flowDirs = (await $.fs.list(`${subs}/workflows`).catch(() => [])).filter(e => e.kind === 'dir').map(e => e.name)
+  const listed = [
+    ...(await $.fs.list(subs).catch(() => [])).map(e => ({ ...e, dir: subs, flow: '' })),
+    ...(await Promise.all(flowDirs.map(async name => (await $.fs.list(`${subs}/workflows/${name}`).catch(() => [])).map(e => ({ ...e, dir: `${subs}/workflows/${name}`, flow: name }))))).flat(),
+  ].filter(e => /^agent-\w+\.jsonl$/.test(e.name))
+  const chatFile = (await $.fs.list(folder).catch(() => [])).find(e => e.name === `${chatId}.jsonl`)
+  const files = [...listed.map(e => ({ path: `${e.dir}/${e.name}`, size: e.size, mtime: e.mtimeMs, flow: e.flow, id: e.name.slice(6, -6) })), ...(chatFile ? [{ path: `${folder}/${chatFile.name}`, size: chatFile.size, mtime: chatFile.mtimeMs, flow: '', id: '' }] : [])]
+  const next: Cache = { v: CACHE_V, folder, files: {} }
+  let isChanged = folder !== cache.folder
+  // A few at a time: each is a process
+  for (let at = 0; at < files.length; at += 6)
+    await Promise.all(
+      files.slice(at, at + 6).map(async f => {
+        const was = cache.files[f.path]
+        if (was && was.size === f.size && was.mtime === f.mtime) next.files[f.path] = was
+        else {
+          next.files[f.path] = { size: f.size, mtime: f.mtime, sum: await sumOf($, f.path) }
+          isChanged = true
+        }
+      }),
+    )
+  if (isChanged || Object.keys(cache.files).length !== files.length) await $.fs.write(`${memory}/stats/${chatId}.json`, JSON.stringify(next)).catch(() => undefined)
+  const flowTitle = new Map<string, string>()
+  for (const name of flowDirs) flowTitle.set(name, parsed<{ title?: string; name?: string }>(await readOr($, `${memory}/flows/${name}.json`), {}).title || 'Workflow')
+  return Promise.all(
+    files.map(async (f): Promise<Run> => {
+      const sum = next.files[f.path]?.sum ?? { s: [], u: [], d: [] }
+      if (!f.id) return { id: chatId, kind: 'chat', parent: '', title: 'This chat', isFinished: false, sum }
+      const meta = parsed<Meta>(await readOr($, f.path.replace(/\.jsonl$/, '.meta.json')), {})
+      if (f.flow) return { id: f.id, kind: 'flow', parent: f.flow, title: flowTitle.get(f.flow) ?? 'Workflow', isFinished: Boolean(meta.finished) || (sum.s.at(-1)?.[1] ?? 0) < Date.now() - GAP, sum }
+      return { id: f.id, kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background work', isFinished: Boolean(meta.finished), sum }
+    }),
+  )
+}
+// The chats the mod has kept work for (finished/<chat id>.json), and this one
+async function chatsKept($: EngineInterface, memory: string, chatId: string) {
+  const kept = (await $.fs.list(`${memory}/finished`).catch(() => [])).map(e => /^(.+)\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean)
+  return [...new Set([chatId, ...kept])]
+}
+
+async function loadStats($: EngineInterface, scope: Scope, home: string, memory: string, chatId: string, hint: string, now: number) {
+  if (reading.has(scope) || !chatId) return
+  const was = held.get(scope)
+  if (was && now - was.at < READ_EVERY) return
+  reading.add(scope)
+  try {
+    await loadMemorySizes($, memory).catch(() => undefined)
+    const ids = scope === 'chat' ? [chatId] : await chatsKept($, memory, chatId)
+    const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat()
+    held.set(scope, { runs, at: now })
+  } catch (err) {
+    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? 'Stats reads Claude’s records with jq, and jq was not found on this Mac.' : `The records could not be read: ${String(err)}` })
+  } finally {
+    reading.delete(scope)
+    $.ui.invalidate('ui.render')
+  }
+}
+async function loadMemorySizes($: EngineInterface, memory: string) {
+  const names = async (folder: string) => (await $.fs.list(`${memory}/${folder}`).catch(() => [])).filter(e => !e.name.startsWith('.'))
+  // Sizes as the disk counts them, the whole of each folder
+  const du = await $.process.run(['du', '-skL', ...['index.md', 'streams', 'words', 'asks', 'reports', 'finished', 'flows', 'stats', 'thumbs'].map(one => `${memory}/${one}`)]).catch(() => undefined)
+  const kb = new Map((du?.stdout ?? '').split('\n').map(row => row.split('\t')).filter(([n, path]) => n && path).map(([n, path]) => [String(path).slice(memory.length + 1), Number(n) * 1024]))
+  const index = await $.fs.read(`${memory}/index.md`).catch(() => '')
+  const subjects = index.split('\n').filter(row => row.startsWith('- ')).length
+  const reports = await names('reports')
+  const parts: MemoryPart[] = [
+    { name: 'Subjects', count: subjects, bytes: kb.get('index.md') ?? 0 },
+    { name: 'Briefs', count: (await names('streams')).length, bytes: kb.get('streams') ?? 0 },
+    { name: 'Your words, by chat', count: (await names('words')).length, bytes: kb.get('words') ?? 0 },
+    { name: 'Asks and answers, by chat', count: (await names('asks')).length, bytes: kb.get('asks') ?? 0 },
+    { name: 'Results', count: reports.filter(e => e.kind === 'dir').length, bytes: kb.get('reports') ?? 0 },
+    { name: 'Finished work, by chat', count: (await names('finished')).length, bytes: kb.get('finished') ?? 0 },
+    { name: 'Workflow runs', count: (await names('flows')).length, bytes: kb.get('flows') ?? 0 },
+    { name: 'Thumbnails and sums', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
+  ]
+  const bytes = [...kb.values()].reduce((sum, n) => sum + n, 0)
+  memoryHeld.now = { parts, bytes }
 }
 
 // Stats: what the work added up to, in a tab of its own, opened in front like Results
@@ -2004,7 +2216,7 @@ const saveFlow = async ($: EngineInterface, f: Flow) => {
   if (!dir || !(await isFlowMine($, f))) return
   const text = JSON.stringify(f)
   if (flowSaved.get(f.id) === text) return
-  await $.fs.write(flowPath(f.id), `${text}\n`)
+  await $.fs.write(`${dir}/flows/${f.id.replace(/[^A-Za-z0-9_-]/g, '-')}.json`, `${text}\n`)
   flowSaved.set(f.id, text)
 }
 const changeFlow = async ($: EngineInterface, id: string, fn: (f: Flow, at: number) => Flow) => {
@@ -2339,7 +2551,7 @@ const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"): ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
   if (working) await tell($, ask.from ?? one.id, to)
-  else await sendForPerson($, isReply ? `${said}\n(That is my reply to what the work "${titleOf(one)}" asked me before it ended: ${ask.text})` : `${said}. That answers what the work "${titleOf(one)}" asked me before it ended: ${ask.text}`)
+  else await sendForPerson($, isReply ? `From the Claudopus panel: ${who(true)} replied to what the work "${titleOf(one)}" asked before it ended (${ask.text}):\n${said}` : `From the Claudopus panel: ${who(true)} pressed "${said}" in answer to what the work "${titleOf(one)}" asked before it ended: ${ask.text}`)
 }
 
 export const register: Register = on => {
@@ -2490,7 +2702,7 @@ export const register: Register = on => {
     // The notice that a workflow ended ends its card
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))
     if (e.isMeta || e.command || !dir) return next(e)
-    // A message the mod sent from a press on a report is the person's own
+    // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
     if (!isPerson) return next(e)
@@ -2517,8 +2729,9 @@ export const register: Register = on => {
       await update($, me, one => ({ ...one, isChat: true, needsContext: false, roleSent }))
 
       if (text.length > PASTE_CHARS) {
-        const path = `${dir}/pastes/${new Date().toISOString().replaceAll(':', '-')}.md`
-        await $.fs.write(path, text)
+        const stamp = new Date().toISOString().replaceAll(':', '-')
+        const path = `${dir}/pastes/${stamp}.md`
+        await $.fs.write(`${dir}/pastes/${stamp}.md`, text)
         text = `${text.slice(0, 600)}\n\n[${text.length - 1200} characters pasted here were saved to ${path} and left out of this chat]\n\n${text.slice(-600)}`
         context.push(PASTED)
       }
@@ -2528,8 +2741,8 @@ export const register: Register = on => {
     heard = [...heard, text]
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
-    const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}`
-    await append($, `${dir}/words/${m.id}.md`, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
+    const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
+    await appendWords($, m.id, `## ${new Date().toISOString()}${how}\n${text}\n\n`).catch(err => log($, `message not saved: ${String(err)}`))
 
     return next(context.length ? { ...e, text, context } : { ...e, text })
   })
@@ -2778,7 +2991,7 @@ export const register: Register = on => {
     // The subject a piece of work recorded names the subject of its report
     if (e.agentId !== undefined) await change($, e.agentId, one => ({ ...one, subject: saved.name }))
     const path = `${dir}/streams/${slug(saved.name)}.md`
-    if (input.brief?.trim()) await $.fs.write(path, `${input.brief.trim()}\n`)
+    if (input.brief?.trim()) await $.fs.write(`${dir}/streams/${slug(saved.name)}.md`, `${input.brief.trim()}\n`)
 
     return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nBrief: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` }
   })
@@ -3007,11 +3220,11 @@ export const register: Register = on => {
       return (
         <Box key={key} flexDirection="column" gap={1}>
           {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
-          <Text wrap="wrap" color={NEEDS} bold>{isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6))}</Text>
+          <Text wrap="wrap" color={NEEDS} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
           {ask.copy ? (
             <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text mono wrap="wrap">{ask.copy}</Text>
+                <Text mono wrap="wrap">{withLinks(table.Link, ask.copy, `${key}-copy`)}</Text>
               </Box>
               <Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} />
             </Box>
@@ -3695,7 +3908,7 @@ export const register: Register = on => {
     void statsRead($, statsShown.scope).catch(() => undefined)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {statsView($, $.ui.resolve(e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
+        {statsView(() => $.ui.invalidate('ui.render'), $.ui.resolve(e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
       </Box>
     )
   })

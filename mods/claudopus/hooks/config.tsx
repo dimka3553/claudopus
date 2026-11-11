@@ -2,7 +2,7 @@
 // carries, the chat's rules, the rules every piece of work follows); a copy of one at the same path under the memory folder,
 // ~/.claude/claudopus, is the person's own and is used in its place, so an update of the mod, which replaces its own folder, never
 // touches it. The settings are config.json in the same folder. Put back removes the person's copy or key, kept beside it as .old
-import type { ElementTable, EngineInterface } from 'claude-code'
+import type { ElementTable } from 'claude-code'
 
 type Ui = ElementTable
 
@@ -12,22 +12,6 @@ export const TEXTS: Text[] = [
   { key: 'chat', name: "The chat's rules", what: 'How a chat hands each of your messages to background work.', path: 'roles/chat.md' },
   { key: 'work', name: 'Work rules', what: 'What every piece of background work is told as it starts.', path: 'roles/work.md' },
 ]
-
-async function readOr($: EngineInterface, path: string) {
-  return $.fs.read(path).catch(() => '')
-}
-
-// The text in force: the person's own copy when it holds anything, the shipped one otherwise
-export async function inForce($: EngineInterface, root: string, memory: string, path: string) {
-  const own = memory ? await readOr($, `${memory}/${path}`) : ''
-  const shipped = await readOr($, `${root}/${path}`)
-  // A copy the same as what shipped is no change of the person's
-  // A copy made before an update can lack a place the shipped text now fills (a setting such as the models): it is stale
-  const places = (text: string) => new Set(text.match(/\{[a-z]+\}/gi) ?? [])
-  const isStale = (own: string) => [...places(shipped)].some(place => !places(own).has(place))
-  if (own.trim() && own.trim() !== shipped.trim()) return { text: own, path: `${memory}/${path}`, isOwn: true, isStale: isStale(own) }
-  return { text: shipped, path: `${root}/${path}`, isOwn: false, isStale: false }
-}
 
 // ---- Settings, config.json ----
 
@@ -50,39 +34,12 @@ export const parse = (text: string): Config => {
     return {}
   }
 }
-export async function readConfig($: EngineInterface, memory: string) {
-  return parse(await readOr($, `${memory}/config.json`))
-}
 export const modelsOf = (config: Config): Models => {
   const named = (role: Role, shipped: string) => {
     const value = config.models?.[role]
     return typeof value === 'string' && MODEL_NAMES[value] ? value : shipped
   }
   return Object.fromEntries(ROLES.map(one => [one.key, named(one.key, one.shipped)])) as Models
-}
-
-// Sets one key, or with undefined puts it back to what shipped; every other key, ones this tab does not know included, is kept
-export async function setConfig($: EngineInterface, memory: string, key: keyof Config, value: unknown, role?: Role) {
-  const path = `${memory}/config.json`
-  const text = await readOr($, path)
-  const config = (() => {
-    try {
-      return JSON.parse(text || '{}') as Record<string, unknown>
-    } catch {
-      return undefined
-    }
-  })()
-  // A file that does not parse is someone's edit under way: it is left as it is
-  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('config.json does not parse')
-  if (key === 'models' && role) {
-    const models = { ...((config.models as Record<string, unknown>) ?? {}) }
-    if (value === undefined) delete models[role]
-    else models[role] = value
-    if (Object.keys(models).length) config.models = models
-    else delete config.models
-  } else if (value === undefined) delete config[key]
-  else config[key] = value
-  await $.fs.write(path, `${JSON.stringify(config, null, 2)}\n`)
 }
 
 // ---- The texts' places for the models ----
@@ -111,37 +68,7 @@ export const sectionsOf = (text: string) =>
     })
     .filter(part => part.lines.length)
 
-// ---- Acts ----
-
-async function opened($: EngineInterface, path: string) {
-  // The text editor the Mac opens .md files in; elsewhere the desktop's own opener
-  const mac = await $.process.run(['open', '-t', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  if (mac.exitCode === 0) return ''
-  const other = await $.process.run(['xdg-open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  return other.exitCode === 0 ? '' : mac.stderr || other.stderr || 'no editor opened'
-}
-// Edit: the person's own copy, made from the shipped text the first time, opened in their editor
-export async function editText($: EngineInterface, root: string, memory: string, path: string) {
-  const own = `${memory}/${path}`
-  if (!(await readOr($, own)).trim()) await $.fs.write(own, await readOr($, `${root}/${path}`))
-  return opened($, own)
-}
-// Put back: the person's copy moves aside as .old, and the shipped text is in force again
-export async function putBack($: EngineInterface, memory: string, path: string) {
-  const own = `${memory}/${path}`
-  // Each copy put back is kept under a name of its own, so a second Reset never loses the first
-  const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
-  const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  return r.exitCode === 0 ? '' : r.stderr || 'not put back'
-}
-
-// Save: what the person wrote in the tab becomes their own copy
-export async function saveText($: EngineInterface, root: string, memory: string, path: string, text: string) {
-  // Saved as it shipped, it is no copy of the person's: the shipped text stays in force through updates
-  if (text.trim() === (await readOr($, `${root}/${path}`)).trim()) return (await readOr($, `${memory}/${path}`)) ? putBack($, memory, path) : ''
-  await $.fs.write(`${memory}/${path}`, text.endsWith('\n') ? text : `${text}\n`)
-  return ''
-}
+// ---- Acts: in ./register, beside the other calls on the engine ----
 
 // ---- The tab ----
 

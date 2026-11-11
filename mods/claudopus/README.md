@@ -82,25 +82,52 @@ Everything the mod keeps is in `~/.claude/claudopus`, as plain files:
 
 - `index.md`: the subjects of your work, one line each
 - `streams/`: one brief per subject
-- `words/`: your messages, word for word, one file per chat
-- `reports/`: what finished work left for you, one dated folder each
+- `words/`: your messages, word for word, and Claude's answers, one file per chat
 - `asks/`: what you asked in each chat and what was done, one file per chat
+- `reports/`: what finished work left for you, one dated folder each, with copies of the pictures it named and small thumbnails
 - `finished/`: the Finished list of each chat
+- `flows/`: each workflow run the panel follows
+- `pastes/`: a message over 12,000 characters, kept here while the chat gets its start, its end and this path
+- `stats/` and `thumbs/`: sums Stats made of Claude Code's records, and small copies of pictures shown in the panel
 - `servers.json`: the servers `/servers` last saw
+- `config.json`: your settings, written by the Config tab
+- `rules/CLAUDE.md`, `roles/chat.md`, `roles/work.md`: your own copies of the three texts, written only when you edit or save one in the Config tab; Reset moves your copy aside as `.old`
 - `log.md`: the mod's own log
 
-Delete the folder to start over.
+Delete the folder to start over. The mod writes nowhere else: no build, start-up or settings file of Claude Code or your projects.
 
-## What it runs and sends
+## What it does, for the plugin directory
 
-Everything stays on your machine, apart from what Claude Code itself sends to Claude:
+Everything stays on your machine, apart from what Claude Code itself sends to Claude.
 
-- After each reply, one short Sonnet call through Claude Code titles the chat and notes what was asked and done.
-- It reads Claude Code's own session records under `~/.claude` to show work and Stats, and writes only under `~/.claude/claudopus`.
-- It runs local commands: `lsof` and `ps` for `/servers`, `kill` when you stop a server there, `jq` and `du` for Stats, `sips` for picture thumbnails, `osascript` for notifications and the password and key boxes, `security` for the keychain, `open` for Finder and files, and `grep` to search the memory.
-- The admin and key runners (`bin/admin`, `bin/secret`) run only the command work hands them, on this Mac or over SSH to a host it names, and never send a password or key anywhere else.
+**What it sends, and where.** After each reply, one short call through Claude Code (`$.model.complete`, Sonnet) sends the start of your message and of the reply to Claude, to title the chat and note what was asked and done. It sets that title, and reads the chat's own id, through the Claude desktop app's built-in session server (`ccd_session_mgmt`: `get_session`, `set_session_title`). No telemetry, no other network calls.
 
-No telemetry, no other network calls.
+**What it puts in prompts.** Into every chat: the working principles (`rules/CLAUDE.md`, or your copy), as one more instruction file. With your first message in a chat, after a compaction and when the text changes: the chat's rules (`roles/chat.md`), the list of your subjects with the path of each brief, how full each running piece of work is, and the results not yet passed on. Into each agent the chat starts, after its brief: the work rules (`roles/work.md`), the path of the chat's saved words and the panel's to-do rule. Into a compaction: a line asking it to keep what you asked for and the work under way. Into a running agent's chat: your steer or answer from the panel, and a short reminder when it has gone many steps without updating its card. A message over 12,000 characters is sent as its start, its end and the path where it was kept.
+
+**The prompts it submits.** When you press an answer or send a reply on a card whose work has already ended, the panel submits it to the chat as a message from the mod, saying what you pressed and what it answers, so the chat carries the work on.
+
+**What its hooks do.**
+- `prompt.submit`, `prompt.context`, `session.compact`, `agent.spawn`: add the texts above. `agent.spawn` adds only to the prompt of an agent the chat itself starts; it changes no permission mode, model or tools.
+- `tool.call` (every tool): in a chat's own thread, while the handing-over is on, it lets through only the tools that start and talk to agents and workflows (`Agent`, `Workflow`, `SendMessage`, `ListAgents`, `TaskStop`, `ToolSearch`, `AskUserQuestion`, `SendUserFile`, `ReadNotifications`, `Skill`, the mod's own tools, the app's `mcp__ccd_` tools, and `Read` of a kept result), and refuses the rest with a line saying to hand the work to an agent. An `Agent` call from the chat that copies the chat (`fork`) or names no model is refused the same way. A `Bash` command that reads a password from the keychain is refused everywhere. Once you have kept a key, what any other tool returns has every kept value replaced by its name. Agents' calls are otherwise passed on unchanged; the hook counts their steps for the cards.
+- `tool.call` on `Workflow`: passed on unchanged; a run it started is followed on a card.
+- `tool.call` on the mod's own tools (`mcp__claudopus__note`, `todo`, `ask`, `waits`, `update`, `recall`): answers them itself; it stands in for no other tool.
+- `tool.describe`: rarely used tools (`ReportFindings`, `SuggestPluginInstall`, `SuggestSkills`, `SearchPlugins`, `ScheduleWakeup`, `Workflow`, and the browser, iOS simulator and visualize servers) wait behind ToolSearch instead of loading into every chat.
+- `turn.step`: when you pick another model for a piece of work in its card, its next steps ask for that model; the request and response are otherwise untouched, and only the token count and model name are read.
+- `turn.complete`, `session.measure`, `session.start`, `command.run` (`/claudopus`, `/servers`), `ui.render`: keep the cards, the band above the prompt and the panel's tabs.
+- From any of them it may show a notification through the app (`$.ui.notify`), play its own `sounds/ready.wav`, or put text you pressed Copy on onto the clipboard (`$.ui.copy`).
+
+**Tools it runs itself.** `TaskStop`, when you press Stop on a card or a workflow.
+
+**Programs it runs, and why.** Each by name with its arguments in the call: `lsof` and `ps` to list servers for `/servers`, `kill` when you stop one there; `jq` (looked for in `/usr/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, then the path) and `du` for Stats; `head` and `tail` to read the ends of a work's record; `sips` for thumbnails; `mkdir`, `cp` and `find` to copy a result's pictures into its folder and drop old thumbnails; `mv` to set aside your copy of a text on Reset; `open` (or `xdg-open`) to show the memory folder, a picture or a text in your editor; `grep` to search the memory for `recall`; and its own `bin/secret` with `--list` and `--hide` to hide kept keys.
+
+**What it does not run by itself.** `bin/admin` and `bin/secret` are shell scripts the work rules point agents to: an agent runs one with Bash when a step needs an admin command or a key, and it asks you in a macOS dialog (`osascript`), keeps the value in this Mac's keychain (`security`), and runs only the command it is handed, on this Mac or over SSH to the host named. The key itself is asked for at that moment and never read from a file. `workflows/rounds.js` is a workflow script the chat starts through the Workflow tool as `claudopus:rounds`. `onboard/` (a Python script and a brief) is a by-hand way to load old chats into the memory; nothing in the mod runs it.
+
+**Files that will be held for a reviewer, and why they stay.**
+- The hooks module itself: the panel, the cards and every behaviour above are this code.
+- `bin/admin` and `bin/secret`: the only way work gets an admin command or a key without the value passing through a chat.
+- `workflows/rounds.js`: the maker-and-checker workflow the chat starts.
+- `onboard/extract.py`: kept for people who want their old chats in the memory; it runs only by hand.
+- `sounds/ready.wav`, `art/panel.gif` and the icon: the chime, the README's picture and the listing icon.
 
 ## Licence
 

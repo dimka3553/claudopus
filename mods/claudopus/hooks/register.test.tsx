@@ -1387,7 +1387,8 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
   await pressed(one, 'report-say-0-Yes')
   await until(async () => submitted.length > 0 || undefined)
-  expect(submitted[0]).toContain('Yes. That answers what the result "Weekly revenue"')
+  expect(submitted[0]).toContain('From the Claudopus panel: The person pressed "Yes" in answer to what the result "Weekly revenue"')
+  expect(submitted[0]).not.toMatch(/\b(me|my)\b/)
   expect(submitted[0]).toContain('Shall I send it to the team?')
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
   expect(JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting).toEqual([{ text: 'Shall I send it to the team?', answer: 'Yes' }, { text: 'Post it in the channel too?' }])
@@ -2087,6 +2088,12 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   // Instructions passed as text to copy get no Copy: only what is pasted elsewhere does
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k6', agentId: 'a2', text: 'Open the plugin directory and submit the form.', copy: 'Open the plugin directory page and fill in the form with the details' } as never)
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Copy')).toBe(false)
+  // A web address in the ask is a link to press, on the card and in Details, and one to paste is a link beside its Copy
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k7', agentId: 'a2', text: 'Open https://claude.ai/directory/manage, press Submit new, and paste the repository.', copy: 'https://github.com/dimka3553/claudopus' } as never)
+  const hrefs = async (pane: typeof list) => (await pane.findAll({ type: 'Link' })).map(one => one.props.href)
+  expect(await until(async () => ((await hrefs(list)).includes('https://claude.ai/directory/manage') ? true : undefined))).toBe(true)
+  expect(await hrefs(list)).toContain('https://github.com/dimka3553/claudopus')
+  expect(await until(async () => ((await hrefs(ears)).includes('https://claude.ai/directory/manage') ? true : undefined))).toBe(true)
 
   // A command for the person to type is shown with its Copy, and the work is told to open a terminal for it (the app opens one
   // only for Claude, never for a plugin's own code)
