@@ -171,12 +171,16 @@ code.long{white-space:normal;overflow-wrap:anywhere}
 
 .film{position:relative;padding:var(--s2);background:var(--screen-raised)}
 .film video{width:100%;height:auto;aspect-ratio:16/9;background:var(--screen)}
-.film .play{position:absolute;inset:0;width:100%;display:flex;align-items:flex-end;justify-content:flex-start;padding:var(--s8);border:0;background:none;cursor:pointer}
+/* the play button sits in the exact middle of the picture, over a light shade, so the still reads as a video */
+.film .play{position:absolute;inset:var(--s2);display:flex;align-items:center;justify-content:center;padding:0;border:0;background:rgb(10 10 11/.25);cursor:pointer}
 .film .play[hidden]{display:none}
-.film .play .btn>span{padding-right:var(--s8)}
+.film .play .btn{font-size:var(--t-lead)}
+.film .play .btn>span{min-height:var(--s16);padding:var(--s4) var(--s8);gap:var(--s4)}
+.film .play .px{width:16px;height:28px}
 .film .play:hover .btn>span{background:var(--purple-lift)}
 .film .play:active .btn>span{transform:translate(var(--cell),var(--cell))}
-.film .play:focus-visible{outline-offset:-8px}
+.film .play:focus-visible{outline:none}
+.film .play:focus-visible .btn{outline:2px solid var(--screen-purple);outline-offset:6px}
 
 .pairs{display:grid;gap:var(--s2)}
 .pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--s2)}
@@ -285,9 +289,9 @@ figure .note{margin-top:var(--s4)}
   .top nav{gap:var(--s4)}
   .top nav .opt{display:none}
   .hero .acts{gap:var(--s4)}
-  .film .play{padding:var(--s4)}
   .film .play .btn{font-size:var(--t-small)}
-  .film .play .btn>span{min-height:40px;padding:var(--s2) var(--s3);gap:var(--s2)}
+  .film .play .btn>span{min-height:44px;padding:var(--s2) var(--s4);gap:var(--s3)}
+  .film .play .px{width:10px;height:18px}
   .ways summary{padding:var(--s4)}
   .ways .in{padding:0 var(--s4) var(--s4)}
   .sec.install{padding:var(--s12) var(--gutter);margin:0 calc(-1*var(--gutter));clip-path:none}

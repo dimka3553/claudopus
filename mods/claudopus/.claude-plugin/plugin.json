@@ -1,7 +1,7 @@
 {
   "name": "claudopus",
   "displayName": "Claudopus",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Every chat hands its work to background agents and a panel beside it shows how each piece is going; your words, results and a brief per subject are kept so chats stay small. macOS only",
   "author": { "name": "dimka3553", "url": "https://github.com/dimka3553" },
   "homepage": "https://www.claudopus.ai",
