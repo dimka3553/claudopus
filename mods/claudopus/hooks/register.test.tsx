@@ -28,7 +28,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean }; isNew?: boolean } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean }; isNew?: boolean; ended?: Set<string> } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -178,6 +178,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { value: { isPlaced: true } }
   })
   on('session.append', (_, e, next) => {
+    if (e.agentId !== undefined && options.ended?.has(e.agentId)) return { deny: 'no running loop' } as never
     appended.push(`${e.agentId}: ${(e.message.content[0] as { text?: string }).text ?? ''}`)
     return next(e)
   })
@@ -2043,7 +2044,9 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
 })
 
 test('work that needs the person\'s hands asks: its card stands out first with the ask, the text to paste with its Copy, and answers that go back to it', async ($, on) => {
-  const { played, notified, appended, terminals } = world(on)
+  // Once its run has ended, a work's chat takes no more lines
+  const ended = new Set<string>()
+  const { played, notified, appended, terminals, submitted } = world(on, { ended })
   const clip: string[] = []
   on('ui.copy', (_, e) => (clip.push(e.text), { value: { isCopied: true } }) as never)
   await $.session.start(start)
@@ -2087,6 +2090,22 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await ears.input({ key: box?.key ?? '', text: 'Where do I do that?' })
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('Where do I do that?')))).toContain('Submit it to the plugin directory.')
   expect(await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' })).toBeDefined()
+  // The box is empty again and says the reply went, on the card too; the work reads it at its next step, and then it says so
+  const again = (await ears.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  expect(again?.key).not.toBe(box?.key)
+  expect(again?.props.value ?? '').toBe('')
+  const waiting = '✓ Sent: “Where do I do that?” · the work reads it at its next step, once what it is doing now ends'
+  expect(await until(async () => ears.find({ type: 'Text', text: waiting }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: waiting }))).toBeDefined()
+  for await (const _ of $.turn.step({ turnId: 'turn-9', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a2' })) void _
+  expect(await until(async () => ears.find({ type: 'Text', text: '✓ Sent: “Where do I do that?” · read by the work' }))).toBeDefined()
+  // A reply to work whose run has ended goes to the chat, as the panel's, and says so
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k8', agentId: 'a2', text: 'Tell me the repo name.' } as never)
+  ended.add('a2')
+  const box3 = (await ears.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await ears.input({ key: box3?.key ?? '', text: 'claudopus' })
+  expect(await until(async () => submitted.find(line => line.includes('claudopus') && line.includes('From the Claudopus panel')))).toContain('Tell me the repo name.')
+  expect(await until(async () => ears.find({ type: 'Text', text: '✓ Sent: “claudopus” · sent to the chat, which carries the work on' }))).toBeDefined()
   // Instructions passed as text to copy get no Copy: only what is pasted elsewhere does
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k6', agentId: 'a2', text: 'Open the plugin directory and submit the form.', copy: 'Open the plugin directory page and fill in the form with the details' } as never)
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Copy')).toBe(false)
@@ -2103,6 +2122,16 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect(told.result).toContain('mcp__terminal__open_terminal_tab with cwd "/repo/site"')
   expect((await list.find({ type: 'Text', text: 'gh auth login' }))?.props.mono).toBe(true)
   expect(terminals).toEqual([])
+
+  // A reply written into work that then ends without another step was never read: the chat gets it, and the box says so
+  ended.delete('a2')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k9', agentId: 'a2', text: 'Which branch?', choices: ['main', 'Not now'] } as never)
+  const box4 = (await ears.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await ears.input({ key: box4?.key ?? '', text: 'main' })
+  expect(await until(async () => ears.find({ type: 'Text', text: '✓ Sent: “main” · the work reads it at its next step, once what it is doing now ends' }))).toBeDefined()
+  await $.turn.complete({ answer: 'Stopping here.', durationMs: 1, isAborted: false, turnId: 'turn-10', reason: 'answer', agentId: 'a2' } as never)
+  expect(await until(async () => submitted.find(line => line.includes('ended before reading the reply') && line.includes('Which branch?')))).toContain('\nmain')
+  expect(await until(async () => ears.find({ type: 'Text', text: '✓ Sent: “main” · sent to the chat, which carries the work on' }))).toBeDefined()
   await Promise.all([list.unmount(), ears.unmount()])
 })
 

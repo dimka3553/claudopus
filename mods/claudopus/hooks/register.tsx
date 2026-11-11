@@ -464,7 +464,7 @@ const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: n
 
 // Writes a line into a piece of work's own chat, which it reads at its next step
 const tell = ($: EngineInterface, id: string, text: string) =>
-  $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(err => log($, `work ${id} not told: ${String(err)}`))
+  $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(async err => void (await log($, `work ${id} not told: ${String(err)}`)))
 
 const stop = async ($: EngineInterface, id: string) => {
   if ((await read($, todos)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
@@ -2594,20 +2594,63 @@ const copyAsk = ($: EngineInterface, id: string, text: string, surface: RenderSu
 const replies = new Map<string, number>()
 // What the person has typed into a reply box and not sent, by the work, so a redraw keeps it
 const drafts = new Map<string, string>()
+// The last reply sent from each work's box, shown under it while the same ask stands: sent to the work (which reads a message
+// only at its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
+type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' }
+const sentReplies = new Map<string, Sent>()
+// A reply on its way, by the work it was written into: that work's next step reads it, and the card it belongs to says so
+const pending = new Map<string, string>()
 const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   const ask = one.ask
   const said = choice.trim()
   if (!ask || !said) return
+  const target = ask.from ?? one.id
+  // The box clears and says it is sent before anything is written: nothing the panel does is waited on
+  if (isReply) {
+    replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: one.status === 'working' ? 'work' : 'chat' })
+    redraw($)
+  }
   const at = await $.clock.now()
-  if (isReply) replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   await update($, todos, list =>
     list.map(card => (card.id === one.id ? { ...card, ask: isReply ? card.ask : undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) } : card)),
   )
   redraw($)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"): ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
-  if (working) await tell($, ask.from ?? one.id, to)
-  else await sendForPerson($, isReply ? `From the Claudopus panel: ${who(true)} replied to what the work "${titleOf(one)}" asked before it ended (${ask.text}):\n${said}` : `From the Claudopus panel: ${who(true)} pressed "${said}" in answer to what the work "${titleOf(one)}" asked before it ended: ${ask.text}`)
+  // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
+  // Marked on its way once written, so a step that began before it never counts as reading it
+  const told = working ? await tell($, target, to) : undefined
+  if (told && !told.deny) return void (isReply && (pending.set(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work' }), redraw($)))
+  if (isReply) (sentReplies.set(one.id, { text: said, ask: ask.text, to: 'chat' }), redraw($))
+  await sendForPerson($, isReply ? `From the Claudopus panel: ${who(true)} replied to what the work "${titleOf(one)}" asked before it ended (${ask.text}):\n${said}` : `From the Claudopus panel: ${who(true)} pressed "${said}" in answer to what the work "${titleOf(one)}" asked before it ended: ${ask.text}`)
+}
+// The work a reply was written into starts its next step: that step reads it
+const replyRead = ($: EngineInterface, agentId: string) => {
+  const card = pending.get(agentId)
+  if (card === undefined) return
+  pending.delete(agentId)
+  const sent = sentReplies.get(card)
+  if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
+}
+// Work whose run ended with a reply written in but never read leaves it to the chat, which carries the work on
+const replyUnread = async ($: EngineInterface, agentId: string) => {
+  const card = pending.get(agentId)
+  if (card === undefined) return
+  pending.delete(agentId)
+  const sent = sentReplies.get(card)
+  const one = (await read($, todos)).find(todo => todo.id === card)
+  if (sent?.to !== 'work' || !one) return
+  sentReplies.set(card, { ...sent, to: 'chat' })
+  redraw($)
+  await sendForPerson($, `From the Claudopus panel: ${who(true)} replied to what the work "${titleOf(one)}" asked, and it ended before reading the reply (${sent.ask}):\n${sent.text}`)
+}
+// What the box says of the reply last sent from it, while the ask it answered stands
+const sentLine = (one: Todo) => {
+  const sent = sentReplies.get(one.id)
+  if (!sent || sent.ask !== one.ask?.text) return ''
+  const how = { work: 'the work reads it at its next step, once what it is doing now ends', read: 'read by the work', chat: 'sent to the chat, which carries the work on' }[sent.to]
+  return `✓ Sent: “${cut(sent.text, 80)}” · ${how}`
 }
 
 export const register: Register = on => {
@@ -2822,6 +2865,8 @@ export const register: Register = on => {
         return list.map(one => (one.id !== id ? one : isWaiting ? { ...one, answer: answer || one.answer } : { ...ended(one, how, now), answer: answer || one.answer }))
       })
       await lookEnds($)
+      // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
+      if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
       // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report
       const card = (await read($, todos)).find(one => one.id === id)
       const report = (e.answer ?? '').trim()
@@ -2981,6 +3026,7 @@ export const register: Register = on => {
   // Work the person moved to another model sends each step from then on to that model; only the model the request names changes
   on('turn.step', async function* ($, e, next) {
     const id = e.agentId
+    if (id !== undefined) replyRead($, id)
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     const r = yield* next(chosen && modelName(chosen) !== modelName(e.model) ? { ...e, model: chosen } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
@@ -3300,6 +3346,8 @@ export const register: Register = on => {
             />
             </Box>
           ) : null}
+          {/* The reply last sent, on the card and under the box: that it went, and whether the work has read it yet */}
+          {sentLine(one) ? <Text key={`${key}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{sentLine(one)}</Text> : null}
           {answers.length || !isWhole ? (
             <Box flexDirection="row" flexWrap="wrap" gap={1}>
               {answers.map((choice, n) => (
