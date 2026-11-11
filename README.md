@@ -41,7 +41,7 @@ That is all. Nothing has to be typed in each chat.
 
 - The mod is on in every chat you open from then on, in every folder.
 - You send a message. The chat answers in one line and starts a background agent for it, then is free for your next message.
-- The panel opens beside the chat by itself the first time work starts in that chat. Each piece of work is a card with its to-dos and a line saying where it stands. If you close the panel it stays closed for that chat; `/claudopus` opens it again.
+- The panel opens beside the chat by itself the first time work starts in that chat. Each piece of work is a card with its to-dos and a line saying where it stands. If you close the panel it stays closed for that chat; `/claudopus` opens it again. Right after you install, it opens once by itself with a welcome that offers to index your old chats.
 - A short band above the prompt says what is being done right now.
 - A message about work that is already running goes to that work as a steer instead of starting new work.
 - When work finishes, the chat passes on its result, and the panel lists it under Finished. What the work left for you to read is listed under Results.
@@ -116,6 +116,7 @@ Everything the mod keeps is in `~/.claude/claudopus`, as plain files:
 | `stats/`, `thumbs/` | Sums Stats made of Claude Code's records, and small copies of pictures shown in the panel |
 | `servers.json` | The servers `/servers` last saw |
 | `config.json` | Your settings, written by the Config tab |
+| `welcome.json` | Whether the first-run welcome still shows |
 | `rules/CLAUDE.md`, `roles/chat.md`, `roles/work.md` | Your own copies of the three texts, written only when you edit or save one in the Config tab; Reset moves your copy aside as `.old` |
 | `log.md` | The mod's own log |
 
@@ -166,14 +167,14 @@ Each by name with its arguments in the call: `lsof` and `ps` to list servers for
 
 ### What it does not run by itself
 
-`bin/admin` and `bin/secret` are shell scripts the work rules point agents to: an agent runs one with Bash when a step needs an admin command or a key, and it asks you in a macOS dialog (`osascript`), keeps the value in this Mac's keychain (`security`), and runs only the command it is handed, on this Mac or over SSH to the host named. No box asks about each command: once a Mac's password is kept, `bin/admin` runs whatever command an agent hands it as root on that Mac. The key itself is asked for at that moment and never read from a file. `workflows/rounds.js` is a workflow script the chat starts through the Workflow tool as `claudopus:rounds`. `onboard/` (a Python script and a brief) is a by-hand way to load old chats into the memory; nothing in the mod runs it.
+`bin/admin` and `bin/secret` are shell scripts the work rules point agents to: an agent runs one with Bash when a step needs an admin command or a key, and it asks you in a macOS dialog (`osascript`), keeps the value in this Mac's keychain (`security`), and runs only the command it is handed, on this Mac or over SSH to the host named. No box asks about each command: once a Mac's password is kept, `bin/admin` runs whatever command an agent hands it as root on that Mac. The key itself is asked for at that moment and never read from a file. `workflows/rounds.js` is a workflow script the chat starts through the Workflow tool as `claudopus:rounds`. `onboard/` (a Python script and a brief) loads old chats into the memory: it runs only when you press Index my old chats on the welcome a new install shows once, which asks the chat to run it as background work.
 
 ### Files that will be held for a reviewer, and why they stay
 
 - The hooks module itself: the panel, the cards and every behaviour above are this code.
 - `bin/admin` and `bin/secret`: the only way work gets an admin command or a key without the value passing through a chat.
 - `workflows/rounds.js`: the maker-and-checker workflow the chat starts.
-- `onboard/extract.py`: kept for people who want their old chats in the memory; it runs only by hand.
+- `onboard/extract.py`: reads your past chats under `~/.claude/projects` into the memory; it runs only after you press Index my old chats.
 - `sounds/ready.wav`, `art/panel.gif` and the icon: the chime, the README's picture and the listing icon.
 
 ## Licence

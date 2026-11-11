@@ -1201,6 +1201,62 @@ const sendForPerson = async ($: EngineInterface, text: string) => {
   await $.prompt.submit({ text }).catch(err => log($, `message from a report not sent: ${String(err)}`))
 }
 
+// ---- First run: a welcome at the top of the panel, once, for someone the mod has never set up ----
+
+// welcome.json in the memory folder: the session the welcome first showed in, and whether it still shows
+type Welcome = { shownIn: string; isOpen: boolean }
+let isWelcomeOpen = false
+// Decided at a session's start: a new person (no index.md yet) gets the welcome, which stays through reloads of that session
+// and is put away when the next session starts or a button on it is pressed; anyone already set up never sees it
+const welcomeAt = (isNew: boolean, stored: Welcome | undefined, sessionId: string): Welcome | undefined => {
+  if (isNew) return { shownIn: sessionId, isOpen: true }
+  if (!stored?.isOpen) return stored
+  return stored.shownIn === sessionId ? stored : { ...stored, isOpen: false }
+}
+const readWelcome = ($: EngineInterface) =>
+  readOr($, `${dir}/welcome.json`)
+    .then(text => (text ? (JSON.parse(text) as Welcome) : undefined))
+    .catch(() => undefined)
+const settleWelcome = async ($: EngineInterface, isNew: boolean, sessionId: string) => {
+  const stored = await readWelcome($)
+  const next = welcomeAt(isNew, stored, sessionId)
+  if (next && JSON.stringify(next) !== JSON.stringify(stored)) await $.fs.write(`${dir}/welcome.json`, `${JSON.stringify(next)}\n`)
+  isWelcomeOpen = Boolean(next?.isOpen)
+}
+const closeWelcome = async ($: EngineInterface) => {
+  isWelcomeOpen = false
+  presses += 1
+  const stored = await readWelcome($)
+  await $.fs.write(`${dir}/welcome.json`, `${JSON.stringify({ shownIn: stored?.shownIn ?? '', isOpen: false })}\n`)
+  await redraw($)
+}
+// What the chat is sent when the person presses Index my old chats: the two onboarding steps the mod ships, then the subjects recorded
+const indexAsk = (root: string) =>
+  [
+    'Index my old chats (pressed in the Claudopus panel).',
+    `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it saves each past chat's messages under ${dir}/words and writes digests of them, one or more per project, into ${dir}/onboard.`,
+    'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
+    `Then for each digest file it wrote, have a helper follow ${root}/onboard/reader.md on it, writing its streams to ${dir}/onboard/streams/<the digest's file name>.`,
+    'Last, record each stream found as a subject with the `update` tool (its name, folder, state and summary, and its section as the brief), and report the subjects found in a few lines.',
+  ].join(' ')
+const indexOldChats = async ($: EngineInterface) => {
+  await closeWelcome($)
+  await sendForPerson($, indexAsk($.plugin.root))
+}
+const welcomeCard = ($: EngineInterface, ui: Ui) => (
+  <ui.Box key="welcome" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+    <ui.Text bold wrap="wrap">Welcome to Claudopus</ui.Text>
+    <ui.Text wrap="wrap">Each message you send in a chat goes to background work, and its card shows here while it runs.</ui.Text>
+    <ui.Text wrap="wrap">Closed this panel? Type /claudopus to bring it back.</ui.Text>
+    <ui.Text bold wrap="wrap">Bring in your old chats</ui.Text>
+    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on this Mac into its memory, so it knows what you were working on. It runs as background work and takes a few minutes.</ui.Text>
+    <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
+      <ui.Button key={`welcome-index-${presses}`} label="Index my old chats" onPress={() => void indexOldChats($).catch(err => log($, `old chats not indexed: ${String(err)}`))} />
+      <ui.Button key={`welcome-later-${presses}`} label="Not now" plain dimColor onPress={() => void closeWelcome($).catch(err => log($, `welcome not put away: ${String(err)}`))} />
+    </ui.Box>
+  </ui.Box>
+)
+
 const showFile = async ($: EngineInterface, path: string) => {
   const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `picture not opened: ${opened.stderr}`)
@@ -2659,7 +2715,10 @@ export const register: Register = on => {
     await $.command.register({ name: 'servers', description: 'Show the servers running on this Mac, with a link to each and which chat started it' })
     void $.ui.close({ id: OLD_PANE }).catch(() => undefined)
 
-    if (!(await $.fs.exists(`${dir}/index.md`))) await $.fs.write(`${dir}/index.md`, INDEX_HEAD)
+    // Someone the mod has never set up has no index.md yet: they get the welcome, once
+    const isNew = !(await $.fs.exists(`${dir}/index.md`))
+    if (isNew) await $.fs.write(`${dir}/index.md`, INDEX_HEAD)
+    await settleWelcome($, isNew, id).catch(err => log($, `welcome not settled: ${String(err)}`))
     await measure($).catch(() => undefined)
     await loadFinished($).catch(err => log($, `finished work not read: ${String(err)}`))
     void recoverEnded($).catch(err => log($, `ended work not read back: ${String(err)}`))
@@ -2668,7 +2727,7 @@ export const register: Register = on => {
     // Work that is running when the chat loads brings the panel up, if it has never opened
     // and comes back after a reload of the mod (which closes it) if it was open or work is running
     const isRunning = (await read($, todos)).some(one => !one.parentId && one.status === 'working')
-    if (isRunning) await openList($)
+    if (isRunning || isWelcomeOpen) await openList($)
     if (((await read($, paneShown)) || isRunning) && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST))
       await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => log($, `panel not opened again: ${String(err)}`))
     $.clock.every(FOLLOW_EVERY, () => follow($).catch(err => log($, `work not followed: ${String(err)}`)))
@@ -3878,6 +3937,7 @@ export const register: Register = on => {
             </Box>
           </Box>
         ) : null}
+        {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
           ? big(alone, talked?.lines)
           : // Work that needs the person's hands comes first
