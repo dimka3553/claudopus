@@ -123,8 +123,8 @@ Delete the folder to start over. The mod writes nowhere else: no build, start-up
 
 ## Privacy
 
-- **What it keeps.** Only the files listed under [Memory](#memory), in `~/.claude/claudopus` on your own machine. Delete the folder and they are gone.
-- **What it sends.** After each reply, one short call through Claude Code sends the start of your message and of the reply to Claude, to title the chat and note what was asked and done. Nothing else leaves your machine because of the mod: no telemetry, no other network calls.
+- **What it keeps.** The files listed under [Memory](#memory), in `~/.claude/claudopus` on your own machine; delete the folder and they are gone. Passwords and keys you type in its boxes are kept in this Mac's keychain instead, and stay there until you remove them.
+- **What it sends.** Only to Claude, through Claude Code: the texts it adds to prompts (its rules, your subjects, briefs and results not yet passed on), and after each reply one short call with the start of your message and of the reply, to title the chat and note what was asked and done. No telemetry, no other network calls of its own.
 - **Keys and passwords.** What you type in its password and key boxes stays in this Mac's keychain and is used only for the commands work runs, on this Mac or over SSH to the host named. [What you see](#what-you-see) says what that allows and where the hiding stops.
 
 The full account is below.
