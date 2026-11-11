@@ -28,7 +28,7 @@ const PRINCIPLES = '# How I work with Claude\n\n1. My words are the spec.\n'
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; app?: { noSurface: boolean } } = {}) => {
   const files = new Map<string, string>()
   const titles: string[] = []
   const compacts: (string | undefined)[] = []
@@ -48,6 +48,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const stepped: string[] = []
   const played: string[] = []
   const notified: string[] = []
+  // What was handed to osascript
+  const osa: string[][] = []
   prompts.length = 0
   let spawned = 0
   mock.env(on, { HOME })
@@ -127,6 +129,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   // What the Mac answers: a dev server on 3100 started by a chat, and the system's own listener, which is not the person's
   on('process.run', (_, e) => {
     const [tool, ...rest] = e.argv
+    if (tool === 'osascript') osa.push([...e.argv])
     if (tool === 'kill') killed.push(String(rest[0]))
     // A copy the mod makes of a file
     if (tool === 'cp') (copied.push(String(rest[2])), files.set(String(rest[2]), files.get(String(rest[1])) ?? ''))
@@ -180,7 +183,9 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     played.push(String((e.clip as { asset?: string }).asset))
     return { value: undefined }
   })
+  // The app takes it, or, as the desktop app does today, takes none from a mod
   on('ui.notify', (_, e) => {
+    if (options.app?.noSurface) return { value: { isSent: false, reason: 'no-surface' } } as never
     notified.push(`${e.title ?? ''} | ${e.text}`)
     return { value: { isSent: true, channel: 'client' } } as never
   })
@@ -190,7 +195,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -1049,7 +1054,9 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
 })
 
 test('work that is ready plays one sound and raises one notification; helpers, a second report, a Stop press and a reload make none; stopped work says so silently', async ($, on) => {
-  const { clock, played, notified, files } = world(on)
+  // Whether the app takes notifications from a mod
+  const app = { noSurface: false }
+  const { clock, played, notified, files, osa } = world(on, { app })
   await $.session.start(start)
   const end = (agentId: string, turnId: string, answer = 'Done.', extra = {}) => $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId, ...extra } as never)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
@@ -1115,19 +1122,28 @@ test('work that is ready plays one sound and raises one notification; helpers, a
   expect(notified.at(-1)).toBe('Draw the ears | The ears are drawn.')
   expect(played).toHaveLength(4)
 
+  // Where the app takes no notification from a mod, this Mac's own Notification Centre is told
+  app.noSurface = true
+  await $.agent.spawn({ ...spawn, description: 'Draw the cheeks', prompt: 'draw the cheeks' } as never)
+  await end('a9', 't11', 'The cheeks are drawn.')
+  await clock.advance(1_000)
+  expect(osa.at(-1)).toEqual(['osascript', '-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', 'Draw the cheeks', 'The cheeks are drawn.'])
+  app.noSurface = false
+
   // config.json switches each off
   files.set(`${MEMORY}/config.json`, JSON.stringify({ sound: false }))
   await $.agent.spawn({ ...spawn, description: 'Draw the brows', prompt: 'draw the brows' } as never)
-  await end('a9', 't9')
-  await clock.advance(1_000)
-  expect(played).toHaveLength(4)
-  expect(notified).toHaveLength(6)
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false }))
-  await $.agent.spawn({ ...spawn, description: 'Draw the lips', prompt: 'draw the lips' } as never)
-  await end('a10', 't10')
+  await end('a10', 't9')
   await clock.advance(1_000)
   expect(played).toHaveLength(5)
   expect(notified).toHaveLength(6)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false }))
+  await $.agent.spawn({ ...spawn, description: 'Draw the lips', prompt: 'draw the lips' } as never)
+  await end('a11', 't10')
+  await clock.advance(1_000)
+  expect(played).toHaveLength(6)
+  expect(notified).toHaveLength(6)
+  expect(osa).toHaveLength(1)
 })
 
 test('work the engine runs is listed even when the mod never saw it start, and work it reports as failed leaves the panel', async ($, on) => {

@@ -2049,7 +2049,13 @@ const announce = async ($: EngineInterface) => {
   const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} pieces of work are ready` : `${items.length} pieces of work ended`
   const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${one.isDone ? 'ready' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
   const sent = await $.ui.notify(text, { title, key: `ready-${ids.map(one => one.id).join('-')}`.slice(0, 200) }).catch(err => ({ isSent: false as const, reason: String(err) }))
-  void log($, `ready: ${title} — ${sent.isSent ? `notified through ${sent.channel}` : `not notified (${sent.reason})`}`)
+  if (sent.isSent || sent.reason === 'disabled' || sent.reason === 'refused') return void log($, `ready: ${title} — ${sent.isSent ? `notified through ${sent.channel}` : `not notified (${sent.reason})`}`)
+  // The desktop app takes no notification from a mod yet (no-surface): this Mac's own Notification Centre is told instead.
+  // Elsewhere osascript is missing and nothing is shown
+  const mac = await $.process
+    .run(['osascript', '-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', title, text])
+    .catch(err => ({ exitCode: -1, stderr: String(err) }))
+  void log($, `ready: ${title} — app said ${sent.reason}; ${mac.exitCode === 0 ? 'notified through macOS' : `macOS notification failed: ${mac.stderr.slice(0, 120)}`}`)
 }
 
 export const register: Register = on => {
