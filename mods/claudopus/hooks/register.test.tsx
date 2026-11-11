@@ -28,7 +28,7 @@ const PRINCIPLES = '# How I work with Claude\n\n1. My words are the spec.\n'
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string } } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean } = {}) => {
   const files = new Map<string, string>()
   const titles: string[] = []
   const compacts: (string | undefined)[] = []
@@ -46,6 +46,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const submitted: string[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
+  const played: string[] = []
+  const notified: string[] = []
   prompts.length = 0
   let spawned = 0
   mock.env(on, { HOME })
@@ -56,6 +58,9 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return <Text>the engine's own</Text>
   })
   on('fs.read', (_, e) => {
+    // The octopus drawings, each an SVG naming its file, when a test asks for them
+    const drawing = options.art ? /\/art\/([\w-]+)\.svg$/.exec(e.path)?.[1] : undefined
+    if (drawing) return { value: `<svg xmlns="http://www.w3.org/2000/svg"><title>${drawing}</title></svg>` }
     if (e.path.endsWith('roles/chat.md')) return { value: 'CHAT ROLE' }
     if (e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE' }
     if (e.path.endsWith('rules/CLAUDE.md')) return { value: PRINCIPLES }
@@ -170,13 +175,22 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { text: e.text, context: e.context }
   })
   on('turn.complete', (_, e) => ({ text: e.answer }))
+  // The sounds played and the notifications raised, each as "title | text"
+  on('audio.play', (_, e) => {
+    played.push(String((e.clip as { asset?: string }).asset))
+    return { value: undefined }
+  })
+  on('ui.notify', (_, e) => {
+    notified.push(`${e.title ?? ''} | ${e.text}`)
+    return { value: { isSent: true, channel: 'client' } } as never
+  })
   on('tool.describe', (_, e) => ({ description: e.description }))
   on('session.compact', (_, e) => {
     compacts.push(e.instructions)
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -966,6 +980,156 @@ test('work that ends pauses in its place for two seconds: two at once, one ended
   await again.unmount()
 })
 
+test('the octopus turns happy and green when work finishes, for its pause, then goes back to work or to rest; stopped work, a closed panel and a reload leave none behind', async ($, on) => {
+  const { clock } = world(on, { art: true })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  const end = (agentId: string, turnId: string) => $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId } as never)
+  // The octopus drawings a view shows, by the file each came from
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect(await drawn(pane)).toEqual(['working'])
+  expect(await drawn(band)).toEqual(['working-small'])
+
+  // One finishes while another works: both octopuses are happy, the band still says what the other is doing
+  await clock.advance(400)
+  await end('a1', 't1')
+  expect(await drawn(pane)).toEqual(['happy'])
+  expect(await drawn(band)).toEqual(['happy-small'])
+  expect(await band.find({ type: 'Text', text: /Check the ears/ })).toBeDefined()
+  // The other finishes in the pause: the same drawing stays, with nothing else running, and the band stays for the pause
+  await clock.advance(1_000)
+  await end('a2', 't2')
+  expect(await drawn(pane)).toEqual(['happy'])
+  expect(await drawn(band)).toEqual(['happy-small'])
+  expect((await band.find({ type: 'Text', text: '✓ Finished' }))?.props.dimColor).toBe(true)
+  // The first pause ends but the second has not: still happy; once both are over, at rest and the band gone
+  await clock.advance(1_100)
+  expect(await drawn(pane)).toEqual(['happy'])
+  await clock.advance(1_000)
+  expect(await drawn(pane)).toEqual(['mark'])
+  expect(await band.find({ type: 'Text', text: "the engine's own" })).toBeDefined()
+
+  // Work finishing while another still runs goes back to work after its pause
+  await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Draw the mouth', prompt: 'draw the mouth' } as never)
+  await end('a3', 't3')
+  expect(await drawn(pane)).toEqual(['happy'])
+  await clock.advance(2_100)
+  expect(await drawn(pane)).toEqual(['working'])
+  expect(await drawn(band)).toEqual(['working-small'])
+
+  // Stopped work makes no one happy
+  await pane.press({ key: 'stop-a4' })
+  expect(await pane.find({ type: 'Text', text: 'Stopped' })).toBeDefined()
+  expect(await drawn(pane)).toEqual(['mark'])
+  expect(await band.find({ type: 'Text', text: "the engine's own" })).toBeDefined()
+  await clock.advance(2_100)
+
+  // Work that finishes while the panel is closed leaves no happy octopus when it opens after the pause
+  await pane.unmount()
+  await band.unmount()
+  await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' } as never)
+  await end('a5', 't5')
+  await clock.advance(2_500)
+  const again = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await drawn(again)).toEqual(['mark'])
+
+  // Nor after a reload in the pause: the pause still ends, and the octopus is at rest
+  await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw the nose' } as never)
+  await end('a6', 't6')
+  expect(await drawn(again)).toEqual(['happy'])
+  await $.session.start(start)
+  await clock.advance(2_100)
+  expect(await drawn(again)).toEqual(['mark'])
+  await again.unmount()
+})
+
+test('work that is ready plays one sound and raises one notification; helpers, a second report, a Stop press and a reload make none; stopped work says so silently', async ($, on) => {
+  const { clock, played, notified, files } = world(on)
+  await $.session.start(start)
+  const end = (agentId: string, turnId: string, answer = 'Done.', extra = {}) => $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId, ...extra } as never)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  // Its helper ends first: nothing
+  await $.agent.spawn({ ...spawn, description: 'Measure the nose', prompt: 'measure', parentAgentId: 'a1' } as never)
+  await end('a2', 'h1')
+  await clock.advance(1_000)
+  expect(played).toEqual([])
+  expect(notified).toEqual([])
+
+  // The work finishes: one sound, one line with its title and the first words of its answer
+  await end('a1', 't1', '**The nose is fixed.** Both nostrils now match, and the tests pass.\n\nMore below.')
+  expect(played).toEqual([])
+  await clock.advance(1_000)
+  expect(played).toEqual(['sounds/ready.wav'])
+  expect(notified).toEqual(['Fix the nose | The nose is fixed.'])
+
+  // Sent on and ending again within seconds: no second sound or notification
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'One more look.' } as never)
+  await end('a1', 't2')
+  await clock.advance(1_000)
+  expect(played).toHaveLength(1)
+  expect(notified).toHaveLength(1)
+
+  // Two that finish together: one sound and one notification naming both; what waits on the person comes first
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w1', agentId: 'a3', items: ['Do you want the left ear bigger?'] } as never)
+  await end('a3', 't3')
+  await clock.advance(300)
+  await end('a4', 't4')
+  await clock.advance(1_000)
+  expect(played).toHaveLength(2)
+  expect(notified.at(-1)).toBe('2 pieces of work are ready | Check the ears: ready · Draw the eyes: ready')
+  await $.agent.spawn({ ...spawn, description: 'Check the chin', prompt: 'check the chin' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', agentId: 'a5', items: ['Do you want the chin rounder?'] } as never)
+  await end('a5', 't5')
+  await clock.advance(1_000)
+  expect(notified.at(-1)).toBe('Check the chin | Waits on the person: Do you want the chin rounder?')
+
+  // Failed work: a notification that says so, and no sound
+  await $.agent.spawn({ ...spawn, description: 'Paint the hair', prompt: 'paint the hair' } as never)
+  await end('a6', 't6', '', { reason: 'error' })
+  await clock.advance(1_000)
+  expect(played).toHaveLength(3)
+  expect(notified.at(-1)).toBe('Paint the hair | Stopped by an error.')
+
+  // Work the person stops with its Stop button: nothing
+  await $.agent.spawn({ ...spawn, description: 'Draw the mouth', prompt: 'draw the mouth' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pane.press({ key: 'stop-a7' })
+  await clock.advance(1_000)
+  await pane.unmount()
+  expect(notified).toHaveLength(4)
+
+  // A reload announces nothing that ended before it, and goes on announcing what ends after it
+  await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' } as never)
+  await $.session.start(start)
+  await clock.advance(1_000)
+  expect(notified).toHaveLength(4)
+  await end('a8', 't8', 'The ears are drawn.')
+  await clock.advance(1_000)
+  expect(notified.at(-1)).toBe('Draw the ears | The ears are drawn.')
+  expect(played).toHaveLength(4)
+
+  // config.json switches each off
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ sound: false }))
+  await $.agent.spawn({ ...spawn, description: 'Draw the brows', prompt: 'draw the brows' } as never)
+  await end('a9', 't9')
+  await clock.advance(1_000)
+  expect(played).toHaveLength(4)
+  expect(notified).toHaveLength(6)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false }))
+  await $.agent.spawn({ ...spawn, description: 'Draw the lips', prompt: 'draw the lips' } as never)
+  await end('a10', 't10')
+  await clock.advance(1_000)
+  expect(played).toHaveLength(5)
+  expect(notified).toHaveLength(6)
+})
+
 test('work the engine runs is listed even when the mod never saw it start, and work it reports as failed leaves the panel', async ($, on) => {
   const agents: Record<string, string> = { a7: 'running' }
   const kinds: Record<string, string> = {}
@@ -1115,20 +1279,22 @@ test('finished work leaves a report for good: its pictures copied, listed under 
 
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   // On the Claudopus pane the reports are one small button, marked while one waits on the person
-  expect(await pane.find({ type: 'Text', text: /^Artifacts$/ })).toBeUndefined()
-  expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Artifacts 1')
+  expect(await pane.find({ type: 'Text', text: /^Results$/ })).toBeUndefined()
+  expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Results 1')
   expect((await pane.find({ type: 'Text', text: /^●$/ }))?.props.color).toBe('#8A63F0')
   // Pressed, it opens the list as a pane of its own; the Claudopus pane stays as it was
   await pressed(pane, 'reports-open')
   expect(opened).toContain('reports')
-  expect(await pane.find({ type: 'Text', text: /^Artifacts$/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Results$/ })).toBeUndefined()
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
-  expect((await list.find({ type: 'Text', text: /^Artifacts$/ }))?.props.bold).toBe(true)
-  expect((await list.find({ type: 'Text', text: /^1 · 1 waiting on you$/ }))).toBeDefined()
-  // A row under its subject: the finding itself, not the title again, when, and the mark
-  expect((await list.find({ type: 'Text', text: /^Weekly revenue$/ }))?.props.bold).toBe(true)
-  expect((await keyed(list, `report-${folder.split('/').pop()}`))?.props.label).toBe('Revenue rose 12% this week to $4,210.')
-  expect(await list.find({ type: 'Text', text: /^\d\d:\d\d · waiting on you$/ })).toBeDefined()
+  expect((await list.find({ type: 'Text', text: /^Results$/ }))?.props.bold).toBe(true)
+  expect((await list.find({ type: 'Text', text: /^Waiting on you$/ }))?.props.bold).toBe(true)
+  // One line a row: its title, when, the mark that it waits, and Archive; nothing under it
+  expect((await keyed(list, `report-${folder.split('/').pop()}`))?.props.label).toBe('Weekly revenue')
+  expect(await list.find({ type: 'Text', text: /^\d\d:\d\d$/ })).toBeDefined()
+  expect((await list.find({ type: 'Text', text: /^●$/ }))?.props.color).toBe('#8A63F0')
+  expect(await list.find({ type: 'Text', text: /Revenue rose/ })).toBeUndefined()
+  expect((await keyed(list, `archive-${folder.split('/').pop()}`))?.props.label).toBe('Archive')
 
   // A report opens as a pane of its own, named after it: the question first, then the finding, the pictures, the report, carry on
   await pressed(list, `report-${folder.split('/').pop()}`)
@@ -1147,24 +1313,24 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
   await pressed(one, 'report-say-0-Yes')
   await until(async () => submitted.length > 0 || undefined)
-  expect(submitted[0]).toContain('Yes. That answers what the artifact "Weekly revenue"')
+  expect(submitted[0]).toContain('Yes. That answers what the result "Weekly revenue"')
   expect(submitted[0]).toContain('Shall I send it to the team?')
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
   expect(JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting).toEqual([{ text: 'Shall I send it to the team?', answer: 'Yes' }, { text: 'Post it in the channel too?' }])
-  expect(await list.find({ type: 'Text', text: /waiting on you/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeDefined()
   await until(async () => ((await one.find({ type: 'Text', text: 'Shall I send it to the team?' })) ? undefined : true))
   expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
   // Not now clears the other and sends nothing
   await pressed(one, 'report-say-1-Not now')
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[1]?.answer ? true : undefined))
   expect(submitted).toHaveLength(1)
-  await until(async () => ((await list.find({ type: 'Text', text: /waiting on you/ })) ? undefined : true))
-  expect(await list.find({ type: 'Text', text: /waiting on you/ })).toBeUndefined()
+  await until(async () => ((await list.find({ type: 'Text', text: /^Waiting on you$/ })) ? undefined : true))
+  expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeUndefined()
   expect(await one.find({ type: 'Text', text: /^Waiting on you$/ })).toBeUndefined()
 
   // The chat is told of the reports with each message, and reads one itself to answer from it
   const next = await $.prompt.submit({ text: 'what was revenue again', wait: false, origin: composer })
-  expect(next.context?.join('\n')).toContain('Artifacts kept')
+  expect(next.context?.join('\n')).toContain('Results kept')
   expect(next.context?.join('\n')).toContain(`${folder}/report.md`)
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: `${folder}/report.md` } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r2', file_path: '/repo/secrets.md' } as never)).deny).toContain('Start a fresh agent')
@@ -1195,24 +1361,19 @@ test('work started from a report keeps its own report linked to it, beside the o
   // The older one is kept as it was
   expect(files.get(`${MEMORY}/reports/${old.id}/report.md`)).toBe('Revenue was flat.\n')
 
-  // The same work reporting again is one entry, its earlier round folded under it
+  // The same work reporting again, and the report it started from, are one row: the newest
   await $.turn.complete({ agentId: 'a1', answer: `Revenue rose 6% once the refunds are counted.\n\n${'Refunds are in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
   await clock.advance(70_000)
   await until(async () => ([...files.keys()].filter(path => path.endsWith('/meta.json')).length === 3 ? true : undefined))
 
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
-  // One block for the subject, its two entries in it, the newest first
-  expect((await list.findAll({ type: 'Text' })).filter(text => text.text === 'Revenue')).toHaveLength(1)
   const rows = (await list.findAll({ type: 'Button' })).filter(one => /^report-\d{8}/.test(one.key ?? ''))
-  expect(rows.map(one => one.props.label)).toEqual(['Revenue again', 'Revenue was flat.'])
-  expect(await list.find({ type: 'Text', text: /^Revenue rose 6% once the refunds are counted\.$/ })).toBeDefined()
-  expect((await list.find({ type: 'Text', text: /rounds$/ }))?.text).toMatch(/^\d\d:\d\d · 2 rounds$/)
-  const fold = (await list.findAll({ type: 'Button' })).find(one => /^rounds-/.test(one.key ?? ''))
-  expect(fold?.props.label).toBe('▸ 1 earlier round')
-  await list.press({ key: fold?.key ?? '' })
-  await until(async () => ((await list.findAll({ type: 'Button' })).filter(one => /^report-\d{8}/.test(one.key ?? '')).length === 3 ? true : undefined))
-  const earlier = (await list.findAll({ type: 'Button' })).filter(one => /^report-\d{8}/.test(one.key ?? ''))[1]
-  expect(String(earlier?.props.label)).toMatch(/^\d\d:\d\d · Revenue rose 5% since the last look\.$/)
+  expect(rows.map(one => one.props.label)).toEqual(['Revenue again'])
+  expect((await list.find({ type: 'Text', text: /^Results$/ }))?.props.bold).toBe(true)
+  expect(await list.find({ type: 'Text', text: /^1$/ })).toBeDefined()
+  // No subject heading, no line under the row, no fold of rounds in the list
+  expect((await list.findAll({ type: 'Text' })).filter(text => text.text === 'Revenue' || /Revenue rose/.test(text.text))).toHaveLength(0)
+  expect((await list.findAll({ type: 'Button' })).some(one => /^rounds-/.test(one.key ?? ''))).toBe(false)
 
   // Opened, a report names what it started from and its other rounds; a fourth report pane closes the one opened longest ago
   const newest = (await list.findAll({ type: 'Button' })).filter(one => /^report-\d{8}/.test(one.key ?? ''))[0]
@@ -1251,7 +1412,9 @@ test('an older report waits by its one question, a report that only ends with a 
   }
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
-  expect(await list.find({ type: 'Text', text: /^3 · 2 waiting on you$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^3$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^2$/ })).toBeDefined()
   const told = (await $.prompt.submit({ text: 'what waits', wait: false, origin: composer })).context?.join('\n') ?? ''
   expect(told).toContain('waits on: Ship the old one?')
   expect(told).toContain('waits on: Make it public?')
@@ -1367,7 +1530,7 @@ test('a memory path in a reply opens in a tab of the mod on the desktop, never t
   expect(await until(async () => tabs.find(one => /^memory-streams-launch-md-\d+: Launch$/.test(one)))).toBeDefined()
 })
 
-test('an artifact archived with one press leaves the list, its tab, the count and the note, waits on nothing, keeps its text, and comes back from the folded Archived row', async ($, on) => {
+test('a result archived with one press leaves the list, its tab, the count and the note, waits on nothing, keeps its text, and comes back from the folded Archived row', async ($, on) => {
   const { files, closed } = world(on, { panes: ['claudopus', 'reports', 'report-b'] })
   const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [] }
   const reps = [
@@ -1383,7 +1546,8 @@ test('an artifact archived with one press leaves the list, its tab, the count an
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' } as never)
-  expect(await list.find({ type: 'Text', text: /^3 · 1 waiting on you$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^3$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeDefined()
 
   // From its tab: the tab closes, nothing in it waits, and the text stays as it was
   const tab = await $.ui.mount({ ...LIST, requestId: 'report-b', surface: 'desktop' } as never)
@@ -1392,7 +1556,7 @@ test('an artifact archived with one press leaves the list, its tab, the count an
   expect(JSON.parse(files.get(`${MEMORY}/reports/b/meta.json`) ?? '{}').archived).toBe(1_700_000_000_000)
   expect(files.get(`${MEMORY}/reports/b/report.md`)).toBe('A bot wave.\n')
   expect(await until(async () => list.find({ type: 'Text', text: /^2$/ }))).toBeDefined()
-  expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Artifacts 2')
+  expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Results 2')
   expect(await pane.find({ type: 'Text', text: '●' })).toBeUndefined()
 
   // From its row: every round of that work goes
@@ -1416,7 +1580,8 @@ test('an artifact archived with one press leaves the list, its tab, the count an
   expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▾ Archived 2')
   await pressed(list, 'unarchive-b')
   await until(async () => (JSON.parse(files.get(`${MEMORY}/reports/b/meta.json`) ?? '{}').archived ? undefined : true))
-  expect(await until(async () => list.find({ type: 'Text', text: /^2 · 1 waiting on you$/ }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: /^Waiting on you$/ }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^2$/ })).toBeDefined()
   expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▾ Archived 1')
 
   // An archived one opened from the row says so, with Bring back in place of Archive
@@ -1451,7 +1616,7 @@ phase('Make')`
 const journal = (...lines: object[]) => lines.map(one => JSON.stringify(one)).join('\n')
 
 test('a workflow the chat starts is one blue card: how many agents, its rounds as squares with the step being run, the last round checked, nothing cut at any width, and Details with each round and agent chat; ended, it is under Finished', async ($, on) => {
-  const { files, tabs, clock } = world(on, { panes: ['claudopus'] })
+  const { files, tabs, clock, played, notified } = world(on, { panes: ['claudopus'], art: true })
   await $.session.start(start)
   await $.prompt.submit({ text: 'make the roman numerals right', wait: false, origin: composer })
   // The chat's own thread starts it: a workflow is delegation, as an agent is
@@ -1553,11 +1718,99 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeDefined()
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect(await pane.find({ type: 'Button', key: 'flow-stop-wf_1' })).toBeUndefined()
+  // A workflow that passed makes the octopus happy for its pause too, then it rests
+  const octopus = async () => (await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).find(alt => /^Claudopus/.test(alt))
+  expect(await octopus()).toBe('Claudopus, work finished')
   expect((await pane.findAll({ type: 'Button' })).some(b => /Finished/.test(String(b.props.label)))).toBe(false)
   await clock.advance(2_100)
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeUndefined()
+  expect(await octopus()).toBe('Claudopus')
   await pressed(pane, 'finished-fold')
   expect(await until(async () => pane.find({ type: 'Text', text: /^Finished · Workflow/ }))).toBeDefined()
   expect(JSON.parse(files.get(`${MEMORY}/flows/wf_1.json`) ?? '{}').result).toBe('passed in 2 rounds')
+  // Its end was heard and told, as a piece of work's is
+  expect(played).toEqual(['sounds/ready.wav'])
+  expect(notified).toEqual(['Roman numerals | passed in 2 rounds'])
   await pane.unmount()
+})
+
+test('the results list is one line a row: what waits first, the five newest, the rest folded, rounds of one work as one row, archived and told as one', async ($, on) => {
+  const { files } = world(on, { panes: ['claudopus', 'reports'] })
+  const base = { chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'A long line that no row shows.' }
+  const at = (n: number) => 1_700_000_000_000 - n * 60_000
+  const reps = [
+    // A video in three rounds by three pieces of work, each started from the one before: the newest waits, the older waits are its to ask again
+    { ...base, id: 'v1', title: 'Explainer video', subject: 'Claude workflow', at: at(60), agent: 'w1', waiting: [{ text: 'Keep the first cut?' }] },
+    { ...base, id: 'v2', title: 'Video second cut', subject: 'Claude workflow', at: at(40), agent: 'w2', from: 'v1', waiting: [{ text: 'Keep the second cut?' }] },
+    { ...base, id: 'v3', title: 'Video third cut', subject: 'Claude workflow', at: at(20), agent: 'w3', from: 'v2', waiting: [{ text: 'Keep the third cut?' }] },
+    // Two looks on one subject whose titles lead with it
+    { ...base, id: 'i1', title: 'Old-chat index: first', subject: 'Old-chat index', at: at(300), agent: 'w4' },
+    { ...base, id: 'i2', title: 'Old-chat index: second', subject: 'Old-chat index', at: at(290), agent: 'w5' },
+    // Eight more on one broad subject, none joined
+    ...Array.from({ length: 8 }, (_, n) => ({ ...base, id: `p${n}`, title: `Panel change ${n}`, subject: 'Claude workflow', at: at(100 + n), agent: `x${n}` })),
+  ]
+  for (const r of reps) {
+    files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify(r))
+    files.set(`${MEMORY}/reports/${r.id}/report.md`, `${r.gist}\n`)
+  }
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Results', bodyColumns: 80 }, surface: 'desktop' } as never)
+  const titles = async () => (await list.findAll({ type: 'Button' })).filter(one => /^report-/.test(one.key ?? '')).map(one => String(one.props.label))
+  // 13 reports are 10 rows: the video one, the index one, eight panel changes
+  expect(await list.find({ type: 'Text', text: /^10$/ })).toBeDefined()
+  expect((await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)).toEqual(['Results', 'Waiting on you', 'Recent'])
+  expect(await titles()).toEqual(['Video third cut', 'Panel change 0', 'Panel change 1', 'Panel change 2', 'Panel change 3', 'Panel change 4'])
+  // Nothing under a title: no finding, no subject, no line saying it waits; one mark, the time, Archive
+  expect(await list.find({ type: 'Text', text: /long line|waiting on you|Claude workflow/ })).toBeUndefined()
+  expect((await list.findAll({ type: 'Text', text: /^●$/ })).length).toBe(1)
+  const rowBoxes = (await list.drawn()) as unknown as { props?: { key?: string; height?: number }; children?: unknown[] }
+  const heights: number[] = []
+  const walk = (n: unknown) => {
+    const one = n as { props?: { key?: string; height?: number }; children?: unknown[] }
+    if (one?.props?.key?.startsWith('entry-')) heights.push(one.props.height ?? 0)
+    for (const child of one?.children ?? []) walk(child)
+  }
+  walk(rowBoxes)
+  expect(heights).toEqual([1, 1, 1, 1, 1, 1])
+  // The rest is one row that unfolds
+  expect((await keyed(list, 'earlier-fold'))?.props.label).toBe('▸ Earlier 4')
+  await pressed(list, 'earlier-fold')
+  expect((await titles()).slice(6)).toEqual(['Panel change 5', 'Panel change 6', 'Panel change 7', 'Old-chat index: second'])
+
+  // The chat is told what waits now: the newest round's item, not the older rounds' asked again
+  const told = (await $.prompt.submit({ text: 'what waits', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(told).toContain('Keep the third cut?')
+  expect(told).not.toContain('Keep the first cut?')
+  expect(told).not.toContain('Keep the second cut?')
+
+  // Opened, its earlier rounds are listed inside it
+  const tab = await $.ui.mount({ ...LIST, requestId: 'report-v3', surface: 'desktop' } as never)
+  const kin = (await tab.findAll({ type: 'Button' })).map(one => String(one.props.label))
+  expect(kin.some(label => label.includes('Video second cut · this started from it'))).toBe(true)
+  expect(kin.some(label => label.includes('Explainer video · earlier round'))).toBe(true)
+
+  // Archived from its row, every round goes
+  await pressed(list, 'archive-v3')
+  await until(async () => (JSON.parse(files.get(`${MEMORY}/reports/v1/meta.json`) ?? '{}').archived ? true : undefined))
+  expect(['v1', 'v2', 'v3'].map(id => Boolean(JSON.parse(files.get(`${MEMORY}/reports/${id}/meta.json`) ?? '{}').archived))).toEqual([true, true, true])
+  expect(await until(async () => keyed(list, 'archived-fold'))).toBeDefined()
+  expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▸ Archived 1')
+})
+
+test('work whose brief names one result on what it is about is a round of that work; one naming several, or one on something else, is not', async ($, on) => {
+  const { files, clock } = world(on)
+  const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'Done.', agent: 'w0' }
+  for (const r of [{ ...base, id: '20261111-1853-explainer-video', title: 'Claudopus explainer video', at: 1 }, { ...base, id: '20261111-1700-logo', title: 'Draw the logo', at: 2 }]) (files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify(r)), files.set(`${MEMORY}/reports/${r.id}/report.md`, "Done.\n"))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the video clearer', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Video second cut', prompt: `Start from ${MEMORY}/reports/20261111-1853-explainer-video/report.md` } as never)
+  await $.agent.spawn({ ...spawn, description: 'Fix the panel', prompt: `Start from ${MEMORY}/reports/20261111-1853-explainer-video/report.md` } as never)
+  await $.agent.spawn({ ...spawn, description: 'Video and logo', prompt: `Read ${MEMORY}/reports/20261111-1853-explainer-video/report.md and ${MEMORY}/reports/20261111-1700-logo/report.md` } as never)
+  for (const id of ['a1', 'a2', 'a3']) await $.turn.complete({ agentId: id, answer: `Finished ${id}.\n\n${'It is in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: `t-${id}`, reason: 'answer' })
+  await clock.advance(10)
+  const metas = await until(async () => {
+    const all = [...files.entries()].filter(([path]) => path.endsWith('/meta.json')).map(([, text]) => JSON.parse(text) as { agent: string; from?: string })
+    return all.length === 5 ? all : undefined
+  })
+  expect(['a1', 'a2', 'a3'].map(id => metas?.find(one => one.agent === id)?.from ?? '')).toEqual(['20261111-1853-explainer-video', '', ''])
 })

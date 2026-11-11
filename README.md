@@ -28,7 +28,8 @@ That is all. Nothing has to be typed in each chat.
 - The panel opens beside the chat by itself the first time work starts in that chat. Each piece of work is a card with its to-dos and a line saying where it stands. If you close the panel it stays closed for that chat; `/claudopus` opens it again.
 - A short band above the prompt says what is being done right now.
 - A message about work that is already running goes to that work as a steer instead of starting new work.
-- When work finishes, the chat passes on its result, and the panel lists it under Finished. What the work left for you to read is listed under Artifacts.
+- When work finishes, the chat passes on its result, and the panel lists it under Finished. What the work left for you to read is listed under Results.
+- A finish plays a short quiet chime, and a notification names the work and the first words of its result, so you hear and see it when you are elsewhere.
 - `/servers` shows the local servers running on your machine and which chat started each.
 
 The mod also adds its author's working principles ([mods/claudopus/rules/CLAUDE.md](mods/claudopus/rules/CLAUDE.md)) to every chat. Read them before installing; they shape how Claude answers.
@@ -43,14 +44,18 @@ The chat picks a model for each piece of work: Opus for most, Sonnet for long le
 
 ## Settings
 
-The mod reads `~/.claude/claudopus/config.json` when a chat starts. Both keys are optional:
+The mod reads `~/.claude/claudopus/config.json`. Every key is optional:
 
 ```json
-{ "name": "Sam", "agents": true }
+{ "name": "Sam", "agents": true, "sound": true, "notifications": true }
 ```
 
 - `name`: what the agents call you. Left out, they say "the person".
 - `agents`: `false` stops the handing over; every chat then does its own work again.
+- `sound`: `false` silences the short chime played when work is ready.
+- `notifications`: `false` stops the notification that names work when it is ready, stopped or failed.
+
+`name` and `agents` are read when a chat starts; `sound` and `notifications` each time work ends.
 
 ## Turn it off
 

@@ -69,7 +69,7 @@ const NO_PAGES = /^(postgres|redis-server|mysqld|mongod)\b/
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'Answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any artifact by path, what done looks like). A message about work already listed is a steer: it goes to the agent that has that work instead, with SendMessage, in their words.'
+  'Answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). A message about work already listed is a steer: it goes to the agent that has that work instead, with SendMessage, in their words.'
 const REFUSED =
   'This chat\'s own thread does no work itself. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
 const NO_COPY =
@@ -317,6 +317,7 @@ const sync = async ($: EngineInterface) => {
     }
     return isChanged ? capped([...cards.values()]) : list
   })
+  await lookEnds($)
 }
 
 // Changes the to-do a piece of work belongs to; work the mod never saw start is looked up first, and a helper of unknown work changes nothing
@@ -336,10 +337,12 @@ const tell = ($: EngineInterface, id: string, text: string) =>
   $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] }, agentId: id }).catch(err => log($, `work ${id} not told: ${String(err)}`))
 
 const stop = async ($: EngineInterface, id: string) => {
+  if ((await read($, todos)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
   const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
-  if (r.deny) return log($, `work ${id} not stopped: ${r.deny}`)
+  if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
   const now = await $.clock.now()
   await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'stopped', now) : one)))
+  await lookEnds($)
 }
 
 // Moves running work to another model: its card names it at once, each step it sends from now on goes to it, and the work is
@@ -1033,14 +1036,16 @@ const markReport = ($: EngineInterface, r: Report, patch: Partial<Report> | ((st
 }
 
 // What the chat is told of with each message: the newest reports, so a question one answers is answered from it. One put away is
-// left out
-const reportsTold = (all: Report[], now: number, list = all.filter(r => !r.archived)) =>
-  list.length
-    ? `Artifacts kept (what finished work left for ${who()} to read or act on), newest first (title · subject · when · its file${list.some(isOpenQuestion) ? ' · what in it waits on them' : ''}):\n${list
+// left out, and an earlier round's open items are its newest round's to ask again
+const reportsTold = (all: Report[], now: number, list = all.filter(r => !r.archived), newest = newestOf(list)) => {
+  const waits = (r: Report) => newest.has(r.id) && isOpenQuestion(r)
+  return list.length
+    ? `Results kept (what finished work left for ${who()} to read or act on), newest first (title · subject · when · its file${list.some(waits) ? ' · what in it waits on them' : ''}):\n${list
         .slice(0, REPORTS_TOLD)
-        .map(r => `- ${[cut(r.title, 70), cut(r.subject, 40), `${dated(r.at, now)} (${ago(r.at, now)})`, `${reportPath(r)}/report.md`, isOpenQuestion(r) ? `waits on: ${openWaits(r).map(one => cut(one.text, 120)).join(' / ')}` : ''].filter(Boolean).join(' · ')}`)
+        .map(r => `- ${[cut(r.title, 70), cut(r.subject, 40), `${dated(r.at, now)} (${ago(r.at, now)})`, `${reportPath(r)}/report.md`, waits(r) ? `waits on: ${openWaits(r).map(one => cut(one.text, 120)).join(' / ')}` : ''].filter(Boolean).join(' · ')}`)
         .join('\n')}`
     : ''
+}
 
 // Sends the chat a message for the person, as if typed: it starts work as any message of theirs does
 const sendForPerson = async ($: EngineInterface, text: string) => {
@@ -1054,7 +1059,7 @@ const showFile = async ($: EngineInterface, path: string) => {
 }
 // Puts a line naming the report in the chat's box, for the person to finish and send; where there is no box, nothing is sent for them
 const carryOn = async ($: EngineInterface, r: Report, now: number) => {
-  const text = `Carry on from the artifact "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `
+  const text = `Carry on from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `
   // What the person had typed stays: the line goes after it
   const typed = (await $.prompt.read().catch(() => ({ text: '' }))).text
   const filled = await $.prompt.fill(typed.trim() ? { text: `\n${text}`, mode: 'append' } : { text, mode: 'replace' }).catch(() => ({ isFilled: false }))
@@ -1068,7 +1073,7 @@ const answerWait = async ($: EngineInterface, r: Report, index: number, said: 'Y
   // A second press before the answer is kept sends nothing more
   if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return
   answering.add(`${r.id}:${index}`)
-  if (said !== 'Not now') await sendForPerson($, `${said}. That answers what the artifact "${r.title}" (${dated(r.at, now)}) waits on me for: ${wait.text}\nThe artifact: ${reportPath(r)}/report.md`)
+  if (said !== 'Not now') await sendForPerson($, `${said}. That answers what the result "${r.title}" (${dated(r.at, now)}) waits on me for: ${wait.text}\nThe result: ${reportPath(r)}/report.md`)
   // Not now kept nowhere can be pressed again; a Yes or No already sent is not sent twice
   await markReport($, r, stored => ({ waiting: waitsOf(stored).map((one, at) => (at === index ? { ...one, answer: said } : one)) })).catch(err => {
     if (said === 'Not now') answering.delete(`${r.id}:${index}`)
@@ -1080,23 +1085,22 @@ const answerWait = async ($: EngineInterface, r: Report, index: number, said: 'Y
 // The list's pane; a report's pane is named after the report. At most this many reports are open as panes: opening one more
 // closes the one opened longest ago
 const REPORTS_PANE = 'reports'
-const REPORTS_TITLE = 'Artifacts'
+const REPORTS_TITLE = 'Results'
 const REPORT_PANES = 3
 // A pane's id is at most 64 letters, digits, '_' and '-': a longer one keeps its head and a mark of the whole, so two never meet
 const paneOf = (r: Report) => {
   const id = `report-${r.id.replace(/[^A-Za-z0-9_-]/g, '-')}`
   return id.length <= 64 ? id : `${id.slice(0, 52)}-${mark(r.id).replace(/\D/g, '').slice(-11)}`
 }
-// Which picture each open report shows, by its pane; which list entries have their earlier rounds unfolded
+// Which picture each open report shows, by its pane
 const pictureAt = new Map<string, number>()
-const unfolded = new Set<string>()
 const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
 // Opens a pane from a press, in front: the app leaves a pane already open where it is, behind another tab, so one open but not
 // shown is opened again
 const front = async ($: EngineInterface, id: string, title: string) => {
   const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown)
   // A tab open behind another is not shown, and opening it again would leave it behind: it is closed and opened again, which
-  // brings it to the front (seen in the app on a press of Artifacts and of one artifact)
+  // brings it to the front (seen in the app on a press of Results and of one result)
   const was = (await $.ui.panes()).find(pane => pane.id === id)
   if (was && !was.isShown) await $.ui.close({ id }).catch(() => undefined)
   await $.ui.open({ id, title, focus: true })
@@ -1133,7 +1137,7 @@ const openReport = ($: EngineInterface, id: string) => {
   })().catch(err => log($, `report ${id} not opened: ${String(err)}`))
 }
 
-// Puts an artifact away, or brings it back: its entry, every round of its work, leaves the list and the chat's note, nothing in it
+// Puts a result away, or brings it back: its entry, every round of its work, leaves the list and the chat's note, nothing in it
 // waits, and its open tabs close. The mark is kept beside each report; nothing is deleted or rewritten
 const archiving = new Set<string>()
 const archiveReport = ($: EngineInterface, r: Report, isArchived: boolean) => {
@@ -1143,10 +1147,11 @@ const archiveReport = ($: EngineInterface, r: Report, isArchived: boolean) => {
   presses += 1
   void (async () => {
     // A round already put away keeps when it was; a round that came after is put away with the rest
-    const rounds = (await read($, reports)).filter(one => (r.agent ? one.agent === r.agent : one.id === r.id) && Boolean(one.archived) !== isArchived)
+    const kept = (await read($, reports)).filter(one => Boolean(one.archived) !== isArchived)
+    const rounds = entriesOf(kept).find(entry => entry.some(one => one.id === r.id)) ?? []
     const now = await $.clock.now()
     // Each round is marked even when another's mark fails, so the press leaves as little half done as it can
-    for (const one of rounds) await markReport($, one, { archived: isArchived ? now : undefined }).catch(err => log($, `artifact ${one.id} not ${isArchived ? 'archived' : 'brought back'}: ${String(err)}`))
+    for (const one of rounds) await markReport($, one, { archived: isArchived ? now : undefined }).catch(err => log($, `result ${one.id} not ${isArchived ? 'archived' : 'brought back'}: ${String(err)}`))
     // One brought back is listed in its place, even one that came after the list was opened
     if (!isArchived && reportsListed.length) reportsListed =[...new Set([...reportsListed, ...rounds.map(one => one.id)])]
     if (isArchived) {
@@ -1154,7 +1159,7 @@ const archiveReport = ($: EngineInterface, r: Report, isArchived: boolean) => {
       for (const pane of (await $.ui.panes()).filter(one => tabs.has(one.id))) await $.ui.close({ id: pane.id }).catch(() => undefined)
     }
   })()
-    .catch(err => log($, `artifact ${r.id} not ${isArchived ? 'archived' : 'brought back'}: ${String(err)}`))
+    .catch(err => log($, `result ${r.id} not ${isArchived ? 'archived' : 'brought back'}: ${String(err)}`))
     .finally(() => (archiving.delete(entry), redraw($)))
 }
 
@@ -1219,7 +1224,7 @@ const memoryRead = async ($: EngineInterface, path: string) => {
   const entries = await $.fs.list(path).catch(() => [])
   return entries.length ? `# ${fileName(path)}\n\n${entries.map(one => `- [${one.name}](${memoryHref(`${path}/${one.name}`)})`).join('\n')}\n` : ''
 }
-// A memory link pressed: an artifact's own path opens that artifact's tab, any other file a tab of its own, named after its heading
+// A memory link pressed: a result's own path opens that result's tab, any other file a tab of its own, named after its heading
 const openMemory = ($: EngineInterface, path: string) => {
   presses += 1
   void (async () => {
@@ -1237,7 +1242,7 @@ const openMemory = ($: EngineInterface, path: string) => {
   })().catch(err => log($, `memory file ${path} not opened: ${String(err)}`))
 }
 
-// A piece of work's Details is a tab of its own, named after the work, beside the list, as an artifact is: closing it leaves the
+// A piece of work's Details is a tab of its own, named after the work, beside the list, as a result is: closing it leaves the
 // list as it was. A press on Details for work whose tab is open brings that tab to the front
 const WORK_PANE = 'work-'
 const workPaneOf = (id: string) => `${WORK_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
@@ -1278,11 +1283,33 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
 let reportsListed: string[] = []
 // A subject in letters the slug drops stands alone, by its id
 const subjectOf = (r: Report) => slug(r.subject || r.title) || r.id
-// One entry per piece of work: the same work reporting again is one entry, its newest report first, its earlier rounds after it.
-// A report brought in by hand is an entry of its own
-const entriesOf = (list: Report[]) => [...list.reduce((all, r) => all.set(r.agent || r.id, [...(all.get(r.agent || r.id) ?? []), r]), new Map<string, Report[]>()).values()]
-// The entries by subject, the subject with the newest report first
-const bySubject = (list: Report[]) => [...entriesOf(list).reduce((all, entry) => all.set(subjectOf(entry[0] as Report), [...(all.get(subjectOf(entry[0] as Report)) ?? []), entry]), new Map<string, Report[][]>()).values()]
+// One entry per piece of work, its newest report first and its earlier rounds after it. Rounds of one work are: the same work
+// reporting again; work started from a report (its `from`); and reports on one subject whose titles lead with that subject. A report
+// brought in by hand is an entry of its own unless one of these joins it
+const entriesOf = (list: Report[]) => {
+  const head = new Map(list.map(r => [r.id, r.id]))
+  const find = (id: string): string => {
+    const up = head.get(id) ?? id
+    return up === id ? id : find(up)
+  }
+  const join = (a: string, b: string) => {
+    const [x, y] = [find(a), find(b)]
+    if (x !== y) head.set(x, y)
+  }
+  const firsts = new Map<string, string>()
+  const by = (key: string, r: Report) => (firsts.has(key) ? join(r.id, firsts.get(key) as string) : firsts.set(key, r.id))
+  for (const r of list) {
+    if (r.agent) by(`agent:${r.agent}`, r)
+    if (r.from && head.has(r.from)) join(r.id, r.from)
+    const subject = slug(r.subject)
+    if (subject && (slug(r.title) === subject || slug(r.title).startsWith(`${subject}-`))) by(`subject:${subject}`, r)
+  }
+  return [...list.reduce((all, r) => all.set(find(r.id), [...(all.get(find(r.id)) ?? []), r]), new Map<string, Report[]>()).values()]
+}
+// What a report waits on now: an earlier round's open items were asked again, or not, by its newest round
+const newestOf = (list: Report[]) => new Set(entriesOf(list).map(entry => entry[0]?.id))
+// Words that say what a piece of work is about, for telling whether a brief that names a report goes on with that work
+const aboutWords = (text: string) => new Set(slug(text).split('-').filter(word => word.length >= 4 && !['with', 'from', 'that', 'this', 'into', 'your', 'what', 'when', 'work'].includes(word)))
 const openReports = async ($: EngineInterface) => {
   presses += 1
   reportsListed = (await read($, reports)).map(r => r.id)
@@ -1300,115 +1327,94 @@ const reportsButton = ($: EngineInterface, ui: Ui, all: Report[]) => {
   if (!list.length) return null
   return (
     <Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      {list.some(isOpenQuestion) ? <Text color={LIVE}>●</Text> : null}
-      <Button key={`reports-open-${presses}`} label={`Artifacts ${entriesOf(list).length}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
+      {entriesOf(list).some(entry => isOpenQuestion(entry[0] as Report)) ? <Text color={LIVE}>●</Text> : null}
+      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
     </Box>
   )
 }
 
-// The list: a heading with the count, then one block per subject, its date at the right. Each entry is a steady row of fixed height:
-// what it is about, its one-line finding, when, and a mark while it waits on the person, with Archive at its right. Earlier rounds
-// fold under their entry. Those put away are one folded row at the bottom, "Archived N", each with Bring back
+// The list, one line a row: the title, when, and Archive at its right, a mark while it waits on the person. First what waits on
+// the person, then the few newest, then the rest folded into one row, "Earlier N", and those put away into "Archived N". Rounds of
+// one work are one row, its newest; the earlier rounds are listed inside its tab
+const RECENT = 5
+let isEarlierOpen = false
 let isArchivedOpen = false
+// When, as short as it fits its place: the time today, the day this year, the year before that
+const when = (at: number, now: number) => (day(at, now) === day(now, now) ? time(at, now) : new Date(at).getFullYear() === new Date(now).getFullYear() ? day(at, now) : String(new Date(at).getFullYear()))
 const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, line: number) => {
   const { Box, Button, Text } = ui
   const list = all.filter(r => !r.archived)
   const gone = entriesOf(all.filter(r => r.archived))
   // A new round of an entry already listed shows in its place; a new entry waits
-  const agents = new Set(list.filter(r => reportsListed.includes(r.id) && r.agent).map(r => r.agent))
-  const shown = reportsListed.length ? list.filter(r => reportsListed.includes(r.id) || agents.has(r.agent)) : list
-  const fresh = entriesOf(list).length - entriesOf(shown).length
-  const waiting = entriesOf(shown).filter(entry => isOpenQuestion(entry[0] as Report)).length
+  const shown = reportsListed.length ? entriesOf(list).filter(entry => entry.some(r => reportsListed.includes(r.id))).flat() : list
+  const entries = entriesOf(shown)
+  const fresh = entriesOf(list).length - entries.length
+  const waiting = entries.filter(entry => isOpenQuestion(entry[0] as Report))
+  const rest = entries.filter(entry => !isOpenQuestion(entry[0] as Report))
+  const [recent, earlier] = [rest.slice(0, RECENT), rest.slice(RECENT)]
+  const fold = (key: string, label: string, isOpen: boolean, onPress: () => void) => (
+    <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
+      {/* In the rows' title column */}
+      <Box width={1} flexShrink={0} />
+      <Button key={`${key}-${presses}`} label={`${isOpen ? '▾' : '▸'} ${label}`} plain dimColor onPress={() => void ((presses += 1), onPress(), redraw($))} />
+    </Box>
+  )
+  // One row, one line: the title pressed opens it; when and Archive sit at the right, the same width on every row
+  const row = (entry: Report[]) => {
+    const r = entry[0]
+    if (!r) return null
+    return (
+      <Box key={`entry-${r.id}`} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
+        <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
+          {/* The mark's place is kept on every row, so every title starts in one column */}
+          <Box width={1} flexShrink={0}>
+            {isOpenQuestion(r) ? <Text color={LIVE}>●</Text> : null}
+          </Box>
+          <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
+            <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - 22)} plain onPress={() => openReport($, r.id)} />
+          </Box>
+        </Box>
+        <Box width={6} flexShrink={0} justifyContent="flex-end">
+          <Text dimColor>{when(r.at, now)}</Text>
+        </Box>
+        <Button key={`archive-${r.id}-${presses}`} label="Archive" plain dimColor onPress={() => archiveReport($, r, true)} />
+      </Box>
+    )
+  }
+  const rows = (group: Report[][]) => (
+    <Box flexDirection="column" flexShrink={0}>
+      {group.map(row)}
+    </Box>
+  )
   return (
     <Box key="reports" flexDirection="column" gap={1} flexGrow={1}>
       <Box key="reports-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
         <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" alignItems="center" gap={1}>
-          <Text bold>Artifacts</Text>
-          <Text dimColor>{[`${entriesOf(shown).length}`, waiting ? `${waiting} waiting on you` : ''].filter(Boolean).join(' · ')}</Text>
+          <Text bold>Results</Text>
+          <Text dimColor>{`${entries.length}`}</Text>
         </Box>
         {fresh ? <Button key={`reports-fresh-${presses}`} label={`Show ${fresh} new`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
       </Box>
       {!shown.length && !gone.length ? <Text dimColor>Nothing yet.</Text> : null}
-      {bySubject(shown).map(group => {
-        const first = group[0]?.[0]
-        if (!first) return null
-        return band(
-          ui,
-          `subject-${subjectOf(first)}`,
-          first.subject || first.title,
-          day(first.at, now),
-          <Box flexDirection="column" gap={1}>
-            {group.map(entry => {
-              const [r, ...older] = entry
-              if (!r) return null
-              const about = slug(r.title) === slug(r.subject) ? '' : r.title
-              const head = about || r.gist || r.title
-              const finding = about ? r.gist : ''
-              const isOpen = unfolded.has(r.agent || r.id)
-              return (
-                <Box key={`entry-${r.id}`} flexDirection="column" flexShrink={0}>
-                  <Box flexDirection="row" height={finding ? 3 : 2} overflow="hidden" flexShrink={0}>
-                    <Box flexDirection="column" alignItems="flex-start" flexGrow={1} flexShrink={1} minWidth={0}>
-                      <Button key={`report-${r.id}-${presses}`} label={cut(head, line - 10)} plain onPress={() => openReport($, r.id)} />
-                      {/* In line with the label: a plain button sets its label in a little. Each line leaves room for Archive */}
-                      {finding ? (
-                        <Box paddingLeft={1}>
-                          <Text dimColor>{cut(finding, line - 10)}</Text>
-                        </Box>
-                      ) : null}
-                      <Box paddingLeft={1} flexDirection="row" alignItems="center" gap={1}>
-                        {isOpenQuestion(r) ? <Text color={LIVE}>●</Text> : null}
-                        <Text dimColor>{cut([time(r.at, now), older.length ? `${older.length + 1} rounds` : '', isOpenQuestion(r) ? 'waiting on you' : answeredOf(r)].filter(Boolean).join(' · '), line - 10)}</Text>
-                      </Box>
-                    </Box>
-                    {/* On the entry's last line, at its right */}
-                    <Box flexDirection="column" justifyContent="flex-end" flexShrink={0}>
-                      <Button key={`archive-${r.id}-${presses}`} label="Archive" plain dimColor onPress={() => archiveReport($, r, true)} />
-                    </Box>
-                  </Box>
-                  {older.length ? (
-                    <Box flexDirection="column" alignItems="flex-start" flexShrink={0}>
-                      <Button
-                        key={`rounds-${r.id}-${presses}`}
-                        label={`${isOpen ? '▾' : '▸'} ${older.length} earlier ${older.length === 1 ? 'round' : 'rounds'}`}
-                        plain
-                        dimColor
-                        onPress={() => void ((presses += 1), isOpen ? unfolded.delete(r.agent || r.id) : unfolded.add(r.agent || r.id), redraw($))}
-                      />
-                      {isOpen
-                        ? older.map(one => (
-                            <Box key={`round-${one.id}`} height={1} overflow="hidden" paddingLeft={2} flexShrink={0}>
-                              <Button key={`report-${one.id}-${presses}`} label={cut(`${time(one.at, now)} · ${one.gist || one.title}`, line - 2)} plain dimColor onPress={() => openReport($, one.id)} />
-                            </Box>
-                          ))
-                        : null}
-                    </Box>
-                  ) : null}
-                </Box>
-              )
-            })}
-          </Box>,
-        )
-      })}
-      {gone.length ? (
-        <Box key="archived" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-          <Box flexDirection="column" alignItems="flex-start">
-            <Button
-              key={`archived-fold-${presses}`}
-              label={`${isArchivedOpen ? '▾' : '▸'} Archived ${gone.length}`}
-              plain
-              dimColor
-              onPress={() => void ((presses += 1), (isArchivedOpen = !isArchivedOpen), redraw($))}
-            />
-          </Box>
-          {isArchivedOpen
+      {waiting.length ? band(ui, 'reports-waiting', 'Waiting on you', `${waiting.length}`, rows(waiting)) : null}
+      {recent.length ? band(ui, 'reports-recent', waiting.length ? 'Recent' : 'Newest', '', rows(recent)) : null}
+      {earlier.length || gone.length ? (
+        <Box key="reports-folded" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+          {earlier.length ? fold('earlier-fold', `Earlier ${earlier.length}`, isEarlierOpen, () => (isEarlierOpen = !isEarlierOpen)) : null}
+          {earlier.length && isEarlierOpen ? rows(earlier) : null}
+          {gone.length ? fold('archived-fold', `Archived ${gone.length}`, isArchivedOpen, () => (isArchivedOpen = !isArchivedOpen)) : null}
+          {gone.length && isArchivedOpen
             ? gone.map(entry => {
                 const r = entry[0]
                 if (!r) return null
                 return (
                   <Box key={`archived-${r.id}`} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
-                    <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
-                      <Button key={`report-${r.id}-${presses}`} label={cut(`${dated(r.at, now)} · ${r.title}`, line - 14)} plain dimColor onPress={() => openReport($, r.id)} />
+                    <Box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
+                      <Box width={1} flexShrink={0} />
+                      <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - 24)} plain dimColor onPress={() => openReport($, r.id)} />
+                    </Box>
+                    <Box width={6} flexShrink={0} justifyContent="flex-end">
+                      <Text dimColor>{when(r.at, now)}</Text>
                     </Box>
                     <Button key={`unarchive-${r.id}-${presses}`} label="Bring back" plain onPress={() => archiveReport($, r, false)} />
                   </Box>
@@ -1427,10 +1433,13 @@ type Thumb = { source: string; width: number; height: number } | null
 const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb) => {
   const { Box, Button, Markdown, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
-  const kin = list.filter(one => one.id !== r.id && ((r.agent && one.agent === r.agent) || one.id === r.from || one.from === r.id || subjectOf(one) === subjectOf(r)))
+  // The other rounds of its work first, as the list shows them as one row; then what it started from or started, and the subject's others
+  const rounds = (entriesOf(list.filter(one => Boolean(one.archived) === Boolean(r.archived))).find(entry => entry.some(one => one.id === r.id)) ?? []).filter(one => one.id !== r.id)
+  const others = list.filter(one => one.id !== r.id && !rounds.includes(one) && (one.id === r.from || one.from === r.id || subjectOf(one) === subjectOf(r)))
+  const kin = [...rounds, ...others.slice(0, Math.max(0, 8 - rounds.length))]
   const pictures = r.files.map(file => ({ file, path: `${reportPath(r)}/${file}`, href: `file://${encodeURI(`${reportPath(r)}/${file}`)}` }))
   const how = (one: Report) =>
-    [one.id === r.from ? 'this started from it' : one.from === r.id ? 'started from this' : r.agent && one.agent === r.agent ? (one.at < r.at ? 'earlier round' : 'later round') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
+    [one.id === r.from ? 'this started from it' : one.from === r.id ? 'started from this' : rounds.includes(one) ? (one.at < r.at ? 'earlier round' : 'later round') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
   const show = (to: number) => void ((presses += 1), pictureAt.set(pane, to), redraw($))
   return (
@@ -1508,7 +1517,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         'Carry on',
         '',
         <Box flexDirection="column" alignItems="flex-start" gap={1}>
-          <Text dimColor wrap="wrap">Puts a line naming this artifact in the chat's box, for you to finish and send.</Text>
+          <Text dimColor wrap="wrap">Puts a line naming this result in the chat's box, for you to finish and send.</Text>
           <Button key={`report-carry-${presses}`} label="Carry on from this" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
           {kin.length ? (
             <Box flexDirection="column" alignItems="flex-start">
@@ -1539,9 +1548,14 @@ const LIVE_DOTS = dots(LIVE, LINE)
 // The mark of work that finished
 const DONE = 'success'
 // The octopus: resting, working at its computers (drawn from 32 px up), and lifting its arms (for 16 to 24 px). Each is an SVG
-// file of the mod's, art/<name>.svg, read when the session starts: a drawing is swapped by replacing its file
-const ART = { mark: '', working: '', workingSmall: '' }
-const ART_FILES: Record<keyof typeof ART, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg' }
+// file of the mod's, art/<name>.svg, read when the session starts: a drawing is swapped by replacing its file. Happy is the
+// octopus in the finished green, bouncing with its arms up once over the two seconds finished work pauses, then still
+const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '' }
+const ART_FILES: Record<keyof typeof ART, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg' }
+// Whether the octopus is happy at a time: work of this chat's that finished, not stopped or failed, is in its pause. A new drawing
+// starts its animation, so it plays from the first finish and holds its last picture through any finish that follows in the pause
+const isHappy = (cards: { parentId?: string; status: string; endedAt: number }[], at: number) =>
+  cards.some(one => !one.parentId && one.status === 'done' && isLingering(one, at))
 // How big the octopus is drawn in the panel's header and in the line above the prompt, in the app's pixels
 const HEAD_MARK = 48
 const BAND_MARK = 16
@@ -1771,6 +1785,7 @@ const changeFlow = async ($: EngineInterface, id: string, fn: (f: Flow, at: numb
   const list = await update($, flows, all => all.map(f => (f.id === id ? fn(f, now) : f)))
   const f = list.find(one => one.id === id)
   if (f) await saveFlow($, f).catch(err => log($, `workflow ${id} not kept: ${String(err)}`))
+  await lookEnds($)
 }
 const keptFlows = (list: Flow[]) => {
   let over = list.length - FLOWS_KEPT
@@ -1847,8 +1862,9 @@ const flowEnded = async ($: EngineInterface, text: string) => {
 const stopFlow = async ($: EngineInterface, id: string) => {
   const f = (await read($, flows)).find(one => one.id === id)
   if (!f || f.status !== 'working') return
+  pressed.add(`flow:${id}`)
   const r = await $.tool.call({ tool: 'TaskStop', task_id: f.taskId }).catch(err => ({ deny: String(err) }))
-  if (r.deny) return log($, `workflow ${id} not stopped: ${r.deny}`)
+  if (r.deny) return (pressed.delete(`flow:${id}`), log($, `workflow ${id} not stopped: ${r.deny}`))
   await changeFlow($, id, (one, at) => ({ ...one, status: 'stopped', endedAt: at }))
 }
 const readJournal = async ($: EngineInterface, id: string) => {
@@ -1935,8 +1951,111 @@ const flowTalkOf = async ($: EngineInterface, f: Flow, agent: FlowAgent) => {
   return flowTalks.get(agent.id)?.lines
 }
 
+// ---- Work that is ready: a short sound and a notification ----
+
+// The sound, a file of the mod's: two soft rising notes, 0.75 s, made by mockups/claudopus-sound/ready.py
+const READY_SOUND = 'sounds/ready.wav'
+// Ends this close together are one sound and one notification
+const SETTLE = 800
+// Work that ends again this soon after it was announced is not announced again
+const AGAIN = 10_000
+// An end the mod learns of this long after it happened, as work read back after a restart, is not announced
+const STALE_END = 60_000
+// How each card and workflow of this chat's stood when last looked at, by id. Unset until the first look after the mod loads,
+// which only takes note, so a reload announces nothing
+let lastSeen: Map<string, string> | undefined
+// Ends waiting to be announced together, with what waited on the person as the end was seen (its report takes that over soon
+// after), and when each was last announced, by id
+let ready: { id: string; waits?: string[] }[] = []
+let isSettling = false
+const announced = new Map<string, number>()
+// Work the person stopped with its Stop button: they saw it end, so it is not announced
+const pressed = new Set<string>()
+const standing = (status: string, endedAt: number) => (status === 'working' ? 'working' : `${status}:${endedAt}`)
+
+// Looks for work of this chat's that has ended since the last look; helpers are never listed, so never announced
+const lookEnds = async ($: EngineInterface) => {
+  const mine = await sessionName($)
+  const cards = (await read($, todos)).filter(one => !one.parentId)
+  const runs = (await read($, flows)).filter(f => f.session === mine)
+  const now = await $.clock.now()
+  const all = [...cards.map(one => ({ id: one.id, status: one.status, endedAt: one.endedAt, waits: one.waits })), ...runs.map(f => ({ id: `flow:${f.id}`, status: f.status, endedAt: f.endedAt, waits: undefined as string[] | undefined }))]
+  const was = lastSeen
+  lastSeen = new Map(all.map(one => [one.id, standing(one.status, one.endedAt)]))
+  if (!was) return
+  for (const one of all) {
+    const before = was.get(one.id)
+    if (one.status === 'working' || before === undefined || before === standing(one.status, one.endedAt)) continue
+    if (now - one.endedAt > STALE_END || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
+    announced.set(one.id, now)
+    if (pressed.delete(one.id)) continue
+    ready.push({ id: one.id, waits: one.waits })
+  }
+  if (ready.length && !isSettling) {
+    isSettling = true
+    $.clock.after(SETTLE, () => void announce($).catch(err => log($, `ready not announced: ${String(err)}`)))
+  }
+}
+
+// A few words of what work left: the first sentence of what it found, cut short
+const fewWords = (text: string) => {
+  const found = gistOf(text) || oneLine(text.replace(/[*_`#>]/g, ''))
+  const sentence = /^.{12,}?[.!?](?=\s|$)/.exec(found)?.[0] ?? found
+  return sentence.length > 140 ? `${sentence.slice(0, 139).trimEnd()}…` : sentence
+}
+
+// What one ended piece of work or workflow says in a notification
+const readyOf = ({ id, waits: seen }: { id: string; waits?: string[] }, cards: Todo[], runs: Flow[]) => {
+  if (id.startsWith('flow:')) {
+    const f = runs.find(one => `flow:${one.id}` === id)
+    if (!f) return undefined
+    const what = f.status === 'done' ? fewWords(f.result) || 'Finished.' : f.status === 'failed' ? 'Stopped by an error.' : 'Stopped.'
+    return { title: f.title || f.name || 'Workflow', isDone: f.status === 'done', what }
+  }
+  const one = cards.find(card => card.id === id)
+  if (!one) return undefined
+  const waits = one.waits ?? seen ?? []
+  const said = [...one.entries].reverse().find(entry => entry.kind === 'note')?.text ?? ''
+  const what =
+    one.status === 'done'
+      ? waits.length
+        ? `Waits on ${who()}: ${fewWords(waits[0] ?? '')}${waits.length > 1 ? ` (and ${waits.length - 1} more)` : ''}`
+        : fewWords(one.answer) || fewWords(said) || 'Finished.'
+      : one.status === 'failed'
+        ? 'Stopped by an error.'
+        : 'Stopped.'
+  return { title: one.title || 'Work', isDone: one.status === 'done', what }
+}
+
+// One sound for all that ended together, only when some finished; one notification naming them. config.json switches each off
+const announce = async ($: EngineInterface) => {
+  isSettling = false
+  const ids = ready
+  ready = []
+  let config: { sound?: unknown; notifications?: unknown } = {}
+  try {
+    config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
+  } catch {
+    // A config.json being edited leaves both on
+  }
+  const cards = await read($, todos)
+  const runs = await read($, flows)
+  const items = ids.map(one => readyOf(one, cards, runs)).filter(one => one !== undefined)
+  if (!items.length) return
+  if (config.sound !== false && items.some(one => one.isDone)) void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ready sound not played: ${String(err)}`))
+  if (config.notifications === false) return
+  const [first] = items
+  const done = items.filter(one => one.isDone).length
+  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} pieces of work are ready` : `${items.length} pieces of work ended`
+  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${one.isDone ? 'ready' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
+  const sent = await $.ui.notify(text, { title, key: `ready-${ids.map(one => one.id).join('-')}`.slice(0, 200) }).catch(err => ({ isSent: false as const, reason: String(err) }))
+  void log($, `ready: ${title} — ${sent.isSent ? `notified through ${sent.channel}` : `not notified (${sent.reason})`}`)
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    // A load, first or a reload, starts looking afresh: nothing that ended before it is announced
+    lastSeen = undefined
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
@@ -1973,7 +2092,7 @@ export const register: Register = on => {
     })
     await $.tool.register({
       name: 'recall',
-      description: named("Searches the memory for a phrase: {name}'s messages word for word, what they asked, subject briefs, pastes, and the artifacts finished work left for {name} (reports/<id>/report.md, each dated). Returns matching lines with their files."),
+      description: named("Searches the memory for a phrase: {name}'s messages word for word, what they asked, subject briefs, pastes, and the results finished work left for {name} (reports/<id>/report.md, each dated). Returns matching lines with their files."),
       inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
       isDeferred: false,
     })
@@ -2009,7 +2128,7 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'waits',
       description: named(
-        "For background work, before it finishes: records what in its report waits on {name}, each one short line {name} can answer yes or no. The artifact shows each with Yes / No / Not now. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. It replaces what was recorded before; leave it uncalled when nothing waits.",
+        "For background work, before it finishes: records what in its report waits on {name}, each one short line {name} can answer yes or no. The panel shows each with Yes / No / Not now. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. It replaces what was recorded before; leave it uncalled when nothing waits.",
       ),
       inputSchema: {
         type: 'object',
@@ -2124,6 +2243,7 @@ export const register: Register = on => {
         const isWaiting = how === 'done' && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
         return list.map(one => (one.id !== id ? one : isWaiting ? { ...one, answer: answer || one.answer } : { ...ended(one, how, now), answer: answer || one.answer }))
       })
+      await lookEnds($)
       // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report
       const card = (await read($, todos)).find(one => one.id === id)
       const report = (e.answer ?? '').trim()
@@ -2307,10 +2427,15 @@ export const register: Register = on => {
     if (!dir || !r.agentId) return r
     const id = r.agentId
     const now = await $.clock.now()
+    // A brief that names one result, on what that result's title is about, goes on with its work: a round of it. One that names
+    // several, or one on something else, only reads them
+    const named1 = isOwn && !fromReport && !e.resume ? (await read($, reports)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : []
+    const goesOn = named1.length === 1 && named1[0] && [...aboutWords(named1[0].title)].some(word => aboutWords(e.description ?? '').has(word)) ? named1[0].id : ''
+    const from = fromReport || goesOn
     await update($, todos, list => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
-      const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && fromReport ? { from: fromReport } : {}) }
+      const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
       return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model }])
     })
     if (isOwn) await openList($)
@@ -2350,7 +2475,7 @@ export const register: Register = on => {
     const query = (e as unknown as { query?: string }).query?.trim() ?? ''
     if (!query) return { result: 'Nothing to search for.' }
     const r = await $.process.run(['grep', '-rniF', '--include=*.md', '-e', query, dir])
-    // An artifact the person put away is still found, marked, so it is answered from only when they name it
+    // A result the person put away is still found, marked, so it is answered from only when they name it
     const archived = new Set((await loadReports($).catch(() => [] as Report[])).filter(one => one.archived).map(one => one.id))
     const lines = r.stdout
       .split('\n')
@@ -2386,12 +2511,12 @@ export const register: Register = on => {
   // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each
   on('tool.call', { tool: 'mcp__claudopus__waits' }, async ($, e) => {
     const input = e as unknown as { items?: unknown }
-    if (e.agentId === undefined) return { result: "Only background work leaves an artifact; a chat's own thread has none." }
+    if (e.agentId === undefined) return { result: "Only background work leaves a result; a chat's own thread has none." }
     // A helper's answer is no report: the work it answers to records what waits
     if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper records nothing here: say what waits in your answer, and the work that started you records it.' }
     const items = [...new Set((Array.isArray(input.items) ? input.items : []).filter((one): one is string => typeof one === 'string').map(one => cut(oneLine(one), 200)).filter(Boolean))].slice(0, 12)
     await change($, e.agentId, one => ({ ...one, waits: items.length ? items : undefined }))
-    return { result: items.length ? `Recorded ${items.length} waiting on ${who()}; your report's artifact shows them.` : `Nothing waits on ${who()}.` }
+    return { result: items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing waits on ${who()}.` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides
@@ -2419,8 +2544,13 @@ export const register: Register = on => {
   // Above the prompt, while work runs: a small mark that it does, and nothing of what it is doing
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    const working = (await read($, todos)).filter(one => !one.parentId && one.status === 'working')
-    if (!working.length) return next(e)
+    const cards = await read($, todos)
+    const working = cards.filter(one => !one.parentId && one.status === 'working')
+    // Work that just finished makes the octopus happy for its pause, the band staying that long even when nothing else runs;
+    // the redraw set for the pause's end is read so the band leaves or goes back to work then
+    const happy = isHappy(cards, await $.clock.now())
+    if (happy) await read($, tick)
+    if (!working.length && !happy) return next(e)
 
     const ui = $.ui.resolve(e)
     const { Box, Text } = ui
@@ -2429,12 +2559,12 @@ export const register: Register = on => {
     // words), else its title. Never cut with an ellipsis: the band is one line
     const latest = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')
     const [lead] = [...working].sort((a, b) => (latest(b)?.at ?? b.startedAt) - (latest(a)?.at ?? a.startedAt))
-    const doing = lead ? lead.items.find(item => item.state === 'doing')?.text || lead.title || 'Working' : 'Working'
+    const doing = lead ? lead.items.find(item => item.state === 'doing')?.text || lead.title || 'Working' : '✓ Finished'
     const others = working.length - 1
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-        {octopus(ui, 'band-mark', 'workingSmall', BAND_MARK, 'Claudopus at work') ?? <Text dimColor>•••</Text>}
+        {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work') ?? <Text dimColor>•••</Text>}
         <Box flexShrink={1} minWidth={0}>
           <Text dimColor wrap="truncate-end">{oneLine(doing)}</Text>
         </Box>
@@ -2937,7 +3067,7 @@ export const register: Register = on => {
               {one.status === 'working' || left(one) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
-                  {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Its artifact" onPress={() => void openReport($, left(one)?.id ?? '')} /> : null}
+                  {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Its result" onPress={() => void openReport($, left(one)?.id ?? '')} /> : null}
                 </Box>
               ) : null}
             </Box>
@@ -2949,7 +3079,7 @@ export const register: Register = on => {
       )
     }
 
-    // The newest artifact a piece of work left, which its open card links to
+    // The newest result a piece of work left, which its open card links to
     const left = (one: Todo) => kept.filter(r => r.agent === one.id).sort((a, b) => b.at - a.at)[0]
 
     // Work that has ended, under the running cards: one folded row, so nothing above it moves. Unfolded, the newest first, each a
@@ -3111,7 +3241,10 @@ export const register: Register = on => {
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
         {!alone ? (
           <Box key="head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-            {octopus(ui, 'head-mark', working.length + runningFlows.length ? 'working' : 'mark', HEAD_MARK, working.length + runningFlows.length ? 'Claudopus at work' : 'Claudopus')}
+            {/* Happy too for a workflow in its pause whose card turned green: it finished and its last round did not fail */}
+            {isHappy(own, at) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false)
+              ? octopus(ui, 'head-mark', 'happy', HEAD_MARK, 'Claudopus, work finished')
+              : octopus(ui, 'head-mark', working.length + runningFlows.length ? 'working' : 'mark', HEAD_MARK, working.length + runningFlows.length ? 'Claudopus at work' : 'Claudopus')}
             <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
               <Text bold wrap="truncate-end">Claudopus</Text>
               <Text dimColor wrap="truncate-end">
@@ -3151,14 +3284,14 @@ export const register: Register = on => {
     const { Box, Text } = $.ui.resolve(e)
     const kept = await read($, reports)
     const r = kept.find(one => paneOf(one) === e.requestId)
-    if (!r) return <Text dimColor>This artifact is no longer kept.</Text>
+    if (!r) return <Text dimColor>This result is no longer kept.</Text>
     if (!reportText.has(r.id)) reportText.set(r.id, await readOr($, `${reportPath(r)}/report.md`))
     const at = Math.min(Math.max(0, pictureAt.get(paneOf(r)) ?? 0), Math.max(0, r.files.length - 1))
     const file = r.files[at] ?? ''
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, $.ui.resolve(e), r, reportText.get(r.id) || 'This artifact has no text.', kept, await $.clock.now(), at, picture)}
+        {reportShown($, $.ui.resolve(e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture)}
       </Box>
     )
   })
