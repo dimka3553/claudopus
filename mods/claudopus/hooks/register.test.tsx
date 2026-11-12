@@ -2294,3 +2294,15 @@ test('/claudopus on a screen with nowhere to draw the panel does not open it for
   await $.command.run({ command: 'claudopus', args: '' } as never)
   expect(files.has(`${MEMORY}/panel.json`)).toBe(false)
 })
+
+test('someone whose panel was open before chats shared it has it open in every chat once this version loads', async ($, on) => {
+  const { files } = world(on, { panes: ['claudopus'] })
+  await $.session.start(start)
+  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true)
+})
+
+test('a chat whose panel was never open writes no choice as it loads', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  expect(files.has(`${MEMORY}/panel.json`)).toBe(false)
+})
