@@ -2805,7 +2805,11 @@ const shareMine = async ($: EngineInterface) => {
   const sign = `${title}\n${JSON.stringify([mySaid ?? null, myLink ?? null])}\n${signOf(cards)}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
   const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(mySaid ? { said: mySaid } : {}), ...(myLink ? { link: myLink } : {}) }
-  await $.fs.write(ownLive(id), JSON.stringify(s))
+  // Ended work is written apart, under `ended`: a chat still running a version from before ended work was shared reads `cards` only,
+  // and would show what is there as running for good
+  const isLive = (one: Todo) => one.status === 'working' || Boolean(one.ask)
+  const ended = cards.filter(one => !isLive(one))
+  await $.fs.write(ownLive(id), JSON.stringify({ ...s, cards: cards.filter(isLive), ...(ended.length ? { ended } : {}) }))
   sharedSign = sign
   sharedAt = now
 }

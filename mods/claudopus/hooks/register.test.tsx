@@ -2298,7 +2298,9 @@ test("the panel shows every open chat's running work under that chat's name, thi
   // The chat's own work ends: its file says so at once, so the others show it finished as this chat does
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(1000)
-  expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{"cards":[]}').cards[0]?.status === 'done' ? true : undefined))).toBe(true)
+  expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{"cards":[]}').ended?.[0]?.status === 'done' ? true : undefined))).toBe(true)
+  // Ended work is written apart from the running, so a chat still on a version that reads only the running cards never shows it as running
+  expect(JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').cards).toEqual([])
   // A chat of this Mac with no work is not listed in the others' panels
   files.set(`${MEMORY}/live/chat-d.json`, JSON.stringify({ chat: 'chat-d', title: 'Quiet chat', folder: '/repo/quiet', host: '', at: NOW + 6000, cards: [] }))
   await clock.advance(5000)
@@ -2445,7 +2447,7 @@ test('a chat whose panel was never open writes no choice as it loads', async ($,
   expect(files.has(`${MEMORY}/panel.json`)).toBe(false)
 })
 
-test("an open chat of another Mac with no work running is listed here by its name and Mac, and leaves when that Mac stops answering", async ($, on) => {
+test("an open chat of another Mac with no work running is folded into one row, N other chats, which lists it by its name and Mac, and leaves when that Mac stops answering", async ($, on) => {
   const { files, clock } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
   const idle = (at: number) => JSON.stringify({ chat: 'chat-rc', title: '', folder: '/Users/sam/GitHub', host: '', at, cards: [] })
@@ -2453,14 +2455,24 @@ test("an open chat of another Mac with no work running is listed here by its nam
   await $.session.start(start)
   await clock.advance(10_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // The chat with work is listed in the open; the quiet one and this chat, with nothing going on, are one folded row under it
+  expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
+  const fold = async () => (await keyed(list, 'quiet-fold'))?.props.label
+  expect(await until(fold)).toBe('▸ 2 other chats')
+  expect(await list.find({ type: 'Text', text: 'GitHub' })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: '2 more in 1 other chat' })).toBeDefined()
+  // Unfolded, it lists them by name and Mac, this chat first, and keeps that choice for every chat's panel
+  await pressed(list, 'quiet-fold')
   expect(await until(async () => list.find({ type: 'Text', text: 'GitHub' }))).toBeDefined()
+  expect(await fold()).toBe('▾ 2 other chats')
+  expect(JSON.parse(files.get(`${MEMORY}/folds.json`) ?? '{}')).toEqual({ isQuietOpen: true })
   expect(await list.find({ type: 'Text', text: 'on m4' })).toBeDefined()
   // By its name alone: no line under it
   expect(await list.find({ type: 'Text', text: /nothing running/ })).toBeUndefined()
-  // The chat with work comes before the quiet one, and the count names only work
   const bold = (await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)
-  expect(bold.indexOf('Robot arm')).toBeLessThan(bold.indexOf('GitHub'))
-  expect(await list.find({ type: 'Text', text: '2 more in 1 other chat' })).toBeDefined()
+  expect(bold.indexOf('Robot arm')).toBeLessThan(bold.indexOf('This chat'))
+  expect(bold.indexOf('This chat')).toBeLessThan(bold.indexOf('GitHub'))
   // Beside another Mac's chats this chat is named too, with nothing running, and says which Mac it is on
   expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'on sams-macbook-air' })).toBeDefined()
@@ -2475,9 +2487,44 @@ test("an open chat of another Mac with no work running is listed here by its nam
   files.delete('ssh:fetch')
   await clock.advance(100_000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'GitHub' })) ? undefined : true))).toBe(true)
-  // With no other Mac's chats left, this chat is no longer named alone
+  // With no other Mac's chats left, this chat is no longer named alone, and the folded row goes
   expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
+  expect(await fold()).toBeUndefined()
   await list.unmount()
+})
+
+test('on one Mac a quiet chat shows no folded row, however it was last left', async ($, on) => {
+  const { files, clock } = world(on)
+  files.set(`${MEMORY}/folds.json`, JSON.stringify({ isQuietOpen: true }))
+  // One Mac: another quiet chat of this Mac is not listed at all, so no row
+  files.set(`${MEMORY}/live/chat-q.json`, JSON.stringify({ chat: 'chat-q', title: 'Quiet here', folder: '/y', host: '', at: NOW, cards: [] }))
+  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
+  await $.session.start(start)
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Billing page' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Quiet here' })).toBeUndefined()
+  expect(await keyed(list, 'quiet-fold')).toBeUndefined()
+  await list.unmount()
+})
+
+test('beside another Mac the folded row of quiet chats opens as it was last left in another chat, and follows it', async ($, on) => {
+  const { files, clock } = world(on)
+  files.set(`${MEMORY}/folds.json`, JSON.stringify({ isQuietOpen: true }))
+  files.set(`${MEMORY}/live/chat-q.json`, JSON.stringify({ chat: 'chat-q', title: 'Quiet here', folder: '/y', host: '', at: NOW, cards: [] }))
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  files.set('ssh:fetch', `${NOW / 1000}\n`)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  const again = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => again.find({ type: 'Text', text: 'Quiet here' }))).toBeDefined()
+  expect((await keyed(again, 'quiet-fold'))?.props.label).toBe('▾ 2 other chats')
+  // Folded in another chat, it folds here at the next look
+  files.set(`${MEMORY}/folds.json`, JSON.stringify({ isQuietOpen: false }))
+  await clock.advance(3000)
+  expect(await until(async () => ((await again.find({ type: 'Text', text: 'Quiet here' })) ? undefined : true))).toBe(true)
+  expect((await keyed(again, 'quiet-fold'))?.props.label).toBe('▸ 2 other chats')
+  await again.unmount()
 })
 
 test("a Mac that reaches another hands it this Mac's chats in the same trip, and leaves here the answers pressed there for them, once each", async ($, on) => {
@@ -2524,7 +2571,10 @@ test("a Mac handed another Mac's chats lists them by name and Mac with its own, 
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'billing · on sams-m5' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Quiet one' })).toBeDefined()
+  // The quiet chats are inside the folded row
+  expect(await list.find({ type: 'Text', text: 'Quiet one' })).toBeUndefined()
+  await pressed(list, 'quiet-fold')
+  expect(await until(async () => list.find({ type: 'Text', text: 'Quiet one' }))).toBeDefined()
   // This Mac's chats are listed too, idle or not, named by what the other Mac calls this one
   expect(await list.find({ type: 'Text', text: 'Own quiet' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeDefined()
@@ -2616,6 +2666,9 @@ test("another chat's name shows what was last said there under it as the pointer
   await $.session.start(start)
   await clock.advance(10_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // Both are quiet, so they are inside the folded row; their names hover and open there as in the open
+  await until(async () => keyed(list, 'quiet-fold'))
+  await pressed(list, 'quiet-fold')
   expect(await until(async () => list.find({ type: 'Text', text: 'Here is the summary: three releases.' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Sum up last month' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'You · 2m ago' })).toBeDefined()

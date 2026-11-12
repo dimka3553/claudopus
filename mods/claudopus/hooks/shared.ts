@@ -46,10 +46,11 @@ export const signOf = (cards: readonly Todo[]) =>
 // Mac that wrote it, so a Mac whose clock runs apart from this one's is judged by its own
 export const sharedOf = (text: string, now: number, host = '', isIdleKept = false): Shared | undefined => {
   try {
-    const one = JSON.parse(text) as Partial<Shared>
+    const one = JSON.parse(text) as Partial<Shared> & { ended?: unknown }
     if (typeof one.chat !== 'string' || !one.chat || typeof one.at !== 'number' || !Array.isArray(one.cards)) return undefined
     if (now - one.at > STALE) return undefined
-    const cards = one.cards.filter((card): card is Todo => Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)))
+    // Running work under `cards`, ended work apart under `ended`, so a version that reads `cards` alone never shows ended work as running
+    const cards = [...one.cards, ...(Array.isArray(one.ended) ? (one.ended as unknown[]) : [])].filter((card): card is Todo => Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)))
     if (!cards.length && !isIdleKept) return undefined
     const said = saidOf(one.said)
     const link = linkOf(one.link)
