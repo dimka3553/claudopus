@@ -382,10 +382,17 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // Work that ends needs nothing more of the person's hands: its ask goes with it, unless it waits on an answer from its buttons
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at, ask: one.ask?.choices?.length ? one.ask : undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0 })
-// How work that is stopped ends: done when its turn had already ended with its answer and only its own background work held it
+const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined })
+// How work that is stopped ends: done when its turn had already ended with its report and only its own background work held it
 // (the chat stops such work once its report is in), stopped otherwise
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
+// Work that called SubagentHandback in the turn now ending: what it ends that turn with is its report
+const handedBack = new Set<string>()
+// Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
+const keepStoppedReports = async ($: EngineInterface, now: number) => {
+  for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
+    $.clock.after(5, () => void saveReport($, card, card.answer).catch(err => log($, `report of ${card.id} not kept: ${String(err)}`)))
+}
 
 // Work that has ended, the oldest first, then work under way: what `capped` forgets first comes first
 const byEnd = (list: Todo[]) => [...list].sort((a, b) => (a.status === 'working' ? Infinity : a.endedAt) - (b.status === 'working' ? Infinity : b.endedAt) || 0)
@@ -454,6 +461,7 @@ const sync = async ($: EngineInterface) => {
     }
     return isChanged ? capped([...cards.values()]) : list
   })
+  await keepStoppedReports($, now)
   await lookEnds($)
 }
 
@@ -479,6 +487,7 @@ const stop = async ($: EngineInterface, id: string) => {
   if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
   const now = await $.clock.now()
   await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one)))
+  await keepStoppedReports($, now)
   await lookEnds($)
 }
 
@@ -3729,18 +3738,32 @@ export const register: Register = on => {
       const answer = (e.answer ?? '').trim().slice(0, ANSWER_CHARS)
       const isHeld = (await $.agent.list().catch(() => [])).some(one => one.id === id && one.status === 'waiting')
       const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
+      // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
+      // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
+      const isReport = how === 'done' && isHeld && (handedBack.has(id) || answer.length >= REPORT_LEAST)
+      handedBack.delete(id)
       await update($, todos, list => {
         const isWaiting = how === 'done' && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
-        return list.map(one => (one.id !== id ? one : isWaiting ? { ...one, answer: answer || one.answer, answeredAt: answer ? now : one.answeredAt } : { ...ended(one, how === 'stopped' ? stoppedAs(one) : how, now), answer: answer || one.answer }))
+        // An aborted turn's own text is not kept over the report the work gave before it was stopped
+        return list.map(one =>
+          one.id !== id
+            ? one
+            : isWaiting
+              ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt }
+              : how === 'stopped'
+                ? ended(one, stoppedAs(one), now)
+                : { ...ended(one, how, now), answer: answer || one.answer },
+        )
       })
+      if (how === 'stopped') await keepStoppedReports($, now)
       await lookEnds($)
       // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
-      // Work a message of the person's started that has finished leaves its report for good, held on its own background work too;
-      // a helper's answer is no report
+      // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
+      // held on its own background work leaves it once it ends (keepStoppedReports)
       const card = (await read($, todos)).find(one => one.id === id)
       const report = (e.answer ?? '').trim()
-      if (card && !card.parentId && (card.status === 'done' || (card.status === 'working' && card.answeredAt === now)) && report) {
+      if (card && !card.parentId && card.status === 'done' && how === 'done' && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
       }
       return done
@@ -3861,6 +3884,7 @@ export const register: Register = on => {
               ? one
               : {
                   ...one,
+                  answeredAt: undefined,
                   owes: isSteer ? 0 : one.owes,
                   entries: words && one.entries.at(-1)?.text !== words ? [...one.entries, { at: now, kind: 'steer' as const, text: words }].slice(-ENTRIES_KEPT) : one.entries,
                 },
@@ -3873,6 +3897,7 @@ export const register: Register = on => {
       const id = e.agentId
       // What this work starts with the Agent tool is its helper, which the engine's own record does not always say
       if (e.tool === 'Agent') helperCalls.set(e.tool_use_id, id)
+      if (String(e.tool) === 'SubagentHandback') handedBack.add(id)
       // Work that calls a tool is working: a card that had ended is back. Its steps are counted: to place a steer among them,
       // to see that a steer got its decision, and to see that its to-dos are still being kept
       if (dir) {
@@ -3910,6 +3935,18 @@ export const register: Register = on => {
         return { deny: NO_COPY() }
       }
     }
+    // Work the chat stops ends at once, as a press on Stop ends it: done when it had already given its report
+    if (e.tool === 'TaskStop' && dir) {
+      const r = await next(e)
+      const stopId = String((e as { task_id?: unknown }).task_id ?? '')
+      if (!r.deny && stopId) {
+        const now = await $.clock.now()
+        await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one)))
+        await keepStoppedReports($, now)
+        await lookEnds($)
+      }
+      return r
+    }
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
     // The chat reads a kept report itself, to answer from it
     const readPath = String((e as { file_path?: unknown }).file_path ?? '')
@@ -3933,6 +3970,8 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
+    // Work that takes a step again after its report is working again: stopped from now, it is stopped
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     const r = yield* next(chosen && modelName(chosen) !== modelName(e.model) ? { ...e, model: chosen } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
