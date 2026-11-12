@@ -1,7 +1,10 @@
 // Claudopus.app: the mod's notifications, under its own name and icon, opening the chat they are about when clicked.
 //
-//   Claudopus --title T --text X [--open URL] [--activate BUNDLE-ID] [--key K]
+//   Claudopus --title T --text X [--open URL] [--activate BUNDLE-ID] [--key K] [--sound FILE]
 //   Claudopus --status        prints on, off, quiet or not-asked
+//
+// --sound names a sound file in the app's Resources, played with the notification as macOS allows: not when the person turned
+// sound off for this app or a Focus silences it.
 //
 // Flags are read in pairs from the left, so a title or text that looks like a flag is still only a title or text.
 // Exit codes: 0 shown, 2 notifications for Claudopus are turned off, 3 not allowed when asked, 4 failed.
@@ -82,6 +85,7 @@ func post() {
   if let url = given["--open"] { info["open"] = url }
   if let id = given["--activate"] { info["activate"] = id }
   content.userInfo = info
+  if let sound = given["--sound"] { content.sound = UNNotificationSound(named: UNNotificationSoundName(sound)) }
   let request = UNNotificationRequest(identifier: given["--key"] ?? UUID().uuidString, content: content, trigger: nil)
   let send = {
     center.add(request) { error in
@@ -97,7 +101,7 @@ func post() {
       // The first time macOS asks the person. Its question goes away if this app quits, so the app waits for the answer and
       // shows this notification once allowed; bin/notify starts it apart from the mod for this
       DispatchQueue.main.async { asking = true }
-      center.requestAuthorization(options: [.alert]) { isAllowed, _ in
+      center.requestAuthorization(options: [.alert, .sound]) { isAllowed, _ in
         if isAllowed { send() } else { exit(3) }
       }
       DispatchQueue.main.asyncAfter(deadline: .now() + 1800) { exit(3) }

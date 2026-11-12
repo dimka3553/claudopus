@@ -29,7 +29,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; unplaced?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean}[] } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; unplaced?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean}[] } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -150,10 +150,10 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   on('process.run', (_, e) => {
     const [tool, ...rest] = e.argv
     if (tool === 'osascript') osa.push([...e.argv])
-    // Claudopus.app answers as the app on this Mac set: 0 shown, 2 turned off in System Settings
+    // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
       own.push([...e.argv])
-      return { value: { exitCode: options.app?.claudopus ?? 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+      return { value: { exitCode: (rest[0] === '--asks' ? options.app?.asks : options.app?.claudopus) ?? 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (tool === 'open') shown.push([...e.argv])
     if (tool === 'kill') killed.push(String(rest[0]))
@@ -2264,6 +2264,66 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   // Picking what shipped takes the key out again
   await config.select({ key: 'config-model-legwork-pick', value: 'sonnet' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
+})
+
+test('work that needs the person is heard once: its notification comes as the amber Claudopus Asks carrying the sound, silent when sound is off', async ($, on) => {
+  const app = { noSurface: true, claudopus: 0, asks: 0 }
+  const { played, own, osa, files, clock } = world(on, { app, env: { CLAUDE_CODE_HOST_SESSION_ID: 'local_ab12-cd34' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the repo private', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
+  const ask = (id: string, text: string) => $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: id, agentId: 'a1', text } as never)
+  const lead = (argv?: string[]) => argv?.slice(1, argv.indexOf('--title'))
+
+  // The sound goes in the notification, so macOS plays it as the person set Claudopus Asks and as a Focus allows; no second sound
+  await ask('k1', 'Paste the code.')
+  expect(own).toHaveLength(1)
+  expect(lead(own[0])).toEqual(['--asks', '--chime'])
+  expect(own[0]?.slice(3)).toEqual(['--title', 'Hide the repo needs you', '--text', 'Paste the code.', '--open', 'claude://code/continue?session=local_ab12-cd34', '--key', 'ask-a1'])
+  expect(played).toEqual([])
+  // The same ask said again is neither shown nor heard again
+  await ask('k2', 'Paste the code.')
+  expect(own).toHaveLength(1)
+
+  // Sound off in Config: the amber notification, silent, and no chime of the mod's
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ sound: false }))
+  await ask('k3', 'Press Approve.')
+  expect(lead(own.at(-1))).toEqual(['--asks'])
+  expect(played).toEqual([])
+
+  // Claudopus Asks turned off in System Settings: the purple Claudopus, which carries no sound, and the mod's own chime
+  files.set(`${MEMORY}/config.json`, '{}')
+  app.asks = 2
+  await ask('k4', 'Type your password.')
+  expect(lead(own.at(-2))).toEqual(['--asks', '--chime'])
+  expect(lead(own.at(-1))).toEqual([])
+  expect(played).toEqual(['sounds/ready.wav'])
+  expect(osa).toEqual([])
+  // Another within five seconds is shown and not heard again
+  await ask('k4b', 'Type it again.')
+  expect(lead(own.at(-1))).toEqual([])
+  expect(played).toHaveLength(1)
+
+  // The first ask on a Mac waits for macOS's allow question without its sound, so the mod's chime is heard at once instead
+  app.asks = 5
+  await clock.advance(6_000)
+  await ask('k4c', 'Allow it.')
+  expect(lead(own.at(-1))).toEqual(['--asks', '--chime'])
+  expect(played).toHaveLength(2)
+  app.asks = 0
+
+  // Notifications off in Config: only the chime; both off: nothing
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false }))
+  const before = own.length
+  await clock.advance(6_000)
+  await ask('k5', 'Pick a name.')
+  expect(own).toHaveLength(before)
+  expect(played).toHaveLength(3)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false, sound: false }))
+  await clock.advance(6_000)
+  await ask('k6', 'Pick a colour.')
+  expect(own).toHaveLength(before)
+  expect(played).toHaveLength(3)
 })
 
 test('work that needs the person\'s hands asks: its card stands out first with the ask, the text to paste with its Copy, and answers that go back to it', async ($, on) => {

@@ -2641,26 +2641,47 @@ const clickOf = async ($: EngineInterface) => {
 }
 
 // One notification, through the app, else as Claudopus in this Mac's Notification Centre, with its icon, a click opening the
-// chat; else, where Claudopus may not notify, macOS's plain one. `what` names it in the log
-const alertPerson = async ($: EngineInterface, what: string, title: string, text: string, key: string) => {
+// chat; else, where Claudopus may not notify, macOS's plain one. `what` names it in the log. Work that needs the person (`asks`)
+// goes as Claudopus Asks, the amber octopus, and with `chime` its notification carries the "needs you" sound, which macOS plays
+// as the person set it for that app and as a Focus allows. Says whether the sound went with the notification
+const alertPerson = async ($: EngineInterface, what: string, title: string, text: string, key: string, asks?: { chime: boolean }) => {
   const sent = await $.ui.notify(text, { title, key: key.slice(0, 200) }).catch(err => ({ isSent: false as const, reason: String(err) }))
-  if (sent.isSent || sent.reason === 'disabled' || sent.reason === 'refused') return void log($, `${what}: ${title} — ${sent.isSent ? `notified through ${sent.channel}` : `not notified (${sent.reason})`}`)
+  if (sent.isSent || sent.reason === 'disabled' || sent.reason === 'refused') {
+    void log($, `${what}: ${title} — ${sent.isSent ? `notified through ${sent.channel}` : `not notified (${sent.reason})`}`)
+    return false
+  }
   // The desktop app takes no notification from a mod yet (no-surface): Claudopus.app raises it. 0 shown, 5 macOS is asking the
   // person to allow Claudopus and it is shown once they do
-  const own = await $.process
-    .run([`${$.plugin.root}/bin/notify`, '--title', title, '--text', text, ...(await clickOf($)), '--key', key.slice(0, 200)])
-    .catch(err => ({ exitCode: -1, stderr: String(err) }))
-  if (own.exitCode === 0 || own.exitCode === 5) return void log($, `${what}: ${title} — app said ${sent.reason}; ${own.exitCode === 0 ? 'notified through Claudopus' : 'macOS asked to allow Claudopus'}`)
+  const click = [...(await clickOf($)), '--key', key.slice(0, 200)]
+  const run = (lead: string[]) => $.process.run([`${$.plugin.root}/bin/notify`, ...lead, '--title', title, '--text', text, ...click]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  const amber = asks ? await run(['--asks', ...(asks.chime ? ['--chime'] : [])]) : undefined
+  if (amber && (amber.exitCode === 0 || amber.exitCode === 5)) {
+    void log($, `${what}: ${title} — app said ${sent.reason}; ${amber.exitCode === 0 ? 'notified through Claudopus Asks' : 'macOS asked to allow Claudopus Asks'}`)
+    // Shown now with its sound; one waiting on macOS's question goes without it, so the mod's chime is heard instead
+    return amber.exitCode === 0 && asks?.chime === true
+  }
+  // Claudopus Asks turned off in System Settings, or it failed: the purple Claudopus, without the sound
+  const own = await run([])
+  const tried = amber ? `Claudopus Asks said ${amber.exitCode}; ` : ''
+  if (own.exitCode === 0 || own.exitCode === 5) {
+    void log($, `${what}: ${title} — app said ${sent.reason}; ${tried}${own.exitCode === 0 ? 'notified through Claudopus' : 'macOS asked to allow Claudopus'}`)
+    return false
+  }
   // Claudopus notifications turned off in System Settings, or it failed: macOS's plain notification. Elsewhere osascript is
   // missing and nothing is shown
   const mac = await $.process
     .run(['osascript', '-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', title, text])
     .catch(err => ({ exitCode: -1, stderr: String(err) }))
-  void log($, `${what}: ${title} — app said ${sent.reason}; Claudopus said ${own.exitCode}; ${mac.exitCode === 0 ? 'notified through macOS' : `macOS notification failed: ${mac.stderr.slice(0, 120)}`}`)
+  void log($, `${what}: ${title} — app said ${sent.reason}; ${tried}Claudopus said ${own.exitCode}; ${mac.exitCode === 0 ? 'notified through macOS' : `macOS notification failed: ${mac.stderr.slice(0, 120)}`}`)
+  return false
 }
 
-// Work that needs the person's hands says so at once: the panel comes up with its card standing out, a chime unless config.json
-// turned sound off, and a notification unless it turned those off
+// The mod's own chime for what needs the person, as bin/notify's for the notification: asks within this long of it are not heard again
+const QUIET_CHIME = 5_000
+let lastChime = -Infinity
+// Work that needs the person's hands says so at once: the panel comes up with its card standing out, and a notification with the
+// "needs you" sound. config.json's sound off makes it silent; its notifications off leaves only the mod's own chime. The chime
+// plays apart from the notification only where the notification could not carry the sound, so one ask is heard once
 const aloud = async ($: EngineInterface, what: string, title: string, text: string, key: string) => {
   let config: { sound?: unknown; notifications?: unknown } = {}
   try {
@@ -2668,8 +2689,12 @@ const aloud = async ($: EngineInterface, what: string, title: string, text: stri
   } catch {
     // A config.json being edited leaves both on
   }
-  if (config.sound !== false) void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ask sound not played: ${String(err)}`))
-  if (config.notifications !== false) await alertPerson($, what, title, text, key)
+  const chime = config.sound !== false
+  const isHeard = config.notifications !== false && (await alertPerson($, what, title, text, key, { chime }))
+  const now = await $.clock.now()
+  if (!chime || isHeard || now - lastChime < QUIET_CHIME) return
+  lastChime = now
+  void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ask sound not played: ${String(err)}`))
 }
 const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} needs you`, text, `ask-${one.id}`)
 

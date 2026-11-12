@@ -1,11 +1,24 @@
 // Draws the app icon set from the mod's icon: the square picture inside the macOS icon grid, its corners rounded.
-//   swift icon.swift <icon.png> <out.iconset>
+//   swift icon.swift <icon.png> <out.iconset> [RRGGBB]
+// With a colour, the octopus is drawn in it instead of its purple: every coloured pixel takes it, the dark ground stays.
 import AppKit
 
 let args = CommandLine.arguments
-guard args.count == 3, let source = NSImage(contentsOfFile: args[1]) else {
-  FileHandle.standardError.write("usage: swift icon.swift <icon.png> <out.iconset>\n".data(using: .utf8)!)
+guard args.count == 3 || args.count == 4, let given = NSImage(contentsOfFile: args[1]) else {
+  FileHandle.standardError.write("usage: swift icon.swift <icon.png> <out.iconset> [RRGGBB]\n".data(using: .utf8)!)
   exit(1)
+}
+var source = given
+if args.count == 4, let hex = UInt32(args[3], radix: 16), let tiff = given.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) {
+  let tint = NSColor(deviceRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+  for y in 0..<rep.pixelsHigh {
+    for x in 0..<rep.pixelsWide {
+      guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+      if max(c.redComponent, c.greenComponent, c.blueComponent) - min(c.redComponent, c.greenComponent, c.blueComponent) > 0.2 { rep.setColor(tint, atX: x, y: y) }
+    }
+  }
+  source = NSImage(size: given.size)
+  source.addRepresentation(rep)
 }
 let out = URL(fileURLWithPath: args[2])
 try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)

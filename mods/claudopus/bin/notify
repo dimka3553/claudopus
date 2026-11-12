@@ -1,13 +1,23 @@
 #!/bin/sh
-# Shows one notification as Claudopus: bin/notify --title T --text X [--open URL] [--activate BUNDLE-ID] [--key K]
+# Shows one notification as Claudopus: bin/notify [--asks [--chime]] --title T --text X [--open URL] [--activate BUNDLE-ID] [--key K]
+# --asks sends it as Claudopus Asks, the amber octopus, for work that needs the person; --chime plays its "needs you" sound with
+# it, except within QUIET seconds of the last one on this Mac, so asks that arrive together are heard once.
 # The app is copied to one fixed place first, so macOS knows one Claudopus whichever version of the mod is installed, and a
 # click finds it again after the mod updates.
 # Exit codes: 0 shown, 5 macOS is asking the person to allow Claudopus (this one is shown once they do), 2 Claudopus
 # notifications are turned off, anything else failed.
 set -eu
-src="$(cd "$(dirname "$0")/.." && pwd)/notifier/Claudopus.app"
+name=Claudopus
+chime=
+if [ "${1:-}" = --asks ]; then
+  name=ClaudopusAsks
+  shift
+  if [ "${1:-}" = --chime ]; then chime=1; shift; fi
+fi
+QUIET=5
+src="$(cd "$(dirname "$0")/.." && pwd)/notifier/$name.app"
 home="$HOME/Library/Application Support/Claudopus"
-dest="$home/Claudopus.app"
+dest="$home/$name.app"
 lock="$home/.copying"
 mkdir -p "$home"
 
@@ -32,17 +42,34 @@ if ! diff -rq "$src" "$dest" >/dev/null 2>&1; then
   mv "$dest.new" "$dest"
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$dest" >/dev/null 2>&1 || true
 fi
+app="$dest/Contents/MacOS/Claudopus"
+if [ "$*" = --status ]; then
+  rmdir "$lock" 2>/dev/null || true
+  trap - EXIT
+  exec "$app" --status
+fi
+standing=$("$app" --status)
+# Under the same lock, so two sent at once cannot both chime: the last chime's time is kept in a file, written only for one that
+# will be shown now with its sound
+sound=
+if [ -n "$chime" ] && [ "$standing" != off ] && [ "$standing" != not-asked ]; then
+  now=$(date +%s)
+  last=$(cat "$home/.chimed" 2>/dev/null || echo 0)
+  case $last in '' | *[!0-9]*) last=0 ;; esac
+  if [ $((now - last)) -ge "$QUIET" ] || [ "$last" -gt "$now" ]; then
+    sound=needs-you.wav
+    echo "$now" >"$home/.chimed"
+  fi
+fi
 rmdir "$lock" 2>/dev/null || true
 trap - EXIT
 
-app="$dest/Contents/MacOS/Claudopus"
-[ "$*" = --status ] && exec "$app" --status
-case $("$app" --status) in
+case $standing in
   off) exit 2 ;;
   not-asked)
     # macOS's question stays up only while the app runs, so it waits for the answer, started by macOS apart from the mod.
-    # One waits at a time; one sent meanwhile is not shown as Claudopus
+    # One waits at a time; one sent meanwhile is not shown as Claudopus. It goes without the sound, which the mod plays now
     pgrep -qf "$app --title" || open -g -n -a "$dest" --args "$@"
     exit 5 ;;
 esac
-exec "$app" "$@"
+exec "$app" "$@" ${sound:+--sound "$sound"}
