@@ -57,6 +57,36 @@ test('the bar keeps its buttons whole on a row of their own under the header, wr
   expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
 })
 
+test('the header names the version this chat loaded beside Claudopus, and a newer one the Mac has installed, on the same line', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  const version = async (pane: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; text?: string; props: Record<string, unknown> }[]> }) =>
+    (await pane.findAll({ type: 'Text' })).find(one => /^v\d/.test(one.text ?? ''))
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  const name = (await pane.findAll({ type: 'Box' })).find(one => one.key === 'head-name')
+  expect(name?.props.flexDirection).toBe('row')
+  const shown = await version(pane)
+  expect(shown?.text).toBe('v0.1.0')
+  expect(shown?.props.dimColor).toBe(true)
+  // The header keeps its three lines: the name, what runs, this chat's size
+  expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
+  // A newer copy the Mac updated itself to is named after it; one the same or older is not
+  await pane.unmount()
+  files.set(`${MEMORY}/update.json`, JSON.stringify({ at: 1, version: '0.1.1', result: 'updated' }))
+  const later = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect((await version(later))?.text).toBe('v0.1.0 · v0.1.1 installed')
+  await later.unmount()
+  // In a narrow pane the name stays whole; only the version shortens
+  const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 24 }, surface: 'desktop' } as never)
+  const whole = (await narrow.findAll({ type: 'Box' })).find(one => one.key === 'head-name')
+  expect(whole?.props.minWidth).toBe(0)
+  expect(await narrow.find({ type: 'Text', text: 'Claudopus' })).toBeDefined()
+  await narrow.unmount()
+  files.set(`${MEMORY}/update.json`, JSON.stringify({ at: 2, version: '0.1.0', result: 'none' }))
+  const same = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect((await version(same))?.text).toBe('v0.1.0')
+})
+
 test('About says what Claudopus is, its version and the app\'s, and links the site, the code and its licence', async ($, on) => {
   const { tabs } = world(on)
   await $.session.start(start)

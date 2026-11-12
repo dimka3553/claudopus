@@ -17,20 +17,27 @@ const aboutButton = ($: EngineInterface, ui: Ui) => (
     <ui.Button key={`about-open-${presses}`} label="About" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
   </ui.Box>
 )
-const aboutView = async ($: EngineInterface, ui: Ui) => {
-  const { Box, Link, Text } = ui
-  const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
-  const version = (() => {
+// The version this chat loaded, read once from its own copy, so a chat on an older copy shows its own number; and a newer one the
+// Mac updated itself to while this chat runs the one it loaded
+let loadedVersion: Promise<string> | undefined
+const versionsOf = async ($: EngineInterface) => {
+  loadedVersion ??= readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`).then(manifest => {
     try {
       return String(JSON.parse(manifest).version ?? '')
     } catch {
       return ''
     }
-  })()
+  })
+  const version = await loadedVersion
+  // A read that failed is tried again on the next drawing
+  if (!version) loadedVersion = undefined
+  const installed = dir ? (stampOf(await readOr($, `${dir}/update.json`))?.version ?? '') : ''
+  return { version, installed, isWaiting: Boolean(version && installed && isNewer(installed, version)) }
+}
+const aboutView = async ($: EngineInterface, ui: Ui) => {
+  const { Box, Link, Text } = ui
   const app = await (async () => (await $.session.version()).version)().catch(() => '')
-  // A newer version the Mac updated itself to while this chat runs the one it loaded
-  const installed = stampOf(await readOr($, `${dir}/update.json`))?.version ?? ''
-  const isWaiting = Boolean(version && installed && isNewer(installed, version))
+  const { version, installed, isWaiting } = await versionsOf($)
   const line = (key: string, name: string, body: JSX.Element) => (
     <Box key={key} flexDirection="row" alignItems="flex-start" gap={2} flexShrink={0}>
       <Box width={9} flexShrink={0}>

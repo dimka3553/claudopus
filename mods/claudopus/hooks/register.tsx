@@ -2118,20 +2118,27 @@ const aboutButton = ($: EngineInterface, ui: Ui) => (
     <ui.Button key={`about-open-${presses}`} label="About" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
   </ui.Box>
 )
-const aboutView = async ($: EngineInterface, ui: Ui) => {
-  const { Box, Link, Text } = ui
-  const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
-  const version = (() => {
+// The version this chat loaded, read once from its own copy, so a chat on an older copy shows its own number; and a newer one the
+// Mac updated itself to while this chat runs the one it loaded
+let loadedVersion: Promise<string> | undefined
+const versionsOf = async ($: EngineInterface) => {
+  loadedVersion ??= readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`).then(manifest => {
     try {
       return String(JSON.parse(manifest).version ?? '')
     } catch {
       return ''
     }
-  })()
+  })
+  const version = await loadedVersion
+  // A read that failed is tried again on the next drawing
+  if (!version) loadedVersion = undefined
+  const installed = dir ? (stampOf(await readOr($, `${dir}/update.json`))?.version ?? '') : ''
+  return { version, installed, isWaiting: Boolean(version && installed && isNewer(installed, version)) }
+}
+const aboutView = async ($: EngineInterface, ui: Ui) => {
+  const { Box, Link, Text } = ui
   const app = await (async () => (await $.session.version()).version)().catch(() => '')
-  // A newer version the Mac updated itself to while this chat runs the one it loaded
-  const installed = stampOf(await readOr($, `${dir}/update.json`))?.version ?? ''
-  const isWaiting = Boolean(version && installed && isNewer(installed, version))
+  const { version, installed, isWaiting } = await versionsOf($)
   const line = (key: string, name: string, body: JSX.Element) => (
     <Box key={key} flexDirection="row" alignItems="flex-start" gap={2} flexShrink={0}>
       <Box width={9} flexShrink={0}>
@@ -3786,6 +3793,8 @@ const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
     // A load, first or a reload, starts looking afresh: nothing that ended before it is announced
     lastSeen = undefined
+    // and reads its own copy's version again
+    loadedVersion = undefined
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
@@ -5341,6 +5350,7 @@ const panelHooks = (on: On) => {
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
+    const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
 
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
@@ -5351,7 +5361,13 @@ const panelHooks = (on: On) => {
             <Box flexDirection="row" alignItems="center" gap={2}>
               {octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text bold wrap="truncate-end">Claudopus</Text>
+                {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
+                <Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
+                  <Box flexShrink={0}>
+                    <Text bold>Claudopus</Text>
+                  </Box>
+                  {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed` : ''}`}</Text> : null}
+                </Box>
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
                 <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
               </Box>

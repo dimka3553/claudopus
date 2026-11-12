@@ -47,6 +47,8 @@ const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
     // A load, first or a reload, starts looking afresh: nothing that ended before it is announced
     lastSeen = undefined
+    // and reads its own copy's version again
+    loadedVersion = undefined
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
