@@ -2720,7 +2720,10 @@ test("another chat's name, shown while it has something going on, opens that cha
   const withLink = busy('chat-rc', "Last month's work summary", { said: { you: 'Sum up last month', youAt: NOW, reply: 'Here is the summary.', replyAt: NOW }, link: { bridge: 'session_01Summary', app: 'local_m4-only' } })
   // A chat of the other Mac with Remote Control off: the app's own id there opens nothing here; an id of no allowed shape is dropped
   const noLink = busy('chat-t', 'Terminal chat', { link: { bridge: 'session_; rm -rf ~', app: 'local_m4-two' } })
-  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${withLink}\n---claudopus-live---\n${noLink}\n`)
+  // A chat this Mac's app runs on the other Mac over SSH: the app holds it under its own id, so it opens as the sidebar opens it
+  const viaSsh = busy('chat-s', 'SSH chat', { link: { bridge: '', app: 'local_run-from-here' } })
+  files.set(`${HOME}/Library/Application Support/Claude/claude-code-sessions/acct/org/local_run-from-here.json`, '{}')
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${withLink}\n---claudopus-live---\n${noLink}\n---claudopus-live---\n${viaSsh}\n`)
   await $.session.start(start)
   await clock.advance(10_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -2729,11 +2732,15 @@ test("another chat's name, shown while it has something going on, opens that cha
   expect(await list.find({ type: 'Text', text: 'Here is the summary.' })).toBeUndefined()
   expect(await list.find({ type: 'Text', text: 'Sum up last month' })).toBeUndefined()
   expect(JSON.stringify(await list.drawn())).not.toContain('"hover":{"display"')
-  // The chat with Remote Control opens by its Remote Control id; the one without has no press at all
+  // The chat with Remote Control opens by its Remote Control id, the one this Mac's app runs by the app's own id; the one of the
+  // other Mac's own app without Remote Control has no press at all
+  expect(await until(async () => list.find({ key: 'chat-open-sam@m4.local-chat-s' }))).toBeDefined()
   const buttons = (await list.findAll({ type: 'Button' })).map(one => String(one.key))
-  expect(buttons.filter(key => key.startsWith('chat-open-'))).toEqual(['chat-open-sam@m4.local-chat-rc'])
+  expect(buttons.filter(key => key.startsWith('chat-open-')).sort()).toEqual(['chat-open-sam@m4.local-chat-rc', 'chat-open-sam@m4.local-chat-s'])
   await list.press({ key: 'chat-open-sam@m4.local-chat-rc' })
   expect(shown.at(-1)).toEqual(['open', 'claude://code/session_01Summary'])
+  await list.press({ key: 'chat-open-sam@m4.local-chat-s' })
+  expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_run-from-here'])
   await list.unmount()
 })
 

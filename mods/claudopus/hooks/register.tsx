@@ -2954,14 +2954,39 @@ const readOthers = async ($: EngineInterface) => {
       if (isNew) $.clock.after(LINGER + 20, () => void update($, tick, n => n + 1))
     }
   for (const key of [...endSeen.keys()]) if (!ids.has(key)) endSeen.delete(key)
+  const isAppChanged = found.some(s => s.host && s.link?.app) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
   const next = ordered(found)
   if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
-  else if (`${isMulti()}:${selfName()}` !== wasSelf) redraw($)
+  else if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged) redraw($)
+}
+
+// The chats this Mac's Claude app holds, by its own id (local_…): its session files, one per chat, under
+// ~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/. They include the chats it runs on another Mac over SSH,
+// which a press then opens as the app's own sidebar does. Listed again at most every half minute
+const appIds = new Set<string>()
+let appIdsAt = 0
+const isHere = (app: string) => appIds.has(app)
+// Answers whether what it holds changed, so the names it opens are drawn again
+const readAppIds = async ($: EngineInterface, now: number) => {
+  if (now - appIdsAt < 30_000) return false
+  appIdsAt = now
+  const root = `${(await $.env.get('HOME')) ?? ''}/Library/Application Support/Claude/claude-code-sessions`
+  const found = new Set<string>()
+  for (const account of await $.fs.list(root).catch(() => []))
+    for (const org of account.kind === 'dir' ? await $.fs.list(`${root}/${account.name}`).catch(() => []) : [])
+      for (const one of org.kind === 'dir' ? await $.fs.list(`${root}/${account.name}/${org.name}`).catch(() => []) : []) {
+        const app = one.name.replace(/\.json$/, '')
+        if (one.name.endsWith('.json') && APP_ID.test(app)) found.add(app)
+      }
+  const isSame = found.size === appIds.size && [...found].every(one => appIds.has(one))
+  appIds.clear()
+  for (const one of found) appIds.add(one)
+  return !isSame
 }
 
 // A press on another chat's name: that chat in the Claude app, as a notification's click opens this one. Nothing else is run
 const openChat = async ($: EngineInterface, c: Shared) => {
-  const url = openUrl(c)
+  const url = openUrl(c, isHere)
   if (!url) return
   const r = await $.process.run(['open', url]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   await log($, `chat ${c.chat}${c.host ? ` on ${c.host}` : ''} ${r.exitCode === 0 ? `opened: ${url}` : `not opened: ${r.stderr.trim().slice(0, 160)}`}`)
@@ -4389,7 +4414,7 @@ export const register: Register = on => {
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
     // the Claude app when pressed, where its link opens here
     const chatHead = (key: string, name: string, side: string, c?: Shared) => {
-      const url = c ? openUrl(c) : ''
+      const url = c ? openUrl(c, isHere) : ''
       const label = <Text bold dimColor wrap="truncate-end">{name}</Text>
       return (
         <Box key={`chat-head-${key}`} flexDirection="column" paddingTop={1} flexShrink={0}>
@@ -4626,7 +4651,7 @@ export const register: Register = on => {
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
                 // Open that chat whenever its link opens here: a chat of this Mac, or one of another Mac with Remote Control on
-                const url = openUrl(c)
+                const url = openUrl(c, isHere)
                 const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', url))
                 return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...cards.map(one => small(one))]
               }),
