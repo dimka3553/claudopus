@@ -28,6 +28,9 @@ const aboutView = async ($: EngineInterface, ui: Ui) => {
     }
   })()
   const app = await (async () => (await $.session.version()).version)().catch(() => '')
+  // A newer version the Mac updated itself to while this chat runs the one it loaded
+  const installed = stampOf(await readOr($, `${dir}/update.json`))?.version ?? ''
+  const isWaiting = Boolean(version && installed && isNewer(installed, version))
   const line = (key: string, name: string, body: JSX.Element) => (
     <Box key={key} flexDirection="row" alignItems="flex-start" gap={2} flexShrink={0}>
       <Box width={9} flexShrink={0}>
@@ -44,7 +47,7 @@ const aboutView = async ($: EngineInterface, ui: Ui) => {
         {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving')}
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold>Claudopus</Text>
-          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
+          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} is installed, new chats use it` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
         </Box>
       </Box>
       {band(

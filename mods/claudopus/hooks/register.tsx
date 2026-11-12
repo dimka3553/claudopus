@@ -11,6 +11,7 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
+import { installedFrom, isNewer, isUpdateDue, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedTo, updateSteps } from './update'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
 // helpers, the log and the chat's saved words
@@ -2128,6 +2129,9 @@ const aboutView = async ($: EngineInterface, ui: Ui) => {
     }
   })()
   const app = await (async () => (await $.session.version()).version)().catch(() => '')
+  // A newer version the Mac updated itself to while this chat runs the one it loaded
+  const installed = stampOf(await readOr($, `${dir}/update.json`))?.version ?? ''
+  const isWaiting = Boolean(version && installed && isNewer(installed, version))
   const line = (key: string, name: string, body: JSX.Element) => (
     <Box key={key} flexDirection="row" alignItems="flex-start" gap={2} flexShrink={0}>
       <Box width={9} flexShrink={0}>
@@ -2144,7 +2148,7 @@ const aboutView = async ($: EngineInterface, ui: Ui) => {
         {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving')}
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold>Claudopus</Text>
-          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
+          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} is installed, new chats use it` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
         </Box>
       </Box>
       {band(
@@ -2820,6 +2824,62 @@ const aloud = async ($: EngineInterface, what: string, title: string, text: stri
   void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ask sound not played: ${String(err)}`))
 }
 const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} needs you`, text, `ask-${one.id}`)
+
+// Claudopus keeps itself up to date: every few hours one chat runs Claude Code's own update steps for it (the pure parts are in hooks/update.ts)
+
+// ---- Keeping itself up to date (the pure parts are in ./update) ----
+
+// Every few hours one chat on this Mac runs Claude Code's own two update steps for the mod, under a lock the other chats see, and
+// keeps what it learnt in update.json; a copy not installed from a marketplace (its maker's folder) is never updated
+let isUpdating = false
+const selfUpdate = async ($: EngineInterface) => {
+  const from = installedFrom($.plugin.root)
+  if (!from || isUpdating || !dir) return
+  const stampPath = `${dir}/update.json`
+  if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now())) return
+  isUpdating = true
+  // The lock is one file made only where none is (the shell's noclobber), holding when it was taken and by whom; a lock left by a
+  // chat that closed mid-look is moved aside by exactly one chat once it is old (by what it says, else by when it was written)
+  const lock = `${dir}/update.lock`
+  const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
+  const take = async () =>
+    (await $.process.run(['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
+  try {
+    if (!(await take())) {
+      const now = await $.clock.now()
+      const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
+      if (now - at < UPDATE_LOOK) return
+      const aside = `${lock}.${token.split(' ')[1]}`
+      if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return
+      await $.process.run(['rm', '-f', aside]).catch(() => undefined)
+      if (!(await take())) return
+    }
+    try {
+      // Another chat may have looked between this chat's reading and its lock
+      const before = stampOf(await readOr($, stampPath))
+      const now = await $.clock.now()
+      if (!isUpdateDue(before, now)) return
+      const engine = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
+      const scope = scopeOf(await readOr($, `${from.plugins}/installed_plugins.json`), `${from.plugin}@${from.marketplace}`, $.plugin.root)
+      const [refresh, update] = updateSteps(engine, from, scope)
+      const run = (argv: string[], timeoutMs: number) => $.process.run(argv, { timeoutMs }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+      const refreshed = await run(refresh, 180_000)
+      const updated = refreshed.exitCode === 0 ? await run(update, 300_000) : refreshed
+      const to = refreshed.exitCode === 0 ? updatedTo(`${updated.stdout}\n${updated.stderr}`) : undefined
+      const why = `${updated.stderr || updated.stdout}`.trim().slice(-200)
+      const result = to ? (to.isNew ? 'updated' : 'latest') : `${refreshed.exitCode === 0 ? 'not updated' : 'marketplace not refreshed'}: ${why}`
+      // A look that learnt nothing keeps the version the last one found, so About still says what is installed
+      await $.fs.write(stampPath, JSON.stringify({ at: now, version: to?.version ?? before?.version ?? '', result }))
+      if (to?.isNew) await log($, `Claudopus updated to ${to.version}: chats that start from now on load it`)
+      else if (!to) await log($, `Claudopus ${result}`)
+    } finally {
+      // Only this chat's own lock is removed: one taken over meanwhile is the other chat's
+      if ((await readOr($, lock)) === token) await $.process.run(['rm', '-f', lock]).catch(() => undefined)
+    }
+  } finally {
+    isUpdating = false
+  }
+}
 
 // The asking card: an ask's text to copy, its buttons and reply box, and the answer reaching the work
 
@@ -3916,6 +3976,9 @@ const chatHooks = (on: On) => {
     await knowSession($)
     await loadFlows($).catch(err => log($, `workflows not read back: ${String(err)}`))
     $.clock.every(FLOW_EVERY, () => followFlows($).catch(err => log($, `workflows not followed: ${String(err)}`)))
+    // Claudopus updates itself: a look a little after the chat starts, then whenever one is due
+    $.clock.after(UPDATE_AFTER, () => void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
+    $.clock.every(UPDATE_LOOK, () => selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
 
     return begun

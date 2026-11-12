@@ -237,6 +237,9 @@ const chatHooks = (on: On) => {
     await knowSession($)
     await loadFlows($).catch(err => log($, `workflows not read back: ${String(err)}`))
     $.clock.every(FLOW_EVERY, () => followFlows($).catch(err => log($, `workflows not followed: ${String(err)}`)))
+    // Claudopus updates itself: a look a little after the chat starts, then whenever one is due
+    $.clock.after(UPDATE_AFTER, () => void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
+    $.clock.every(UPDATE_LOOK, () => selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
 
     return begun

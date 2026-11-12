@@ -6,6 +6,7 @@ import * as M3 from '../../mods/claudopus/hooks/stats'
 import * as M4 from '../../mods/claudopus/hooks/results'
 import * as M5 from '../../mods/claudopus/hooks/shared'
 import * as M6 from '../../mods/claudopus/hooks/config'
+import * as M7 from '../../mods/claudopus/hooks/update'
 
 declare global {
   export import atom = M0.atom
@@ -139,4 +140,13 @@ declare global {
   export import ConfigShown = M6.ConfigShown
   export import Models = M6.Models
   export import Role = M6.Role
+  export import installedFrom = M7.installedFrom
+  export import isNewer = M7.isNewer
+  export import isUpdateDue = M7.isUpdateDue
+  export import scopeOf = M7.scopeOf
+  export import stampOf = M7.stampOf
+  export import UPDATE_AFTER = M7.UPDATE_AFTER
+  export import UPDATE_LOOK = M7.UPDATE_LOOK
+  export import updatedTo = M7.updatedTo
+  export import updateSteps = M7.updateSteps
 }
