@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, McpToolResult, Register, RenderSurface, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
 
-import type { Entry, Flow, FlowAgent, Item, Link, Me, Report, Said, Server, Shared, Stream, Todo, Wait } from '../types'
+import type { Entry, Flow, FlowAgent, Item, Link, Me, Prompt, Report, Said, Server, Shared, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
@@ -2648,7 +2648,7 @@ const alertPerson = async ($: EngineInterface, what: string, title: string, text
 
 // Work that needs the person's hands says so at once: the panel comes up with its card standing out, a chime unless config.json
 // turned sound off, and a notification unless it turned those off
-const askAloud = async ($: EngineInterface, one: Todo, text: string) => {
+const aloud = async ($: EngineInterface, what: string, title: string, text: string, key: string) => {
   let config: { sound?: unknown; notifications?: unknown } = {}
   try {
     config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
@@ -2656,8 +2656,9 @@ const askAloud = async ($: EngineInterface, one: Todo, text: string) => {
     // A config.json being edited leaves both on
   }
   if (config.sound !== false) void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ask sound not played: ${String(err)}`))
-  if (config.notifications !== false) await alertPerson($, 'ask', `${titleOf(one)} needs you`, text, `ask-${one.id}`)
+  if (config.notifications !== false) await alertPerson($, what, title, text, key)
 }
+const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} needs you`, text, `ask-${one.id}`)
 
 // An ask's text put on the clipboard; its button says so for two seconds, and a later copy starts its own two seconds
 let copiedKey = ''
@@ -2802,9 +2803,10 @@ const shareMine = async ($: EngineInterface) => {
     myLink = await readLink($, id).catch(() => myLink)
   }
   const cards = shareable(await read($, todos), now)
-  const sign = `${title}\n${JSON.stringify([mySaid ?? null, myLink ?? null])}\n${signOf(cards)}`
+  const prompts: Prompt[] = waiting.map(({ id: one, text, title: from, at }) => ({ id: one, text, ...(from ? { title: from } : {}), at }))
+  const sign = `${title}\n${JSON.stringify([mySaid ?? null, myLink ?? null])}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
-  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(mySaid ? { said: mySaid } : {}), ...(myLink ? { link: myLink } : {}) }
+  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(prompts.length ? { prompts } : {}), ...(mySaid ? { said: mySaid } : {}), ...(myLink ? { link: myLink } : {}) }
   // Ended work is written apart, under `ended`: a chat still running a version from before ended work was shared reads `cards` only,
   // and would show what is there as running for good
   const isLive = (one: Todo) => one.status === 'working' || Boolean(one.ask)
@@ -2951,8 +2953,9 @@ const readOthers = async ($: EngineInterface) => {
     if (one) liveRead.set(entry.name, { key, text })
     else liveRead.delete(entry.name)
     if (one) here.add(one.chat)
-    // A chat of this Mac with no work is listed only beside other Macs' chats, so every Mac's panel lists the same open chats
-    if (one && one.chat !== id && (one.cards.length || isMulti())) found.push(one)
+    // A chat of this Mac with no work is listed only beside other Macs' chats, so every Mac's panel lists the same open chats; one
+    // that waits on its prompt is listed always
+    if (one && one.chat !== id && (one.cards.length || one.prompts?.length || isMulti())) found.push(one)
   }
   for (const mac of macs) {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
@@ -3054,6 +3057,105 @@ const readAnswers = async ($: EngineInterface) => {
       continue
     }
     await answerAsk($, card, answer.choice, answer.isReply)
+  }
+}
+
+// ---- The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel ----
+// The engine raises PermissionRequest as it puts a prompt to the person, and says nothing of the answer but a refusal: an allowed
+// call just runs and ends. So a prompt goes when its call ends (refused, interrupted or run), when the terminal draws its running
+// pill, or, for a command, as soon as a process running it is seen on this Mac. The mod never answers a prompt
+type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean }
+let waiting: Waiting[] = []
+// The tool calls whose permission check asked, newest last, so the prompt that follows is known by its call's id: the one of the same
+// loop, tool and input, else the newest of the same loop and tool
+type Asked = { agent: string; tool: string; input: string; id: string }
+let asked: Asked[] = []
+const inputKey = (input: unknown) => JSON.stringify(input ?? null).slice(0, 2000)
+const askedFor = (agent: string | undefined, tool: string, input: unknown) => {
+  const same = asked.filter(one => one.agent === (agent ?? '') && one.tool === tool)
+  const one = same.find(other => other.input === inputKey(input)) ?? same.at(-1)
+  if (one) asked = asked.filter(other => other !== one)
+  return one?.id
+}
+// What the prompt asks, in its own few words: a command's description, the file, the site, the question
+const promptText = (tool: string, input: unknown) => {
+  const given = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+  const field = (key: string) => (typeof given[key] === 'string' ? oneLine(given[key] as string) : '')
+  const file = (path: string) => path.split('/').filter(Boolean).pop() ?? ''
+  if (tool === 'Bash' || tool === 'PowerShell') return `Allow a command: ${cut(field('description') || field('command'), 90) || 'one with no words'}`
+  if (tool === 'Write') return `Allow writing ${file(field('file_path')) || 'a file'}`
+  if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit') return `Allow editing ${file(field('file_path') || field('notebook_path')) || 'a file'}`
+  if (tool === 'WebFetch') return `Allow opening ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'a web page'}`
+  if (tool === 'WebSearch') return `Allow a web search: ${cut(field('query'), 80)}`
+  if (tool === 'AskUserQuestion') {
+    const first = Array.isArray(given.questions) ? (given.questions[0] as { question?: unknown } | undefined)?.question : undefined
+    return typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 90)}` : 'Answer a question'
+  }
+  if (tool === 'ExitPlanMode') return 'Approve a plan'
+  const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
+  if (mcp) return `Allow ${(mcp[2] ?? '').replace(/_/g, ' ')} (${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '')})`
+  return `Allow ${tool}`
+}
+// The start of a command up to its first quote, `$` or line break, as a running shell shows it whatever the quoting
+const snippetOf = (tool: string, input: unknown) => {
+  if (tool !== 'Bash') return ''
+  const head = (String((input as { command?: unknown } | undefined)?.command ?? '').split(/['"\\\n$`]/)[0] ?? '').trimEnd()
+  return head.trim().length >= 4 ? head.slice(0, 80) : ''
+}
+// How many of Claude's shells on this Mac run a command that starts so (the Bash tool runs it as `eval '<command>'`): counted as its
+// prompt opens, so only one more than then is this call's
+const running = async ($: EngineInterface) => {
+  const r = await $.process.run(['ps', '-ww', '-x', '-o', 'args='], { timeoutMs: 5000 })
+  return r.exitCode === 0 ? r.stdout.split('\n') : undefined
+}
+const countOf = (lines: string[], snippet: string) => lines.filter(line => line.includes(`eval '${snippet}`)).length
+const opened = async ($: EngineInterface, agent: string | undefined, tool: string, input: unknown) => {
+  const at = await $.clock.now()
+  const id = askedFor(agent, tool, input) ?? `pr-${at}-${Math.random().toString(36).slice(2, 8)}`
+  const list = await read($, todos)
+  const card = agent !== undefined ? list.find(one => one.id === topOf(list, agent)) : undefined
+  const one: Waiting = { id, text: promptText(tool, input), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input) }
+  waiting = [...waiting.filter(other => other.id !== id), one]
+  redraw($)
+  void shareMine($).catch(() => undefined)
+  // The count to start from is taken beside the prompt, never in its way
+  if (one.snippet)
+    void running($)
+      .then(lines => void (lines && (waiting = waiting.map(other => (other.id === id ? { ...other, seen: countOf(lines, one.snippet) } : other)))))
+      .catch(() => undefined)
+  return id
+}
+// The app says a prompt is still waiting (its own "needs your permission", a few seconds on): it is told aloud once, as an ask is.
+// A prompt answered before that is never told
+const tellWaiting = async ($: EngineInterface) => {
+  const due = waiting.filter(one => !one.isTold)
+  if (!due.length) return
+  waiting = waiting.map(one => ({ ...one, isTold: true }))
+  const { title } = await read($, me)
+  const chat = title.trim() || cwd.split('/').filter(Boolean).pop() || 'A chat'
+  for (const one of due) await aloud($, 'prompt', `${one.title ?? chat} needs your OK`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`))
+}
+// The prompt of a call goes: by its id, else the oldest one of the same loop and tool whose id was not known
+const settle = ($: EngineInterface, id: string, agent?: string, tool?: string) => {
+  const exact = waiting.find(one => one.id === id)
+  const gone = exact ?? (tool ? waiting.find(one => one.id.startsWith('pr-') && one.tool === tool && one.agent === (agent ?? '')) : undefined)
+  if (!gone) return
+  waiting = waiting.filter(one => one !== gone)
+  redraw($)
+  void shareMine($).catch(() => undefined)
+}
+// A command allowed starts at once: a process on this Mac running it ends its prompt before the command itself ends
+let isLooking = false
+const lookForStarted = async ($: EngineInterface) => {
+  const sought = waiting.filter(one => one.snippet && one.seen !== undefined)
+  if (!sought.length || isLooking) return
+  isLooking = true
+  try {
+    const lines = await running($)
+    if (!lines) return
+    for (const one of sought) if (countOf(lines, one.snippet) > (one.seen ?? 0)) settle($, one.id)
+  } finally {
+    isLooking = false
   }
 }
 
@@ -3192,6 +3294,7 @@ export const register: Register = on => {
     let seconds = 0
     $.clock.every(1000, async () => {
       await shareMine($).catch(err => log($, `work not shared: ${String(err)}`))
+      if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
         await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
@@ -3214,6 +3317,9 @@ export const register: Register = on => {
     isEnded = false
     linkReadAt = 0
     mySaid = lastSaid(await readOr($, `${dir}/words/${id}.md`).catch(() => ''))
+    // A load starts with no prompt open: one a reload cut off has no call left to end it
+    waiting = []
+    asked = []
     await unshare($, true).catch(() => undefined)
     if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
@@ -3351,8 +3457,44 @@ export const register: Register = on => {
     return isRare ? { ...r, isDeferred: true } : r
   })
 
+  // A prompt the app is about to put to the person shows amber in every panel; the mod passes the request on untouched and never
+  // answers it. A settings hook that answered it put nothing to the person
+  on('tool.check', async ($, e, next) => {
+    const r = await next(e)
+    if (r.decision === 'ask' && e.tool_use_id && e.approver) {
+      asked = [...asked.filter(one => one.id !== e.tool_use_id), { agent: e.agentId ?? '', tool: e.tool, input: inputKey(e.input), id: e.tool_use_id }].slice(-50)
+    }
+    return r
+  })
+  on('classic.PermissionRequest', async ($, e, next) => {
+    const id = dir && !isEnded ? await opened($, e.agent_id, e.tool_name, e.tool_input).catch(err => (void log($, `prompt not shown: ${String(err)}`), '')) : ''
+    const r = await next(e)
+    if (id && r?.decision) settle($, id)
+    return r
+  })
+  on('classic.Notification', async ($, e, next) => {
+    if (e.notification_type === 'permission_prompt' && waiting.length) await tellWaiting($).catch(err => log($, `prompt not told: ${String(err)}`))
+    return next(e)
+  })
+  // It goes as its call ends (refused, interrupted, or allowed and run: the main tool.call hook below), or as the terminal draws its
+  // running pill
+  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => {
+    const id = e.props.tool_use_id
+    if (waiting.some(one => one.id === id)) void Promise.resolve().then(() => settle($, id))
+    return next(e)
+  })
+
   // A chat's own thread starts agents and talks to them; the work runs in the agents, which carry an agent id
-  on('tool.call', async ($, e, run) => {
+  on('tool.call', async ($, e, raw) => {
+    // A prompt the call raised goes as the call ends: refused, interrupted, or allowed and run
+    const run = async (call: typeof e) => {
+      try {
+        return await raw(call)
+      } finally {
+        asked = asked.filter(one => one.id !== e.tool_use_id)
+        settle($, e.tool_use_id, e.agentId, e.tool)
+      }
+    }
     if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
@@ -4251,6 +4393,26 @@ export const register: Register = on => {
       )
     }
 
+    // The app's own prompt open in a chat, amber at the top of that chat's cards: what it asks in its own few words, the work it came
+    // from, and where to answer it. A chat of the Claude app on this Mac opens at a press; the panel answers no prompt itself
+    const promptCard = (p: Prompt, key: string, where: string, link = '') => (
+      <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+        <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
+        <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
+          <Box flexDirection="column">
+            <Text bold wrap="truncate-end">{p.title || 'Needs your input'}</Text>
+            <Text dimColor wrap="truncate-end">{where}</Text>
+          </Box>
+          <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
+          {link ? (
+            <Box flexDirection="row">
+              <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), $.process.run(['open', link]).catch(err => log($, `chat not opened: ${String(err)}`)))} />
+            </Box>
+          ) : null}
+        </Box>
+      </Box>
+    )
+
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
     // the Claude app when pressed, and with the pointer resting on it shows under it what was last said there: the person's last
     // message and Claude's last answer, the older first, and what a press opens. Drawn hidden and shown by the surface as the pointer
@@ -4312,8 +4474,8 @@ export const register: Register = on => {
     // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none, when it is another
     // Mac's or beside other Macs' chats, is not listed among them: it is a row inside one folded row at the bottom, "N other chats"
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
-    const listedChats = otherChats.filter(c => shownOf(c).length)
-    const quietChats = otherChats.filter(c => !shownOf(c).length && (c.host || isMulti()))
+    const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
+    const quietChats = otherChats.filter(c => !shownOf(c).length && !c.prompts?.length && (c.host || isMulti()))
     const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     // The open chats with nothing going on, this one too when it has nothing: one folded row, "N other chats", under the cards.
     // Unfolded, each is a row of its name, with its folder and Mac at its right, as the cards' chats are named
@@ -4528,12 +4690,16 @@ export const register: Register = on => {
           : [
               // This chat's work first, named as this chat's once another chat's is shown; work that needs the person's hands comes first
               // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
-              ...(listedChats.length && (shownWork.length || shownFlows.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
+              ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
+              ...waiting.map(p => promptCard(p, `this-${p.id}`, 'Answer it in this chat')),
               ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, those that wait on the person first
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
-                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...cards.map(one => small(one))]
+                // Open that chat whenever its link opens here: a chat of this Mac, or one of another Mac with Remote Control on
+                const url = openUrl(c)
+                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', url))
+                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...cards.map(one => small(one))]
               }),
             ]}
         {/* The other chats' row and the Finished row sit at the pane's bottom edge, under everything else */}
