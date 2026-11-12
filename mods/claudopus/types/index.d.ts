@@ -78,7 +78,13 @@ export type Todo = {
 
 // What one chat shares with the panels of the others, in ~/.claude/claudopus/live/<chat id>.json: its running work, and when it last
 // said so. `host` is the Mac it was fetched from, empty for this one
-export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[] }
+export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; said?: Said; link?: Link }
+// What was last said in a chat, as its saved words hold it: the person's last message and Claude's last answer, each cut short, with
+// when. Never its thinking
+export type Said = { you: string; youAt: number; reply: string; replyAt: number }
+// What opens a chat in the Claude app: its Remote Control id (session_…), which opens it from any Mac signed in to the same account,
+// and the app's own id for it (local_…), which opens it only on the Mac it runs on
+export type Link = { bridge: string; app: string }
 
 // The card that has the pane to itself, by id; empty while the small cards show
 // `open` names what is unfolded in that card's chat: a run of tool steps by the number of steps before it, a long message by that number negated less one

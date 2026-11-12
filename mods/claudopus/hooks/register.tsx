@@ -1,12 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, McpToolResult, Register, RenderSurface, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
 
-import type { Entry, Flow, FlowAgent, Item, Me, Report, Server, Shared, Stream, Todo, Wait } from '../types'
+import type { Entry, Flow, FlowAgent, Item, Link, Me, Report, Said, Server, Shared, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
-import { ANSWER_KEPT, ANSWERS, answerOf, BEAT, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, isKey, isMac, keyOf, LIVE_DIR, LOOK_EVERY, MACS, macName, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, isKey, isMac, keyOf, lastSaid, LAST_CHARS, LIVE_DIR, LOOK_EVERY, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
 import type { Answer } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
@@ -982,6 +982,7 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
   await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
   // What Claude answered is kept beside what the person said, so a search finds what happened as well as what was asked
   if (answer.trim()) {
+    await sayMine($, 'reply', answer)
     await appendWords($, m.id, `### Claude ${new Date().toISOString()}\n${answer.trim()}\n\n`).catch(err => log($, `answer not saved: ${String(err)}`))
   }
   // A reply with no message of the person's before it relays an agent's result: it is logged when it says something
@@ -2737,14 +2738,52 @@ let sharedAt = 0
 const ownLive = (id: string) => `${liveDir()}/${id}.json`
 // Set as the session ends, so a beat due after it does not write the file again
 let isEnded = false
+// What was last said in this chat, which the panels show as the pointer rests on its name: kept as the person writes and Claude
+// answers, and read back from its saved words as it loads
+let mySaid: Said | undefined
+const sayMine = async ($: EngineInterface, part: 'you' | 'reply', text: string) => {
+  const said = text.trim().slice(0, LAST_CHARS[part])
+  if (!said) return
+  const at = await $.clock.now()
+  const was = mySaid ?? { you: '', youAt: 0, reply: '', replyAt: 0 }
+  mySaid = part === 'you' ? { ...was, you: said, youAt: at } : { ...was, reply: said, replyAt: at }
+}
+// What opens this chat in the Claude app, read off the engine's own file of this session in ~/.claude/sessions (its Remote Control id
+// appears there once Remote Control is on) at most once a beat; the file found is read again alone until it no longer names this chat
+let myLink: Link | undefined
+let linkReadAt = 0
+let linkFile = ''
+const readLink = async ($: EngineInterface, id: string): Promise<Link | undefined> => {
+  const folder = `${(await $.env.get('HOME')) ?? ''}/.claude/sessions`
+  type Entry = { sessionId?: string; hostSessionId?: string; bridgeSessionId?: string; updatedAt?: number }
+  const entryOf = async (name: string) => JSON.parse((await readOr($, `${folder}/${name}`)) || '{}') as Entry
+  let found = linkFile ? await entryOf(linkFile).catch(() => ({}) as Entry) : ({} as Entry)
+  if (found.sessionId !== id) {
+    linkFile = ''
+    found = {}
+    for (const entry of await $.fs.list(folder).catch(() => [])) {
+      if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+      const one = await entryOf(entry.name).catch(() => ({}) as Entry)
+      if (one.sessionId === id && (one.updatedAt ?? 0) >= (found.updatedAt ?? 0)) ((found = one), (linkFile = entry.name))
+    }
+  }
+  const host = (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) ?? ''
+  const bridge = typeof found.bridgeSessionId === 'string' && BRIDGE_ID.test(found.bridgeSessionId) ? found.bridgeSessionId : ''
+  const app = APP_ID.test(host) ? host : typeof found.hostSessionId === 'string' && APP_ID.test(found.hostSessionId) ? found.hostSessionId : ''
+  return bridge || app ? { bridge, app } : undefined
+}
 const shareMine = async ($: EngineInterface) => {
   const { id, title } = await read($, me)
   if (!id || !dir || isOff || isEnded) return
   const now = await $.clock.now()
+  if (now - linkReadAt >= BEAT) {
+    linkReadAt = now
+    myLink = await readLink($, id).catch(() => myLink)
+  }
   const cards = shareable(await read($, todos), now)
-  const sign = `${title}\n${signOf(cards)}`
+  const sign = `${title}\n${JSON.stringify([mySaid ?? null, myLink ?? null])}\n${signOf(cards)}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
-  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards }
+  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(mySaid ? { said: mySaid } : {}), ...(myLink ? { link: myLink } : {}) }
   await $.fs.write(ownLive(id), JSON.stringify(s))
   sharedSign = sign
   sharedAt = now
@@ -2915,6 +2954,14 @@ const readOthers = async ($: EngineInterface) => {
   const next = ordered(found)
   if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
   else if (`${isMulti()}:${selfName()}` !== wasSelf) redraw($)
+}
+
+// A press on another chat's name: that chat in the Claude app, as a notification's click opens this one. Nothing else is run
+const openChat = async ($: EngineInterface, c: Shared) => {
+  const url = openUrl(c)
+  if (!url) return
+  const r = await $.process.run(['open', url]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  await log($, `chat ${c.chat}${c.host ? ` on ${c.host}` : ''} ${r.exitCode === 0 ? `opened: ${url}` : `not opened: ${r.stderr.trim().slice(0, 160)}`}`)
 }
 
 // An answer pressed here for another chat's work, left for that chat: on this Mac in its folder of answers, on a Mac named under
@@ -3140,6 +3187,8 @@ export const register: Register = on => {
     // the other chats' files and the answers left for this one are read every few seconds, the other Macs fetched now and then
     sharedSign = ''
     isEnded = false
+    linkReadAt = 0
+    mySaid = lastSaid(await readOr($, `${dir}/words/${id}.md`).catch(() => ''))
     await unshare($, true).catch(() => undefined)
     if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
@@ -3202,6 +3251,7 @@ export const register: Register = on => {
 
     said = text
     heard = [...heard, text]
+    await sayMine($, 'you', text)
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
@@ -4176,19 +4226,56 @@ export const register: Register = on => {
       )
     }
 
-    // The name of a chat above its cards, with its folder and the Mac it runs on when another
-    const chatHead = (key: string, name: string, side: string) => (
-      <Box key={`chat-head-${key}`} flexDirection="row" alignItems="flex-end" gap={2} paddingX={2} paddingTop={1} flexShrink={0}>
-        <Box flexGrow={1} flexShrink={1} minWidth={0}>
-          <Text bold dimColor wrap="truncate-end">{name}</Text>
-        </Box>
-        {side ? (
-          <Box flexShrink={0}>
-            <Text dimColor wrap="truncate-end">{side}</Text>
+    // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
+    // the Claude app when pressed, and with the pointer resting on it shows under it what was last said there: the person's last
+    // message and Claude's last answer, the older first, and what a press opens. Drawn hidden and shown by the surface as the pointer
+    // moves, so nothing crosses to the mod and the cards beneath move down only while it rests there
+    const chatHead = (key: string, name: string, side: string, c?: Shared) => {
+      const url = c ? openUrl(c) : ''
+      const said = c?.said
+      const lines = said ? [...(said.you ? [{ who: 'You', text: said.you, at: said.youAt }] : []), ...(said.reply ? [{ who: 'Claude', text: said.reply, at: said.replyAt }] : [])].sort((a, b) => a.at - b.at) : []
+      const label = <Text bold dimColor wrap="truncate-end">{name}</Text>
+      return (
+        <Box key={`chat-head-${key}`} flexDirection="column" paddingTop={1} flexShrink={0}>
+          <Box flexDirection="row" alignItems="flex-end" gap={2} paddingX={2}>
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>
+              {c && url ? (
+                <Button key={`chat-open-${key}`} plain hover={{ underline: true }} onPress={() => void openChat($, c)}>
+                  {label}
+                </Button>
+              ) : (
+                label
+              )}
+            </Box>
+            {side ? (
+              <Box flexShrink={0}>
+                <Text dimColor wrap="truncate-end">{side}</Text>
+              </Box>
+            ) : null}
           </Box>
-        ) : null}
-      </Box>
-    )
+          {c ? (
+            <Box display="none" hover={{ display: 'flex' }} flexDirection="column" gap={1} marginTop={1} marginX={2} paddingX={1} paddingY={1} backgroundColor={FILL}>
+              {lines.length ? null : <Text dimColor wrap="wrap">Nothing said in this chat yet.</Text>}
+              {lines.map(line => (
+                <Box key={`chat-peek-${key}-${line.who}`} flexDirection="column">
+                  <Text dimColor wrap="truncate-end">{line.at ? `${line.who} · ${ago(line.at, at)}` : line.who}</Text>
+                  <Text wrap="wrap">{cut(oneLine(line.text), line.who === 'Claude' ? 240 : 160)}</Text>
+                </Box>
+              ))}
+              <Text dimColor wrap="wrap">
+                {url
+                  ? c.host
+                    ? `Press the name to open this chat in the Claude app here, through Remote Control.`
+                    : 'Press the name to open this chat in the Claude app.'
+                  : c.host
+                    ? `Opens only on ${macName(c.host)}: Remote Control is off in this chat.`
+                    : 'Opens only where it runs: it is not a chat of the Claude app and Remote Control is off.'}
+              </Text>
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
 
     // The newest result a piece of work left, which its open card links to
     const left = (one: Todo) => kept.filter(r => r.agent === one.id).sort((a, b) => b.at - a.at)[0]
@@ -4402,8 +4489,8 @@ export const register: Register = on => {
                 const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
                 // An open chat with nothing running, of another Mac or of this one beside other Macs' chats, is listed by its name
                 // alone, so the person sees what is open on each
-                if (!cards.length) return c.host || isMulti() ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()))] : []
-                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName())), ...cards.map(one => small(one))]
+                if (!cards.length) return c.host || isMulti() ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c)] : []
+                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...cards.map(one => small(one))]
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}

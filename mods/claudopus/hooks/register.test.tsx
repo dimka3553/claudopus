@@ -2584,3 +2584,65 @@ test('a chat shares the work that ended lately, the newest few, and not work tha
   expect(shared).not.toContain('old')
   expect(shared).not.toContain('n11')
 })
+
+test("a chat shares what was last said in it and what opens it, and never more of its answer than a few lines take", async ($, on) => {
+  const { files, clock } = world(on, { env: { CLAUDE_CODE_HOST_SESSION_ID: 'local_ab12-cd34' } })
+  files.set(`${HOME}/.claude/sessions/41.json`, JSON.stringify({ sessionId: 'someone-else', bridgeSessionId: 'session_01Other' }))
+  files.set(`${HOME}/.claude/sessions/42.json`, JSON.stringify({ sessionId: 'engine-id', hostSessionId: 'local_ab12-cd34', bridgeSessionId: 'session_01Mine', updatedAt: 5 }))
+  // What it last said is read back from its saved words as it loads: a heading inside an answer does not cut the answer there
+  files.set(`${MEMORY}/words/engine-id.md`, '## 2026-11-12T07:00:00.000Z\nSum up last month\n\n### Claude 2026-11-12T07:01:00.000Z\nHere it is.\n## Shipped\n## 2025-11-01\nThree releases.\n\n')
+  await $.session.start(start)
+  const shared = () => JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}')
+  expect(shared().link).toEqual({ bridge: 'session_01Mine', app: 'local_ab12-cd34' })
+  expect(shared().said).toMatchObject({ you: 'Sum up last month', reply: 'Here it is.\n## Shipped\n## 2025-11-01\nThree releases.' })
+  // A new message and its answer replace them at once, the answer cut short
+  await $.prompt.submit({ text: 'And this month?', origin: composer } as never)
+  await clock.advance(1000)
+  expect(shared().said.you).toBe('And this month?')
+  await $.turn.complete({ answer: 'x'.repeat(5000), reason: 'end_turn' } as never)
+  await clock.advance(1000)
+  expect(await until(async () => (shared().said.reply.length === 560 ? true : undefined))).toBe(true)
+})
+
+test("another chat's name shows what was last said there under it as the pointer rests on it, and a press opens that chat in the app", async ($, on) => {
+  const { files, clock, shown } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const idle = (at: number, chat: string, title: string, extra: object) => JSON.stringify({ chat, title, folder: '/Users/sam/GitHub', host: '', at, cards: [], ...extra })
+  const said = { you: 'Sum up last month', youAt: NOW - 120_000, reply: 'Here is the summary: three releases.', replyAt: NOW - 60_000 }
+  const withLink = idle(NOW, 'chat-rc', "Last month's work summary", { said, link: { bridge: 'session_01Summary', app: 'local_m4-only' } })
+  // A chat of the other Mac with Remote Control off: the app's own id there opens nothing here; an id of no allowed shape is dropped
+  const noLink = idle(NOW, 'chat-t', 'Terminal chat', { link: { bridge: 'session_; rm -rf ~', app: 'local_m4-two' } })
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${withLink}\n---claudopus-live---\n${noLink}\n`)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Here is the summary: three releases.' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Sum up last month' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'You · 2m ago' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Claude · 1m ago' })).toBeDefined()
+  // Drawn hidden, shown by the surface while the pointer rests on the chat's name or on it
+  const drawn = JSON.stringify(await list.drawn())
+  expect(drawn).toContain('"display":"none"')
+  expect(drawn).toContain('"hover":{"display":"flex"}')
+  expect(await list.find({ type: 'Text', text: 'Opens only on m4: Remote Control is off in this chat.' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Nothing said in this chat yet.' })).toBeDefined()
+  // The chat with Remote Control opens by its Remote Control id; the one without has no press at all
+  const buttons = (await list.findAll({ type: 'Button' })).map(one => String(one.key))
+  expect(buttons.filter(key => key.startsWith('chat-open-'))).toEqual(['chat-open-sam@m4.local-chat-rc'])
+  await list.press({ key: 'chat-open-sam@m4.local-chat-rc' })
+  expect(shown.at(-1)).toEqual(['open', 'claude://code/session_01Summary'])
+  await list.unmount()
+})
+
+test("a chat of this Mac with work opens by the app's own id when it has no Remote Control", async ($, on) => {
+  const { files, clock, shown } = world(on)
+  const mine = JSON.parse(otherChat(NOW)) as Record<string, unknown>
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...mine, link: { bridge: '', app: 'local_here-1' } }))
+  await $.session.start(start)
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ key: 'chat-open--chat-b' }))).toBeDefined()
+  await list.press({ key: 'chat-open--chat-b' })
+  expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_here-1'])
+  await list.unmount()
+})
