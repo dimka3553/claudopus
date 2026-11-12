@@ -6,7 +6,7 @@ import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, j
 import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
-import { ANSWER_KEPT, ANSWERS, answerOf, BEAT, cardsOf, chatName, chatSide, FETCH, FETCH_EVERY, fetchedOf, isMac, LIVE_DIR, LOOK_EVERY, MACS, macName, ordered, shareable, sharedOf, signOf, STALE } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, BEAT, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, isKey, isMac, keyOf, LIVE_DIR, LOOK_EVERY, MACS, macName, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
 import type { Answer } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
@@ -2741,7 +2741,7 @@ const shareMine = async ($: EngineInterface) => {
   const { id, title } = await read($, me)
   if (!id || !dir || isOff || isEnded) return
   const now = await $.clock.now()
-  const cards = shareable(await read($, todos))
+  const cards = shareable(await read($, todos), now)
   const sign = `${title}\n${signOf(cards)}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
   const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards }
@@ -2763,38 +2763,114 @@ const unshare = async ($: EngineInterface, isSure = false) => {
 let macs: string[] = []
 const macPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.json`
 const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '--', mac, command]
-type Fetched = { mac: string; text: string; fetchedAt: number; triedAt: number }
-// Each other Mac's chats are fetched over ssh by whichever chat here finds its copy older than FETCH_EVERY: one fetch for every
-// chat on this Mac. What a fetch that failed leaves is the copy before it, which goes stale on its own
+// This Mac's own name, as its Sharing settings give it, read once: what it is called on the Macs it hands its chats to
+let localName = ''
+const knowLocalName = async ($: EngineInterface) => {
+  if (localName) return localName
+  const r = await $.process.run(['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
+  localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac'
+  return localName
+}
+// What a trip leaves in this Mac's copy: the fetch, when it was fetched and last tried, the answers it carried (put away there on
+// the next trip) and the names of those carried lately, so an answer carried twice is left for its chat once
+type Fetched = { mac: string; text: string; fetchedAt: number; triedAt: number; acks?: string[]; seen?: string[] }
+// This Mac's own chats' files, as handed to the other Macs: those written in the last three minutes, never another Mac's copies
+const ownFiles = async ($: EngineInterface, now: number) => {
+  const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && !(entry.mtimeMs && now - entry.mtimeMs > 180_000))
+  return (await Promise.all(listed.map(entry => readOr($, `${liveDir()}/${entry.name}`)))).filter(text => text.trim().startsWith('{'))
+}
+// Each other Mac is reached by whichever chat here finds its copy older than FETCH_EVERY: one trip for every chat on this Mac. A trip
+// hands that Mac this Mac's chats, brings back its chats and the answers pressed there for this Mac's chats. What a trip that failed
+// leaves is the copy before it, which goes stale on its own
 let isFetching = false
 const fetchMacs = async ($: EngineInterface) => {
   if (isFetching) return
   isFetching = true
   try {
+    const from = await knowLocalName($)
     for (const mac of macs) {
       const now = await $.clock.now()
       const was = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
       if (now - Math.max(was.fetchedAt ?? 0, was.triedAt ?? 0) < FETCH_EVERY) continue
-      await $.fs.write(macPath(mac), JSON.stringify({ mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, triedAt: now }))
-      const r = await $.process.run(ssh(mac, FETCH), { timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+      const kept = { mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, acks: was.acks ?? [], seen: was.seen ?? [] }
+      await $.fs.write(macPath(mac), JSON.stringify({ ...kept, triedAt: now }))
+      const push = pushOf(from, keyOf(macName(mac)), now, await ownFiles($, now))
+      const r = await $.process.run(ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
       if (r.exitCode !== 0 || !r.stdout.includes('\n')) {
         // Said once when the Mac stops answering, not at every try
         if ((was.fetchedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `chats on ${mac} not fetched: ${r.stderr.trim().slice(0, 160)}`)
         continue
       }
-      await $.fs.write(macPath(mac), JSON.stringify({ mac, text: r.stdout, fetchedAt: await $.clock.now(), triedAt: now }))
+      const fetchedAt = await $.clock.now()
+      const { text, carried } = tripOf(r.stdout)
+      // An answer carried back is left for its chat here as one pressed in another chat's panel, its time moved onto this Mac's clock
+      const shift = clockOf(text) ? fetchedAt - clockOf(text) : 0
+      // Only an answer left here, or left on an earlier trip, is put away there: one that could not be left is carried again
+      const names: string[] = []
+      for (const one of carried) {
+        if (kept.seen.includes(one.name)) {
+          names.push(one.name)
+          continue
+        }
+        const path = `${liveDir()}/${ANSWERS}/${one.chat}/${one.name}`
+        const r = await $.fs
+          .write(`${path}.part`, JSON.stringify({ ...one.answer, at: one.answer.at + shift }))
+          .then(() => $.process.run(['mv', '-f', `${path}.part`, path]))
+          .catch(err => ({ exitCode: -1, stderr: String(err) }))
+        if (r.exitCode === 0) names.push(one.name)
+        else await log($, `answer from ${mac} not left: ${r.stderr.trim().slice(0, 160)}`)
+      }
+      await $.fs.write(macPath(mac), JSON.stringify({ mac, text, fetchedAt, triedAt: now, acks: names, seen: [...new Set([...kept.seen, ...names])].slice(-200) }))
     }
   } finally {
     isFetching = false
   }
 }
 
+// The Macs that handed this one their chats lately, by the name each gave, and what the freshest called this Mac: its name here once
+// other Macs' chats are listed beside its own
+const pushedFrom = new Set<string>()
+let pushedYou = ''
+// Whether this Mac lists other Macs' chats, and what it calls itself beside them
+const isMulti = () => macs.length > 0 || pushedFrom.size > 0
+const selfName = () => (isMulti() ? pushedYou || localName : '')
+
+// When this panel saw each of another chat's pieces of work end, by its id here; 0 for one that had ended well before
+const endSeen = new Map<string, number>()
+const SEEN_ENDING = 60_000
+// Whether ended work is in its pause after ending: this chat's from its end, another chat's from when this panel saw it end
+const lingers = (one: Todo, at: number) => {
+  if (!one.chat) return isLingering(one, at)
+  const seen = endSeen.get(one.id) ?? 0
+  return one.status !== 'working' && seen > 0 && at >= seen && at - seen < LINGER
+}
 // The files of other chats, as last read, by name: a file is read again only when it changed
 const liveRead = new Map<string, { key: string; text: string }>()
 const readOthers = async ($: EngineInterface) => {
   const { id } = await read($, me)
   if (!id || !dir) return
   const now = await $.clock.now()
+  const wasSelf = `${isMulti()}:${selfName()}`
+  // What other Macs handed this one: a copy not handed again for STALE (that Mac asleep or its chats closed) says nothing now
+  const pushed: Shared[] = []
+  // Gathered apart and put in place at the end, so what this Mac knows of them holds while they are read
+  const from = new Set<string>()
+  let you = ''
+  let youAt = 0
+  for (const entry of (await $.fs.list(`${liveDir()}/${PUSHED}`).catch(() => [])).filter(one => one.kind === 'file' && one.name.endsWith('.json'))) {
+    const at = entry.mtimeMs || now
+    if (now - at > STALE) continue
+    const text = await readOr($, `${liveDir()}/${PUSHED}/${entry.name}`)
+    const head = pushHead(text)
+    if (!head || `${head.from}.json` !== entry.name) continue
+    from.add(head.from)
+    if (head.you && at >= youAt) (you = head.you, (youAt = at))
+    pushed.push(...fetchedOf(text, head.from, at))
+  }
+  pushedFrom.clear()
+  for (const one of from) pushedFrom.add(one)
+  pushedYou = you
+  if (macs.length) await knowLocalName($)
   const found: Shared[] = []
   // The chats open on this Mac, work or none
   const here = new Set<string>([id])
@@ -2811,24 +2887,46 @@ const readOthers = async ($: EngineInterface) => {
     if (one) liveRead.set(entry.name, { key, text })
     else liveRead.delete(entry.name)
     if (one) here.add(one.chat)
-    // A chat of this Mac is listed only while it has work
-    if (one && one.chat !== id && one.cards.length) found.push(one)
+    // A chat of this Mac with no work is listed only beside other Macs' chats, so every Mac's panel lists the same open chats
+    if (one && one.chat !== id && (one.cards.length || isMulti())) found.push(one)
   }
   for (const mac of macs) {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
     // A copy not fetched again for STALE says nothing of that Mac now
     if (!f.text || now - (f.fetchedAt ?? 0) > STALE) continue
     // A Mac named that is this one shows its chats once, as this Mac's
-    found.push(...fetchedOf(f.text, mac, f.fetchedAt).filter(one => !here.has(one.chat)))
+    for (const one of fetchedOf(f.text, mac, f.fetchedAt)) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
   }
+  // A chat both fetched and handed over, as when two Macs each name the other, is listed once, as fetched
+  for (const one of pushed) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
+  // Work of another chat seen ending, by its id here: it turns happy for its pause from when this panel saw it end, as another
+  // chat's file reaches here seconds later. Work that ended well before this panel saw it goes to Finished at once
+  const ids = new Set<string>()
+  for (const s of found)
+    for (const card of s.cards.filter(one => one.status !== 'working')) {
+      const key = remoteId(s, card.id)
+      ids.add(key)
+      if (endSeen.has(key)) continue
+      const isNew = now - card.endedAt < SEEN_ENDING
+      endSeen.set(key, isNew ? now : 0)
+      if (isNew) $.clock.after(LINGER + 20, () => void update($, tick, n => n + 1))
+    }
+  for (const key of [...endSeen.keys()]) if (!ids.has(key)) endSeen.delete(key)
   const next = ordered(found)
   if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
+  else if (`${isMulti()}:${selfName()}` !== wasSelf) redraw($)
 }
 
-// An answer pressed here for another chat's work, left for that chat: on this Mac in its folder of answers, on another over ssh,
+// An answer pressed here for another chat's work, left for that chat: on this Mac in its folder of answers, on a Mac named under
+// macs over ssh, for a chat of a Mac that handed it over in this Mac's outbox for that Mac, which its next trip carries back. Each is
 // written under another name and then renamed, so it is never read half-written. The ask leaves this panel at once; that chat's own
 // file brings it back if the work asks again, and an answer that could not be left says so and brings the ask back
 const answeredHere = new Set<string>()
+const leaveHere = ($: EngineInterface, folder: string, name: string, body: unknown) =>
+  $.fs
+    .write(`${liveDir()}/${folder}/${name}.part`, JSON.stringify(body))
+    .then(() => $.process.run(['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
+    .catch(err => ({ exitCode: -1, stderr: String(err) }))
 const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, isReply: boolean) => {
   const ask = one.ask
   const said = choice.trim()
@@ -2844,15 +2942,14 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   const mac = chat.host ? macs.find(m => m === chat.host) : undefined
   const folder = `${ANSWERS}/${chat.id}`
   const r = !chat.host
-    ? await $.fs
-        .write(`${liveDir()}/${folder}/${name}.part`, JSON.stringify(answer))
-        .then(() => $.process.run(['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
-        .catch(err => ({ exitCode: -1, stderr: String(err) }))
+    ? await leaveHere($, folder, name, answer)
     : mac
       ? await $.process
           .run(ssh(mac, `d=~/.claude/claudopus/${LIVE_DIR}/${folder} && mkdir -p $d && cat > $d/${name}.part && mv $d/${name}.part $d/${name}.json`), { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
           .catch(err => ({ exitCode: -1, stderr: String(err) }))
-      : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
+      : isKey(chat.host) && pushedFrom.has(chat.host)
+        ? await leaveHere($, `${OUTBOX}/${chat.host}`, name, { ...answer, chat: chat.id })
+        : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
   if (r.exitCode !== 0) {
     answeredHere.delete(`${one.id}:${ask.at}`)
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost' })
@@ -2868,7 +2965,10 @@ const readAnswers = async ($: EngineInterface) => {
   const { id } = await read($, me)
   if (!id || !dir) return
   const folder = `${liveDir()}/${ANSWERS}/${id}`
-  const entries = (await $.fs.list(folder).catch(() => [])).filter(entry => entry.name.endsWith('.json') && !takenAnswers.has(entry.name))
+  const all = (await $.fs.list(folder).catch(() => [])).filter(entry => entry.name.endsWith('.json'))
+  // One taken already and left again, as an answer another Mac's trip carried twice, is put away unread
+  for (const entry of all.filter(one => takenAnswers.has(one.name))) await $.process.run(['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
+  const entries = all.filter(entry => !takenAnswers.has(entry.name))
   for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     takenAnswers.add(entry.name)
     const path = `${folder}/${entry.name}`
@@ -3654,7 +3754,7 @@ export const register: Register = on => {
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
-                {isLingering(one, at) ? (
+                {lingers(one, at) ? (
                   <Text wrap="truncate-end" color={one.status === 'done' ? DONE : undefined} dimColor={one.status !== 'done'}>
                     {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : 'Stopped'}
                   </Text>
@@ -4049,7 +4149,7 @@ export const register: Register = on => {
                 <Text bold wrap="wrap">{titleOf(one)}</Text>
                 {facts(one, true)}
               </Box>
-              {one.chat ? <Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat) ? `, ${chatSide(one.chat)}` : ''}`}</Text> : null}
+              {one.chat ? <Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat, selfName()) ? `, ${chatSide(one.chat, selfName())}` : ''}`}</Text> : null}
               {(one.status === 'working' && !one.chat) || left(one) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
@@ -4095,7 +4195,13 @@ export const register: Register = on => {
 
     // Work that has ended, under the running cards: one folded row, so nothing above it moves. Unfolded, the newest first, each a
     // steady row of two lines (what it was, how it ended, its model, how long it took, when) that opens its card as for running work
-    const finished = own.filter(one => one.status !== 'working' && !isLingering(one, at)).sort((a, b) => b.endedAt - a.endedAt)
+    // Other chats' ended work folds in here too, once its pause is over; the row then says it holds every chat's
+    const endedElsewhere = elsewhere.filter(one => one.status !== 'working' && !one.ask && !lingers(one, at))
+    // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none is listed by its
+    // name alone when it is another Mac's or beside other Macs' chats, else not at all
+    const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
+    const listedChats = otherChats.filter(c => shownOf(c).length || c.host || isMulti())
+    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -4108,7 +4214,7 @@ export const register: Register = on => {
                 onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
               />
             </Box>
-            <Text dimColor>this chat</Text>
+            <Text dimColor>{endedElsewhere.length ? 'all chats' : 'this chat'}</Text>
           </Box>
           {isOpen
             ? [...finished.map(one => ({ at: one.endedAt, card: () => small(one) })), ...endedFlows.map(f => ({ at: f.endedAt, card: () => flowSmall(f) }))].sort((a, b) => b.at - a.at).map(one => one.card())
@@ -4256,7 +4362,7 @@ export const register: Register = on => {
           <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
               {/* Happy too for a workflow in its pause whose card turned green: it finished and its last round did not fail */}
-              {isHappy(own, at) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false)
+              {isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false)
                 ? octopus(ui, 'head-mark', 'happy', HEAD_MARK, 'Claudopus, work finished')
                 : octopus(ui, 'head-mark', working.length + runningFlows.length ? 'working' : 'mark', HEAD_MARK, working.length + runningFlows.length ? 'Claudopus at work' : 'Claudopus')}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
@@ -4288,17 +4394,16 @@ export const register: Register = on => {
           ? big(alone, talked?.lines)
           : [
               // This chat's work first, named as this chat's once another chat's is shown; work that needs the person's hands comes first
-              ...(otherChats.length && (shownWork.length || shownFlows.length) ? [chatHead('this', 'This chat', '')] : []),
+              // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
+              ...(listedChats.length && (shownWork.length || shownFlows.length || isMulti()) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, those that wait on the person first
-              ...otherChats.flatMap(c => {
-                const cards = elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
-                // An open chat of another Mac with no work is listed by its name alone, so the person sees what is open there
-                if (!cards.length)
-                  return c.host
-                    ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c)), <Box key={`chat-idle-${c.host}-${c.chat}`} paddingX={3} flexShrink={0}><Text dimColor wrap="truncate-end">Open · nothing running</Text></Box>]
-                    : []
-                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c)), ...cards.map(one => small(one))]
+              ...listedChats.flatMap(c => {
+                const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
+                // An open chat with nothing running, of another Mac or of this one beside other Macs' chats, is listed by its name
+                // alone, so the person sees what is open on each
+                if (!cards.length) return c.host || isMulti() ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()))] : []
+                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName())), ...cards.map(one => small(one))]
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}
