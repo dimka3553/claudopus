@@ -1354,13 +1354,33 @@ const front = async ($: EngineInterface, id: string, title: string) => {
   if (was && !was.isShown) await $.ui.close({ id }).catch(() => undefined)
   await $.ui.open({ id, title, focus: true })
   // The pane pressed in stays in front while its press runs: once it has run, the new pane is opened again, which brings it forward
+  // Only where the surface says which pane it shows: a chat the app runs on another Mac over ssh says none is shown, ever, and there
+  // this open from a timer, which no press asked for, left a tab the mod never drew in place of the one drawn (seen on the M4)
   if (!(await shown()))
     $.clock.after(150, async () => {
-      if (await shown()) return
+      const panes = await $.ui.panes()
+      const mine = panes.find(pane => pane.id === id)
+      // Closed by the person meanwhile, already in front, or a screen that says nothing of what it shows: left as it is
+      if (!mine || mine.isShown || !panes.some(pane => pane.isShown)) return
       await $.ui.close({ id }).catch(() => undefined)
       await $.ui.open({ id, title, focus: true })
-      await log($, `front ${id} again: shown ${await shown()}`)
+      const now = (await $.ui.panes()).find(pane => pane.id === id)
+      await log($, `front ${id} again: shown ${Boolean(now?.isShown)}, drawn ${Boolean(now?.isPlaced)}`)
     })
+}
+// A tab of the mod's own, other than the list, that is open and not drawn was left by an open no press asked for: it is closed, so
+// the person never looks at an empty tab, and a press opens it again, drawn. Run as the mod loads and as the session starts
+// Only while a surface places this chat's panes (one of them is drawn): with none attached every pane waits undrawn, rightly
+const closeUndrawn = async ($: EngineInterface) => {
+  const panes = await $.ui.panes().catch(() => [])
+  if (!panes.some(pane => pane.isPlaced)) return
+  for (const pane of panes) {
+    if (pane.id === LIST || pane.isPlaced) continue
+    // Read again just before: a press meanwhile may have opened it afresh, drawn
+    if ((await $.ui.panes().catch(() => [])).find(one => one.id === pane.id)?.isPlaced !== false) continue
+    await $.ui.close({ id: pane.id }).catch(() => undefined)
+    await log($, `undrawn tab ${pane.id} closed`)
+  }
 }
 // A picture that is an SVG of the work's own is drawn as it is, when it is small enough to draw
 const svgOf = async ($: EngineInterface, path: string): Promise<Thumb> => {
@@ -3404,6 +3424,9 @@ export const register: Register = on => {
     ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
     cwd = e.cwd
     await loadSettings($)
+    // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
+    await closeUndrawn($)
+    $.clock.after(3000, () => closeUndrawn($))
 
     // The engine's id names this chat's files, as its transcript is named
     const id = await $.session.id()
@@ -4587,6 +4610,24 @@ export const register: Register = on => {
       )
     }
 
+    // Another chat's work: its own chat is in that chat's panel, which one press opens wherever the app can open that chat (a chat of
+    // the app on this Mac, or one Remote Control serves); elsewhere it says where to go. Nothing of that chat is read from here
+    const theirChat = (one: Todo, c: NonNullable<Todo['chat']>) => {
+      const id = one.id
+      const s = otherChats.find(one => one.chat === c.id && one.host === c.host)
+      const canOpen = Boolean(s && openUrl(s, heldApp(s)))
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Text dimColor wrap="wrap">{`Its chat is shown in the panel of the chat "${chatName(c)}"${c.host ? ` on ${macName(c.host)}` : ''}, which runs it.${one.status === 'working' ? ' Stop it or move it to another model there.' : ''}`}</Text>
+          {s && canOpen ? (
+            <Box flexDirection="row">
+              <Button key={`their-chat-${id}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, s))} />
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
+
     // The big card, in parts that stand apart: what the work is, with its buttons; where it started; its to-dos; its chat. The
     // buttons sit at the top, above a chat of any length
     const big = (one: Todo, lines: Line[] | undefined) => {
@@ -4625,7 +4666,7 @@ export const register: Register = on => {
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {one.chat
-            ? part('part-chat', 'Its chat', '', <Text dimColor wrap="wrap">{`Its chat is shown in the panel of the chat "${chatName(one.chat)}", which runs it. Stop it or move it to another model there.`}</Text>)
+            ? part('part-chat', 'Its chat', '', theirChat(one, one.chat))
             : part('part-chat', 'Its chat', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading its chat…</Text>)}
         </Box>
       )

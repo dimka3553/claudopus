@@ -29,7 +29,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; unplaced?: boolean } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; unplaced?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean}[] } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -138,9 +138,12 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     logged.push(e.text)
     return { value: undefined }
   })
-  on('ui.panes', () => ({ value: (options.panes ?? []).map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
+  // `live`: panes as a surface keeps them, opened and closed as asked; a surface that never says one is shown (a chat the app runs on
+  // another Mac over ssh) is told by isShown false on every open
+  on('ui.panes', () => ({ value: options.live ? options.live.map(one => ({ id: one.id, title: one.id, isShown: one.isShown, isFocused: false, isPlaced: one.isPlaced })) : (options.panes ?? []).map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
   on('ui.close', (_, e) => {
     closed.push(e.id)
+    if (options.live) options.live.splice(0, options.live.length, ...options.live.filter(one => one.id !== e.id))
     return { value: undefined }
   })
   // What the Mac answers: a dev server on 3100 started by a chat, and the system's own listener, which is not the person's
@@ -219,6 +222,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     tabs.push(`${e.id}: ${e.title}`)
     // A screen with nowhere to draw a pane, as a Remote Control chat seen from another device
     if (options.unplaced) return { value: { isPlaced: false, reason: 'no-surface' } } as never
+    if (options.live && !options.live.some(one => one.id === e.id)) options.live.push({ id: e.id, isShown: false, isPlaced: true })
     return { value: { isPlaced: true } }
   })
   on('session.append', (_, e, next) => {
@@ -3046,4 +3050,81 @@ test("a chat of this Mac with work opens by the app's own id when it has no Remo
   await list.press({ key: 'chat-open--chat-b' })
   expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_here-1'])
   await list.unmount()
+})
+
+test("Details of work in a chat the app runs on another Mac shows what that chat shares, and one press opens that chat", async ($, on) => {
+  const { files, clock, shown } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const chat = { chat: 'chat-m4', title: 'Video', folder: '/Users/sam/GitHub', host: '', at: NOW, link: { bridge: 'session_01Video', app: '' }, cards: [{ id: 'v1', parentId: '', isFork: false, tokens: 242_001, title: 'Improve the video', words: 'Can you improve the video?', items: [{ text: 'Find the cuts', state: 'done' }, { text: 'Have it checked', state: 'doing' }, { text: 'Show you', state: 'open' }], entries: [{ at: NOW - 1000, kind: 'note', text: 'Rendering again for a second look.' }], answer: '', startedAt: NOW - 60_000, endedAt: 0, status: 'working', model: 'claude-fable-5-2' }] }
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${JSON.stringify(chat)}\n`)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Improve the video' }))).toBeDefined()
+  const id = (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('open-r-'))?.key?.replace(/^open-/, '').replace(/-\d+$/, '') ?? ''
+  const tab = await $.ui.mount({ ...LIST, requestId: `work-${id}`, surface: 'desktop' } as never)
+  const texts = (await tab.findAll({ type: 'Text' })).map(t => t.text)
+  expect(texts).toContain('From the chat "Video", GitHub · on m4')
+  expect(texts).toContain('“Can you improve the video?”')
+  expect(texts).toContain('Have it checked')
+  expect(texts).toContain('Rendering again for a second look.')
+  expect(texts).toContain('Its chat is shown in the panel of the chat "Video" on m4, which runs it. Stop it or move it to another model there.')
+  await pressed(tab, `their-chat-${id}`)
+  expect(await until(async () => shown.find(argv => argv[1]?.startsWith('claude://')))).toEqual(['open', 'claude://code/session_01Video'])
+  await tab.unmount()
+  await list.unmount()
+})
+
+test("in a chat whose screen never says which tab it shows, as one the app runs over ssh, Details opens its tab once and leaves it drawn", async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: false, isPlaced: true }]
+  const { opened, closed, clock } = world(on, { live })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'open-a1')
+  expect(await until(async () => opened.includes('work-a1') || undefined)).toBe(true)
+  await clock.advance(1000)
+  expect(opened.filter(id => id === 'work-a1')).toHaveLength(1)
+  expect(closed).not.toContain('work-a1')
+  expect(live.find(one => one.id === 'work-a1')?.isPlaced).toBe(true)
+  await pane.unmount()
+})
+
+test("where the screen says which tab it shows, a Details tab left behind the list is brought forward once the press has run", async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: true, isPlaced: true }]
+  const { opened, closed, clock } = world(on, { live })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'open-a1')
+  expect(await until(async () => opened.includes('work-a1') || undefined)).toBe(true)
+  await clock.advance(1000)
+  expect(opened.filter(id => id === 'work-a1')).toHaveLength(2)
+  expect(closed.filter(id => id === 'work-a1')).toHaveLength(1)
+  await pane.unmount()
+})
+
+test("an empty tab an earlier version left open, not drawn, closes as the mod loads; the list and drawn tabs stay", async ($, on) => {
+  const live = [
+    { id: 'claudopus', isShown: true, isPlaced: true },
+    { id: 'work-a9', isShown: false, isPlaced: false },
+    { id: 'reports', isShown: false, isPlaced: true },
+  ]
+  const { closed } = world(on, { live })
+  await $.session.start(start)
+  expect(closed.filter(id => id !== 'agents')).toEqual(['work-a9'])
+  expect(live.map(one => one.id)).toEqual(['claudopus', 'reports'])
+})
+
+test("with no screen attached every tab waits undrawn, and none is closed as the mod loads", async ($, on) => {
+  const live = [
+    { id: 'claudopus', isShown: false, isPlaced: false },
+    { id: 'work-a9', isShown: false, isPlaced: false },
+  ]
+  const { closed, clock } = world(on, { live })
+  await $.session.start(start)
+  await clock.advance(5000)
+  expect(closed.filter(id => id !== 'agents')).toEqual([])
 })
