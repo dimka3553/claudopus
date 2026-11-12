@@ -62,8 +62,15 @@ const ANSWER_CHARS = 30_000
 const TICK = 3000
 // Work that has just ended stays in its place among the running cards this long, in its ended look, before it goes to Finished
 const LINGER = 2000
+// Work that ended while the mod was reloading, which draws nothing for many seconds, has its pause from the load instead, by
+// `<id>:<endedAt>`: a finish is never over before the panel could show it
+const lateFrom = new Map<string, number>()
+// Ended work this long before a load may not have been drawn ended at all
+const RELOAD_GRACE = 30_000
+// When ended work's pause begins
+const pauseFrom = (one: { id: string; endedAt: number }) => Math.max(one.endedAt, lateFrom.get(`${one.id}:${one.endedAt}`) ?? 0)
 // Whether ended work is still in that pause at a time: a card that ended in the future, as from another clock, is not
-const isLingering = (one: { status: string; endedAt: number }, at: number) => one.status !== 'working' && one.endedAt > 0 && at >= one.endedAt && at - one.endedAt < LINGER
+const isLingering = (one: { id: string; status: string; endedAt: number }, at: number) => one.status !== 'working' && one.endedAt > 0 && at >= pauseFrom(one) && at - pauseFrom(one) < LINGER
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set<string>()
 // The engine's list of agents is read again this often, and the minutes move on
@@ -2128,7 +2135,7 @@ const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: ''
 const ART_FILES: Record<Exclude<keyof typeof ART, 'asking'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
 // Whether the octopus is happy at a time: work of this chat's that finished, not stopped or failed, is in its pause. A new drawing
 // starts its animation, so it plays from the first finish and holds its last picture through any finish that follows in the pause
-const isHappy = (cards: { parentId?: string; status: string; endedAt: number }[], at: number) =>
+const isHappy = (cards: { id: string; parentId?: string; status: string; endedAt: number }[], at: number) =>
   cards.some(one => !one.parentId && one.status === 'done' && isLingering(one, at))
 // How big the octopus is drawn in the panel's header and in the line above the prompt, in the app's pixels
 const HEAD_MARK = 48
@@ -3675,6 +3682,13 @@ export const register: Register = on => {
     // drawn again only when its work moves, since its chat is too long to draw every second and a press must not wait behind a drawing.
     // The redraws set for pauses before this start are forgotten, as their timers went with the session that set them
     lingerSet.clear()
+    // Work that ended in the seconds the reload drew nothing has its pause now
+    {
+      const now = await $.clock.now()
+      lateFrom.clear()
+      for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)])
+        if (one.status !== 'working' && one.endedAt > 0 && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, now)
+    }
     let seconds = 0
     $.clock.every(1000, async () => {
       await shareMine($).catch(err => log($, `work not shared: ${String(err)}`))
@@ -3692,7 +3706,7 @@ export const register: Register = on => {
         const key = `${one.id}:${one.endedAt}`
         if (lingerSet.has(key)) continue
         lingerSet.add(key)
-        $.clock.after(one.endedAt + LINGER - now + 20, () => void ((lingerSet.delete(key), update($, tick, n => n + 1))))
+        $.clock.after(pauseFrom(one) + LINGER - now + 20, () => void ((lingerSet.delete(key), update($, tick, n => n + 1))))
       }
     })
     $.clock.every(TICK, () => refresh($).catch(err => log($, `servers not looked at again: ${String(err)}`)))

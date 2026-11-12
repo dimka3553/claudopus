@@ -1174,12 +1174,28 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   const again = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await drawn(again)).toEqual(['mark'])
 
-  // Nor after a reload in the pause: the pause still ends, and the octopus is at rest
+  // A reload in the pause gives it its pause again from the load, which then ends, and the octopus is at rest
   await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw the nose' } as never)
   await end('a6', 't6')
   expect(await drawn(again)).toEqual(['happy'])
   await $.session.start(start)
   await clock.advance(2_100)
+  expect(await drawn(again)).toEqual(['mark'])
+
+  // Work that ends while the mod reloads, which draws nothing for many seconds, is green and happy once it has loaded, for its pause
+  await $.agent.spawn({ ...spawn, description: 'Draw the brows', prompt: 'draw the brows' } as never)
+  await end('a7', 't7')
+  await clock.advance(15_000)
+  expect(await drawn(again)).toEqual(['mark'])
+  await $.session.start(start)
+  expect(await drawn(again)).toEqual(['happy'])
+  expect((await again.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  await clock.advance(2_100)
+  expect(await drawn(again)).toEqual(['mark'])
+  expect(await again.find({ type: 'Text', text: /Draw the brows/ })).toBeUndefined()
+  // Work that ended long before a load is not
+  await clock.advance(30_000)
+  await $.session.start(start)
   expect(await drawn(again)).toEqual(['mark'])
   await again.unmount()
 })
