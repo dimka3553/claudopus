@@ -387,7 +387,7 @@ const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', s
 // (the chat stops such work once its report is in), stopped otherwise
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
 // Work that called SubagentHandback in the turn now ending: what it ends that turn with is its report
-const handedBack = new Set<string>()
+const handedBack = new Map<string, string>()
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
@@ -3735,7 +3735,8 @@ export const register: Register = on => {
     if (e.agentId !== undefined) {
       const id = e.agentId
       const now = await $.clock.now()
-      const answer = (e.answer ?? '').trim().slice(0, ANSWER_CHARS)
+      // A turn that handed back its report with SubagentHandback and says nothing after has that report as its answer
+      const answer = ((e.answer ?? '').trim() || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
       const isHeld = (await $.agent.list().catch(() => [])).some(one => one.id === id && one.status === 'waiting')
       const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
       // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
@@ -3751,7 +3752,9 @@ export const register: Register = on => {
             : isWaiting
               ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt }
               : how === 'stopped'
-                ? ended(one, stoppedAs(one), now)
+                ? one.status === 'working'
+                  ? ended(one, stoppedAs(one), now)
+                  : one
                 : { ...ended(one, how, now), answer: answer || one.answer },
         )
       })
@@ -3762,7 +3765,7 @@ export const register: Register = on => {
       // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
       // held on its own background work leaves it once it ends (keepStoppedReports)
       const card = (await read($, todos)).find(one => one.id === id)
-      const report = (e.answer ?? '').trim()
+      const report = (e.answer ?? '').trim() || answer
       if (card && !card.parentId && card.status === 'done' && how === 'done' && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
       }
@@ -3850,7 +3853,13 @@ export const register: Register = on => {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
     }
-    const next = async (call: typeof e) => hideKept($, call, await run(call))
+    // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
+    let woken = ''
+    const next = async (call: typeof e) => {
+      const r = await run(call)
+      if (woken && !r.deny && !r.isError) await update($, todos, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
+      return hideKept($, call, r)
+    }
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
     // a line saying what it decided. It is kept by the card in their words. Any other message to work under way, a helper's reply,
     // one between pieces of work or the chat's own note, is told as its sender's
@@ -3865,6 +3874,7 @@ export const register: Register = on => {
       const list = await read($, todos)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
       if (target) {
+        woken = target.id
         const isSteer = target.status === 'working' && Boolean(words)
         if (target.status === 'working' && message && !isSteer) {
           const sender = list.find(one => one.id === e.agentId)
@@ -3884,7 +3894,6 @@ export const register: Register = on => {
               ? one
               : {
                   ...one,
-                  answeredAt: undefined,
                   owes: isSteer ? 0 : one.owes,
                   entries: words && one.entries.at(-1)?.text !== words ? [...one.entries, { at: now, kind: 'steer' as const, text: words }].slice(-ENTRIES_KEPT) : one.entries,
                 },
@@ -3897,7 +3906,7 @@ export const register: Register = on => {
       const id = e.agentId
       // What this work starts with the Agent tool is its helper, which the engine's own record does not always say
       if (e.tool === 'Agent') helperCalls.set(e.tool_use_id, id)
-      if (String(e.tool) === 'SubagentHandback') handedBack.add(id)
+      if (String(e.tool) === 'SubagentHandback') handedBack.set(id, String((e as { message?: unknown }).message ?? '').trim())
       // Work that calls a tool is working: a card that had ended is back. Its steps are counted: to place a steer among them,
       // to see that a steer got its decision, and to see that its to-dos are still being kept
       if (dir) {

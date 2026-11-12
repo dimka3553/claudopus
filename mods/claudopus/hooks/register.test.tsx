@@ -1200,6 +1200,12 @@ test('work that answered while only its own background work held it, then stoppe
   await clock.advance(10)
   expect(await until(async () => kept()[0])).toBeDefined()
   expect(files.get(kept()[0] ?? '')).toBe(`${report.trim()}\n`)
+  // The aborted turn that follows the stop changes nothing: its pause is not begun again, and its words are no report
+  await clock.advance(1_000)
+  await $.turn.complete({ answer: 'Partial words', durationMs: 1, isAborted: true, turnId: 't1x', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(1_100)
+  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  expect(files.get(kept()[0] ?? '')).toBe(`${report.trim()}\n`)
   await clock.advance(2_100)
   expect(await pane.find({ type: 'Text', text: /Remove the hover/ })).toBeUndefined()
   expect(await drawn(pane)).toEqual(['mark'])
@@ -1232,7 +1238,8 @@ test('work that answered while only its own background work held it, then stoppe
   agents.a4 = 'waiting'
   kinds.a4 = 'general-purpose'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a4', message: 'Named it Otto.' } as never)
-  await $.turn.complete({ answer: 'Named it Otto.', durationMs: 1, isAborted: false, turnId: 't4s', reason: 'answer', agentId: 'a4' } as never)
+  // Its turn may end with no text of its own: the handback is its answer
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4s', reason: 'answer', agentId: 'a4' } as never)
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's4', task_id: 'a4' } as never)
   expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeDefined()
   await clock.advance(2_100)
