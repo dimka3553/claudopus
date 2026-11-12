@@ -11,7 +11,7 @@ test("another Mac's results are read past a login banner, by folder, with each m
   expect(resultsOf('no home here')).toBeUndefined()
   expect(isResultId('_sync')).toBe(false)
   expect(isResultId('a b')).toBe(false)
-  expect(pullThere(['ok-1', '$(rm)'])).toBe('cd ~/.claude/claudopus/reports && COPYFILE_DISABLE=1 tar cf - -- ok-1')
+  expect(pullThere(['ok-1', '$(rm)'])).toBe('cd ~/.claude/claudopus/reports && mkdir -p _sync && : > _sync/_end && COPYFILE_DISABLE=1 tar cf - ok-1 -C _sync _end')
 })
 
 test("a result's paths move onto the other Mac's home, never into a longer name that begins with it", async () => {

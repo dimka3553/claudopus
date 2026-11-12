@@ -83,7 +83,8 @@ export const parsedMeta = (text: string): Marked => {
 // or hands that Mac the results in the folder here. Either fails when ssh or tar on either end does, so a stream cut short is
 // never taken as whole
 export const PULL = 'set -o pipefail; S=$1; M=$2; C=$3; ssh -o BatchMode=yes -o ConnectTimeout=5 -- "$M" "$C" | tar xf - -C "$S"'
-export const pullThere = (ids: readonly string[]) => `cd ~/.claude/claudopus/reports && COPYFILE_DISABLE=1 tar cf - -- ${ids.filter(isResultId).join(' ')}`
+// It ends with an empty _end, kept in _sync there; no -- before the names, which isResultId keeps from starting with a dash
+export const pullThere = (ids: readonly string[]) => `cd ~/.claude/claudopus/reports && mkdir -p _sync && : > _sync/_end && COPYFILE_DISABLE=1 tar cf - ${ids.filter(isResultId).join(' ')} -C _sync _end`
 // The stream ends with an empty _end, so the other end knows it got all of it even where a cut falls between two files
 export const PUSH = 'set -o pipefail; S=$1; M=$2; C=$3; shift 3; cd "$S" && : > _end && COPYFILE_DISABLE=1 tar cf - -- "$@" _end | ssh -o BatchMode=yes -o ConnectTimeout=5 -- "$M" "$C"'
 // A folder goes in place only when no folder has its name, under a claim only one chat can take at a time (mkdir), so two chats

@@ -2869,7 +2869,7 @@ const fetchMacs = async ($: EngineInterface) => {
 // A result is moved into place only whole and only where none has its name; nothing is deleted
 const resultsPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.results.json`
 // What one sync with a Mac leaves: when, and each result both have that was put away then, with when
-type Synced = { syncedAt?: number; triedAt?: number; archived?: Record<string, number> }
+type Synced = { syncedAt?: number; triedAt?: number; archived?: Record<string, number>; failed?: string[] }
 let isSyncing = false
 const syncResults = async ($: EngineInterface) => {
   if (isSyncing) return
@@ -2895,13 +2895,10 @@ const syncResults = async ($: EngineInterface) => {
     isSyncing = false
   }
 }
-// The results missing on one side that one trip takes, starting further along each trip, so a few that keep failing never hold
+// The results missing on one side that one trip takes, those that failed last trip last, so a few that keep failing never hold
 // back the rest
-const aTrip = (ids: string[], now: number) => {
-  if (ids.length <= RESULTS_A_TRIP) return ids
-  const from = (Math.floor(now / RESULTS_EVERY) * RESULTS_A_TRIP) % ids.length
-  return [...ids, ...ids].slice(from, from + RESULTS_A_TRIP)
-}
+const aTrip = (ids: string[], failed: readonly string[] = []) =>
+  [...ids.filter(id => !failed.includes(id)), ...ids.filter(id => failed.includes(id))].slice(0, RESULTS_A_TRIP)
 const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: number, staging: string) => {
   const home = dir.slice(0, -'/.claude/claudopus'.length)
   const looked = await $.process.run(ssh(mac, RESULTS_LOOK), { timeoutMs: 60_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }))
@@ -2921,16 +2918,19 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
   let changed = 0
   // Brought here one at a time, each into a folder of its own first, its paths moved onto this Mac's home, then into place whole:
   // one whose stream was cut short is left out, and brought on a later trip
-  const wanted = aTrip([...theirs.results.keys()].filter(id => !mine.has(id)), now)
+  const failed: string[] = []
+  const wanted = aTrip([...theirs.results.keys()].filter(id => !mine.has(id)), was.failed)
   for (const id of wanted) {
     const into = `${staging}/${id}`
     await $.process.run(['mkdir', '-p', into])
     const r = await $.process.run(['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
-    if (r.exitCode !== 0) {
-      await log($, `result ${id} from ${mac} not brought: ${r.stderr.trim().slice(0, 160)}`)
+    // Its stream ends with an empty _end, so one cut between two files is known as cut
+    const isWhole = r.exitCode === 0 && (await $.fs.exists(`${into}/_end`).catch(() => false))
+    if (!isWhole || (parsedMeta(await readOr($, `${into}/${id}/meta.json`)) as { id?: unknown }).id !== id) {
+      await log($, `result ${id} from ${mac} not brought: ${r.exitCode !== 0 ? r.stderr.trim().slice(0, 160) : 'it came cut short'}`)
+      failed.push(id)
       continue
     }
-    if ((parsedMeta(await readOr($, `${into}/${id}/meta.json`)) as { id?: unknown }).id !== id) continue
     for (const file of ['meta.json', 'report.md']) {
       const text = await readOr($, `${into}/${id}/${file}`)
       if (text) await $.fs.write(`${into}/${id}/${file}`, rehome(text, theirs.home, home))
@@ -2940,13 +2940,16 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
   }
   // Handed there: copied aside here with its paths moved onto that Mac's home, then sent in one stream, put in place there only
   // once the whole stream is in
-  const handed = aTrip([...mine.keys()].filter(id => !theirs.results.has(id)), now)
+  const handed = aTrip([...mine.keys()].filter(id => !theirs.results.has(id)), was.failed)
   if (handed.length) {
     const out = `${staging}-out`
     await $.process.run(['mkdir', '-p', out])
     const ready: string[] = []
     for (const id of handed) {
-      if ((await $.process.run(['cp', '-Rp', `${reportsDir()}/${id}`, `${out}/${id}`]).catch(() => ({ exitCode: -1 }))).exitCode !== 0) continue
+      if ((await $.process.run(['cp', '-Rp', `${reportsDir()}/${id}`, `${out}/${id}`]).catch(() => ({ exitCode: -1 }))).exitCode !== 0) {
+        failed.push(id)
+        continue
+      }
       for (const file of ['meta.json', 'report.md']) {
         const text = await readOr($, `${out}/${id}/${file}`)
         if (text) await $.fs.write(`${out}/${id}/${file}`, rehome(text, home, theirs.home))
@@ -2954,7 +2957,10 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
       ready.push(id)
     }
     const r = ready.length ? await $.process.run(['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' }
-    if (r.exitCode !== 0) await log($, `results not handed to ${mac}: ${r.stderr.trim().slice(0, 160)}`)
+    if (r.exitCode !== 0) {
+      await log($, `results not handed to ${mac}: ${r.stderr.trim().slice(0, 160)}`)
+      failed.push(...ready)
+    }
   }
   // What the person did to a result both have: the later of put away and brought back, every answer, on both. Each side is written
   // only when it differs; there only when unchanged since it was read
@@ -2985,7 +2991,7 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
     if (kept) archived[id] = kept
   }
   if (changed) await loadReports($)
-  await $.fs.write(resultsPath(mac), JSON.stringify({ syncedAt: await $.clock.now(), triedAt: now, brought: wanted.length, handed: handed.length, marked, archived }))
+  await $.fs.write(resultsPath(mac), JSON.stringify({ syncedAt: await $.clock.now(), triedAt: now, brought: wanted.length, handed: handed.length, marked, archived, failed }))
   if (wanted.length || handed.length || marked) await log($, `results with ${mac}: ${wanted.length} brought, ${handed.length} handed, ${marked} marked`)
 }
 

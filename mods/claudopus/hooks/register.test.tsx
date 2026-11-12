@@ -168,7 +168,10 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
       // A stream cut short lays half of what it carried and fails
       if (String(rest[1]).includes('tar xf - -C "$S"')) {
         for (const [key, text] of [...files]) if (key.startsWith('remote:') && !(files.has('pull:cut') && key.endsWith('report.md'))) files.set(`${rest[3]}/${key.slice(7)}`, text)
+        // Cut between two files, tar may end well: only the _end it closes with is missing
+        if (files.get('pull:cut') === 'between') return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
         if (files.has('pull:cut')) return { value: { exitCode: 1, stdout: '', stderr: 'tar: Truncated input file', isStdoutTruncated: false, isStderrTruncated: false } }
+        files.set(`${rest[3]}/_end`, '')
       }
       if (String(rest[1]).startsWith('mkdir "$3"')) {
         const [from = '', to = ''] = [String(rest[3]), String(rest[4])]
@@ -2710,7 +2713,7 @@ test("with another Mac named, the results become the same on both: what each lac
   await until(async () => files.get(`${MEMORY}/reports/theirs/meta.json`))
   expect(files.get(`${MEMORY}/reports/theirs/meta.json`)).toContain(`"folder":"${HOME}/repo"`)
   expect(files.get(`${MEMORY}/reports/theirs/report.md`)).toBe(`See ${HOME}/repo/a.png\n`)
-  expect(sshed.find(([script]) => script?.includes('tar xf - -C "$S"'))?.[1]).toContain('tar cf - -- theirs')
+  expect(sshed.find(([script]) => script?.includes('tar xf - -C "$S"'))?.[1]).toContain('tar cf - theirs -C _sync _end')
   // "mine" is handed there, and only it
   const handed = await until(async () => sshed.find(([script]) => script?.includes(': > _end && COPYFILE_DISABLE=1 tar cf')))
   expect(handed?.[1]).toMatch(/ mine$/)
@@ -2739,6 +2742,13 @@ test("a result cut short on its way is never put in place, and a list cut short 
   await $.session.start(start)
   await clock.advance(10_000)
   await until(async () => sshed.find(([script]) => script?.includes('tar xf - -C "$S"')))
+  await clock.advance(1_000)
+  expect(files.has(`${MEMORY}/reports/theirs/meta.json`)).toBe(false)
+  // Cut between its two files with tar ending well: no _end came, so it is not put in place either
+  files.set('pull:cut', 'between')
+  const pulls = sshed.filter(([script]) => script?.includes('tar xf - -C "$S"')).length
+  await clock.advance(120_000)
+  await until(async () => sshed.filter(([script]) => script?.includes('tar xf - -C "$S"')).length > pulls)
   await clock.advance(1_000)
   expect(files.has(`${MEMORY}/reports/theirs/meta.json`)).toBe(false)
   // Two minutes on, with the list cut short: nothing is brought, handed or marked
