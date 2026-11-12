@@ -2657,18 +2657,35 @@ const copyAsk = ($: EngineInterface, id: string, text: string, surface: RenderSu
     })
     .catch(err => log($, `copy not made: ${String(err)}`))
 
-// The person's answer to an ask's buttons: to work under way, a message it reads at its next step; to work that has ended, a
-// message to the chat, which carries the work on. Either way the ask goes, and the answer is kept on the card as the person's
-// A reply in the person's own words goes the same way, and leaves the ask in place for the work to clear or ask again: a question
-// back ("where do I do that?") does not answer it
+// The person's answer to an ask, a button pressed or a reply in their own words: to work under way, a message it reads at its next
+// step; to work that has ended, a message to the chat, which carries the work on. Either way the ask goes at once, and the card
+// says briefly what was answered; the work turns amber again only by asking again
 const replies = new Map<string, number>()
 // What the person has typed into a reply box and not sent, by the work, so a redraw keeps it
 const drafts = new Map<string, string>()
-// The last reply sent from each work's box, shown under it while the same ask stands: sent to the work (which reads a message
-// only at its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
-type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost' }
+// While the person types into a reply box the list's running times stand still: the list is drawn again each second, and a box in
+// a list drawn that often lost its place and threw the panel to the bottom. Each letter typed, or the box taking the focus, holds
+// the times for TYPING more; sending lets them go
+const TYPING = 30_000
+let typing = 0
+let isTyping = false
+const holdTimes = ($: EngineInterface) => {
+  const made = (typing += 1)
+  isTyping = true
+  $.clock.after(TYPING, () => void (typing === made && (isTyping = false)))
+}
+const freeTimes = () => void ((typing += 1), (isTyping = false))
+// The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
+// its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
+type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string }
+// The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
+const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
+// How long the card says what was answered, unless the work writes a newer line first
+const ANSWER_SHOWN = 60_000
+// The answers every ask offers when the work gave none of its own
+const DEFAULT_ANSWERS = ['Done', 'Not now']
 const sentReplies = new Map<string, Sent>()
-// A reply on its way, by the work it was written into: that work's next step reads it, and the card it belongs to says so
+// An answer on its way, by the work it was written into: that work's next step reads it, and the card it belongs to says so
 const pending = new Map<string, string>()
 const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   if (one.chat) return answerElsewhere($, one, choice, isReply)
@@ -2676,27 +2693,26 @@ const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const said = choice.trim()
   if (!ask || !said) return
   const target = ask.from ?? one.id
-  // The box clears and says it is sent before anything is written: nothing the panel does is waited on
-  if (isReply) {
-    replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
-    sentReplies.set(one.id, { text: said, ask: ask.text, to: one.status === 'working' ? 'work' : 'chat' })
-    redraw($)
-  }
   const at = await $.clock.now()
+  // The box clears, the amber goes and the card says what was answered before anything is written: nothing the panel does is waited on
+  if (isReply) (replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes())
+  const line = lineOf(one)
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: one.status === 'working' ? 'work' : 'chat', at, line })
   await update($, todos, list =>
-    list.map(card => (card.id === one.id ? { ...card, ask: isReply ? card.ask : undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) } : card)),
+    list.map(card => (card.id === one.id && card.ask?.at === ask.at ? { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) } : card)),
   )
   redraw($)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
-  const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"): ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
+  const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
   // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
   // Marked on its way once written, so a step that began before it never counts as reading it
   const told = working ? await tell($, target, to) : undefined
-  if (told && !told.deny) return void (isReply && (pending.set(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work' }), redraw($)))
-  if (isReply) (sentReplies.set(one.id, { text: said, ask: ask.text, to: 'chat' }), redraw($))
+  if (told && !told.deny) return void (pending.set(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line }), redraw($))
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'chat', at, line })
+  redraw($)
   await sendForPerson($, isReply ? `From the Claudopus panel: ${who(true)} replied to what the work "${titleOf(one)}" asked before it ended (${ask.text}):\n${said}` : `From the Claudopus panel: ${who(true)} pressed "${said}" in answer to what the work "${titleOf(one)}" asked before it ended: ${ask.text}`)
 }
-// The work a reply was written into starts its next step: that step reads it
+// The work an answer was written into starts its next step: that step reads it
 const replyRead = ($: EngineInterface, agentId: string) => {
   const card = pending.get(agentId)
   if (card === undefined) return
@@ -2704,7 +2720,7 @@ const replyRead = ($: EngineInterface, agentId: string) => {
   const sent = sentReplies.get(card)
   if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
 }
-// Work whose run ended with a reply written in but never read leaves it to the chat, which carries the work on
+// Work whose run ended with an answer written in but never read leaves it to the chat, which carries the work on
 const replyUnread = async ($: EngineInterface, agentId: string) => {
   const card = pending.get(agentId)
   if (card === undefined) return
@@ -2714,20 +2730,23 @@ const replyUnread = async ($: EngineInterface, agentId: string) => {
   if (sent?.to !== 'work' || !one) return
   sentReplies.set(card, { ...sent, to: 'chat' })
   redraw($)
-  await sendForPerson($, `From the Claudopus panel: ${who(true)} replied to what the work "${titleOf(one)}" asked, and it ended before reading the reply (${sent.ask}):\n${sent.text}`)
+  await sendForPerson($, `From the Claudopus panel: ${who(true)} answered what the work "${titleOf(one)}" asked, and it ended before reading the answer (${sent.ask}):\n${sent.text}`)
 }
-// What the box says of the reply last sent from it, while the ask it answered stands
-const sentLine = (one: Todo) => {
+// What the card says of the answer last given to its ask, for ANSWER_SHOWN after, until the work writes a newer line or asks again.
+// An answer that could not be left for another Mac says so under the ask, which is back
+const sentLine = (one: Todo, now: number) => {
   const sent = sentReplies.get(one.id)
-  if (!sent || sent.ask !== one.ask?.text) return ''
+  if (!sent) return ''
+  if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}”. That Mac could not be reached; answer it in its own chat` : ''
+  const newer = lineOf(one) !== sent.line
+  if (one.ask || newer || now - sent.at > ANSWER_SHOWN) return ''
   const how = {
-    work: 'the work reads it at its next step, once what it is doing now ends',
-    read: 'read by the work',
+    work: 'it reads this at its next step',
+    read: 'it has read it',
     chat: 'sent to the chat, which carries the work on',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose work reads it at its next step`,
-    lost: 'not sent: that Mac could not be reached. Answer it in its own chat',
   }[sent.to]
-  return `✓ Sent: “${cut(sent.text, 80)}” · ${how}`
+  return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
 }
 
 // ---- The work of every chat, in every chat's panel (shared.ts says how) ----
@@ -3194,11 +3213,11 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   const said = choice.trim()
   const chat = one.chat
   if (!ask || !said || !chat || !/^[A-Za-z0-9_-]+$/.test(chat.id)) return
-  if (isReply) replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
-  else answeredHere.add(`${one.id}:${ask.at}`)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other' })
-  redraw($)
+  if (isReply) (replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes())
+  answeredHere.add(`${one.id}:${ask.at}`)
   const at = await $.clock.now()
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line: lineOf(one) })
+  redraw($)
   const answer: Answer = { card: chat.agent, choice: said, isReply, ask: ask.text, askAt: ask.at, at }
   const name = `${at}-${Math.random().toString(36).slice(2, 8)}`
   const mac = chat.host ? macs.find(m => m === chat.host) : undefined
@@ -3214,7 +3233,7 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
         : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
   if (r.exitCode !== 0) {
     answeredHere.delete(`${one.id}:${ask.at}`)
-    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost' })
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost', at, line: lineOf(one) })
     redraw($)
     await log($, `answer for the chat ${chat.id}${chat.host ? ` on ${chat.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)
   }
@@ -3421,14 +3440,14 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and tells {name}. `text` says what to do, in one plain line; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need; `command` is a command {name} types themselves: the answer tells you to open a terminal for it with the terminal tools. The answer pressed arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Call it again with empty `text` once it is done; without choices it also goes when you finish.",
+        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and tells {name}. `text` says what to do, in one plain line; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need (without them the card offers Done and Not now); {name} can always reply in their own words instead; `command` is a command {name} types themselves: the answer tells you to open a terminal for it with the terminal tools. Any answer clears the ask and arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Ask again if the answer leaves something waiting. Call it again with empty `text` once it is done; without choices it also goes when you finish.",
       ),
       inputSchema: {
         type: 'object',
         properties: {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
           copy: { type: 'string', description: 'Only text they must paste somewhere else, such as a one-time code or a link; leave it out when they only read or press something' },
-          choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now; the one pressed comes back to you as a message' },
+          choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now (Done and Not now when left out); the one pressed comes back to you as a message' },
           command: { type: 'string', description: 'A command for them to type themselves, one line, shown with a Copy button; then open a terminal for it with mcp__terminal__open_terminal_tab' },
           cwd: { type: 'string', description: 'The folder the command runs in, a full path; the chat\'s folder when left out' },
         },
@@ -3488,7 +3507,8 @@ export const register: Register = on => {
         await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
       }
       const isFlowing = (await read($, flows)).some(f => f.status === 'working')
-      if (isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length)) await update($, tick, n => n + 1)
+      // Held while the person types into a reply box (holdTimes)
+      if (!isTyping && (isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length))) await update($, tick, n => n + 1)
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
       const now = await $.clock.now()
       for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)].filter(card => isLingering(card, now))) {
@@ -3850,6 +3870,11 @@ export const register: Register = on => {
   })
 
   // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
+  // A reply box taking the focus holds the list's times, so the list is not drawn under the person as they start typing
+  on('ui.focus', async ($, e, next) => {
+    if (e.plugin === 'claudopus' && /-reply-/.test(e.element ?? '')) holdTimes($)
+    return next(e)
+  })
   on('ui.close', async ($, e, next) => {
     const r = await next(e)
     if (e.id === LIST && e.origin.kind === 'person' && dir) await choosePanel($, false)
@@ -3947,8 +3972,8 @@ export const register: Register = on => {
     // A command for the person gets a terminal at once, so they type it there without looking for one. The app runs its terminal
     // tools only for Claude, never for a plugin's own code, so the work opens it
     const terminal = command ? ` Now open a terminal for it yourself, at once: mcp__terminal__open_terminal_tab with cwd "${folder}" and a short title; never type or run the command in it.` : ''
-    const shown = [command ? 'the command with a Copy button' : copy ? 'a Copy button for the text' : '', choices.length ? `the buttons ${choices.join(', ')}; the one pressed comes back to you as a message` : ''].filter(Boolean).join(' and ') || 'nothing to copy or press'
-    return { result: `Shown on your card with ${shown}, and ${who()} was told. Clear it with empty text once it is done.${terminal}` }
+    const shown = [command ? 'the command with a Copy button' : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
+    return { result: `Shown on your card with ${shown}, and ${who()} was told. Any answer clears the ask and comes back to you as a message; ask again if it leaves something waiting. Clear it with empty text once it is done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides
@@ -4092,14 +4117,14 @@ export const register: Register = on => {
         <Text color={LIVE}>▸</Text>
       )
 
-    // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button
-    // On the small card: what to do, the text to paste with its Copy on a filled row of its own, then one row of answers ending in
-    // Reply, which opens its Details. The reply box is in Details alone: the list redraws each second, and a text box there lost its
-    // place and threw the panel to the bottom while the person typed
+    // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button, then
+    // the same three ways to answer on every ask, on the small card as in Details: the work's own buttons, or Done and Not now when
+    // it gave none, and a box for a reply in the person's own words. The list's times stand still while the person types (holdTimes)
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
-      const answers = ask.choices ?? []
+      const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
+      const lost = sentLine(one, at)
       return (
         <Box key={key} flexDirection="column" gap={1}>
           {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
@@ -4112,28 +4137,25 @@ export const register: Register = on => {
               <Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} />
             </Box>
           ) : null}
-          {isWhole && 'Input' in table ? (
+          <Box flexDirection="row" flexWrap="wrap" gap={1}>
+            {answers.map((choice, n) => (
+              <Button key={`${key}-choice-${n}-${presses}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
+            ))}
+          </Box>
+          {'Input' in table ? (
             <Box width="100%" flexDirection="column">
-            <table.Input
-              key={`${key}-reply-${replies.get(one.id) ?? 0}`}
-              placeholder="Reply in your own words"
-              value={drafts.get(one.id) ?? ''}
-              submitLabel="send"
-              onInput={value => void drafts.set(one.id, value)}
-              onSubmit={value => void (drafts.delete(one.id), answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)))}
-            />
+              <table.Input
+                key={`${key}-reply-${replies.get(one.id) ?? 0}`}
+                placeholder="Or reply in your own words"
+                value={drafts.get(one.id) ?? ''}
+                submitLabel="send"
+                onInput={value => void (drafts.set(one.id, value), holdTimes($))}
+                onSubmit={value => void (drafts.delete(one.id), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+              />
             </Box>
           ) : null}
-          {/* The reply last sent, on the card and under the box: that it went, and whether the work has read it yet */}
-          {sentLine(one) ? <Text key={`${key}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{sentLine(one)}</Text> : null}
-          {answers.length || !isWhole ? (
-            <Box flexDirection="row" flexWrap="wrap" gap={1}>
-              {answers.map((choice, n) => (
-                <Button key={`${key}-choice-${n}-${presses}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
-              ))}
-              {isWhole ? null : <Button key={`${key}-reply-open-${presses}`} label="Reply…" plain dimColor onPress={() => openWork($, one.id)} />}
-            </Box>
-          ) : null}
+          {/* An answer that could not be left for another Mac says so, under the ask that is back */}
+          {lost ? <Text key={`${key}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{lost}</Text> : null}
         </Box>
       )
     }
@@ -4163,7 +4185,7 @@ export const register: Register = on => {
                     {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : 'Stopped'}
                   </Text>
                 ) : (
-                  <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || Boolean(one.ask)}>{cut(now(one), room) || (one.status === 'working' ? 'Starting' : 'It wrote no line about itself')}</Text>
+                  <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || Boolean(one.ask)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? 'Starting' : 'It wrote no line about itself')}</Text>
                 )}
               </Box>
             </Box>
@@ -4569,6 +4591,10 @@ export const register: Register = on => {
                 <Text bold dimColor>Needs you now</Text>
                 {askBlock(one, `ask-big-${one.id}`, true)}
               </Box>
+            </Box>
+          ) : sentLine(one, at) ? (
+            <Box key="part-answered" flexDirection="row" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+              <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
             </Box>
           ) : null}
           {one.words ? askPart(one) : null}
