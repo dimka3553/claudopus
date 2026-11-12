@@ -2136,12 +2136,13 @@ const BAND_MARK = 16
 // The app draws an Svg as a picture and keeps a picture it drew before, animation and all: the same drawing shown again starts
 // where its last showing ended, at rest, so a second finish would stay still. Each time a place turns to a drawing, that drawing
 // is marked with the moment and so is new to the app, and plays from its start; it keeps that mark while it stays, so a redraw
-// does not restart it; a place not drawn for a while, such as a closed panel, starts a new moment. The mark holds this run's own
+// does not restart it; a happy octopus not drawn for a while, as in a closed panel, starts a new moment. The mark holds this run's own
 // letters, so a drawing of another chat's panel is never the same either
 const moments = new Map<string, { art: keyof typeof ART; mark: string; at: number }>()
 const MOMENT_GAP = 5000
-// The drawings that play once and then rest; the others are still or go round and round, so an old copy of them is right
-const ONCE = new Set<keyof typeof ART>(['happy', 'happySmall', 'wave', 'asking'])
+// The happy drawings last only a finish's short pause, so one drawn again after a gap is a new finish and plays anew; the wave
+// rests on its last picture for as long as something waits, and plays again only when the octopus turns to it anew
+const ONCE = new Set<keyof typeof ART>(['happy', 'happySmall'])
 const RUN_MARK = Math.random().toString(36).slice(2, 8)
 let momentCount = 0
 const momentOf = (key: string, art: keyof typeof ART) => {
@@ -2150,6 +2151,8 @@ const momentOf = (key: string, art: keyof typeof ART) => {
   if (was?.art === art && (at - was.at < MOMENT_GAP || !ONCE.has(art))) return (was.at = at), was.mark
   momentCount += 1
   const mark = `${RUN_MARK}-${momentCount}`
+  // Each opening of About is a place of its own; the openings before it are gone
+  if (key.startsWith('about-mark-')) for (const one of moments.keys()) if (one.startsWith('about-mark-')) moments.delete(one)
   moments.set(key, { art, mark, at })
   return mark
 }
