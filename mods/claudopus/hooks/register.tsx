@@ -507,10 +507,31 @@ const choosePanel = async ($: EngineInterface, isOpen: boolean) => {
   panelSeen = seenOf({ isOpen, at })
   await $.fs.write(`${dir}/panel.json`, JSON.stringify({ isOpen, at })).catch(err => log($, `panel choice not kept: ${String(err)}`))
 }
+// Whether the row that holds the open chats with nothing going on is unfolded: kept in folds.json, so every chat's panel shows it
+// as the person last left it; each chat reads it again at its next look
+let isQuietOpen = false
+const readFolds = async ($: EngineInterface) => {
+  const text = await readOr($, `${dir}/folds.json`).catch(() => '')
+  const isOpen = (() => {
+    try {
+      return (JSON.parse(text || '{}') as { isQuietOpen?: unknown }).isQuietOpen === true
+    } catch {
+      return false
+    }
+  })()
+  if (isOpen !== isQuietOpen) ((isQuietOpen = isOpen), redraw($))
+}
+const foldQuiet = async ($: EngineInterface) => {
+  isQuietOpen = !isQuietOpen
+  presses += 1
+  redraw($)
+  await $.fs.write(`${dir}/folds.json`, JSON.stringify({ isQuietOpen })).catch(err => log($, `fold not kept: ${String(err)}`))
+}
 // Brings this chat's panel in line with the last choice, once per choice. A pane opened where nothing draws it yet stays open and
 // is drawn once a screen that can attaches; an open the engine refused is tried again at the next look
 const followPanel = async ($: EngineInterface) => {
   if (!dir) return undefined
+  await readFolds($)
   const choice = await readPanel($)
   if (!choice || seenOf(choice) === panelSeen) return choice
   const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
@@ -4197,11 +4218,32 @@ export const register: Register = on => {
     // steady row of two lines (what it was, how it ended, its model, how long it took, when) that opens its card as for running work
     // Other chats' ended work folds in here too, once its pause is over; the row then says it holds every chat's
     const endedElsewhere = elsewhere.filter(one => one.status !== 'working' && !one.ask && !lingers(one, at))
-    // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none is listed by its
-    // name alone when it is another Mac's or beside other Macs' chats, else not at all
+    // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none, when it is another
+    // Mac's or beside other Macs' chats, is not listed among them: it is a row inside one folded row at the bottom, "N other chats"
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
-    const listedChats = otherChats.filter(c => shownOf(c).length || c.host || isMulti())
+    const listedChats = otherChats.filter(c => shownOf(c).length)
+    const quietChats = otherChats.filter(c => !shownOf(c).length && (c.host || isMulti()))
     const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    // The open chats with nothing going on, this one too when it has nothing: one folded row, "N other chats", under the cards.
+    // Unfolded, each is a row of its name, with its folder and Mac at its right, as the cards' chats are named
+    const isSelfQuiet = !shownWork.length && !shownFlows.length && isMulti()
+    const quietCount = quietChats.length + (isSelfQuiet && quietChats.length ? 1 : 0)
+    const quietPart = () =>
+      quietChats.length ? (
+        <Box key="quiet" flexDirection="column" flexShrink={0} backgroundColor={FILL} paddingBottom={isQuietOpen ? 1 : 0}>
+          <Box flexDirection="row" alignItems="center" gap={2} paddingX={2} paddingY={1}>
+            <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
+              <Button key={`quiet-fold-${presses}`} label={`${isQuietOpen ? '▾' : '▸'} ${quietCount === 1 ? '1 other chat' : `${quietCount} other chats`}`} plain onPress={() => void foldQuiet($)} />
+            </Box>
+          </Box>
+          {isQuietOpen
+            ? [
+                ...(isSelfQuiet ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
+                ...quietChats.map(c => chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()))),
+              ]
+            : null}
+        </Box>
+      ) : null
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -4395,19 +4437,17 @@ export const register: Register = on => {
           : [
               // This chat's work first, named as this chat's once another chat's is shown; work that needs the person's hands comes first
               // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
-              ...(listedChats.length && (shownWork.length || shownFlows.length || isMulti()) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
+              ...(listedChats.length && (shownWork.length || shownFlows.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, those that wait on the person first
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
-                // An open chat with nothing running, of another Mac or of this one beside other Macs' chats, is listed by its name
-                // alone, so the person sees what is open on each
-                if (!cards.length) return c.host || isMulti() ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()))] : []
                 return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName())), ...cards.map(one => small(one))]
               }),
             ]}
-        {/* The Finished row sits at the pane's bottom edge, under everything else */}
-        {!alone && (finished.length || endedFlows.length) ? <Box key="finished-gap" flexGrow={1} /> : null}
+        {/* The other chats' row and the Finished row sit at the pane's bottom edge, under everything else */}
+        {!alone && (finished.length || endedFlows.length || quietChats.length) ? <Box key="finished-gap" flexGrow={1} /> : null}
+        {!alone ? quietPart() : null}
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
