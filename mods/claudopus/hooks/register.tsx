@@ -2967,7 +2967,7 @@ const readOthers = async ($: EngineInterface) => {
     const s = present.get(was.chat)
     if (!s?.cards.some(card => remoteId(s, card.id) === key) && !vanished.has(key)) vanished.set(key, { chat: was.chat, card: { ...was.card, status: 'done', endedAt: now, ask: undefined }, at: now, of: was.of })
   }
-  for (const s of found) for (const card of s.cards.filter(one => one.status === 'working')) lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card, at: now, of: { ...s, cards: [] } })
+  for (const s of found) for (const card of s.cards.filter(one => one.status === 'working')) lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card, at: now, of: { ...s, cards: [], prompts: undefined } })
   for (const [key, one] of [...vanished]) {
     const s = present.get(one.chat)
     if (!open.has(one.chat) || now - one.at > LINGER + LOOK_EVERY || s?.cards.some(card => remoteId(s, card.id) === key)) vanished.delete(key)
