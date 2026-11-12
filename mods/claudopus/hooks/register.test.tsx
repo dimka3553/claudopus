@@ -56,6 +56,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const osa: string[][] = []
   // What was handed to open: a folder shown in Finder
   const shown: string[][] = []
+  // What was run over ssh, with what it was handed
+  const sshed: string[][] = []
   prompts.length = 0
   let spawned = 0
   mock.env(on, { HOME })
@@ -143,6 +145,13 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     if (tool === 'osascript') osa.push([...e.argv])
     if (tool === 'open') shown.push([...e.argv])
     if (tool === 'kill') killed.push(String(rest[0]))
+    // Another Mac over ssh: what it answers is laid by the test as ssh:<what>; an answer sent there is kept as it was handed over
+    if (tool === 'ssh') {
+      sshed.push([String(e.argv.at(-1)), String(e.init?.stdin ?? '')])
+      const said = String(e.argv.at(-1)).startsWith('date') ? files.get('ssh:fetch') : files.has('ssh:down') ? undefined : ''
+      return { value: { exitCode: said === undefined ? 255 : 0, stdout: said ?? '', stderr: said === undefined ? 'ssh: connect to host m4: timed out' : '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (tool === 'rm') files.delete(String(rest.at(-1)))
     // A file moved aside
     if (tool === 'mv') (files.set(String(rest[2]), files.get(String(rest[1])) ?? ''), files.delete(String(rest[1])))
     // A copy the mod makes of a file
@@ -220,7 +229,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, shown, terminals }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, shown, terminals, sshed }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -2185,4 +2194,112 @@ test('someone already set up never sees the welcome, and the panel does not open
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await pane.find({ type: 'Text', text: 'Welcome to Claudopus' })).toBeUndefined()
   await pane.unmount()
+})
+
+// ---- Every chat's work in every panel ----
+
+const NOW = 1_700_000_000_000
+// Another chat's file as that chat writes it: one piece of work that asks for a go-ahead, and one that runs
+const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
+  JSON.stringify({
+    chat,
+    title,
+    folder: '/repo/billing',
+    host: '',
+    at,
+    cards: [
+      { id: 'b1', parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: 'Send the invoices', words: 'send them', items: [{ text: 'Draft the mail', state: 'done' }], entries: [{ at, kind: 'note', text: 'I drafted the mail.' }], answer: '', ask: { text: 'May I send 12 invoices?', choices: ['Send', 'Not now'], from: 'b1', at }, startedAt: at - 60_000, endedAt: 0, status: 'working' },
+      { id: 'b2', parentId: '', isFork: false, tokens: 0, title: 'Check the totals', words: 'check', items: [], entries: [{ at, kind: 'note', text: 'Adding up March.' }], answer: '', startedAt: at - 30_000, endedAt: 0, status: 'working' },
+    ],
+  })
+
+test("the panel shows every open chat's running work under that chat's name, this chat's first; a chat gone silent shows none", async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
+  // A chat that has said nothing for minutes was closed, or its Mac sleeps
+  files.set(`${MEMORY}/live/chat-c.json`, otherChat(NOW - 200_000, 'chat-c', 'Old landing page'))
+  await clock.advance(5000)
+  // This chat says what it runs, for the others
+  expect(JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').cards?.[0]?.title).toBe('Fix the nose')
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const bold = (await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)
+  expect(bold.indexOf('This chat')).toBeGreaterThan(-1)
+  expect(bold.indexOf('This chat')).toBeLessThan(bold.indexOf('Fix the nose'))
+  expect(bold.indexOf('Fix the nose')).toBeLessThan(bold.indexOf('Billing page'))
+  // Under the other chat's name, its ask first
+  expect(bold.indexOf('Billing page')).toBeLessThan(bold.indexOf('Send the invoices'))
+  expect(bold.indexOf('Send the invoices')).toBeLessThan(bold.indexOf('Check the totals'))
+  expect(bold).not.toContain('Old landing page')
+  expect(await list.find({ type: 'Text', text: 'billing' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '2 more in 1 other chat' })).toBeDefined()
+  // Another chat's work is stopped in its own chat: no Stop here, and its model is no control
+  const buttons = (await list.findAll({ type: 'Button' })).map(one => one.key ?? '')
+  expect(buttons.filter(key => key.startsWith('stop-'))).toEqual(['stop-a1'])
+  expect(buttons.some(key => key.startsWith('model-r-'))).toBe(false)
+  // Once that chat stops saying so, its work leaves this panel
+  await clock.advance(95_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Billing page' })) ? undefined : true))).toBe(true)
+  await list.unmount()
+})
+
+test("an ask of another chat's work is answered from this panel and reaches that chat's work; that chat acts on it as if pressed there", async ($, on) => {
+  const { files, clock, appended } = world(on)
+  await $.session.start(start)
+  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const send = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Send')
+  expect(send).toBeDefined()
+  await list.press({ key: send?.key ?? '' })
+  const left = await until(async () => [...files.keys()].find(path => path.startsWith(`${MEMORY}/live/answers/chat-b/`)))
+  expect(JSON.parse(files.get(left ?? '') ?? '{}')).toMatchObject({ card: 'b1', choice: 'Send', isReply: false, ask: 'May I send 12 invoices?' })
+  // The ask leaves this panel at once
+  expect(await until(async () => ((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Send') ? undefined : true))).toBe(true)
+  // Its Details has the reply box, and says where its chat is
+  const id = (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('open-r-'))?.key?.replace(/^open-/, '').replace(/-\d+$/, '') ?? ''
+  const details = await $.ui.mount({ ...LIST, requestId: `work-${id}`, surface: 'desktop' } as never)
+  expect(await details.find({ type: 'Text', text: /Its chat is shown in the panel of the chat "Billing page"/ })).toBeDefined()
+  await list.unmount()
+  await details.unmount()
+
+  // The other way round: this chat's own work asks, and an answer another chat left for it arrives
+  await $.prompt.submit({ text: 'make the repo private', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  // One pressed for an ask that is gone is dropped; one for the ask that stands is acted on, once
+  files.set(`${MEMORY}/live/answers/engine-id/1-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: false, ask: 'An older ask', at: NOW }))
+  files.set(`${MEMORY}/live/answers/engine-id/2-b.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: false, ask: 'May I delete the old repo?', at: NOW }))
+  await clock.advance(5000)
+  const told = appended.filter(line => line.startsWith('a1: ') && line.includes('"Approve"'))
+  expect(told).toHaveLength(1)
+  expect(told[0]).toContain('May I delete the old repo?')
+  expect([...files.keys()].filter(path => path.includes('/live/answers/engine-id/'))).toEqual([])
+})
+
+test("with another Mac named in config.json, its chats' work shows here under its chat and Mac, an answer goes there over ssh, and a Mac that stops answering shows none", async ($, on) => {
+  const { files, clock, sshed } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local', '-oProxyCommand=bad'] }))
+  // What the M4 answers: its clock, then its chat's file
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${otherChat(NOW, 'chat-m4', 'Robot arm')}\n`)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  // Only a Mac that ssh takes as a name is reached
+  expect(sshed.every(([command]) => command?.startsWith('date') || command?.startsWith('mkdir'))).toBe(true)
+  expect(sshed.length).toBeGreaterThan(0)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'billing · on m4' })).toBeDefined()
+  const send = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Send')
+  await list.press({ key: send?.key ?? '' })
+  const sent = await until(async () => sshed.find(([command]) => command?.startsWith('mkdir')))
+  expect(sent?.[0]).toContain('~/.claude/claudopus/live/answers/chat-m4/')
+  expect(JSON.parse(sent?.[1] ?? '{}')).toMatchObject({ card: 'b1', choice: 'Send' })
+  // The M4 goes to sleep: what was fetched from it goes stale, and its work leaves the panel
+  files.delete('ssh:fetch')
+  await clock.advance(100_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Robot arm' })) ? undefined : true))).toBe(true)
+  await list.unmount()
 })

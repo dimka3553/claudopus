@@ -1,11 +1,13 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, McpToolResult, Register, RenderSurface, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
 
-import type { Entry, Flow, FlowAgent, Item, Me, Report, Server, Stream, Todo, Wait } from '../types'
+import type { Entry, Flow, FlowAgent, Item, Me, Report, Server, Shared, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
+import { ANSWERS, answerOf, BEAT, cardsOf, chatName, chatSide, FETCH, FETCH_EVERY, fetchedOf, isMac, LIVE_DIR, LOOK_EVERY, MACS, macName, ordered, shareable, sharedOf, signOf, STALE } from './shared'
+import type { Answer } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
 
@@ -162,6 +164,7 @@ const loadSettings = async ($: EngineInterface) => {
   isOff = config.agents === false
   person = typeof config.name === 'string' ? config.name.trim() : ''
   models = modelsOf(config)
+  macs = (Array.isArray((config as { macs?: unknown }).macs) ? ((config as { macs: unknown[] }).macs) : []).filter(isMac).slice(0, 4)
   return config
 }
 const who = (isStart = false) => person || (isStart ? 'The person' : 'the person')
@@ -1454,7 +1457,7 @@ const titleOf = (one: Todo) => one.title || quoted(one.words, 60) || 'Background
 const openWork = ($: EngineInterface, id: string) => {
   presses += 1
   void (async () => {
-    const one = (await read($, todos)).find(card => card.id === id)
+    const one = [...(await read($, todos)), ...cardsOf(await read($, others))].find(card => card.id === id)
     if (!one) return
     // A tab opened afresh starts folded; one already open keeps what was unfolded in it
     if (!(await $.ui.panes()).some(pane => pane.id === workPaneOf(id))) folds.delete(id)
@@ -2596,11 +2599,12 @@ const replies = new Map<string, number>()
 const drafts = new Map<string, string>()
 // The last reply sent from each work's box, shown under it while the same ask stands: sent to the work (which reads a message
 // only at its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
-type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' }
+type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost' }
 const sentReplies = new Map<string, Sent>()
 // A reply on its way, by the work it was written into: that work's next step reads it, and the card it belongs to says so
 const pending = new Map<string, string>()
 const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
+  if (one.chat) return answerElsewhere($, one, choice, isReply)
   const ask = one.ask
   const said = choice.trim()
   if (!ask || !said) return
@@ -2649,8 +2653,143 @@ const replyUnread = async ($: EngineInterface, agentId: string) => {
 const sentLine = (one: Todo) => {
   const sent = sentReplies.get(one.id)
   if (!sent || sent.ask !== one.ask?.text) return ''
-  const how = { work: 'the work reads it at its next step, once what it is doing now ends', read: 'read by the work', chat: 'sent to the chat, which carries the work on' }[sent.to]
+  const how = {
+    work: 'the work reads it at its next step, once what it is doing now ends',
+    read: 'read by the work',
+    chat: 'sent to the chat, which carries the work on',
+    other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose work reads it at its next step`,
+    lost: 'not sent: that Mac could not be reached. Answer it in its own chat',
+  }[sent.to]
   return `✓ Sent: “${cut(sent.text, 80)}” · ${how}`
+}
+
+// ---- The work of every chat, in every chat's panel (shared.ts says how) ----
+
+const others = atom({ plugin: 'claudopus', key: 'others' } as const, [], { shape: 'others-1' })
+const liveDir = () => `${dir}/${LIVE_DIR}`
+// What this chat last wrote to its file and when: written again when it changes or its beat is due, and once more with nothing in
+// it after its last work ended, then left alone
+let sharedSign = ''
+let sharedAt = 0
+const shareMine = async ($: EngineInterface) => {
+  const { id, title } = await read($, me)
+  if (!id || !dir || isOff) return
+  const now = await $.clock.now()
+  const cards = shareable(await read($, todos))
+  const sign = signOf(cards)
+  if (!cards.length && !sharedSign) return
+  if (sign === sharedSign && now - sharedAt < BEAT) return
+  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards }
+  await $.fs.write(`${liveDir()}/${id}.json`, JSON.stringify(s))
+  sharedSign = cards.length ? sign : ''
+  sharedAt = now
+}
+// This chat's file says it has no work, as its session ends: the others drop its cards at once, not after STALE
+const unshare = async ($: EngineInterface) => {
+  const { id, title } = await read($, me)
+  if (!id || !dir || !sharedSign) return
+  await $.fs.write(`${liveDir()}/${id}.json`, JSON.stringify({ chat: id, title, folder: cwd, host: '', at: await $.clock.now(), cards: [] }))
+  sharedSign = ''
+}
+
+// The other Macs config.json names under `macs`, as ssh reaches them; none for a person with one Mac
+let macs: string[] = []
+const macPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.json`
+type Fetched = { mac: string; text: string; fetchedAt: number; triedAt: number }
+// Each other Mac's chats are fetched over ssh by whichever chat here finds its copy older than FETCH_EVERY: one fetch for every
+// chat on this Mac. What a fetch that failed leaves is the copy before it, which goes stale on its own
+const fetchMacs = async ($: EngineInterface) => {
+  for (const mac of macs) {
+    const now = await $.clock.now()
+    const was = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
+    if (now - Math.max(was.fetchedAt ?? 0, was.triedAt ?? 0) < FETCH_EVERY) continue
+    await $.fs.write(macPath(mac), JSON.stringify({ mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, triedAt: now }))
+    const r = await $.process.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', mac, FETCH], { timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+    if (r.exitCode !== 0 || !r.stdout.includes('\n')) {
+      if (!was.triedAt || (was.fetchedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `chats on ${mac} not fetched: ${r.stderr.trim().slice(0, 160)}`)
+      continue
+    }
+    await $.fs.write(macPath(mac), JSON.stringify({ mac, text: r.stdout, fetchedAt: await $.clock.now(), triedAt: now }))
+  }
+}
+
+// The files of other chats, as last read, by name: a file is read again only when it changed
+const liveRead = new Map<string, { key: string; text: string }>()
+const readOthers = async ($: EngineInterface) => {
+  const { id } = await read($, me)
+  if (!id || !dir) return
+  const now = await $.clock.now()
+  const found: Shared[] = []
+  for (const entry of await $.fs.list(liveDir()).catch(() => [])) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json') || entry.name === `${id}.json`) continue
+    // A file not written for a day is a chat long gone
+    if (entry.mtimeMs && now - entry.mtimeMs > 24 * 3600_000) continue
+    const key = `${entry.mtimeMs}:${entry.size}`
+    const was = liveRead.get(entry.name)
+    const text = was && entry.mtimeMs && was.key === key ? was.text : await readOr($, `${liveDir()}/${entry.name}`)
+    liveRead.set(entry.name, { key, text })
+    const one = sharedOf(text, now)
+    if (one && one.chat !== id) found.push(one)
+  }
+  for (const mac of macs) {
+    const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
+    // A copy not fetched again for STALE says nothing of that Mac now
+    if (!f.text || now - (f.fetchedAt ?? 0) > STALE) continue
+    found.push(...fetchedOf(f.text, macName(mac)).filter(one => one.chat !== id))
+  }
+  const next = ordered(found)
+  if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
+}
+
+// An answer pressed here for another chat's work, left for that chat: on this Mac in its folder of answers, on another over ssh.
+// The ask leaves this panel at once; that chat's own file brings it back if the work asks again
+const answeredHere = new Set<string>()
+const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, isReply: boolean) => {
+  const ask = one.ask
+  const said = choice.trim()
+  const chat = one.chat
+  if (!ask || !said || !chat || !/^[A-Za-z0-9_-]+$/.test(chat.id)) return
+  if (isReply) replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
+  else answeredHere.add(`${one.id}:${ask.at}`)
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other' })
+  redraw($)
+  const at = await $.clock.now()
+  const answer: Answer = { card: chat.agent, choice: said, isReply, ask: ask.text, at }
+  const name = `${at}-${Math.random().toString(36).slice(2, 8)}.json`
+  const mac = chat.host ? macs.find(m => macName(m) === chat.host) : undefined
+  if (!chat.host) return void (await $.fs.write(`${liveDir()}/${ANSWERS}/${chat.id}/${name}`, JSON.stringify(answer)))
+  const r = mac
+    ? await $.process
+        .run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', mac, `mkdir -p ~/.claude/claudopus/${LIVE_DIR}/${ANSWERS}/${chat.id} && cat > ~/.claude/claudopus/${LIVE_DIR}/${ANSWERS}/${chat.id}/${name}`], { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
+        .catch(err => ({ exitCode: -1, stderr: String(err) }))
+    : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
+  if (r.exitCode !== 0) {
+    answeredHere.delete(`${one.id}:${ask.at}`)
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost' })
+    redraw($)
+    await log($, `answer for ${chat.host} not sent: ${r.stderr.trim().slice(0, 160)}`)
+  }
+}
+// Answers other chats left for this one's work: each acted on as if pressed here, once, then put away
+const takenAnswers = new Set<string>()
+const readAnswers = async ($: EngineInterface) => {
+  const { id } = await read($, me)
+  if (!id || !dir) return
+  const folder = `${liveDir()}/${ANSWERS}/${id}`
+  const entries = (await $.fs.list(folder).catch(() => [])).filter(entry => entry.name.endsWith('.json') && !takenAnswers.has(entry.name))
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    takenAnswers.add(entry.name)
+    const path = `${folder}/${entry.name}`
+    const answer = answerOf(await readOr($, path))
+    await $.process.run(['rm', '-f', path]).catch(() => undefined)
+    const card = answer ? (await read($, todos)).find(one => one.id === answer.card && !one.parentId) : undefined
+    // A press answers the ask it was pressed for and no later one; a reply in words goes to the work whatever it asks now
+    if (!answer || !card?.ask || (!answer.isReply && answer.ask !== card.ask.text)) {
+      await log($, `answer from another chat dropped: ${answer ? `its ask is gone from ${answer.card}` : 'unreadable'}`)
+      continue
+    }
+    await answerAsk($, card, answer.choice, answer.isReply)
+  }
 }
 
 export const register: Register = on => {
@@ -2778,9 +2917,15 @@ export const register: Register = on => {
     // drawn again only when its work moves, since its chat is too long to draw every second and a press must not wait behind a drawing.
     // The redraws set for pauses before this start are forgotten, as their timers went with the session that set them
     lingerSet.clear()
+    let seconds = 0
     $.clock.every(1000, async () => {
+      await shareMine($).catch(err => log($, `work not shared: ${String(err)}`))
+      if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
+        await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
+        await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
+      }
       const isFlowing = (await read($, flows)).some(f => f.status === 'working')
-      if (isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working')) await update($, tick, n => n + 1)
+      if (isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).length) await update($, tick, n => n + 1)
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
       const now = await $.clock.now()
       for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)].filter(card => isLingering(card, now))) {
@@ -2791,6 +2936,13 @@ export const register: Register = on => {
       }
     })
     $.clock.every(TICK, () => refresh($).catch(err => log($, `servers not looked at again: ${String(err)}`)))
+    // Every chat's work in every panel: this chat's file is kept true each second (written only when it changed or its beat is due),
+    // the other chats' files and the answers left for this one are read every few seconds, the other Macs fetched now and then
+    sharedSign = ''
+    if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
+    await shareMine($).catch(() => undefined)
+    await readAnswers($).catch(() => undefined)
+    await readOthers($).catch(() => undefined)
     // The workflows kept, read back, and followed while they run
     await knowSession($)
     await loadFlows($).catch(err => log($, `workflows not read back: ${String(err)}`))
@@ -2798,6 +2950,12 @@ export const register: Register = on => {
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
 
     return begun
+  })
+
+  // A chat that ends says so in its file, so the other panels drop its work at once
+  on('session.end', async ($, e, next) => {
+    await unshare($).catch(() => undefined)
+    return next(e)
   })
 
   on('prompt.submit', async ($, e, next) => {
@@ -3245,6 +3403,9 @@ export const register: Register = on => {
     if (paneId === LIST) await read($, tick)
     const { isFinishedOpen = false } = await read($, view)
     const own = (await read($, todos)).filter(one => !one.parentId)
+    // The work of the other chats, by chat; an ask answered here leaves its card at once
+    const otherChats = await read($, others)
+    const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
     const chat = await read($, me)
     const at = await $.clock.now()
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
@@ -3253,7 +3414,7 @@ export const register: Register = on => {
     // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of the chat always does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
-    const windowOf = (one: Todo) => (one.isFork || (ours && modelName(one.model ?? '') === ours) ? chat.window : 0)
+    const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
     const glance = (one: Todo) =>
@@ -3263,7 +3424,8 @@ export const register: Register = on => {
     const { picking = '' } = await read($, view)
     const facts = (one: Todo, isWhole: boolean) => {
       const name = modelName(one.model ?? '')
-      if (one.status !== 'working' || !name) return <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one)}</Text>
+      // Another chat's work is moved to another model in that chat
+      if (one.status !== 'working' || !name || one.chat) return <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one)}</Text>
       const scope = `model-${one.id}`
       if (picking === one.id)
         return (
@@ -3391,7 +3553,7 @@ export const register: Register = on => {
             </Box>
             <Box flexDirection="row" alignItems="center" gap={1}>
               <Button key={`open-${one.id}-${presses}`} label="Details" onPress={() => openWork($, one.id)} />
-              {one.status === 'working' ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
+              {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
               <Box flexGrow={1} />
               {kept.length > 0 ? (
                 <Box flexShrink={0}>
@@ -3528,7 +3690,7 @@ export const register: Register = on => {
 
     // The work this Details tab is for, if it is one; a workflow's tab folds each of its agents' chats apart
     const flowOpen = flowShown ? pickedOf(flowShown) : undefined
-    const workId = paneId === LIST ? '' : flowShown ? `${flowShown.id}:${flowOpen?.id ?? ''}` : (own.find(one => workPaneOf(one.id) === paneId)?.id ?? '')
+    const workId = paneId === LIST ? '' : flowShown ? `${flowShown.id}:${flowOpen?.id ?? ''}` : ([...own, ...elsewhere].find(one => workPaneOf(one.id) === paneId)?.id ?? '')
     // What is unfolded in this tab: runs of tool steps and long messages by number, and the parts named by OPEN_ASK and the rest
     const open = folds.get(workId) ?? []
     const fold = (at: number) => {
@@ -3775,9 +3937,10 @@ export const register: Register = on => {
                 <Text bold wrap="wrap">{titleOf(one)}</Text>
                 {facts(one, true)}
               </Box>
-              {one.status === 'working' || left(one) ? (
+              {one.chat ? <Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat) ? `, ${chatSide(one.chat)}` : ''}`}</Text> : null}
+              {(one.status === 'working' && !one.chat) || left(one) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                  {one.status === 'working' ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
+                  {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
                   {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Its result" onPress={() => void openReport($, left(one)?.id ?? '')} /> : null}
                 </Box>
               ) : null}
@@ -3794,10 +3957,26 @@ export const register: Register = on => {
           ) : null}
           {one.words ? askPart(one) : null}
           {todoPart(one)}
-          {part('part-chat', 'Its chat', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading its chat…</Text>)}
+          {one.chat
+            ? part('part-chat', 'Its chat', '', <Text dimColor wrap="wrap">{`Its chat is shown in the panel of the chat "${chatName(one.chat)}", which runs it. Stop it or move it to another model there.`}</Text>)
+            : part('part-chat', 'Its chat', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading its chat…</Text>)}
         </Box>
       )
     }
+
+    // The name of a chat above its cards, with its folder and the Mac it runs on when another
+    const chatHead = (key: string, name: string, side: string) => (
+      <Box key={`chat-head-${key}`} flexDirection="row" alignItems="flex-end" gap={2} paddingX={2} paddingTop={1} flexShrink={0}>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Text bold dimColor wrap="truncate-end">{name}</Text>
+        </Box>
+        {side ? (
+          <Box flexShrink={0}>
+            <Text dimColor wrap="truncate-end">{side}</Text>
+          </Box>
+        ) : null}
+      </Box>
+    )
 
     // The newest result a piece of work left, which its open card links to
     const left = (one: Todo) => kept.filter(r => r.agent === one.id).sort((a, b) => b.at - a.at)[0]
@@ -3947,11 +4126,11 @@ export const register: Register = on => {
     }
 
     // A Details tab stays, even once its work has ended, until it is closed; work no longer kept says so
-    const alone = own.find(one => one.id === workId)
-    if (paneId !== LIST && !alone) return <Text dimColor>This work is no longer kept.</Text>
+    const alone = [...own, ...elsewhere].find(one => one.id === workId)
+    if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This work has ended, or its chat is closed. Its chat keeps it.' : 'This work is no longer kept.'}</Text>
     // Its chat and pictures are read outside the drawing, which draws at once from what was read last: a long chat takes seconds to
     // read, and a drawing that waits on it is never shown
-    if (alone) void loadWork($, alone.id).catch(() => undefined)
+    if (alone && !alone.chat) void loadWork($, alone.id).catch(() => undefined)
     const talked = alone ? talks.get(alone.id) : undefined
     // The reports kept, in every chat: on this pane only the button that opens their own
     const kept = await read($, reports)
@@ -3973,6 +4152,9 @@ export const register: Register = on => {
                 <Text dimColor wrap="truncate-end">
                   {working.length + runningFlows.length === 0 ? 'Nothing is running' : working.length + runningFlows.length === 1 ? 'Working on 1 thing' : `Working on ${working.length + runningFlows.length} things`}
                 </Text>
+                {elsewhere.some(one => one.status === 'working') ? (
+                  <Text dimColor wrap="truncate-end">{`${elsewhere.filter(one => one.status === 'working').length} more in ${otherChats.length === 1 ? '1 other chat' : `${otherChats.length} other chats`}`}</Text>
+                ) : null}
                 <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
               </Box>
             </Box>
@@ -3988,8 +4170,16 @@ export const register: Register = on => {
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
           ? big(alone, talked?.lines)
-          : // Work that needs the person's hands comes first
-            [...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card())}
+          : [
+              // This chat's work first, named as this chat's once another chat's is shown; work that needs the person's hands comes first
+              ...(otherChats.length && (shownWork.length || shownFlows.length) ? [chatHead('this', 'This chat', '')] : []),
+              ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              // Then each other chat under its name, those that wait on the person first
+              ...otherChats.flatMap(c => {
+                const cards = elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
+                return cards.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c)), ...cards.map(one => small(one))] : []
+              }),
+            ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}
         {!alone && (finished.length || endedFlows.length) ? <Box key="finished-gap" flexGrow={1} /> : null}
         {!alone ? finishedPart(isFinishedOpen) : null}

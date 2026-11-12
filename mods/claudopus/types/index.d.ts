@@ -71,7 +71,14 @@ export type Todo = {
   endedAt: number
   // Only work that is working has a card; one that has ended is kept, so a message to it brings its card back as it was
   status: 'working' | 'done' | 'stopped' | 'failed'
+  // Set on a card another chat shares: that chat, the Mac it runs on when another (empty for this one), and the card's own id there.
+  // Such a card is shown and answered here; its work is stopped, moved and read in its own chat
+  chat?: { id: string; title: string; folder: string; host: string; agent: string }
 }
+
+// What one chat shares with the panels of the others, in ~/.claude/claudopus/live/<chat id>.json: its running work, and when it last
+// said so. `host` is the Mac it was fetched from, empty for this one
+export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[] }
 
 // The card that has the pane to itself, by id; empty while the small cards show
 // `open` names what is unfolded in that card's chat: a run of tool steps by the number of steps before it, a long message by that number negated less one
@@ -178,6 +185,6 @@ export type Flow = {
 
 declare module 'claude-code' {
   interface PluginState {
-    claudopus: { me: Shaped<Me>; todos: Shaped<Todo[]>; view: Shaped<View>; servers: Shaped<Server[]>; tick: Shaped<number>; shown: Shaped<boolean>; reports: Shaped<Report[]>; flows: Shaped<Flow[]> }
+    claudopus: { me: Shaped<Me>; todos: Shaped<Todo[]>; view: Shaped<View>; servers: Shaped<Server[]>; tick: Shaped<number>; shown: Shaped<boolean>; reports: Shaped<Report[]>; flows: Shaped<Flow[]>; others: Shaped<Shared[]> }
   }
 }
