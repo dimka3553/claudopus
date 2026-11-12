@@ -1,6 +1,6 @@
+// Made by src/claudopus/build.mjs from the parts in src/claudopus: change them there and build again, never this file. It is the hooks module hooks.json names.
 import { atom, read, update } from 'claude-code'
-import type { ElementTable, EngineInterface, McpToolResult, Register, RenderSurface, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
-
+import type { ElementTable, EngineInterface, McpToolResult, On, Register, RenderSurface, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
 import type { Entry, Flow, FlowAgent, Item, Link, Me, Prompt, Report, Server, Shared, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
@@ -11,6 +11,9 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
+
+// What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
+// helpers, the log and the chat's saved words
 
 // The panel beside the chat: one small card per piece of work under way; pressed, a card shows all its to-dos and its own chat
 const LIST = 'claudopus'
@@ -79,62 +82,6 @@ const FOLLOW_EVERY = 20_000
 const WORKING = ['pending', 'running', 'waiting']
 // These listen on a port but serve no pages to open
 const NO_PAGES = /^(postgres|redis-server|mysqld|mongod)\b/
-
-// Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
-// the saved words, and a copy would carry the whole chat on the chat's own, dearest model
-const BRIEF =
-  'Answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). A message about work already listed goes to the agent that has that work instead, with SendMessage, in their words.'
-const REFUSED =
-  'This chat\'s own thread does no work itself. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
-const NO_COPY = () =>
-  `Work is never started as a copy of this chat. Start a fresh agent instead: subagent_type "general-purpose", the model named (${modelsShort(models)}), and a brief as the prompt.`
-// A command that would print a password or key the keychain keeps. Work uses a kept key only through `bin/secret`, which reads it itself
-// or that would point the runner at another store or another box
-const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_SECRET_(?:SERVICE|ASK)\b/
-const NO_READ = 'A kept key or password is never read or printed. Use it as an environment variable through the secret runner the work rules name; it hides the value from what the command prints.'
-// How long the names of kept keys are trusted before they are asked again
-const SECRETS_MS = 60_000
-// The first line of what the mod adds to every brief: the work's own rules and where the chat's words are. The panel leaves it out
-const workHead = () => `What follows is told to every piece of work started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
-const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
-const KEEP =
-  "Keep every ask the user made and every decision, in the user's own words where short. Keep the state of each file and what is not committed. Drop tool output."
-const KEEP_AGENTS = 'Keep the name or id of each background agent with its subject and where it stands.'
-// What every piece of background work is told as it starts: it keeps its own to-do in the panel true
-const PANEL_RULE =
-  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, a command for {name} to type in `command`, then open a terminal for it with mcp__terminal__open_terminal_tab; clear it with empty `text` once it is done.'
-// What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
-// own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
-const STEER =
-  'The message sent to you just now is from {name}, in their words, sent while you work. Stop: take no other step until you have thought about it. Decide which of three it is. More for this work: add it to your to-do list. A new task of its own: do not do it; hand it back with the `note` tool, its `task` set to the ask in one line, and the chat starts it. A change in how you are working: change your to-dos to match. Then say with the `note` tool, in one plain line, what you did with their message, such as that you added it to your to-do list, and carry on. Call it {name}\'s message, by no other name.'
-// What the work is told when it has gone on after a steer without saying what it decided
-// What the work is told when a message under way is not the person's: who sent it, and that it is no steer of theirs
-const FROM = (sender: string) =>
-  `The message sent to you just now is from ${sender}, not from {name}: it is not theirs. Take it as ${sender}'s and carry on.`
-// The chat sends a steer in the person's words: a message carries them when it holds a stretch of what they wrote, word for word
-const STRETCH = 40
-const carries = (message: string, words: string) => {
-  // Compared as whole words: letters and digits alone, any quote, apostrophe or dash the chat retyped left out
-  const plain = (text: string) => ` ${flat(text).toLowerCase().replace(/[’‘']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `
-  const m = plain(message)
-  const w = plain(words)
-  if (!w.trim()) return false
-  if (w.length <= STRETCH) return m.includes(w)
-  const starts = [0, ...[...w].flatMap((c, i) => (c === ' ' ? [i + 1] : []))].filter(i => i + STRETCH <= w.length)
-  return starts.some(i => m.includes(w.slice(i, i + STRETCH)))
-}
-const OWED =
-  'A message from {name} is waiting for your decision, and you have gone on working. Stop now and decide: more for your to-do list, a new task to hand back with the `note` tool and its `task`, or a change in how you work. Change your to-dos to match, then say with the `note` tool, in one plain line, what you did with their message.'
-// What the work is told when it has taken many steps without touching its to-dos or saying where it stands
-const drifted = (steps: number) =>
-  `You have taken ${steps} steps since you last touched your to-dos or said where the work stands. Look at your to-do list now: tick what is done, mark the one you are on as doing, add what you took on, and say where the work stands with the \`note\` tool. If all of it is already true, carry on.`
-// The work is reminded after this many steps past a steer with no decision, and after this many without touching its to-dos
-const OWED_AFTER = 2
-const QUIET_STEPS = 12
-const ASKS_SYSTEM = `You log one exchange of a chat between a user and an AI coding assistant. The user dictates, so messages ramble. Reply in plain lines and nothing else.
-First, one line per distinct thing the user asked for in this message, asides included. Each starts with "- ", has at most 20 words, and uses the user's words where short. A bare approval (yes, continue, push) is not an ask: write no line for it. With no user message there are no such lines.
-Then, when the reply reports a result, a finding or a decision, one line "did: <what was done or found, in at most 25 words, with the names and numbers that matter>". A reply that only acknowledges gets no such line.
-Last, one line "title: <title>". Repeat the current title if it still names what the chat is working on. Otherwise write a new title of 3 to 6 words.`
 
 const me = atom({ plugin: 'claudopus', key: 'me' } as const, { id: '', title: '', tokens: 0, isChat: false, needsContext: false, roleSent: '', isListOpened: false, window: 0 }, { shape: 'me-6' })
 const todos = atom({ plugin: 'claudopus', key: 'todos' } as const, [], { shape: 'todos-3' })
@@ -228,6 +175,84 @@ const log = async ($: EngineInterface, line: string) =>
 const appendWords = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/words/${chatId}.md`, `${await readOr($, `${dir}/words/${chatId}.md`)}${text}`)
 // A chat's asks and answers, asks/<chat id>.md, added to the end
 const appendAsks = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/asks/${chatId}.md`, `${await readOr($, `${dir}/asks/${chatId}.md`)}${text}`)
+
+type Ui = ElementTable
+// One part of a report's view or of the list: a filled block with a bold heading and, at its right, a dim count
+const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => (
+  <ui.Box key={key} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+    <ui.Box flexDirection="row" alignItems="flex-start" gap={2}>
+      <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
+        <ui.Text bold wrap="wrap">{name}</ui.Text>
+      </ui.Box>
+      {side ? (
+        <ui.Box flexShrink={0}>
+          <ui.Text dimColor>{side}</ui.Text>
+        </ui.Box>
+      ) : null}
+    </ui.Box>
+    {body}
+  </ui.Box>
+)
+
+// What chats and work are told: the brief rule, refusals, the work's panel rule, steers and reminders
+
+// Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
+// the saved words, and a copy would carry the whole chat on the chat's own, dearest model
+const BRIEF =
+  'Answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). A message about work already listed goes to the agent that has that work instead, with SendMessage, in their words.'
+const REFUSED =
+  'This chat\'s own thread does no work itself. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
+const NO_COPY = () =>
+  `Work is never started as a copy of this chat. Start a fresh agent instead: subagent_type "general-purpose", the model named (${modelsShort(models)}), and a brief as the prompt.`
+// A command that would print a password or key the keychain keeps. Work uses a kept key only through `bin/secret`, which reads it itself
+// or that would point the runner at another store or another box
+const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_SECRET_(?:SERVICE|ASK)\b/
+const NO_READ = 'A kept key or password is never read or printed. Use it as an environment variable through the secret runner the work rules name; it hides the value from what the command prints.'
+// How long the names of kept keys are trusted before they are asked again
+const SECRETS_MS = 60_000
+// The first line of what the mod adds to every brief: the work's own rules and where the chat's words are. The panel leaves it out
+const workHead = () => `What follows is told to every piece of work started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
+const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
+const KEEP =
+  "Keep every ask the user made and every decision, in the user's own words where short. Keep the state of each file and what is not committed. Drop tool output."
+const KEEP_AGENTS = 'Keep the name or id of each background agent with its subject and where it stands.'
+// What every piece of background work is told as it starts: it keeps its own to-do in the panel true
+const PANEL_RULE =
+  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, a command for {name} to type in `command`, then open a terminal for it with mcp__terminal__open_terminal_tab; clear it with empty `text` once it is done.'
+// What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
+// own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
+const STEER =
+  'The message sent to you just now is from {name}, in their words, sent while you work. Stop: take no other step until you have thought about it. Decide which of three it is. More for this work: add it to your to-do list. A new task of its own: do not do it; hand it back with the `note` tool, its `task` set to the ask in one line, and the chat starts it. A change in how you are working: change your to-dos to match. Then say with the `note` tool, in one plain line, what you did with their message, such as that you added it to your to-do list, and carry on. Call it {name}\'s message, by no other name.'
+// What the work is told when it has gone on after a steer without saying what it decided
+// What the work is told when a message under way is not the person's: who sent it, and that it is no steer of theirs
+const FROM = (sender: string) =>
+  `The message sent to you just now is from ${sender}, not from {name}: it is not theirs. Take it as ${sender}'s and carry on.`
+// The chat sends a steer in the person's words: a message carries them when it holds a stretch of what they wrote, word for word
+const STRETCH = 40
+const carries = (message: string, words: string) => {
+  // Compared as whole words: letters and digits alone, any quote, apostrophe or dash the chat retyped left out
+  const plain = (text: string) => ` ${flat(text).toLowerCase().replace(/[’‘']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `
+  const m = plain(message)
+  const w = plain(words)
+  if (!w.trim()) return false
+  if (w.length <= STRETCH) return m.includes(w)
+  const starts = [0, ...[...w].flatMap((c, i) => (c === ' ' ? [i + 1] : []))].filter(i => i + STRETCH <= w.length)
+  return starts.some(i => m.includes(w.slice(i, i + STRETCH)))
+}
+const OWED =
+  'A message from {name} is waiting for your decision, and you have gone on working. Stop now and decide: more for your to-do list, a new task to hand back with the `note` tool and its `task`, or a change in how you work. Change your to-dos to match, then say with the `note` tool, in one plain line, what you did with their message.'
+// What the work is told when it has taken many steps without touching its to-dos or saying where it stands
+const drifted = (steps: number) =>
+  `You have taken ${steps} steps since you last touched your to-dos or said where the work stands. Look at your to-do list now: tick what is done, mark the one you are on as doing, add what you took on, and say where the work stands with the \`note\` tool. If all of it is already true, carry on.`
+// The work is reminded after this many steps past a steer with no decision, and after this many without touching its to-dos
+const OWED_AFTER = 2
+const QUIET_STEPS = 12
+const ASKS_SYSTEM = `You log one exchange of a chat between a user and an AI coding assistant. The user dictates, so messages ramble. Reply in plain lines and nothing else.
+First, one line per distinct thing the user asked for in this message, asides included. Each starts with "- ", has at most 20 words, and uses the user's words where short. A bare approval (yes, continue, push) is not an ask: write no line for it. With no user message there are no such lines.
+Then, when the reply reports a result, a finding or a decision, one line "did: <what was done or found, in at most 25 words, with the names and numbers that matter>". A reply that only acknowledges gets no such line.
+Last, one line "title: <title>". Repeat the current title if it still names what the chat is working on. Otherwise write a new title of 3 to 6 words.`
+
+// Config: the texts in force and the settings, kept keys' names, and the Config tab's acts (its drawing is in ../../mods/claudopus/hooks/config.tsx)
 
 // ---- Config: the texts in force and the settings (the tab and its pure parts are in ./config) ----
 
@@ -333,6 +358,72 @@ async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult)
     return { deny: `${e.tool} ran, and what it answered was withheld: it could not be checked for kept keys.` }
   }
 }
+// Config: each thing the person can set, what is in force, and a way to change it or put it back to what shipped
+const CONFIG_PANE = 'config'
+const CONFIG_TITLE = 'Config'
+let configFailed = ''
+const openConfig = async ($: EngineInterface) => {
+  presses += 1
+  configFailed = ''
+  await front($, CONFIG_PANE, CONFIG_TITLE)
+}
+const configButton = ($: EngineInterface, ui: Ui) => (
+  <ui.Box key="config-button" flexShrink={0}>
+    <ui.Button key={`config-open-${presses}`} label="Config" onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
+  </ui.Box>
+)
+const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
+  texts: await Promise.all(
+    TEXTS.map(async text => {
+      const { isOwn, isStale, path, text: body } = await inForce($, $.plugin.root, dir, text.path)
+      return { text, isOwn, isStale, path, body }
+    }),
+  ),
+  config: await readConfig($, dir),
+  // A config.json that does not read is said at once: until it is fixed every setting is as shipped
+  failed:
+    configFailed ||
+    (await readOr($, `${dir}/config.json`).then(text => {
+      try {
+        JSON.parse(text || '{}')
+        return ''
+      } catch {
+        return `${dir}/config.json does not read as JSON, so every setting is as shipped. Fix it or remove it.`
+      }
+    })),
+})
+// Each act says what failed under the tab, logs it, and reads the settings again so the chat goes on with what is in force
+const configAct = ($: EngineInterface, what: string, act: () => Promise<string | void>) => {
+  presses += 1
+  void act()
+    .then(failed => {
+      configFailed = failed ? `${what}: ${failed}` : ''
+    })
+    .catch(err => {
+      configFailed = `${what}: ${String(err instanceof Error ? err.message : err)}`
+    })
+    .then(async () => {
+      if (configFailed) await log($, `config: ${configFailed}`)
+      await loadSettings($)
+      redraw($)
+    })
+}
+const configActs = ($: EngineInterface) => ({
+  open: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not opened`, () => editText($, $.plugin.root, dir, text.path)),
+  // Edit opens the text in the tab itself; Save makes it the person's own copy
+  edit: (text: (typeof TEXTS)[number], body: string) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
+  save: (text: (typeof TEXTS)[number], body: string) =>
+    configAct($, `${text.name} not saved`, async () => {
+      const failed = body.trim() ? await saveText($, $.plugin.root, dir, text.path, body) : 'the text was empty, so nothing changed'
+      Object.assign(editing, { key: '', draft: '' })
+      return failed
+    }),
+  cancel: () => configAct($, '', async () => void Object.assign(editing, { key: '', draft: '' })),
+  putBack: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not reset`, () => putBack($, dir, text.path)),
+  set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) => configAct($, 'Not saved', () => setConfig($, dir, key, value, role)),
+})
+
+// The index: one line per subject, and the subject's brief
 
 // ---- The index: one line per subject, "- name | repo | session | state | summary" ----
 
@@ -372,6 +463,9 @@ const appTitle = async ($: EngineInterface) => {
 
 // Tells one version of the role text from another
 const mark = (text: string) => `${text.length}:${[...text].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) % 1_000_003, 7)}`
+
+// The cards: one per piece of background work, its states from start to finish, the panel's open or closed choice, and
+// finished work kept and recovered
 
 // ---- The to-dos: one per piece of background work, as the panel lists them ----
 
@@ -719,6 +813,8 @@ const withLinks = (Link: ElementTable['Link'], text: string, key: string, whole 
   return parts.filter(part => part !== '')
 }
 
+// A piece of work's own chat, read for its Details tab: what it was told, what it wrote, each tool step; and opening that tab
+
 // ---- A piece of work's own chat: what it was told, what it wrote, and each tool step, in order ----
 
 // One line of that chat as the panel draws it: a message to the work, the work's own words, or one tool step
@@ -879,6 +975,26 @@ const newest = (lines: Line[]) => {
   return lines.slice(from + 1)
 }
 
+// A piece of work's Details is a tab of its own, named after the work, beside the list, as a result is: closing it leaves the
+// list as it was. A press on Details for work whose tab is open brings that tab to the front
+const WORK_PANE = 'work-'
+const workPaneOf = (id: string) => `${WORK_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
+const titleOf = (one: Todo) => one.title || quoted(one.words, 60) || 'Background work'
+const openWork = ($: EngineInterface, id: string) => {
+  presses += 1
+  void (async () => {
+    const one = [...(await read($, todos)), ...cardsOf(await read($, others))].find(card => card.id === id)
+    if (!one) return
+    // A tab opened afresh starts folded; one already open keeps what was unfolded in it
+    if (!(await $.ui.panes()).some(pane => pane.id === workPaneOf(id))) folds.delete(id)
+    await front($, workPaneOf(id), cut(titleOf(one), 30))
+    // The pressed card's button gets a new name, so the app does not hold the list where that button was
+    redraw($)
+  })().catch(err => log($, `details of ${id} not opened: ${String(err)}`))
+}
+
+// The servers on this Mac: what listens on which port, from which folder, started by which chat, and the Servers tab
+
 // ---- The servers on this Mac: what listens on which port, from which folder, started by which chat ----
 
 const rows = (text: string) => text.split('\n').filter(Boolean)
@@ -988,48 +1104,36 @@ const stopServer = async ($: EngineInterface, pid: number) => {
   await scanServers($)
 }
 
-// How full this chat's context is, against the window the app's own panel measures it by
-const measure = async ($: EngineInterface) => {
-  const context = (await $.session.usage({ breakdown: 'summary' }).catch(() => undefined))?.context
-  const window = context?.breakdown?.rawMaxTokens ?? context?.window
-  return update($, me, one => ({ ...one, tokens: context?.tokens ?? one.tokens, window: window ?? one.window }))
-}
+const serversTabHooks = (on: On) => {
 
-// ---- After each reply: the size, the answer, the asks and the title ----
+  // The servers panel: one block per server with its link, where it runs and which chat started it; nothing is cut off
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { Box, Button, Link, Text } = $.ui.resolve(e)
+    if (!scannedAt) await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
+    await read($, tick)
+    const found = await read($, servers)
 
-const afterReply = async ($: EngineInterface, text: string, answer: string) => {
-  await measure($)
-  const title = await appTitle($)
-  const m = await update($, me, one => ({ ...one, title: title || one.title }))
-  // A server is looked for while the chat that started it is still above it
-  await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
-  // What Claude answered is kept beside what the person said, so a search finds what happened as well as what was asked
-  if (answer.trim()) {
-    await appendWords($, m.id, `### Claude ${new Date().toISOString()}\n${answer.trim()}\n\n`).catch(err => log($, `answer not saved: ${String(err)}`))
-  }
-  // A reply with no message of the person's before it relays an agent's result: it is logged when it says something
-  const isRelay = !text.trim()
-  if (isRelay && answer.trim().length < 200) return
-
-  const r = await $.model.complete({
-    model: 'sonnet',
-    system: ASKS_SYSTEM,
-    prompt: `Current title: ${m.title || '(none)'}\n\nUser message:\n"""\n${isRelay ? '(none: this reply relays the result of a background agent)' : clip(text, 3000)}\n"""\n\nAssistant reply (shortened):\n"""\n${clip(answer, isRelay ? 1500 : 600)}\n"""`,
-    maxTokens: 500,
+    return (
+      <Box flexDirection="column" gap={1}>
+        {found.length === 0 && <Text dimColor>Nothing is listening from your folders.</Text>}
+        {found.map(one => (
+          <Box key={`server-${one.pid}`} flexDirection="row" alignItems="flex-start" gap={1}>
+            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+              <Text wrap="wrap">{one.url ? <Link href={one.url} label={`localhost:${one.port}`} /> : `Port ${one.port}`}</Text>
+              <Text dimColor wrap="wrap">{one.about}</Text>
+            </Box>
+            <Box flexShrink={0}>
+              <Button key={`kill-${one.pid}`} label="■" onPress={() => void stopServer($, one.pid)} />
+            </Box>
+          </Box>
+        ))}
+      </Box>
+    )
   })
-  if (!r.isAnswered) return
-  const lines = r.text.split('\n').map(line => line.trim())
-  // The index of this chat: what was asked and what came of it, one line each under the time it happened
-  const asks = lines.filter(line => line.startsWith('- ') || /^did:/i.test(line))
-  if (asks.length) await appendAsks($, m.id, `## ${new Date().toISOString()}\n${asks.join('\n')}\n\n`)
-  const named = lines.find(line => /^title:/i.test(line))?.replace(/^title:\s*/i, '').trim() ?? ''
-  if (named && named !== m.title && named.length <= 80) {
-    await $.mcp
-      .call('ccd_session_mgmt', 'set_session_title', { session_id: 'self', title: named })
-      .then(() => update($, me, one => ({ ...one, title: named })))
-      .catch(() => undefined)
-  }
+
 }
+
+// Results: what each finished piece of work reported, kept for good with copies of the pictures it named
 
 // ---- Reports: what each finished piece of work reported, kept for good with copies of the pictures it named ----
 // One folder each under ~/.claude/claudopus/reports: report.md, the text as the work wrote it and never rewritten; meta.json; the
@@ -1268,6 +1372,8 @@ const sendForPerson = async ($: EngineInterface, text: string) => {
   await $.prompt.submit({ text }).catch(err => log($, `message from a report not sent: ${String(err)}`))
 }
 
+// First run: the welcome at the top of the panel, and indexing old chats
+
 // ---- First run: a welcome at the top of the panel, once, for someone the mod has never set up ----
 
 // welcome.json in the memory folder: the session the welcome first showed in, and whether it still shows
@@ -1328,6 +1434,9 @@ const showFile = async ($: EngineInterface, path: string) => {
   const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `picture not opened: ${opened.stderr}`)
 }
+
+// The Results tab and each result's own tab: the list, a result drawn whole, put away and brought back
+
 // Puts a line naming the report in the chat's box, for the person to finish and send; where there is no box, nothing is sent for them
 const carryOn = async ($: EngineInterface, r: Report, now: number) => {
   const text = `Carry on from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `
@@ -1455,121 +1564,6 @@ const archiveReport = ($: EngineInterface, r: Report, isArchived: boolean) => {
     .finally(() => (archiving.delete(entry), redraw($)))
 }
 
-// ---- Memory files in tabs of the mod's own: the app's file pane opens only the session's folders, and it never lets ~/.claude
-// in (the app's list of protected places), so a memory path in a reply is the mod's link to answer ----
-
-const MEMORY_PANE = 'memory-'
-const MEMORY_PANES = 3
-// What a memory path is in a reply: the folder spelled in full or from ~, up to a space, a quote, a bracket, a backtick or markup
-const memoryPathIn = () => new RegExp(`(?:${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|~/\\.claude/claudopus)/[^\\s\`()\\[\\]<>"'*|~]+`, 'g')
-const memoryHref = (path: string) => `file://${encodeURI(path.replace(/^~\/\.claude\/claudopus/, dir))}`
-// A reply's memory paths made links of the mod's: a link to one, a code span that is one path and a bare path. Other code stays as
-// it is, a fence still open to the end too
-const memoryLinked = (text: string) => {
-  const hrefs: string[] = []
-  // A path's line and column (a.md:12) are not the file's
-  const at = (path: string) => {
-    const href = memoryHref(path.replace(/(?::\d+){1,2}$/, ''))
-    if (!hrefs.includes(href) && href.length <= 2048) hrefs.push(href)
-    return href
-  }
-  const path = memoryPathIn().source
-  const whole = new RegExp(`^${path}$`)
-  const one = new RegExp(`\\[([^\\]]*)\\]\\((${path})\\)|(^|[^\\w/(\\[])(${path})`, 'g')
-  const linked = text
-    .split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/)
-    .map((part, i) => {
-      if (i % 2) return part.length > 2 && part.startsWith('`') && !part.startsWith('``') && whole.test(part.slice(1, -1)) ? `[${part}](${at(part.slice(1, -1))})` : part
-      return part.replace(one, (all, label: string | undefined, linkTo: string | undefined, lead: string | undefined, bare: string | undefined) => {
-        if (linkTo) return `[${label}](${at(linkTo)})`
-        if (!bare) return all
-        // A sentence's last mark is not the path's
-        const tail = bare.match(/[.,;:!?_]+$/)?.[0] ?? ''
-        const clean = bare.slice(0, bare.length - tail.length)
-        return `${lead}[${clean}](${at(clean)})${tail}`
-      })
-    })
-    .join('')
-  return { text: linked, hrefs }
-}
-// Which memory file a pressed link is, or '' for any other link
-const memoryPressed = (href: string) => {
-  let path = href.replace(/^file:\/\//, '')
-  try {
-    path = decodeURI(path)
-  } catch {}
-  path = path.replace(/^~\/\.claude\/claudopus/, dir)
-  return dir && path.startsWith(`${dir}/`) && !path.split('/').includes('..') ? path : ''
-}
-const memoryPaneOf = (path: string) => {
-  // Two paths that spell alike once cleaned are told apart by a mark of the whole path
-  const id = `${MEMORY_PANE}${path.slice(dir.length + 1).replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 44)}`
-  return `${id}-${mark(path).replace(/\D/g, '').slice(-12)}`
-}
-// The file each memory tab shows, by its tab, and what it held when it was opened
-const memoryPanes = new Map<string, string>()
-const memoryText = new Map<string, string>()
-// What a memory path holds: a file's text, or a folder's entries as links; '' when it is not there
-const memoryRead = async ($: EngineInterface, path: string) => {
-  const text = await $.fs.read(path).catch(() => undefined)
-  if (text !== undefined) return text
-  const entries = await $.fs.list(path).catch(() => [])
-  return entries.length ? `# ${fileName(path)}\n\n${entries.map(one => `- [${one.name}](${memoryHref(`${path}/${one.name}`)})`).join('\n')}\n` : ''
-}
-// A memory link pressed: a result's own path opens that result's tab, any other file a tab of its own, named after its heading
-const openMemory = ($: EngineInterface, path: string) => {
-  presses += 1
-  void (async () => {
-    const report = path.slice(dir.length + 1).match(/^reports\/([^/]+)/)?.[1]
-    if (report && (await read($, reports)).some(one => one.id === report)) return openReport($, report)
-    const id = memoryPaneOf(path)
-    const text = await memoryRead($, path)
-    memoryPanes.set(id, path)
-    memoryText.set(id, text)
-    const open = (await $.ui.panes()).filter(pane => pane.id.startsWith(MEMORY_PANE) && pane.id !== id)
-    for (const pane of open.slice(0, Math.max(0, open.length - (MEMORY_PANES - 1)))) await $.ui.close({ id: pane.id }).catch(() => undefined)
-    const heading = text.match(/^#\s+(.+)$/m)?.[1]?.trim()
-    await front($, id, cut(heading || fileName(path), 30))
-    redraw($)
-  })().catch(err => log($, `memory file ${path} not opened: ${String(err)}`))
-}
-
-// A piece of work's Details is a tab of its own, named after the work, beside the list, as a result is: closing it leaves the
-// list as it was. A press on Details for work whose tab is open brings that tab to the front
-const WORK_PANE = 'work-'
-const workPaneOf = (id: string) => `${WORK_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
-const titleOf = (one: Todo) => one.title || quoted(one.words, 60) || 'Background work'
-const openWork = ($: EngineInterface, id: string) => {
-  presses += 1
-  void (async () => {
-    const one = [...(await read($, todos)), ...cardsOf(await read($, others))].find(card => card.id === id)
-    if (!one) return
-    // A tab opened afresh starts folded; one already open keeps what was unfolded in it
-    if (!(await $.ui.panes()).some(pane => pane.id === workPaneOf(id))) folds.delete(id)
-    await front($, workPaneOf(id), cut(titleOf(one), 30))
-    // The pressed card's button gets a new name, so the app does not hold the list where that button was
-    redraw($)
-  })().catch(err => log($, `details of ${id} not opened: ${String(err)}`))
-}
-
-type Ui = ElementTable
-// One part of a report's view or of the list: a filled block with a bold heading and, at its right, a dim count
-const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => (
-  <ui.Box key={key} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-    <ui.Box flexDirection="row" alignItems="flex-start" gap={2}>
-      <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-        <ui.Text bold wrap="wrap">{name}</ui.Text>
-      </ui.Box>
-      {side ? (
-        <ui.Box flexShrink={0}>
-          <ui.Text dimColor>{side}</ui.Text>
-        </ui.Box>
-      ) : null}
-    </ui.Box>
-    {body}
-  </ui.Box>
-)
-
 // The reports shown when the list was last opened from the Claudopus pane. One that arrives while the person reads the list waits,
 // counted in its heading, so no row moves under the pointer
 let reportsListed: string[] = []
@@ -1620,290 +1614,6 @@ const reportsButton = ($: EngineInterface, ui: Ui, all: Report[]) => {
   return (
     <Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
       <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
-    </Box>
-  )
-}
-
-// ---- Stats: reading Claude's records (the sums and drawing are in ./stats) ----
-
-let jqPath = ''
-async function sumOf($: EngineInterface, path: string): Promise<FileSum> {
-  for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
-    const r = await $.process.run([jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined)
-    if (!r || r.exitCode !== 0) continue
-    jqPath = jq
-    return parsed<FileSum>(r.stdout.trim(), { s: [], u: [], d: [] })
-  }
-  throw new Error('jq')
-}
-// Where a chat's records are: its own folder under ~/.claude/projects, found by its id
-async function chatFolderOf($: EngineInterface, home: string, chatId: string, known?: string) {
-  if (known && (await $.fs.stat(`${known}/${chatId}.jsonl`).catch(() => undefined))) return known
-  const root = `${home}/.claude/projects`
-  for (const entry of await $.fs.list(root).catch(() => [])) {
-    if (entry.kind !== 'dir') continue
-    if (await $.fs.stat(`${root}/${entry.name}/${chatId}.jsonl`).catch(() => undefined)) return `${root}/${entry.name}`
-  }
-  return ''
-}
-// Every transcript of one chat, summed, with what each was
-async function runsOf($: EngineInterface, home: string, memory: string, chatId: string, hint = ''): Promise<Run[]> {
-  const cachePath = `${memory}/stats/${chatId}.json`
-  const read = parsed<Cache>(await readOr($, cachePath), { files: {} })
-  // Sums made by an earlier program are made again
-  const cache: Cache = read.v === CACHE_V ? read : { files: {} }
-  const folder = await chatFolderOf($, home, chatId, hint || cache.folder)
-  if (!folder) return []
-  const subs = `${folder}/${chatId}/subagents`
-  const flowDirs = (await $.fs.list(`${subs}/workflows`).catch(() => [])).filter(e => e.kind === 'dir').map(e => e.name)
-  const listed = [
-    ...(await $.fs.list(subs).catch(() => [])).map(e => ({ ...e, dir: subs, flow: '' })),
-    ...(await Promise.all(flowDirs.map(async name => (await $.fs.list(`${subs}/workflows/${name}`).catch(() => [])).map(e => ({ ...e, dir: `${subs}/workflows/${name}`, flow: name }))))).flat(),
-  ].filter(e => /^agent-\w+\.jsonl$/.test(e.name))
-  const chatFile = (await $.fs.list(folder).catch(() => [])).find(e => e.name === `${chatId}.jsonl`)
-  const files = [...listed.map(e => ({ path: `${e.dir}/${e.name}`, size: e.size, mtime: e.mtimeMs, flow: e.flow, id: e.name.slice(6, -6) })), ...(chatFile ? [{ path: `${folder}/${chatFile.name}`, size: chatFile.size, mtime: chatFile.mtimeMs, flow: '', id: '' }] : [])]
-  const next: Cache = { v: CACHE_V, folder, files: {} }
-  let isChanged = folder !== cache.folder
-  // A few at a time: each is a process
-  for (let at = 0; at < files.length; at += 6)
-    await Promise.all(
-      files.slice(at, at + 6).map(async f => {
-        const was = cache.files[f.path]
-        if (was && was.size === f.size && was.mtime === f.mtime) next.files[f.path] = was
-        else {
-          next.files[f.path] = { size: f.size, mtime: f.mtime, sum: await sumOf($, f.path) }
-          isChanged = true
-        }
-      }),
-    )
-  if (isChanged || Object.keys(cache.files).length !== files.length) await $.fs.write(`${memory}/stats/${chatId}.json`, JSON.stringify(next)).catch(() => undefined)
-  const flowTitle = new Map<string, string>()
-  for (const name of flowDirs) flowTitle.set(name, parsed<{ title?: string; name?: string }>(await readOr($, `${memory}/flows/${name}.json`), {}).title || 'Workflow')
-  return Promise.all(
-    files.map(async (f): Promise<Run> => {
-      const sum = next.files[f.path]?.sum ?? { s: [], u: [], d: [] }
-      if (!f.id) return { id: chatId, kind: 'chat', parent: '', title: 'This chat', isFinished: false, sum }
-      const meta = parsed<Meta>(await readOr($, f.path.replace(/\.jsonl$/, '.meta.json')), {})
-      if (f.flow) return { id: f.id, kind: 'flow', parent: f.flow, title: flowTitle.get(f.flow) ?? 'Workflow', isFinished: Boolean(meta.finished) || (sum.s.at(-1)?.[1] ?? 0) < Date.now() - GAP, sum }
-      return { id: f.id, kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background work', isFinished: Boolean(meta.finished), sum }
-    }),
-  )
-}
-// The chats the mod has kept work for (finished/<chat id>.json), and this one
-async function chatsKept($: EngineInterface, memory: string, chatId: string) {
-  const kept = (await $.fs.list(`${memory}/finished`).catch(() => [])).map(e => /^(.+)\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean)
-  return [...new Set([chatId, ...kept])]
-}
-
-async function loadStats($: EngineInterface, scope: Scope, home: string, memory: string, chatId: string, hint: string, now: number) {
-  if (reading.has(scope) || !chatId) return
-  const was = held.get(scope)
-  if (was && now - was.at < READ_EVERY) return
-  reading.add(scope)
-  try {
-    await loadMemorySizes($, memory).catch(() => undefined)
-    const ids = scope === 'chat' ? [chatId] : await chatsKept($, memory, chatId)
-    const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat()
-    held.set(scope, { runs, at: now })
-  } catch (err) {
-    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? 'Stats reads Claude’s records with jq, and jq was not found on this Mac.' : `The records could not be read: ${String(err)}` })
-  } finally {
-    reading.delete(scope)
-    $.ui.invalidate('ui.render')
-  }
-}
-async function loadMemorySizes($: EngineInterface, memory: string) {
-  const names = async (folder: string) => (await $.fs.list(`${memory}/${folder}`).catch(() => [])).filter(e => !e.name.startsWith('.'))
-  // Sizes as the disk counts them, the whole of each folder
-  const du = await $.process.run(['du', '-skL', ...['index.md', 'streams', 'words', 'asks', 'reports', 'finished', 'flows', 'stats', 'thumbs'].map(one => `${memory}/${one}`)]).catch(() => undefined)
-  const kb = new Map((du?.stdout ?? '').split('\n').map(row => row.split('\t')).filter(([n, path]) => n && path).map(([n, path]) => [String(path).slice(memory.length + 1), Number(n) * 1024]))
-  const index = await $.fs.read(`${memory}/index.md`).catch(() => '')
-  const subjects = index.split('\n').filter(row => row.startsWith('- ')).length
-  const reports = await names('reports')
-  const parts: MemoryPart[] = [
-    { name: 'Subjects', count: subjects, bytes: kb.get('index.md') ?? 0 },
-    { name: 'Briefs', count: (await names('streams')).length, bytes: kb.get('streams') ?? 0 },
-    { name: 'Your words, by chat', count: (await names('words')).length, bytes: kb.get('words') ?? 0 },
-    { name: 'Asks and answers, by chat', count: (await names('asks')).length, bytes: kb.get('asks') ?? 0 },
-    { name: 'Results', count: reports.filter(e => e.kind === 'dir').length, bytes: kb.get('reports') ?? 0 },
-    { name: 'Finished work, by chat', count: (await names('finished')).length, bytes: kb.get('finished') ?? 0 },
-    { name: 'Workflow runs', count: (await names('flows')).length, bytes: kb.get('flows') ?? 0 },
-    { name: 'Thumbnails and sums', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
-  ]
-  const bytes = [...kb.values()].reduce((sum, n) => sum + n, 0)
-  memoryHeld.now = { parts, bytes }
-}
-
-// Stats: what the work added up to, in a tab of its own, opened in front like Results
-const STATS_PANE = 'stats'
-const STATS_TITLE = 'Stats'
-const statsRead = async ($: EngineInterface, scope: 'chat' | 'all') => {
-  const home = (await $.env.get('HOME')) ?? ''
-  const { id } = await read($, me)
-  await loadStats($, scope, home, dir, id, `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`, await $.clock.now())
-}
-const openStats = async ($: EngineInterface) => {
-  presses += 1
-  void statsRead($, statsShown.scope).catch(err => log($, `stats not read: ${String(err)}`))
-  await front($, STATS_PANE, STATS_TITLE)
-}
-const statsButton = ($: EngineInterface, ui: Ui) => (
-  <ui.Box key="stats-button" flexShrink={0}>
-    <ui.Button key={`stats-open-${presses}`} label="Stats" onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
-  </ui.Box>
-)
-
-// Memory: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on
-const showMemory = async ($: EngineInterface) => {
-  const opened = await $.process.run(['open', dir]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stderr}`)
-}
-const memoryButton = ($: EngineInterface, ui: Ui) => (
-  <ui.Box key="memory-button" flexShrink={0}>
-    <ui.Button key={`memory-open-${presses}`} label="Memory" onPress={() => void showMemory($).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
-  </ui.Box>
-)
-
-// About: what Claudopus is, its version and the app's, the site, the code and its licence
-const ABOUT_PANE = 'about'
-const ABOUT_TITLE = 'About'
-const SITE = 'https://claudopus.ai'
-const REPO = 'https://github.com/dimka3553/claudopus'
-// Each opening of About is a new drawing of the octopus, so it waves once each time and then rests
-let aboutOpens = 0
-const openAbout = async ($: EngineInterface) => {
-  presses += 1
-  aboutOpens += 1
-  await front($, ABOUT_PANE, ABOUT_TITLE)
-}
-const aboutButton = ($: EngineInterface, ui: Ui) => (
-  <ui.Box key="about-button" flexShrink={0}>
-    <ui.Button key={`about-open-${presses}`} label="About" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
-  </ui.Box>
-)
-// Config: each thing the person can set, what is in force, and a way to change it or put it back to what shipped
-const CONFIG_PANE = 'config'
-const CONFIG_TITLE = 'Config'
-let configFailed = ''
-const openConfig = async ($: EngineInterface) => {
-  presses += 1
-  configFailed = ''
-  await front($, CONFIG_PANE, CONFIG_TITLE)
-}
-const configButton = ($: EngineInterface, ui: Ui) => (
-  <ui.Box key="config-button" flexShrink={0}>
-    <ui.Button key={`config-open-${presses}`} label="Config" onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
-  </ui.Box>
-)
-const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
-  texts: await Promise.all(
-    TEXTS.map(async text => {
-      const { isOwn, isStale, path, text: body } = await inForce($, $.plugin.root, dir, text.path)
-      return { text, isOwn, isStale, path, body }
-    }),
-  ),
-  config: await readConfig($, dir),
-  // A config.json that does not read is said at once: until it is fixed every setting is as shipped
-  failed:
-    configFailed ||
-    (await readOr($, `${dir}/config.json`).then(text => {
-      try {
-        JSON.parse(text || '{}')
-        return ''
-      } catch {
-        return `${dir}/config.json does not read as JSON, so every setting is as shipped. Fix it or remove it.`
-      }
-    })),
-})
-// Each act says what failed under the tab, logs it, and reads the settings again so the chat goes on with what is in force
-const configAct = ($: EngineInterface, what: string, act: () => Promise<string | void>) => {
-  presses += 1
-  void act()
-    .then(failed => {
-      configFailed = failed ? `${what}: ${failed}` : ''
-    })
-    .catch(err => {
-      configFailed = `${what}: ${String(err instanceof Error ? err.message : err)}`
-    })
-    .then(async () => {
-      if (configFailed) await log($, `config: ${configFailed}`)
-      await loadSettings($)
-      redraw($)
-    })
-}
-const configActs = ($: EngineInterface) => ({
-  open: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not opened`, () => editText($, $.plugin.root, dir, text.path)),
-  // Edit opens the text in the tab itself; Save makes it the person's own copy
-  edit: (text: (typeof TEXTS)[number], body: string) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
-  save: (text: (typeof TEXTS)[number], body: string) =>
-    configAct($, `${text.name} not saved`, async () => {
-      const failed = body.trim() ? await saveText($, $.plugin.root, dir, text.path, body) : 'the text was empty, so nothing changed'
-      Object.assign(editing, { key: '', draft: '' })
-      return failed
-    }),
-  cancel: () => configAct($, '', async () => void Object.assign(editing, { key: '', draft: '' })),
-  putBack: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not reset`, () => putBack($, dir, text.path)),
-  set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) => configAct($, 'Not saved', () => setConfig($, dir, key, value, role)),
-})
-const aboutView = async ($: EngineInterface, ui: Ui) => {
-  const { Box, Link, Text } = ui
-  const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
-  const version = (() => {
-    try {
-      return String(JSON.parse(manifest).version ?? '')
-    } catch {
-      return ''
-    }
-  })()
-  const app = await (async () => (await $.session.version()).version)().catch(() => '')
-  const line = (key: string, name: string, body: JSX.Element) => (
-    <Box key={key} flexDirection="row" alignItems="flex-start" gap={2} flexShrink={0}>
-      <Box width={9} flexShrink={0}>
-        <Text dimColor>{name}</Text>
-      </Box>
-      <Box flexGrow={1} flexShrink={1} minWidth={0}>
-        {body}
-      </Box>
-    </Box>
-  )
-  return (
-    <Box key="about" flexDirection="column" gap={1} flexGrow={1}>
-      <Box key="about-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-        {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving')}
-        <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-          <Text bold>Claudopus</Text>
-          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
-        </Box>
-      </Box>
-      {band(
-        ui,
-        'about-what',
-        'What it does',
-        '',
-        <Box flexDirection="column" gap={1}>
-          <Text wrap="wrap">Every chat hands each of your messages to an agent that works in the background, so the chat stays small and free to talk.</Text>
-          <Text wrap="wrap">This panel shows each piece of work as a card with its to-dos. What finished work leaves is kept under Results.</Text>
-          <Text wrap="wrap">Your words, the subjects you work on and every result are kept as plain files under Memory. Stats adds up what the work cost and the time it saved.</Text>
-        </Box>,
-      )}
-      {band(
-        ui,
-        'about-links',
-        'Links',
-        '',
-        <Box flexDirection="column" gap={1}>
-          {line('about-site', 'Website', <Text><Link href={SITE} label="claudopus.ai" /></Text>)}
-          {line(
-            'about-repo',
-            'GitHub',
-            <Box flexDirection="column">
-              <Text><Link href={REPO} label="dimka3553/claudopus" /></Text>
-              <Text dimColor wrap="wrap">If Claudopus helps you, a star on GitHub helps others find it.</Text>
-            </Box>,
-          )}
-          {line('about-licence', 'Licence', <Text><Link href={`${REPO}/blob/main/LICENSE`} label="MIT" /></Text>)}
-        </Box>,
-      )}
     </Box>
   )
 }
@@ -2113,6 +1823,365 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
   )
 }
 
+// Memory files in tabs of the mod's own, links to them in the chat's replies, and the Memory button
+
+// ---- Memory files in tabs of the mod's own: the app's file pane opens only the session's folders, and it never lets ~/.claude
+// in (the app's list of protected places), so a memory path in a reply is the mod's link to answer ----
+
+const MEMORY_PANE = 'memory-'
+const MEMORY_PANES = 3
+// What a memory path is in a reply: the folder spelled in full or from ~, up to a space, a quote, a bracket, a backtick or markup
+const memoryPathIn = () => new RegExp(`(?:${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|~/\\.claude/claudopus)/[^\\s\`()\\[\\]<>"'*|~]+`, 'g')
+const memoryHref = (path: string) => `file://${encodeURI(path.replace(/^~\/\.claude\/claudopus/, dir))}`
+// A reply's memory paths made links of the mod's: a link to one, a code span that is one path and a bare path. Other code stays as
+// it is, a fence still open to the end too
+const memoryLinked = (text: string) => {
+  const hrefs: string[] = []
+  // A path's line and column (a.md:12) are not the file's
+  const at = (path: string) => {
+    const href = memoryHref(path.replace(/(?::\d+){1,2}$/, ''))
+    if (!hrefs.includes(href) && href.length <= 2048) hrefs.push(href)
+    return href
+  }
+  const path = memoryPathIn().source
+  const whole = new RegExp(`^${path}$`)
+  const one = new RegExp(`\\[([^\\]]*)\\]\\((${path})\\)|(^|[^\\w/(\\[])(${path})`, 'g')
+  const linked = text
+    .split(/(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/)
+    .map((part, i) => {
+      if (i % 2) return part.length > 2 && part.startsWith('`') && !part.startsWith('``') && whole.test(part.slice(1, -1)) ? `[${part}](${at(part.slice(1, -1))})` : part
+      return part.replace(one, (all, label: string | undefined, linkTo: string | undefined, lead: string | undefined, bare: string | undefined) => {
+        if (linkTo) return `[${label}](${at(linkTo)})`
+        if (!bare) return all
+        // A sentence's last mark is not the path's
+        const tail = bare.match(/[.,;:!?_]+$/)?.[0] ?? ''
+        const clean = bare.slice(0, bare.length - tail.length)
+        return `${lead}[${clean}](${at(clean)})${tail}`
+      })
+    })
+    .join('')
+  return { text: linked, hrefs }
+}
+// Which memory file a pressed link is, or '' for any other link
+const memoryPressed = (href: string) => {
+  let path = href.replace(/^file:\/\//, '')
+  try {
+    path = decodeURI(path)
+  } catch {}
+  path = path.replace(/^~\/\.claude\/claudopus/, dir)
+  return dir && path.startsWith(`${dir}/`) && !path.split('/').includes('..') ? path : ''
+}
+const memoryPaneOf = (path: string) => {
+  // Two paths that spell alike once cleaned are told apart by a mark of the whole path
+  const id = `${MEMORY_PANE}${path.slice(dir.length + 1).replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 44)}`
+  return `${id}-${mark(path).replace(/\D/g, '').slice(-12)}`
+}
+// The file each memory tab shows, by its tab, and what it held when it was opened
+const memoryPanes = new Map<string, string>()
+const memoryText = new Map<string, string>()
+// What a memory path holds: a file's text, or a folder's entries as links; '' when it is not there
+const memoryRead = async ($: EngineInterface, path: string) => {
+  const text = await $.fs.read(path).catch(() => undefined)
+  if (text !== undefined) return text
+  const entries = await $.fs.list(path).catch(() => [])
+  return entries.length ? `# ${fileName(path)}\n\n${entries.map(one => `- [${one.name}](${memoryHref(`${path}/${one.name}`)})`).join('\n')}\n` : ''
+}
+// A memory link pressed: a result's own path opens that result's tab, any other file a tab of its own, named after its heading
+const openMemory = ($: EngineInterface, path: string) => {
+  presses += 1
+  void (async () => {
+    const report = path.slice(dir.length + 1).match(/^reports\/([^/]+)/)?.[1]
+    if (report && (await read($, reports)).some(one => one.id === report)) return openReport($, report)
+    const id = memoryPaneOf(path)
+    const text = await memoryRead($, path)
+    memoryPanes.set(id, path)
+    memoryText.set(id, text)
+    const open = (await $.ui.panes()).filter(pane => pane.id.startsWith(MEMORY_PANE) && pane.id !== id)
+    for (const pane of open.slice(0, Math.max(0, open.length - (MEMORY_PANES - 1)))) await $.ui.close({ id: pane.id }).catch(() => undefined)
+    const heading = text.match(/^#\s+(.+)$/m)?.[1]?.trim()
+    await front($, id, cut(heading || fileName(path), 30))
+    redraw($)
+  })().catch(err => log($, `memory file ${path} not opened: ${String(err)}`))
+}
+
+// Memory: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on
+const showMemory = async ($: EngineInterface) => {
+  const opened = await $.process.run(['open', dir]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stderr}`)
+}
+const memoryButton = ($: EngineInterface, ui: Ui) => (
+  <ui.Box key="memory-button" flexShrink={0}>
+    <ui.Button key={`memory-open-${presses}`} label="Memory" onPress={() => void showMemory($).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
+  </ui.Box>
+)
+
+const memoryHooks = (on: On) => {
+
+  // A reply that names a memory file: its links to memory open the mod's tab, since the app's file pane refuses ~/.claude. The
+  // terminal opens such a path itself, so it keeps its own drawing
+  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
+    if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return next(e)
+    const { text, hrefs } = memoryLinked(e.props.text)
+    if (!hrefs.length) return next(e)
+    const { Markdown } = $.ui.resolve(e)
+    return (
+      <Markdown
+        key={`memory-reply-${mark(e.requestId)}`}
+        text={text}
+        pressableLinks={hrefs.slice(0, 256)}
+        onLinkPress={link => {
+          const path = memoryPressed(link.href)
+          if (path) openMemory($, path)
+        }}
+      />
+    )
+  })
+
+  // A memory file opened as a tab of its own; the links in it to other memory files open there too
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (!e.requestId?.startsWith(MEMORY_PANE)) return next(e)
+    const { Box, Markdown, Text } = $.ui.resolve(e)
+    const path = memoryPanes.get(e.requestId)
+    if (!path) return <Text dimColor>Press the link in the chat again to open this file.</Text>
+    const held = memoryText.get(e.requestId) ?? ''
+    const { text, hrefs } = memoryLinked(held.length > REPORT_CHARS ? `${held.slice(0, REPORT_CHARS)}\n\n…` : held)
+    return (
+      <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+        <Text dimColor wrap="wrap">{path}</Text>
+        {held ? (
+          <Markdown
+            key={`memory-text-${e.requestId}`}
+            text={text}
+            pressableLinks={hrefs.slice(0, 256)}
+            onLinkPress={link => {
+              const to = memoryPressed(link.href)
+              if (to) openMemory($, to)
+            }}
+          />
+        ) : (
+          <Text dimColor>This file is not there any more.</Text>
+        )}
+      </Box>
+    )
+  })
+
+}
+
+// Stats: reading Claude's records for the Stats tab (the sums and drawing are in ../../mods/claudopus/hooks/stats.tsx)
+
+// ---- Stats: reading Claude's records (the sums and drawing are in ./stats) ----
+
+let jqPath = ''
+async function sumOf($: EngineInterface, path: string): Promise<FileSum> {
+  for (const jq of jqPath ? [jqPath] : ['/usr/bin/jq', '/opt/homebrew/bin/jq', '/usr/local/bin/jq', 'jq']) {
+    const r = await $.process.run([jq, '-cnR', '--argjson', 'gap', String(GAP), SUM_JQ, path]).catch(() => undefined)
+    if (!r || r.exitCode !== 0) continue
+    jqPath = jq
+    return parsed<FileSum>(r.stdout.trim(), { s: [], u: [], d: [] })
+  }
+  throw new Error('jq')
+}
+// Where a chat's records are: its own folder under ~/.claude/projects, found by its id
+async function chatFolderOf($: EngineInterface, home: string, chatId: string, known?: string) {
+  if (known && (await $.fs.stat(`${known}/${chatId}.jsonl`).catch(() => undefined))) return known
+  const root = `${home}/.claude/projects`
+  for (const entry of await $.fs.list(root).catch(() => [])) {
+    if (entry.kind !== 'dir') continue
+    if (await $.fs.stat(`${root}/${entry.name}/${chatId}.jsonl`).catch(() => undefined)) return `${root}/${entry.name}`
+  }
+  return ''
+}
+// Every transcript of one chat, summed, with what each was
+async function runsOf($: EngineInterface, home: string, memory: string, chatId: string, hint = ''): Promise<Run[]> {
+  const cachePath = `${memory}/stats/${chatId}.json`
+  const read = parsed<Cache>(await readOr($, cachePath), { files: {} })
+  // Sums made by an earlier program are made again
+  const cache: Cache = read.v === CACHE_V ? read : { files: {} }
+  const folder = await chatFolderOf($, home, chatId, hint || cache.folder)
+  if (!folder) return []
+  const subs = `${folder}/${chatId}/subagents`
+  const flowDirs = (await $.fs.list(`${subs}/workflows`).catch(() => [])).filter(e => e.kind === 'dir').map(e => e.name)
+  const listed = [
+    ...(await $.fs.list(subs).catch(() => [])).map(e => ({ ...e, dir: subs, flow: '' })),
+    ...(await Promise.all(flowDirs.map(async name => (await $.fs.list(`${subs}/workflows/${name}`).catch(() => [])).map(e => ({ ...e, dir: `${subs}/workflows/${name}`, flow: name }))))).flat(),
+  ].filter(e => /^agent-\w+\.jsonl$/.test(e.name))
+  const chatFile = (await $.fs.list(folder).catch(() => [])).find(e => e.name === `${chatId}.jsonl`)
+  const files = [...listed.map(e => ({ path: `${e.dir}/${e.name}`, size: e.size, mtime: e.mtimeMs, flow: e.flow, id: e.name.slice(6, -6) })), ...(chatFile ? [{ path: `${folder}/${chatFile.name}`, size: chatFile.size, mtime: chatFile.mtimeMs, flow: '', id: '' }] : [])]
+  const next: Cache = { v: CACHE_V, folder, files: {} }
+  let isChanged = folder !== cache.folder
+  // A few at a time: each is a process
+  for (let at = 0; at < files.length; at += 6)
+    await Promise.all(
+      files.slice(at, at + 6).map(async f => {
+        const was = cache.files[f.path]
+        if (was && was.size === f.size && was.mtime === f.mtime) next.files[f.path] = was
+        else {
+          next.files[f.path] = { size: f.size, mtime: f.mtime, sum: await sumOf($, f.path) }
+          isChanged = true
+        }
+      }),
+    )
+  if (isChanged || Object.keys(cache.files).length !== files.length) await $.fs.write(`${memory}/stats/${chatId}.json`, JSON.stringify(next)).catch(() => undefined)
+  const flowTitle = new Map<string, string>()
+  for (const name of flowDirs) flowTitle.set(name, parsed<{ title?: string; name?: string }>(await readOr($, `${memory}/flows/${name}.json`), {}).title || 'Workflow')
+  return Promise.all(
+    files.map(async (f): Promise<Run> => {
+      const sum = next.files[f.path]?.sum ?? { s: [], u: [], d: [] }
+      if (!f.id) return { id: chatId, kind: 'chat', parent: '', title: 'This chat', isFinished: false, sum }
+      const meta = parsed<Meta>(await readOr($, f.path.replace(/\.jsonl$/, '.meta.json')), {})
+      if (f.flow) return { id: f.id, kind: 'flow', parent: f.flow, title: flowTitle.get(f.flow) ?? 'Workflow', isFinished: Boolean(meta.finished) || (sum.s.at(-1)?.[1] ?? 0) < Date.now() - GAP, sum }
+      return { id: f.id, kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background work', isFinished: Boolean(meta.finished), sum }
+    }),
+  )
+}
+// The chats the mod has kept work for (finished/<chat id>.json), and this one
+async function chatsKept($: EngineInterface, memory: string, chatId: string) {
+  const kept = (await $.fs.list(`${memory}/finished`).catch(() => [])).map(e => /^(.+)\.json$/.exec(e.name)?.[1] ?? '').filter(Boolean)
+  return [...new Set([chatId, ...kept])]
+}
+
+async function loadStats($: EngineInterface, scope: Scope, home: string, memory: string, chatId: string, hint: string, now: number) {
+  if (reading.has(scope) || !chatId) return
+  const was = held.get(scope)
+  if (was && now - was.at < READ_EVERY) return
+  reading.add(scope)
+  try {
+    await loadMemorySizes($, memory).catch(() => undefined)
+    const ids = scope === 'chat' ? [chatId] : await chatsKept($, memory, chatId)
+    const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat()
+    held.set(scope, { runs, at: now })
+  } catch (err) {
+    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? 'Stats reads Claude’s records with jq, and jq was not found on this Mac.' : `The records could not be read: ${String(err)}` })
+  } finally {
+    reading.delete(scope)
+    $.ui.invalidate('ui.render')
+  }
+}
+async function loadMemorySizes($: EngineInterface, memory: string) {
+  const names = async (folder: string) => (await $.fs.list(`${memory}/${folder}`).catch(() => [])).filter(e => !e.name.startsWith('.'))
+  // Sizes as the disk counts them, the whole of each folder
+  const du = await $.process.run(['du', '-skL', ...['index.md', 'streams', 'words', 'asks', 'reports', 'finished', 'flows', 'stats', 'thumbs'].map(one => `${memory}/${one}`)]).catch(() => undefined)
+  const kb = new Map((du?.stdout ?? '').split('\n').map(row => row.split('\t')).filter(([n, path]) => n && path).map(([n, path]) => [String(path).slice(memory.length + 1), Number(n) * 1024]))
+  const index = await $.fs.read(`${memory}/index.md`).catch(() => '')
+  const subjects = index.split('\n').filter(row => row.startsWith('- ')).length
+  const reports = await names('reports')
+  const parts: MemoryPart[] = [
+    { name: 'Subjects', count: subjects, bytes: kb.get('index.md') ?? 0 },
+    { name: 'Briefs', count: (await names('streams')).length, bytes: kb.get('streams') ?? 0 },
+    { name: 'Your words, by chat', count: (await names('words')).length, bytes: kb.get('words') ?? 0 },
+    { name: 'Asks and answers, by chat', count: (await names('asks')).length, bytes: kb.get('asks') ?? 0 },
+    { name: 'Results', count: reports.filter(e => e.kind === 'dir').length, bytes: kb.get('reports') ?? 0 },
+    { name: 'Finished work, by chat', count: (await names('finished')).length, bytes: kb.get('finished') ?? 0 },
+    { name: 'Workflow runs', count: (await names('flows')).length, bytes: kb.get('flows') ?? 0 },
+    { name: 'Thumbnails and sums', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
+  ]
+  const bytes = [...kb.values()].reduce((sum, n) => sum + n, 0)
+  memoryHeld.now = { parts, bytes }
+}
+
+// Stats: what the work added up to, in a tab of its own, opened in front like Results
+const STATS_PANE = 'stats'
+const STATS_TITLE = 'Stats'
+const statsRead = async ($: EngineInterface, scope: 'chat' | 'all') => {
+  const home = (await $.env.get('HOME')) ?? ''
+  const { id } = await read($, me)
+  await loadStats($, scope, home, dir, id, `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}`, await $.clock.now())
+}
+const openStats = async ($: EngineInterface) => {
+  presses += 1
+  void statsRead($, statsShown.scope).catch(err => log($, `stats not read: ${String(err)}`))
+  await front($, STATS_PANE, STATS_TITLE)
+}
+const statsButton = ($: EngineInterface, ui: Ui) => (
+  <ui.Box key="stats-button" flexShrink={0}>
+    <ui.Button key={`stats-open-${presses}`} label="Stats" onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
+  </ui.Box>
+)
+
+// The About tab: what Claudopus is, its version and the app's, the site and the code
+
+// About: what Claudopus is, its version and the app's, the site, the code and its licence
+const ABOUT_PANE = 'about'
+const ABOUT_TITLE = 'About'
+const SITE = 'https://claudopus.ai'
+const REPO = 'https://github.com/dimka3553/claudopus'
+// Each opening of About is a new drawing of the octopus, so it waves once each time and then rests
+let aboutOpens = 0
+const openAbout = async ($: EngineInterface) => {
+  presses += 1
+  aboutOpens += 1
+  await front($, ABOUT_PANE, ABOUT_TITLE)
+}
+const aboutButton = ($: EngineInterface, ui: Ui) => (
+  <ui.Box key="about-button" flexShrink={0}>
+    <ui.Button key={`about-open-${presses}`} label="About" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
+  </ui.Box>
+)
+const aboutView = async ($: EngineInterface, ui: Ui) => {
+  const { Box, Link, Text } = ui
+  const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
+  const version = (() => {
+    try {
+      return String(JSON.parse(manifest).version ?? '')
+    } catch {
+      return ''
+    }
+  })()
+  const app = await (async () => (await $.session.version()).version)().catch(() => '')
+  const line = (key: string, name: string, body: JSX.Element) => (
+    <Box key={key} flexDirection="row" alignItems="flex-start" gap={2} flexShrink={0}>
+      <Box width={9} flexShrink={0}>
+        <Text dimColor>{name}</Text>
+      </Box>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
+        {body}
+      </Box>
+    </Box>
+  )
+  return (
+    <Box key="about" flexDirection="column" gap={1} flexGrow={1}>
+      <Box key="about-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+        {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving')}
+        <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+          <Text bold>Claudopus</Text>
+          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
+        </Box>
+      </Box>
+      {band(
+        ui,
+        'about-what',
+        'What it does',
+        '',
+        <Box flexDirection="column" gap={1}>
+          <Text wrap="wrap">Every chat hands each of your messages to an agent that works in the background, so the chat stays small and free to talk.</Text>
+          <Text wrap="wrap">This panel shows each piece of work as a card with its to-dos. What finished work leaves is kept under Results.</Text>
+          <Text wrap="wrap">Your words, the subjects you work on and every result are kept as plain files under Memory. Stats adds up what the work cost and the time it saved.</Text>
+        </Box>,
+      )}
+      {band(
+        ui,
+        'about-links',
+        'Links',
+        '',
+        <Box flexDirection="column" gap={1}>
+          {line('about-site', 'Website', <Text><Link href={SITE} label="claudopus.ai" /></Text>)}
+          {line(
+            'about-repo',
+            'GitHub',
+            <Box flexDirection="column">
+              <Text><Link href={REPO} label="dimka3553/claudopus" /></Text>
+              <Text dimColor wrap="wrap">If Claudopus helps you, a star on GitHub helps others find it.</Text>
+            </Box>,
+          )}
+          {line('about-licence', 'Licence', <Text><Link href={`${REPO}/blob/main/LICENSE`} label="MIT" /></Text>)}
+        </Box>,
+      )}
+    </Box>
+  )
+}
+
+// The header's art: the octopus at rest, working, happy and asking, and the dots of a card's state
+
 // The height of one line of the app's text, in its pixels: a mark drawn this tall with its shape in the middle sits on the first line of the text beside it
 const LINE = 20
 // Three dots that pulse while work runs, for a surface that can draw them
@@ -2178,6 +2247,8 @@ const octopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, alt: 
     </Box>
   )
 }
+
+// Pictures a piece of work made, drawn in its chat where it made them
 
 // ---- Pictures a piece of work made, drawn in its chat where it made them ----
 
@@ -2338,6 +2409,8 @@ const loadWork = async ($: EngineInterface, id: string) => {
   // Drawn again only when something new was read, so a drawing that finds nothing new ends there
   if (isChanged) redraw($)
 }
+
+// Workflows: a run of the Workflow tool, a blue card with its stages, who is in it and its rounds
 
 // ---- Workflows: a run of the Workflow tool, a blue card with its stages, who is in it and its rounds ----
 // Each run is kept by the session that runs it in ~/.claude/claudopus/flows/<run id>.json; the chat that started that session
@@ -2560,6 +2633,21 @@ const flowTalkOf = async ($: EngineInterface, f: Flow, agent: FlowAgent) => {
   return flowTalks.get(agent.id)?.lines
 }
 
+const workflowHooks = (on: On) => {
+
+  // A run of the Workflow tool: its card comes up from the call and what the tool answered. The call goes on as made
+  on('tool.call', { tool: 'Workflow' }, async ($, e, next) => {
+    const r = await next(e)
+    const answer = (r.result ?? undefined) as { status?: string; taskId?: string; runId?: string; transcriptDir?: string; scriptPath?: string; workflowName?: string; error?: string } | undefined
+    if (!r.deny && !r.isError && answer && !answer.error && answer.status === 'async_launched')
+      await flowStarted($, e as unknown as { script?: unknown; scriptPath?: unknown; name?: unknown; args?: unknown }, answer).catch(err => log($, `workflow not followed: ${String(err)}`))
+    return r
+  })
+
+}
+
+// Work that is ready or needs the person: a short sound and a notification
+
 // ---- Work that is ready: a short sound and a notification ----
 
 // The sound, a file of the mod's: two soft rising notes, 0.75 s, made by mockups/claudopus-sound/ready.py
@@ -2733,6 +2821,8 @@ const aloud = async ($: EngineInterface, what: string, title: string, text: stri
 }
 const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} needs you`, text, `ask-${one.id}`)
 
+// The asking card: an ask's text to copy, its buttons and reply box, and the answer reaching the work
+
 // An ask's text put on the clipboard; its button says so for two seconds, and a later copy starts its own two seconds
 let copiedKey = ''
 let copies = 0
@@ -2857,6 +2947,9 @@ const sentLine = (one: Todo, now: number) => {
   return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
 }
 
+// Every chat's work in every chat's panel: this chat's file, the others' read, chats opened and answered from another chat
+// (../../mods/claudopus/hooks/shared.ts says how)
+
 // ---- The work of every chat, in every chat's panel (shared.ts says how) ----
 
 const others = atom({ plugin: 'claudopus', key: 'others' } as const, [], { shape: 'others-1' })
@@ -2921,211 +3014,6 @@ const unshare = async ($: EngineInterface, isSure = false) => {
   sharedSign = ''
   if (await $.fs.exists(ownLive(id)).catch(() => false)) await $.process.run(['rm', '-f', ownLive(id)]).catch(() => undefined)
 }
-
-// The other Macs config.json names under `macs`, as ssh reaches them; none for a person with one Mac. Each is known by the name
-// config.json gives it, and shown by the first part of its host name
-let macs: string[] = []
-const macPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.json`
-// One connection to each Mac is kept open a minute after its last use and shared by every chat here, so a trip costs a fraction
-// of a second rather than a new login each time, and a name pressed on that Mac opens here within moments. A connection gone dead,
-// as after sleep, is dropped within ten seconds and the next call logs in afresh
-const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '--', mac, command]
-// This Mac's own name, as its Sharing settings give it, read once: what it is called on the Macs it hands its chats to
-let localName = ''
-const knowLocalName = async ($: EngineInterface) => {
-  if (localName) return localName
-  const r = await $.process.run(['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
-  localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac'
-  return localName
-}
-// What a trip leaves in this Mac's copy: the fetch, when it was fetched and last tried, the answers it carried (put away there on
-// the next trip) and the names of those carried lately, so an answer carried twice is left for its chat once
-type Fetched = { mac: string; text: string; fetchedAt: number; triedAt: number; acks?: string[]; seen?: string[] }
-// This Mac's own chats' files, as handed to the other Macs: those written in the last three minutes, never another Mac's copies
-const ownFiles = async ($: EngineInterface, now: number) => {
-  const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && !(entry.mtimeMs && now - entry.mtimeMs > 180_000))
-  return (await Promise.all(listed.map(entry => readOr($, `${liveDir()}/${entry.name}`)))).filter(text => text.trim().startsWith('{'))
-}
-// Each other Mac is reached by whichever chat here finds its copy older than FETCH_EVERY: one trip for every chat on this Mac. A trip
-// hands that Mac this Mac's chats, brings back its chats and the answers pressed there for this Mac's chats. What a trip that failed
-// leaves is the copy before it, which goes stale on its own
-let isFetching = false
-const fetchMacs = async ($: EngineInterface) => {
-  if (isFetching) return
-  isFetching = true
-  try {
-    const from = await knowLocalName($)
-    for (const mac of macs) {
-      const now = await $.clock.now()
-      const was = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
-      if (now - Math.max(was.fetchedAt ?? 0, was.triedAt ?? 0) < FETCH_EVERY) continue
-      const kept = { mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, acks: was.acks ?? [], seen: was.seen ?? [] }
-      await $.fs.write(macPath(mac), JSON.stringify({ ...kept, triedAt: now }))
-      const push = pushOf(from, keyOf(macName(mac)), now, await ownFiles($, now))
-      const r = await $.process.run(ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
-      if (r.exitCode !== 0 || !r.stdout.includes('\n')) {
-        // Said once when the Mac stops answering, not at every try
-        if ((was.fetchedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `chats on ${mac} not fetched: ${r.stderr.trim().slice(0, 160)}`)
-        continue
-      }
-      const fetchedAt = await $.clock.now()
-      const { text, carried } = tripOf(r.stdout)
-      // An answer carried back is left for its chat here as one pressed in another chat's panel, its time moved onto this Mac's clock
-      const shift = clockOf(text) ? fetchedAt - clockOf(text) : 0
-      // Only an answer left here, or left on an earlier trip, is put away there: one that could not be left is carried again
-      const names: string[] = []
-      for (const one of carried) {
-        if (kept.seen.includes(one.name)) {
-          names.push(one.name)
-          continue
-        }
-        const path = `${liveDir()}/${ANSWERS}/${one.chat}/${one.name}`
-        const r = await $.fs
-          .write(`${path}.part`, JSON.stringify({ ...one.answer, at: one.answer.at + shift }))
-          .then(() => $.process.run(['mv', '-f', `${path}.part`, path]))
-          .catch(err => ({ exitCode: -1, stderr: String(err) }))
-        if (r.exitCode === 0) names.push(one.name)
-        else await log($, `answer from ${mac} not left: ${r.stderr.trim().slice(0, 160)}`)
-      }
-      await $.fs.write(macPath(mac), JSON.stringify({ mac, text, fetchedAt, triedAt: now, acks: names, seen: [...new Set([...kept.seen, ...names])].slice(-200) }))
-    }
-  } finally {
-    isFetching = false
-  }
-}
-
-// The results of each other Mac made the same as this one's, at most every RESULTS_EVERY, by whichever chat here comes first: what
-// that Mac lacks is handed to it, what this one lacks is brought here, and the marks of a result both have are made the same on both.
-// A result is moved into place only whole and only where none has its name; nothing is deleted
-const resultsPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.results.json`
-// What one sync with a Mac leaves: when, and each result both have that was put away then, with when
-type Synced = { syncedAt?: number; triedAt?: number; archived?: Record<string, number>; tried?: Record<string, number> }
-let isSyncing = false
-const syncResults = async ($: EngineInterface) => {
-  if (isSyncing) return
-  isSyncing = true
-  try {
-    let isTried = false
-    for (const mac of macs) {
-      const now = await $.clock.now()
-      const was = JSON.parse((await readOr($, resultsPath(mac))) || '{}') as Synced
-      if (now - Math.max(was.syncedAt ?? 0, was.triedAt ?? 0) < RESULTS_EVERY) continue
-      isTried = true
-      await $.fs.write(resultsPath(mac), JSON.stringify({ ...was, triedAt: now }))
-      const staging = `${reportsDir()}/_sync/${now}-${Math.random().toString(36).slice(2, 8)}`
-      try {
-        await syncWith($, mac, was, now, staging)
-      } finally {
-        await $.process.run(['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined)
-      }
-    }
-    // What a sync cut off left of its own folders goes after an hour; nothing else there is ever touched
-    if (isTried) await $.process.run(['find', `${reportsDir()}/_sync`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(() => undefined)
-  } finally {
-    isSyncing = false
-  }
-}
-// The results missing on one side that one trip takes: those tried longest ago first, never tried before all, so results that keep
-// failing, or that the other Mac keeps leaving out, take turns with the rest and never hold them back
-const aTrip = (ids: string[], tried: Record<string, number> = {}) =>
-  ids.map((id, i) => ({ id, i, at: tried[id] ?? 0 })).sort((a, b) => a.at - b.at || a.i - b.i).slice(0, RESULTS_A_TRIP).map(one => one.id)
-const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: number, staging: string) => {
-  const home = dir.slice(0, -'/.claude/claudopus'.length)
-  const looked = await $.process.run(ssh(mac, RESULTS_LOOK), { timeoutMs: 60_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }))
-  // A list cut short is no list: what it leaves out would look missing there
-  const theirs = looked.exitCode === 0 && !looked.isStdoutTruncated ? resultsOf(looked.stdout) : undefined
-  if (!theirs) {
-    if ((was.syncedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `results on ${mac} not looked at: ${looked.isStdoutTruncated ? 'its list was cut short' : looked.stderr.trim().slice(0, 160)}`)
-    return
-  }
-  // This Mac's results as they stand: each folder with its meta.json, by name
-  const mine = new Map<string, string>()
-  for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
-    if (entry.kind !== 'dir' || !isResultId(entry.name)) continue
-    const text = await readOr($, `${reportsDir()}/${entry.name}/meta.json`)
-    if (text.trim().startsWith('{')) mine.set(entry.name, text)
-  }
-  let changed = 0
-  // Brought here one at a time, each into a folder of its own first, its paths moved onto this Mac's home, then into place whole:
-  // one whose stream was cut short is left out, and brought on a later trip
-  const missingHere = [...theirs.results.keys()].filter(id => !mine.has(id))
-  const missingThere = [...mine.keys()].filter(id => !theirs.results.has(id))
-  const wanted = aTrip(missingHere, was.tried)
-  for (const id of wanted) {
-    const into = `${staging}/${id}`
-    await $.process.run(['mkdir', '-p', into])
-    const r = await $.process.run(['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
-    // Its stream ends with an empty _end, so one cut between two files is known as cut
-    const isWhole = r.exitCode === 0 && (await $.fs.exists(`${into}/_end`).catch(() => false))
-    if (!isWhole || (parsedMeta(await readOr($, `${into}/${id}/meta.json`)) as { id?: unknown }).id !== id) {
-      await log($, `result ${id} from ${mac} not brought: ${r.exitCode !== 0 ? r.stderr.trim().slice(0, 160) : 'it came cut short'}`)
-      continue
-    }
-    for (const file of ['meta.json', 'report.md']) {
-      const text = await readOr($, `${into}/${id}/${file}`)
-      if (text) await $.fs.write(`${into}/${id}/${file}`, rehome(text, theirs.home, home))
-    }
-    const moved = await $.process.run(['sh', '-c', PLACE, 'sh', `${into}/${id}`, `${reportsDir()}/${id}`, `${reportsDir()}/_sync/claim-${id}`]).catch(() => ({ exitCode: -1 }))
-    if (moved.exitCode === 0) changed += 1
-  }
-  // Handed there: copied aside here with its paths moved onto that Mac's home, then sent in one stream, put in place there only
-  // once the whole stream is in
-  const handed = aTrip(missingThere, was.tried)
-  if (handed.length) {
-    const out = `${staging}-out`
-    await $.process.run(['mkdir', '-p', out])
-    const ready: string[] = []
-    for (const id of handed) {
-      if ((await $.process.run(['cp', '-Rp', `${reportsDir()}/${id}`, `${out}/${id}`]).catch(() => ({ exitCode: -1 }))).exitCode !== 0) continue
-      for (const file of ['meta.json', 'report.md']) {
-        const text = await readOr($, `${out}/${id}/${file}`)
-        if (text) await $.fs.write(`${out}/${id}/${file}`, rehome(text, home, theirs.home))
-      }
-      ready.push(id)
-    }
-    const r = ready.length ? await $.process.run(['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' }
-    if (r.exitCode !== 0) await log($, `results not handed to ${mac}: ${r.stderr.trim().slice(0, 160)}`)
-  }
-  // What the person did to a result both have: the later of put away and brought back, every answer, on both. Each side is written
-  // only when it differs; there only when unchanged since it was read
-  let marked = 0
-  const archived: Record<string, number> = {}
-  for (const [id, there] of theirs.results) {
-    const here = mine.get(id)
-    if (!here) continue
-    const wasArchived = was.archived?.[id] ?? 0
-    const theirsNow = broughtBackBy(parsedMeta(there.text), wasArchived)
-    const mineNow = broughtBackBy(parsedMeta(here), wasArchived)
-    const target = marksOf(mineNow, theirsNow)
-    // Its archive is kept as made the same only once both sides hold it; else what was kept before stands
-    let isSame = marked < RESULTS_A_TRIP
-    if (marked < RESULTS_A_TRIP) {
-      if (merged(here, theirsNow, wasArchived)) {
-        const ok = await markReport($, { id } as Report, stored => marksOf(broughtBackBy(stored, wasArchived), theirsNow)).then(() => true, err => (void log($, `result ${id} not marked from ${mac}: ${String(err)}`), false))
-        ;(isSame &&= ok), (changed += 1), (marked += 1)
-      }
-      const theirsNext = merged(there.text, mineNow, wasArchived)
-      if (theirsNext) {
-        const r = await $.process.run(ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
-        if (r.exitCode !== 0) await log($, `result ${id} not marked on ${mac}: ${r.exitCode === 3 ? 'changed there since' : r.stderr.trim().slice(0, 160)}`)
-        ;(isSame &&= r.exitCode === 0), (marked += 1)
-      }
-    }
-    const kept = isSame ? (target.archived ?? 0) : wasArchived
-    if (kept) archived[id] = kept
-  }
-  if (changed) await loadReports($)
-  // When each result still missing on either side was last tried; one that has come across is dropped from it the next trip
-  const tried: Record<string, number> = {}
-  for (const id of [...missingHere, ...missingThere]) if (was.tried?.[id]) tried[id] = was.tried[id]
-  for (const id of [...wanted, ...handed]) tried[id] = now
-  await $.fs.write(resultsPath(mac), JSON.stringify({ syncedAt: await $.clock.now(), triedAt: now, brought: wanted.length, handed: handed.length, marked, archived, tried }))
-  if (wanted.length || handed.length || marked) await log($, `results with ${mac}: ${wanted.length} brought, ${handed.length} handed, ${marked} marked`)
-}
-
-// The Macs that handed this one their chats lately, by the name each gave, and what the freshest called this Mac: its name here once
-// other Macs' chats are listed beside its own
-const pushedFrom = new Set<string>()
 let pushedYou = ''
 let pushedLatest = ''
 // Whether this Mac lists other Macs' chats, and what it calls itself beside them
@@ -3450,6 +3338,215 @@ const readAnswers = async ($: EngineInterface) => {
   }
 }
 
+// The other Macs over ssh: their chats fetched, and the same results on every Mac
+
+// The other Macs config.json names under `macs`, as ssh reaches them; none for a person with one Mac. Each is known by the name
+// config.json gives it, and shown by the first part of its host name
+let macs: string[] = []
+const macPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.json`
+// One connection to each Mac is kept open a minute after its last use and shared by every chat here, so a trip costs a fraction
+// of a second rather than a new login each time, and a name pressed on that Mac opens here within moments. A connection gone dead,
+// as after sleep, is dropped within ten seconds and the next call logs in afresh
+const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', '--', mac, command]
+// This Mac's own name, as its Sharing settings give it, read once: what it is called on the Macs it hands its chats to
+let localName = ''
+const knowLocalName = async ($: EngineInterface) => {
+  if (localName) return localName
+  const r = await $.process.run(['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
+  localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac'
+  return localName
+}
+// What a trip leaves in this Mac's copy: the fetch, when it was fetched and last tried, the answers it carried (put away there on
+// the next trip) and the names of those carried lately, so an answer carried twice is left for its chat once
+type Fetched = { mac: string; text: string; fetchedAt: number; triedAt: number; acks?: string[]; seen?: string[] }
+// This Mac's own chats' files, as handed to the other Macs: those written in the last three minutes, never another Mac's copies
+const ownFiles = async ($: EngineInterface, now: number) => {
+  const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && !(entry.mtimeMs && now - entry.mtimeMs > 180_000))
+  return (await Promise.all(listed.map(entry => readOr($, `${liveDir()}/${entry.name}`)))).filter(text => text.trim().startsWith('{'))
+}
+// Each other Mac is reached by whichever chat here finds its copy older than FETCH_EVERY: one trip for every chat on this Mac. A trip
+// hands that Mac this Mac's chats, brings back its chats and the answers pressed there for this Mac's chats. What a trip that failed
+// leaves is the copy before it, which goes stale on its own
+let isFetching = false
+const fetchMacs = async ($: EngineInterface) => {
+  if (isFetching) return
+  isFetching = true
+  try {
+    const from = await knowLocalName($)
+    for (const mac of macs) {
+      const now = await $.clock.now()
+      const was = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
+      if (now - Math.max(was.fetchedAt ?? 0, was.triedAt ?? 0) < FETCH_EVERY) continue
+      const kept = { mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, acks: was.acks ?? [], seen: was.seen ?? [] }
+      await $.fs.write(macPath(mac), JSON.stringify({ ...kept, triedAt: now }))
+      const push = pushOf(from, keyOf(macName(mac)), now, await ownFiles($, now))
+      const r = await $.process.run(ssh(mac, trip(from, kept.acks)), { stdin: push, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+      if (r.exitCode !== 0 || !r.stdout.includes('\n')) {
+        // Said once when the Mac stops answering, not at every try
+        if ((was.fetchedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `chats on ${mac} not fetched: ${r.stderr.trim().slice(0, 160)}`)
+        continue
+      }
+      const fetchedAt = await $.clock.now()
+      const { text, carried } = tripOf(r.stdout)
+      // An answer carried back is left for its chat here as one pressed in another chat's panel, its time moved onto this Mac's clock
+      const shift = clockOf(text) ? fetchedAt - clockOf(text) : 0
+      // Only an answer left here, or left on an earlier trip, is put away there: one that could not be left is carried again
+      const names: string[] = []
+      for (const one of carried) {
+        if (kept.seen.includes(one.name)) {
+          names.push(one.name)
+          continue
+        }
+        const path = `${liveDir()}/${ANSWERS}/${one.chat}/${one.name}`
+        const r = await $.fs
+          .write(`${path}.part`, JSON.stringify({ ...one.answer, at: one.answer.at + shift }))
+          .then(() => $.process.run(['mv', '-f', `${path}.part`, path]))
+          .catch(err => ({ exitCode: -1, stderr: String(err) }))
+        if (r.exitCode === 0) names.push(one.name)
+        else await log($, `answer from ${mac} not left: ${r.stderr.trim().slice(0, 160)}`)
+      }
+      await $.fs.write(macPath(mac), JSON.stringify({ mac, text, fetchedAt, triedAt: now, acks: names, seen: [...new Set([...kept.seen, ...names])].slice(-200) }))
+    }
+  } finally {
+    isFetching = false
+  }
+}
+
+// The results of each other Mac made the same as this one's, at most every RESULTS_EVERY, by whichever chat here comes first: what
+// that Mac lacks is handed to it, what this one lacks is brought here, and the marks of a result both have are made the same on both.
+// A result is moved into place only whole and only where none has its name; nothing is deleted
+const resultsPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.results.json`
+// What one sync with a Mac leaves: when, and each result both have that was put away then, with when
+type Synced = { syncedAt?: number; triedAt?: number; archived?: Record<string, number>; tried?: Record<string, number> }
+let isSyncing = false
+const syncResults = async ($: EngineInterface) => {
+  if (isSyncing) return
+  isSyncing = true
+  try {
+    let isTried = false
+    for (const mac of macs) {
+      const now = await $.clock.now()
+      const was = JSON.parse((await readOr($, resultsPath(mac))) || '{}') as Synced
+      if (now - Math.max(was.syncedAt ?? 0, was.triedAt ?? 0) < RESULTS_EVERY) continue
+      isTried = true
+      await $.fs.write(resultsPath(mac), JSON.stringify({ ...was, triedAt: now }))
+      const staging = `${reportsDir()}/_sync/${now}-${Math.random().toString(36).slice(2, 8)}`
+      try {
+        await syncWith($, mac, was, now, staging)
+      } finally {
+        await $.process.run(['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined)
+      }
+    }
+    // What a sync cut off left of its own folders goes after an hour; nothing else there is ever touched
+    if (isTried) await $.process.run(['find', `${reportsDir()}/_sync`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(() => undefined)
+  } finally {
+    isSyncing = false
+  }
+}
+// The results missing on one side that one trip takes: those tried longest ago first, never tried before all, so results that keep
+// failing, or that the other Mac keeps leaving out, take turns with the rest and never hold them back
+const aTrip = (ids: string[], tried: Record<string, number> = {}) =>
+  ids.map((id, i) => ({ id, i, at: tried[id] ?? 0 })).sort((a, b) => a.at - b.at || a.i - b.i).slice(0, RESULTS_A_TRIP).map(one => one.id)
+const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: number, staging: string) => {
+  const home = dir.slice(0, -'/.claude/claudopus'.length)
+  const looked = await $.process.run(ssh(mac, RESULTS_LOOK), { timeoutMs: 60_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }))
+  // A list cut short is no list: what it leaves out would look missing there
+  const theirs = looked.exitCode === 0 && !looked.isStdoutTruncated ? resultsOf(looked.stdout) : undefined
+  if (!theirs) {
+    if ((was.syncedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `results on ${mac} not looked at: ${looked.isStdoutTruncated ? 'its list was cut short' : looked.stderr.trim().slice(0, 160)}`)
+    return
+  }
+  // This Mac's results as they stand: each folder with its meta.json, by name
+  const mine = new Map<string, string>()
+  for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
+    if (entry.kind !== 'dir' || !isResultId(entry.name)) continue
+    const text = await readOr($, `${reportsDir()}/${entry.name}/meta.json`)
+    if (text.trim().startsWith('{')) mine.set(entry.name, text)
+  }
+  let changed = 0
+  // Brought here one at a time, each into a folder of its own first, its paths moved onto this Mac's home, then into place whole:
+  // one whose stream was cut short is left out, and brought on a later trip
+  const missingHere = [...theirs.results.keys()].filter(id => !mine.has(id))
+  const missingThere = [...mine.keys()].filter(id => !theirs.results.has(id))
+  const wanted = aTrip(missingHere, was.tried)
+  for (const id of wanted) {
+    const into = `${staging}/${id}`
+    await $.process.run(['mkdir', '-p', into])
+    const r = await $.process.run(['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+    // Its stream ends with an empty _end, so one cut between two files is known as cut
+    const isWhole = r.exitCode === 0 && (await $.fs.exists(`${into}/_end`).catch(() => false))
+    if (!isWhole || (parsedMeta(await readOr($, `${into}/${id}/meta.json`)) as { id?: unknown }).id !== id) {
+      await log($, `result ${id} from ${mac} not brought: ${r.exitCode !== 0 ? r.stderr.trim().slice(0, 160) : 'it came cut short'}`)
+      continue
+    }
+    for (const file of ['meta.json', 'report.md']) {
+      const text = await readOr($, `${into}/${id}/${file}`)
+      if (text) await $.fs.write(`${into}/${id}/${file}`, rehome(text, theirs.home, home))
+    }
+    const moved = await $.process.run(['sh', '-c', PLACE, 'sh', `${into}/${id}`, `${reportsDir()}/${id}`, `${reportsDir()}/_sync/claim-${id}`]).catch(() => ({ exitCode: -1 }))
+    if (moved.exitCode === 0) changed += 1
+  }
+  // Handed there: copied aside here with its paths moved onto that Mac's home, then sent in one stream, put in place there only
+  // once the whole stream is in
+  const handed = aTrip(missingThere, was.tried)
+  if (handed.length) {
+    const out = `${staging}-out`
+    await $.process.run(['mkdir', '-p', out])
+    const ready: string[] = []
+    for (const id of handed) {
+      if ((await $.process.run(['cp', '-Rp', `${reportsDir()}/${id}`, `${out}/${id}`]).catch(() => ({ exitCode: -1 }))).exitCode !== 0) continue
+      for (const file of ['meta.json', 'report.md']) {
+        const text = await readOr($, `${out}/${id}/${file}`)
+        if (text) await $.fs.write(`${out}/${id}/${file}`, rehome(text, home, theirs.home))
+      }
+      ready.push(id)
+    }
+    const r = ready.length ? await $.process.run(['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' }
+    if (r.exitCode !== 0) await log($, `results not handed to ${mac}: ${r.stderr.trim().slice(0, 160)}`)
+  }
+  // What the person did to a result both have: the later of put away and brought back, every answer, on both. Each side is written
+  // only when it differs; there only when unchanged since it was read
+  let marked = 0
+  const archived: Record<string, number> = {}
+  for (const [id, there] of theirs.results) {
+    const here = mine.get(id)
+    if (!here) continue
+    const wasArchived = was.archived?.[id] ?? 0
+    const theirsNow = broughtBackBy(parsedMeta(there.text), wasArchived)
+    const mineNow = broughtBackBy(parsedMeta(here), wasArchived)
+    const target = marksOf(mineNow, theirsNow)
+    // Its archive is kept as made the same only once both sides hold it; else what was kept before stands
+    let isSame = marked < RESULTS_A_TRIP
+    if (marked < RESULTS_A_TRIP) {
+      if (merged(here, theirsNow, wasArchived)) {
+        const ok = await markReport($, { id } as Report, stored => marksOf(broughtBackBy(stored, wasArchived), theirsNow)).then(() => true, err => (void log($, `result ${id} not marked from ${mac}: ${String(err)}`), false))
+        ;(isSame &&= ok), (changed += 1), (marked += 1)
+      }
+      const theirsNext = merged(there.text, mineNow, wasArchived)
+      if (theirsNext) {
+        const r = await $.process.run(ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+        if (r.exitCode !== 0) await log($, `result ${id} not marked on ${mac}: ${r.exitCode === 3 ? 'changed there since' : r.stderr.trim().slice(0, 160)}`)
+        ;(isSame &&= r.exitCode === 0), (marked += 1)
+      }
+    }
+    const kept = isSame ? (target.archived ?? 0) : wasArchived
+    if (kept) archived[id] = kept
+  }
+  if (changed) await loadReports($)
+  // When each result still missing on either side was last tried; one that has come across is dropped from it the next trip
+  const tried: Record<string, number> = {}
+  for (const id of [...missingHere, ...missingThere]) if (was.tried?.[id]) tried[id] = was.tried[id]
+  for (const id of [...wanted, ...handed]) tried[id] = now
+  await $.fs.write(resultsPath(mac), JSON.stringify({ syncedAt: await $.clock.now(), triedAt: now, brought: wanted.length, handed: handed.length, marked, archived, tried }))
+  if (wanted.length || handed.length || marked) await log($, `results with ${mac}: ${wanted.length} brought, ${handed.length} handed, ${marked} marked`)
+}
+
+// The Macs that handed this one their chats lately, by the name each gave, and what the freshest called this Mac: its name here once
+// other Macs' chats are listed beside its own
+const pushedFrom = new Set<string>()
+
+// The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel
+
 // ---- The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel ----
 // The engine raises PermissionRequest as it puts a prompt to the person, and says nothing of the answer but a refusal: an allowed
 // call just runs and ends. So a prompt goes when its call ends (refused, interrupted or run), when the terminal draws its running
@@ -3549,7 +3646,83 @@ const lookForStarted = async ($: EngineInterface) => {
   }
 }
 
-export const register: Register = on => {
+const promptHooks = (on: On) => {
+
+  // A prompt the app is about to put to the person shows amber in every panel; the mod passes the request on untouched and never
+  // answers it. A settings hook that answered it put nothing to the person
+  on('tool.check', async ($, e, next) => {
+    const r = await next(e)
+    if (r.decision === 'ask' && e.tool_use_id && e.approver) {
+      asked = [...asked.filter(one => one.id !== e.tool_use_id), { agent: e.agentId ?? '', tool: e.tool, input: inputKey(e.input), id: e.tool_use_id }].slice(-50)
+    }
+    return r
+  })
+  on('classic.PermissionRequest', async ($, e, next) => {
+    const id = dir && !isEnded ? await opened($, e.agent_id, e.tool_name, e.tool_input).catch(err => (void log($, `prompt not shown: ${String(err)}`), '')) : ''
+    const r = await next(e)
+    if (id && r?.decision) settle($, id)
+    return r
+  })
+  on('classic.Notification', async ($, e, next) => {
+    if (e.notification_type === 'permission_prompt' && waiting.length) await tellWaiting($).catch(err => log($, `prompt not told: ${String(err)}`))
+    return next(e)
+  })
+  // It goes as its call ends (refused, interrupted, or allowed and run: the main tool.call hook below), or as the terminal draws its
+  // running pill
+  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => {
+    const id = e.props.tool_use_id
+    if (waiting.some(one => one.id === id)) void Promise.resolve().then(() => settle($, id))
+    return next(e)
+  })
+
+}
+
+// The chat's own life: its start and end, each message and reply, compaction, and what it is told
+
+// How full this chat's context is, against the window the app's own panel measures it by
+const measure = async ($: EngineInterface) => {
+  const context = (await $.session.usage({ breakdown: 'summary' }).catch(() => undefined))?.context
+  const window = context?.breakdown?.rawMaxTokens ?? context?.window
+  return update($, me, one => ({ ...one, tokens: context?.tokens ?? one.tokens, window: window ?? one.window }))
+}
+
+// ---- After each reply: the size, the answer, the asks and the title ----
+
+const afterReply = async ($: EngineInterface, text: string, answer: string) => {
+  await measure($)
+  const title = await appTitle($)
+  const m = await update($, me, one => ({ ...one, title: title || one.title }))
+  // A server is looked for while the chat that started it is still above it
+  await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
+  // What Claude answered is kept beside what the person said, so a search finds what happened as well as what was asked
+  if (answer.trim()) {
+    await appendWords($, m.id, `### Claude ${new Date().toISOString()}\n${answer.trim()}\n\n`).catch(err => log($, `answer not saved: ${String(err)}`))
+  }
+  // A reply with no message of the person's before it relays an agent's result: it is logged when it says something
+  const isRelay = !text.trim()
+  if (isRelay && answer.trim().length < 200) return
+
+  const r = await $.model.complete({
+    model: 'sonnet',
+    system: ASKS_SYSTEM,
+    prompt: `Current title: ${m.title || '(none)'}\n\nUser message:\n"""\n${isRelay ? '(none: this reply relays the result of a background agent)' : clip(text, 3000)}\n"""\n\nAssistant reply (shortened):\n"""\n${clip(answer, isRelay ? 1500 : 600)}\n"""`,
+    maxTokens: 500,
+  })
+  if (!r.isAnswered) return
+  const lines = r.text.split('\n').map(line => line.trim())
+  // The index of this chat: what was asked and what came of it, one line each under the time it happened
+  const asks = lines.filter(line => line.startsWith('- ') || /^did:/i.test(line))
+  if (asks.length) await appendAsks($, m.id, `## ${new Date().toISOString()}\n${asks.join('\n')}\n\n`)
+  const named = lines.find(line => /^title:/i.test(line))?.replace(/^title:\s*/i, '').trim() ?? ''
+  if (named && named !== m.title && named.length <= 80) {
+    await $.mcp
+      .call('ccd_session_mgmt', 'set_session_title', { session_id: 'self', title: named })
+      .then(() => update($, me, one => ({ ...one, title: named })))
+      .catch(() => undefined)
+  }
+}
+
+const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
     // A load, first or a reload, starts looking afresh: nothing that ended before it is announced
     lastSeen = undefined
@@ -3888,32 +4061,12 @@ export const register: Register = on => {
     return isRare ? { ...r, isDeferred: true } : r
   })
 
-  // A prompt the app is about to put to the person shows amber in every panel; the mod passes the request on untouched and never
-  // answers it. A settings hook that answered it put nothing to the person
-  on('tool.check', async ($, e, next) => {
-    const r = await next(e)
-    if (r.decision === 'ask' && e.tool_use_id && e.approver) {
-      asked = [...asked.filter(one => one.id !== e.tool_use_id), { agent: e.agentId ?? '', tool: e.tool, input: inputKey(e.input), id: e.tool_use_id }].slice(-50)
-    }
-    return r
-  })
-  on('classic.PermissionRequest', async ($, e, next) => {
-    const id = dir && !isEnded ? await opened($, e.agent_id, e.tool_name, e.tool_input).catch(err => (void log($, `prompt not shown: ${String(err)}`), '')) : ''
-    const r = await next(e)
-    if (id && r?.decision) settle($, id)
-    return r
-  })
-  on('classic.Notification', async ($, e, next) => {
-    if (e.notification_type === 'permission_prompt' && waiting.length) await tellWaiting($).catch(err => log($, `prompt not told: ${String(err)}`))
-    return next(e)
-  })
-  // It goes as its call ends (refused, interrupted, or allowed and run: the main tool.call hook below), or as the terminal draws its
-  // running pill
-  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => {
-    const id = e.props.tool_use_id
-    if (waiting.some(one => one.id === id)) void Promise.resolve().then(() => settle($, id))
-    return next(e)
-  })
+}
+
+// Work starting and running: the chat's own thread kept to handing work over, how full the chat is, each step of work, and new
+// work's card
+
+const workHooks = (on: On) => {
 
   // A chat's own thread starts agents and talks to them; the work runs in the agents, which carry an agent id
   on('tool.call', async ($, e, raw) => {
@@ -4105,6 +4258,12 @@ export const register: Register = on => {
     return r
   })
 
+}
+
+// The /claudopus and /servers commands, and the panel's focus and close
+
+const commandHooks = (on: On) => {
+
   on('command.run', { command: 'claudopus' }, async $ => {
     await update($, me, one => ({ ...one, isListOpened: true }))
     await update($, paneShown, () => true)
@@ -4133,6 +4292,12 @@ export const register: Register = on => {
 
     return { text: opened.isPlaced ? 'Servers panel opened.' : nowhere('Servers') }
   })
+
+}
+
+// The mod's own tools: update, recall, todo, waits, ask and note
+
+const toolHooks = (on: On) => {
 
   on('tool.call', { tool: 'mcp__claudopus__update' }, async ($, e) => {
     const input = e as unknown as { name?: string; repo?: string; state?: string; summary?: string; brief?: string }
@@ -4244,6 +4409,12 @@ export const register: Register = on => {
     return { result: `Noted. Hand the task to the chat now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${handed}\nThen carry on with your own work; do not do that task here.` }
   })
 
+}
+
+// Above the prompt: the small octopus while work runs
+
+const bandHooks = (on: On) => {
+
   // Above the prompt, while work runs: a small mark that it does, and nothing of what it is doing
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
@@ -4279,6 +4450,12 @@ export const register: Register = on => {
       </Box>
     )
   })
+
+}
+
+// The panel's drawing: the Claudopus pane, a work's Details and a workflow's, every card in them
+
+const panelHooks = (on: On) => {
 
   // Beside the chat: one small card per piece of work under way, as wide as the panel, every card the same height whatever the work
   // writes. Work that has ended leaves the panel. A card's Details is a tab of its own, drawn here too: all its to-dos, then its own chat
@@ -5151,6 +5328,12 @@ export const register: Register = on => {
     )
   })
 
+}
+
+// The mod's other tabs: Results, Stats, Config, About, and a result in a tab of its own
+
+const tabHooks = (on: On) => {
+
   // The reports, in a pane of their own
   on('ui.render', { component: 'Pane', requestId: REPORTS_PANE }, async ($, e) => {
     const { Box } = $.ui.resolve(e)
@@ -5212,86 +5395,21 @@ export const register: Register = on => {
     )
   })
 
-  // A reply that names a memory file: its links to memory open the mod's tab, since the app's file pane refuses ~/.claude. The
-  // terminal opens such a path itself, so it keeps its own drawing
-  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return next(e)
-    const { text, hrefs } = memoryLinked(e.props.text)
-    if (!hrefs.length) return next(e)
-    const { Markdown } = $.ui.resolve(e)
-    return (
-      <Markdown
-        key={`memory-reply-${mark(e.requestId)}`}
-        text={text}
-        pressableLinks={hrefs.slice(0, 256)}
-        onLinkPress={link => {
-          const path = memoryPressed(link.href)
-          if (path) openMemory($, path)
-        }}
-      />
-    )
-  })
+}
 
-  // A memory file opened as a tab of its own; the links in it to other memory files open there too
-  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
-    if (!e.requestId?.startsWith(MEMORY_PANE)) return next(e)
-    const { Box, Markdown, Text } = $.ui.resolve(e)
-    const path = memoryPanes.get(e.requestId)
-    if (!path) return <Text dimColor>Press the link in the chat again to open this file.</Text>
-    const held = memoryText.get(e.requestId) ?? ''
-    const { text, hrefs } = memoryLinked(held.length > REPORT_CHARS ? `${held.slice(0, REPORT_CHARS)}\n\n…` : held)
-    return (
-      <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        <Text dimColor wrap="wrap">{path}</Text>
-        {held ? (
-          <Markdown
-            key={`memory-text-${e.requestId}`}
-            text={text}
-            pressableLinks={hrefs.slice(0, 256)}
-            onLinkPress={link => {
-              const to = memoryPressed(link.href)
-              if (to) openMemory($, to)
-            }}
-          />
-        ) : (
-          <Text dimColor>This file is not there any more.</Text>
-        )}
-      </Box>
-    )
-  })
+// The hooks module's entry: the hooks of each part, in the order the engine runs them. The parts are the files beside it,
+// each named for its job; build.mjs joins them into mods/claudopus/hooks/register.tsx, the one file the mod loads
 
-  // The servers panel: one block per server with its link, where it runs and which chat started it; nothing is cut off
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Link, Text } = $.ui.resolve(e)
-    if (!scannedAt) await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
-    await read($, tick)
-    const found = await read($, servers)
-
-    return (
-      <Box flexDirection="column" gap={1}>
-        {found.length === 0 && <Text dimColor>Nothing is listening from your folders.</Text>}
-        {found.map(one => (
-          <Box key={`server-${one.pid}`} flexDirection="row" alignItems="flex-start" gap={1}>
-            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-              <Text wrap="wrap">{one.url ? <Link href={one.url} label={`localhost:${one.port}`} /> : `Port ${one.port}`}</Text>
-              <Text dimColor wrap="wrap">{one.about}</Text>
-            </Box>
-            <Box flexShrink={0}>
-              <Button key={`kill-${one.pid}`} label="■" onPress={() => void stopServer($, one.pid)} />
-            </Box>
-          </Box>
-        ))}
-      </Box>
-    )
-  })
-
-  // A run of the Workflow tool: its card comes up from the call and what the tool answered. The call goes on as made
-  on('tool.call', { tool: 'Workflow' }, async ($, e, next) => {
-    const r = await next(e)
-    const answer = (r.result ?? undefined) as { status?: string; taskId?: string; runId?: string; transcriptDir?: string; scriptPath?: string; workflowName?: string; error?: string } | undefined
-    if (!r.deny && !r.isError && answer && !answer.error && answer.status === 'async_launched')
-      await flowStarted($, e as unknown as { script?: unknown; scriptPath?: unknown; name?: unknown; args?: unknown }, answer).catch(err => log($, `workflow not followed: ${String(err)}`))
-    return r
-  })
-
+export const register: Register = on => {
+  chatHooks(on)
+  promptHooks(on)
+  workHooks(on)
+  commandHooks(on)
+  toolHooks(on)
+  bandHooks(on)
+  panelHooks(on)
+  tabHooks(on)
+  memoryHooks(on)
+  serversTabHooks(on)
+  workflowHooks(on)
 }

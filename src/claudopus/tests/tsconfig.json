@@ -1,0 +1,5 @@
+{
+  "extends": "../../../mods/claudopus/.claude-plugin/types/tsconfig.json",
+  "include": ["*.tsx", "globals.d.ts"],
+  "exclude": ["imports.tsx"]
+}

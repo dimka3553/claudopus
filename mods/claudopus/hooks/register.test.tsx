@@ -1,6 +1,9 @@
+// Made by src/claudopus/build.mjs from the parts in src/claudopus/tests: change them there and build again, never this file. Its tests run with the engine's plugin test.
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { headLine, headMood, openTake, opensOf, shareable } from './shared'
+
+// The world beneath the mod in every test: files in memory, the app's session tools, a cheap model; and small helpers
 
 const HOME = '/home/sam'
 const MEMORY = `${HOME}/.claude/claudopus`
@@ -296,6 +299,8 @@ const until = async <T,>(look: () => Promise<T | undefined>) => {
   return undefined
 }
 
+// The chat: its role, handing work over, keys and pastes, names, the mod's tools, compaction, after a reply, the principles
+
 test('a chat gets its role once, is told to start a fresh agent from a brief for every message, and every message is saved', async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
@@ -491,6 +496,24 @@ test('after a reply the answer is saved, the asks and what was done are logged, 
   expect(files.get(`${MEMORY}/words/engine-id.md`)).toContain('Done.')
   expect(titles).toEqual(['Upload page fix'])
 })
+
+test('every conversation carries the principles the mod ships, word for word and once, even where the same text was loaded from elsewhere', async ($, on) => {
+  world(on)
+  // The engine beneath answers what it was handed
+  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
+  await $.session.start(start)
+  const home ={ path: `${HOME}/.claude/CLAUDE.md`, kind: 'user', content: PRINCIPLES } as const
+  const repo = { path: '/repo/CLAUDE.md', kind: 'project', content: 'REPO RULES' } as const
+  const managed = { path: '/etc/claude/CLAUDE.md', kind: 'managed', content: 'ORG RULES' } as const
+  const told = await $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'files' }], instructionFiles: [managed, home, repo] })
+  expect(told.instructionFiles?.map(one => [one.kind, one.path.endsWith('/rules/CLAUDE.md') ? 'mod' : one.path])).toEqual([['managed', managed.path], ['user', 'mod'], ['project', repo.path]])
+  expect(told.instructionFiles?.find(one => one.kind === 'user')?.content).toBe(PRINCIPLES)
+  // A machine with no instruction file of its own gets them from the mod alone
+  const fresh = await $.prompt.context({ blocks: [], instructionFiles: [] })
+  expect(fresh.instructionFiles?.map(one => [one.kind, one.content])).toEqual([['user', PRINCIPLES]])
+})
+
+// Cards: work becoming a card, its to-dos, its own chat, steers, context and model, Details, stops, its pause, work the engine reports
 
 test('what I ask for becomes a box in the panel, the panel opens once, and the chat shows only that work is running', async ($, on) => {
   const { opened, logged } = world(on)
@@ -1103,6 +1126,77 @@ test('work that ends pauses in its place for two seconds: two at once, one ended
   await again.unmount()
 })
 
+test('work the engine runs is listed even when the mod never saw it start, and work it reports as failed leaves the panel', async ($, on) => {
+  const agents: Record<string, string> = { a7: 'running' }
+  const kinds: Record<string, string> = {}
+  const { clock } = world(on, { agents, kinds })
+  await $.session.start(start)
+
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await pane.find({ type: 'Text', text: /Listed/ }))?.text).toBe('Listed by the engine')
+  // A helper the mod never saw start is no to-do
+  agents.h9 = 'running'
+  kinds.h9 = 'general-purpose'
+  await clock.advance(20_000)
+  expect(await pane.findAll({ type: 'Text', text: /Listed/ })).toHaveLength(1)
+  agents.a7 = 'failed'
+  await clock.advance(20_000)
+  expect((await until(() => pane.find({ type: 'Text', text: /^Nothing/ })))?.text).toBe('Nothing is running')
+  await pane.unmount()
+})
+
+test('work the chat started that was running before the mod loaded, as after a rename, is a card of its own, not a helper', async ($, on) => {
+  const agents: Record<string, string> = { w5: 'running' }
+  const kinds: Record<string, string> = { w5: 'general-purpose' }
+  const talk = [{ role: 'assistant', text: '', toolUses: [{ tool_use_id: 'x1', tool: 'Agent', input: { description: 'Listed by the engine' } }] }]
+  world(on, { agents, kinds, talk })
+  await $.session.start(start)
+
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await pane.find({ type: 'Text', text: /Listed/ }))?.text).toBe('Listed by the engine')
+  expect((await pane.find({ type: 'Text', text: /^Working on/ }))?.text).toBe('Working on 1 thing')
+  await pane.unmount()
+})
+
+test('work that ended before the mod kept it is read back from the chat\'s own records, its thinking never', async ($, on) => {
+  const { files } = world(on)
+  const folder = `${HOME}/.claude/projects/-repo/engine-id/subagents`
+  files.set(`${folder}/agent-r1.meta.json`, JSON.stringify({ description: 'Old work', spawnDepth: 1, finished: true }))
+  files.set(`${folder}/agent-h1.meta.json`, JSON.stringify({ description: 'A helper of it', spawnDepth: 2, finished: true }))
+  files.set(`${folder}/agent-h1.jsonl`, JSON.stringify({ timestamp: '2026-11-11T10:00:00Z', type: 'user', message: {} }))
+  const rows = [
+    { timestamp: '2026-11-11T10:00:00Z', type: 'user', message: { content: 'go' } },
+    {
+      timestamp: '2026-11-11T10:05:00Z',
+      type: 'assistant',
+      message: {
+        model: 'claude-opus-5-5',
+        usage: { input_tokens: 10, cache_read_input_tokens: 1000, output_tokens: 5 },
+        content: [
+          { type: 'thinking', thinking: 'a secret thought' },
+          { type: 'tool_use', name: 'mcp__progress__todo', input: { item: 'Step one', state: 'done' } },
+          { type: 'tool_use', name: 'mcp__other__note', input: { text: 'not ours' } },
+          { type: 'tool_use', name: 'mcp__progress__note', input: { text: 'The old line' } },
+        ],
+      },
+    },
+    'not json',
+  ]
+  files.set(`${folder}/agent-r1.jsonl`, rows.map(row => (typeof row === 'string' ? row : JSON.stringify(row))).join('\n'))
+  await $.session.start(start)
+
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label))))
+  expect(fold?.props.label).toBe('▸ Finished 1')
+  await pane.press({ key: String(fold?.key) })
+  expect((await pane.find({ type: 'Text', text: /The old line/ }))?.text).toBe('The old line')
+  expect((await pane.find({ type: 'Text', text: /^Finished ·/ }))?.text).toBe('Finished · Opus 5.5 · context 1.0k · 5m 00s')
+  expect(await pane.find({ type: 'Text', text: /secret|not ours|helper/ })).toBeUndefined()
+  await pane.unmount()
+})
+
+// Finished work: the happy green octopus and its pause
+
 test('the octopus turns happy and green when work finishes, for its pause, then goes back to work or to rest; stopped work, a closed panel and a reload leave none behind', async ($, on) => {
   const { clock } = world(on, { art: true })
   await $.session.start(start)
@@ -1345,6 +1439,8 @@ test('work that answered while only its own background work held it, then stoppe
   await pane.unmount()
 })
 
+// Sounds and notifications: work that is ready, and work that needs the person
+
 test('work that is ready plays one sound and raises one notification; helpers, a second report, a Stop press and a reload make none; stopped work says so silently', async ($, on) => {
   // Whether the app takes notifications from a mod
   const app = { noSurface: false, claudopus: 0 }
@@ -1467,6 +1563,68 @@ test('with neither a chat in the Claude app nor an app to bring forward, a notif
   expect(own.at(-1)?.slice(1)).toEqual(['--title', 'Draw the eyes', '--text', 'The eyes are drawn.', '--key', 'ready-a1'])
 })
 
+test('work that needs the person is heard once: its notification comes as the amber Claudopus Asks carrying the sound, silent when sound is off', async ($, on) => {
+  const app = { noSurface: true, claudopus: 0, asks: 0 }
+  const { played, own, osa, files, clock } = world(on, { app, env: { CLAUDE_CODE_HOST_SESSION_ID: 'local_ab12-cd34' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the repo private', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
+  const ask = (id: string, text: string) => $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: id, agentId: 'a1', text } as never)
+  const lead = (argv?: string[]) => argv?.slice(1, argv.indexOf('--title'))
+
+  // The sound goes in the notification, so macOS plays it as the person set Claudopus Asks and as a Focus allows; no second sound
+  await ask('k1', 'Paste the code.')
+  expect(own).toHaveLength(1)
+  expect(lead(own[0])).toEqual(['--asks', '--chime'])
+  expect(own[0]?.slice(3)).toEqual(['--title', 'Hide the repo needs you', '--text', 'Paste the code.', '--open', 'claude://code/continue?session=local_ab12-cd34', '--key', 'ask-a1'])
+  expect(played).toEqual([])
+  // The same ask said again is neither shown nor heard again
+  await ask('k2', 'Paste the code.')
+  expect(own).toHaveLength(1)
+
+  // Sound off in Config: the amber notification, silent, and no chime of the mod's
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ sound: false }))
+  await ask('k3', 'Press Approve.')
+  expect(lead(own.at(-1))).toEqual(['--asks'])
+  expect(played).toEqual([])
+
+  // Claudopus Asks turned off in System Settings: the purple Claudopus, which carries no sound, and the mod's own chime
+  files.set(`${MEMORY}/config.json`, '{}')
+  app.asks = 2
+  await ask('k4', 'Type your password.')
+  expect(lead(own.at(-2))).toEqual(['--asks', '--chime'])
+  expect(lead(own.at(-1))).toEqual([])
+  expect(played).toEqual(['sounds/ready.wav'])
+  expect(osa).toEqual([])
+  // Another within five seconds is shown and not heard again
+  await ask('k4b', 'Type it again.')
+  expect(lead(own.at(-1))).toEqual([])
+  expect(played).toHaveLength(1)
+
+  // The first ask on a Mac waits for macOS's allow question without its sound, so the mod's chime is heard at once instead
+  app.asks = 5
+  await clock.advance(6_000)
+  await ask('k4c', 'Allow it.')
+  expect(lead(own.at(-1))).toEqual(['--asks', '--chime'])
+  expect(played).toHaveLength(2)
+  app.asks = 0
+
+  // Notifications off in Config: only the chime; both off: nothing
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false }))
+  const before = own.length
+  await clock.advance(6_000)
+  await ask('k5', 'Pick a name.')
+  expect(own).toHaveLength(before)
+  expect(played).toHaveLength(3)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false, sound: false }))
+  await clock.advance(6_000)
+  await ask('k6', 'Pick a colour.')
+  expect(own).toHaveLength(before)
+  expect(played).toHaveLength(3)
+})
+
+// /claudopus and /servers, and the panel opening and closing in every chat
+
 test('/claudopus and /servers say the panel opened, and say plainly where it can be seen when this screen has nowhere to draw it', async ($, on) => {
   world(on)
   await $.session.start(start)
@@ -1481,74 +1639,85 @@ test('/claudopus and /servers on a screen with nowhere to draw a panel say it ca
   expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe("The Servers panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.")
 })
 
-test('work the engine runs is listed even when the mod never saw it start, and work it reports as failed leaves the panel', async ($, on) => {
-  const agents: Record<string, string> = { a7: 'running' }
-  const kinds: Record<string, string> = {}
-  const { clock } = world(on, { agents, kinds })
+test('opened in one chat, the panel opens in every other chat, at once in one that starts and within seconds in one already running', async ($, on) => {
+  const { opened, files, clock } = world(on)
   await $.session.start(start)
-
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect((await pane.find({ type: 'Text', text: /Listed/ }))?.text).toBe('Listed by the engine')
-  // A helper the mod never saw start is no to-do
-  agents.h9 = 'running'
-  kinds.h9 = 'general-purpose'
-  await clock.advance(20_000)
-  expect(await pane.findAll({ type: 'Text', text: /Listed/ })).toHaveLength(1)
-  agents.a7 = 'failed'
-  await clock.advance(20_000)
-  expect((await until(() => pane.find({ type: 'Text', text: /^Nothing/ })))?.text).toBe('Nothing is running')
-  await pane.unmount()
+  expect(opened).toEqual([])
+  // Another chat on this Mac opened it
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_700_000_000_500 }))
+  await clock.advance(2_000)
+  expect(opened).toEqual(['claudopus'])
+  // Followed once: the same choice does not open it again
+  await clock.advance(10_000)
+  expect(opened).toEqual(['claudopus'])
+  // A chat that starts while the choice stands opens it as it loads
+  await $.session.start(start)
+  expect(opened).toEqual(['claudopus', 'claudopus'])
 })
 
-test('work the chat started that was running before the mod loaded, as after a rename, is a card of its own, not a helper', async ($, on) => {
-  const agents: Record<string, string> = { w5: 'running' }
-  const kinds: Record<string, string> = { w5: 'general-purpose' }
-  const talk = [{ role: 'assistant', text: '', toolUses: [{ tool_use_id: 'x1', tool: 'Agent', input: { description: 'Listed by the engine' } }] }]
-  world(on, { agents, kinds, talk })
+test("a chat that starts reads the other chats before its panel opens, so they never drop out of it while it loads", async ($, on) => {
+  const { files, events } = world(on)
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_700_000_000_500 }))
+  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
   await $.session.start(start)
-
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect((await pane.find({ type: 'Text', text: /Listed/ }))?.text).toBe('Listed by the engine')
-  expect((await pane.find({ type: 'Text', text: /^Working on/ }))?.text).toBe('Working on 1 thing')
-  await pane.unmount()
+  const read = events.indexOf(`list ${MEMORY}/live/pushed`)
+  expect(read).toBeGreaterThanOrEqual(0)
+  expect(read).toBeLessThan(events.indexOf('open claudopus'))
 })
 
-test('work that ended before the mod kept it is read back from the chat\'s own records, its thinking never', async ($, on) => {
+test('/claudopus opens the panel for every chat; closed by hand it closes in every chat and work does not bring it back until asked', async ($, on) => {
+  const { opened, files } = world(on)
+  await $.session.start(start)
+  await $.command.run({ command: 'claudopus', args: '' } as never)
+  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true)
+  // The person's own close, as the app raises it, keeps this choice (the test kit cannot raise a close of the person's)
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1_700_000_000_005 }))
+  const closedAt = JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')
+  expect(closedAt.isOpen).toBe(false)
+  opened.length = 0
+  // Work started after it was closed, here or in a chat that loads with work running, leaves it closed
+  await $.prompt.submit({ text: 'The nose on head A is flawed, can you fix it?', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'The nose on head A is flawed, can you fix it?' } as never)
+  await $.session.start(start)
+  expect(opened).toEqual([])
+  // Asked for again, it is open for every chat again, as a choice later than the close
+  await $.command.run({ command: 'claudopus', args: '' } as never)
+  const again = JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')
+  expect(again.isOpen).toBe(true)
+  expect(again.at).toBeGreaterThan(closedAt.at)
+})
+
+test("closed by hand in another chat, the panel closes here; the mod's own close and a screen with nowhere to draw it choose nothing", async ($, on) => {
+  const { closed, files, clock } = world(on, { panes: ['claudopus'] })
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_699_999_999_000 }))
+  await $.session.start(start)
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1_700_000_000_500 }))
+  await clock.advance(2_000)
+  expect(closed).toContain('claudopus')
+  // That close is the mod's own and leaves the choice as it was
+  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')).toEqual({ isOpen: false, at: 1_700_000_000_500 })
+})
+
+test('/claudopus on a screen with nowhere to draw the panel does not open it for the other chats', async ($, on) => {
+  const { files } = world(on, { unplaced: true })
+  await $.session.start(start)
+  await $.command.run({ command: 'claudopus', args: '' } as never)
+  expect(files.has(`${MEMORY}/panel.json`)).toBe(false)
+})
+
+test('someone whose panel was open before chats shared it has it open in every chat once this version loads', async ($, on) => {
+  const { files } = world(on, { panes: ['claudopus'] })
+  await $.session.start(start)
+  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true)
+})
+
+test('a chat whose panel was never open writes no choice as it loads', async ($, on) => {
   const { files } = world(on)
-  const folder = `${HOME}/.claude/projects/-repo/engine-id/subagents`
-  files.set(`${folder}/agent-r1.meta.json`, JSON.stringify({ description: 'Old work', spawnDepth: 1, finished: true }))
-  files.set(`${folder}/agent-h1.meta.json`, JSON.stringify({ description: 'A helper of it', spawnDepth: 2, finished: true }))
-  files.set(`${folder}/agent-h1.jsonl`, JSON.stringify({ timestamp: '2026-11-11T10:00:00Z', type: 'user', message: {} }))
-  const rows = [
-    { timestamp: '2026-11-11T10:00:00Z', type: 'user', message: { content: 'go' } },
-    {
-      timestamp: '2026-11-11T10:05:00Z',
-      type: 'assistant',
-      message: {
-        model: 'claude-opus-5-5',
-        usage: { input_tokens: 10, cache_read_input_tokens: 1000, output_tokens: 5 },
-        content: [
-          { type: 'thinking', thinking: 'a secret thought' },
-          { type: 'tool_use', name: 'mcp__progress__todo', input: { item: 'Step one', state: 'done' } },
-          { type: 'tool_use', name: 'mcp__other__note', input: { text: 'not ours' } },
-          { type: 'tool_use', name: 'mcp__progress__note', input: { text: 'The old line' } },
-        ],
-      },
-    },
-    'not json',
-  ]
-  files.set(`${folder}/agent-r1.jsonl`, rows.map(row => (typeof row === 'string' ? row : JSON.stringify(row))).join('\n'))
   await $.session.start(start)
-
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label))))
-  expect(fold?.props.label).toBe('▸ Finished 1')
-  await pane.press({ key: String(fold?.key) })
-  expect((await pane.find({ type: 'Text', text: /The old line/ }))?.text).toBe('The old line')
-  expect((await pane.find({ type: 'Text', text: /^Finished ·/ }))?.text).toBe('Finished · Opus 5.5 · context 1.0k · 5m 00s')
-  expect(await pane.find({ type: 'Text', text: /secret|not ours|helper/ })).toBeUndefined()
-  await pane.unmount()
+  expect(files.has(`${MEMORY}/panel.json`)).toBe(false)
 })
+
+// The servers panel
 
 test('the servers panel opens when asked, lists the servers running from my folders with a link, names the chat that started each, and stops one', async ($, on) => {
   const { files, killed, opened, closed, clock } = world(on, { panes: ['servers'] })
@@ -1581,6 +1750,8 @@ test('the servers panel opens when asked, lists the servers running from my fold
   expect((await pane.find({ type: 'Text' }))?.text).toBe('Nothing is listening from your folders.')
   await pane.unmount()
 })
+
+// Results: kept, listed, opened, answered, put away and brought back, and rounds of one work
 
 test('finished work leaves a report for good: its pictures copied, listed under Reports, opened, answered, and named to the chat', async ($, on) => {
   const { files, submitted, clock, copied, opened } = world(on)
@@ -1774,114 +1945,6 @@ test('an older report waits by its one question, a report that only ends with a 
   expect(told).not.toContain('Shall I go on?')
 })
 
-test("the pictures a work made are in its chat where it made them: drawn small where the panel can, large in place on a press and never in another app, a gone one named", async ($, on) => {
-  const svg = '/tmp/work/chart.svg'
-  const talk = [
-    { role: 'user', text: 'Draw the chart.', toolUses: [] },
-    {
-      role: 'assistant',
-      text: 'Drawing it.',
-      toolUses: [
-        { tool_use_id: 'u1', tool: 'Write', input: { file_path: svg, content: '<svg/>' } },
-        { tool_use_id: 'u2', tool: 'Bash', input: { command: 'sips -g pixelWidth /tmp/old/before.png', description: 'Measure the old one' }, text: 'pixelWidth: 10' },
-        { tool_use_id: 'u4', tool: 'Read', input: { file_path: '/tmp/old/before.png' } },
-      ],
-    },
-    { role: 'assistant', text: 'Here it is.', toolUses: [{ tool_use_id: 'u3', tool: 'SendUserFile', input: { files: ['/tmp/work/gone.png'], status: 'normal' } }] },
-  ]
-  const { files, logged } = world(on, { talk })
-  files.set(svg, '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
-  files.set('/tmp/old/before.png', 'old')
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'draw the chart', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, prompt: 'Draw the chart.' } as never)
-  for (const surface of ['terminal', 'desktop'] as const) {
-    const pane = await $.ui.mount({ ...LIST, surface } as never)
-    await pressed(pane, 'open-a1')
-    const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface } as never)
-    const labels = (await tab.findAll({ type: 'Button' })).map(one => String(one.props.label))
-    // The picture it wrote, under the run of steps that made it, whether that run is open or not
-    expect(labels.filter(label => label.includes('Picture:'))).toEqual(['▸ Picture: chart.svg'])
-    const svgs = (await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))
-    expect(svgs.map(one => String(one.props.source).slice(0, 4))).toEqual(surface === 'terminal' ? [] : ['<svg'])
-    // One it sent that is gone is named, with nothing to press; one a command or a read only looked at, made before the work, is no picture of it
-    expect((await tab.find({ type: 'Text', text: /^Picture: gone\.png/ }))?.text).toBe('Picture: gone.png · no longer kept')
-    expect(labels.some(label => label.includes('before.png'))).toBe(false)
-    // Pressed, it is drawn large where it is, with where the file is; pressed again, small
-    await pressed(tab, 'pic-open-1-0')
-    expect((await keyed(tab, 'pic-open-1-0'))?.props.label).toBe('▾ Picture: chart.svg')
-    expect((await tab.find({ type: 'Text', text: svg }))?.text).toBe(svg)
-    expect((await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt) === 'Picture: chart.svg').map(one => String(one.props.source).slice(0, 4))).toEqual(surface === 'terminal' ? [] : ['<svg'])
-    await pressed(tab, 'pic-open-1-0')
-    expect((await keyed(tab, 'pic-open-1-0'))?.props.label).toBe('▸ Picture: chart.svg')
-    expect(await tab.find({ type: 'Text', text: svg })).toBeUndefined()
-    await tab.unmount()
-    await pane.unmount()
-  }
-  expect(logged).toEqual([])
-})
-
-test('every conversation carries the principles the mod ships, word for word and once, even where the same text was loaded from elsewhere', async ($, on) => {
-  world(on)
-  // The engine beneath answers what it was handed
-  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
-  await $.session.start(start)
-  const home ={ path: `${HOME}/.claude/CLAUDE.md`, kind: 'user', content: PRINCIPLES } as const
-  const repo = { path: '/repo/CLAUDE.md', kind: 'project', content: 'REPO RULES' } as const
-  const managed = { path: '/etc/claude/CLAUDE.md', kind: 'managed', content: 'ORG RULES' } as const
-  const told = await $.prompt.context({ blocks: [{ name: 'claudeMd', text: 'files' }], instructionFiles: [managed, home, repo] })
-  expect(told.instructionFiles?.map(one => [one.kind, one.path.endsWith('/rules/CLAUDE.md') ? 'mod' : one.path])).toEqual([['managed', managed.path], ['user', 'mod'], ['project', repo.path]])
-  expect(told.instructionFiles?.find(one => one.kind === 'user')?.content).toBe(PRINCIPLES)
-  // A machine with no instruction file of its own gets them from the mod alone
-  const fresh = await $.prompt.context({ blocks: [], instructionFiles: [] })
-  expect(fresh.instructionFiles?.map(one => [one.kind, one.content])).toEqual([['user', PRINCIPLES]])
-})
-
-test('a memory path in a reply opens in a tab of the mod on the desktop, never the app file pane; the terminal keeps its own', async ($, on) => {
-  const { files, tabs } = world(on)
-  files.set(`${MEMORY}/words/chat-1.md`, `# Launch video\n\nSee also ${MEMORY}/streams/launch.md.\n`)
-  files.set(`${MEMORY}/streams/launch.md`, '# Launch\n\nThe brief.\n')
-  await $.session.start(start)
-  const MSG = { plugin: 'claudopus', component: 'AssistantMessage', requestId: 'm1' } as const
-  const said = `Its account is in \`${MEMORY}/words/chat-1.md\`, and [the brief](${MEMORY}/streams/launch.md); the repo is /repo/x.md. **${MEMORY}/index.md** at ${MEMORY}/log.md:12, run \`cat ${MEMORY}/log.md\`.\n\n\`\`\`\ncat ${MEMORY}/log.md\n\`\`\``
-
-  // The terminal draws the reply as the engine does
-  const plain = await $.ui.mount({ ...MSG, props: { text: said, isFirstOfReply: true }, surface: 'terminal' } as never)
-  expect(await plain.find({ type: 'Text', text: "the engine's own" })).toBeDefined()
-
-  const reply = await $.ui.mount({ ...MSG, props: { text: said, isFirstOfReply: true }, surface: 'desktop' } as never)
-  const drawn = await reply.find({ type: 'Markdown' })
-  const words = `file://${MEMORY}/words/chat-1.md`
-  expect(drawn?.props.text).toContain(`[\`${MEMORY}/words/chat-1.md\`](${words})`)
-  expect(drawn?.props.text).toContain(`[the brief](file://${MEMORY}/streams/launch.md)`)
-  // Other paths and a fenced block stay as written
-  expect(drawn?.props.text).toContain('the repo is /repo/x.md.')
-  expect(drawn?.props.text).toContain(`cat ${MEMORY}/log.md\n`)
-  // Bold keeps its marks, a line number is not the file's, and code holding more than a path stays code
-  expect(drawn?.props.text).toContain(`**[${MEMORY}/index.md](file://${MEMORY}/index.md)**`)
-  expect(drawn?.props.text).toContain(`[${MEMORY}/log.md:12](file://${MEMORY}/log.md),`)
-  expect(drawn?.props.text).toContain(`run \`cat ${MEMORY}/log.md\`.`)
-  expect(drawn?.props.pressableLinks).toEqual([words, `file://${MEMORY}/streams/launch.md`, `file://${MEMORY}/index.md`, `file://${MEMORY}/log.md`])
-  // A reply whose only memory path is in code is the engine's
-  const coded = await $.ui.mount({ ...MSG, requestId: 'm3', props: { text: `\`\`\`\ncat ${MEMORY}/log.md\n\`\`\``, isFirstOfReply: true }, surface: 'desktop' } as never)
-  expect(await coded.find({ type: 'Text', text: "the engine's own" })).toBeDefined()
-
-  // A reply with no memory path is the engine's
-  const other = await $.ui.mount({ ...MSG, requestId: 'm2', props: { text: 'See /repo/x.md', isFirstOfReply: true }, surface: 'desktop' } as never)
-  expect(await other.find({ type: 'Text', text: "the engine's own" })).toBeDefined()
-
-  // Pressed, the file opens in a tab of its own named after its heading, and a memory link in it opens there too
-  await reply.press({ key: String(drawn?.key), link: { href: words } })
-  const opened = await until(async () => tabs.find(tab => tab.startsWith('memory-words-chat-1-md-')))
-  expect(opened).toMatch(/^memory-words-chat-1-md-\d+: Launch video$/)
-  const tab = await $.ui.mount({ ...LIST, requestId: (opened ?? '').split(':')[0], surface: 'desktop' } as never)
-  const text = await tab.find({ type: 'Markdown' })
-  expect(text?.props.text).toContain('# Launch video')
-  expect(text?.props.text).toContain(`[${MEMORY}/streams/launch.md](file://${MEMORY}/streams/launch.md).`)
-  await tab.press({ key: String(text?.key), link: { href: `file://${MEMORY}/streams/launch.md` } })
-  expect(await until(async () => tabs.find(one => /^memory-streams-launch-md-\d+: Launch$/.test(one)))).toBeDefined()
-})
-
 test('a result archived with one press leaves the list, its tab, the count and the note, waits on nothing, keeps its text, and comes back from the folded Archived row', async ($, on) => {
   const { files, closed } = world(on, { panes: ['claudopus', 'reports', 'report-b'] })
   const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [] }
@@ -1954,6 +2017,194 @@ test('a result archived with one press leaves the list, its tab, the count and t
   await pressed(list, 'unarchive-d')
   expect(await until(async () => keyed(list, 'report-d'))).toBeDefined()
 })
+
+test('the results list is one line a row: what waits first, the five newest, the rest folded, rounds of one work as one row, archived and told as one', async ($, on) => {
+  const { files } = world(on, { panes: ['claudopus', 'reports'] })
+  const base = { chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'A long line that no row shows.' }
+  const at = (n: number) => 1_700_000_000_000 - n * 60_000
+  const reps = [
+    // A video in three rounds by three pieces of work, each started from the one before: the newest waits, the older waits are its to ask again
+    { ...base, id: 'v1', title: 'Explainer video', subject: 'Claude workflow', at: at(60), agent: 'w1', waiting: [{ text: 'Keep the first cut?' }] },
+    { ...base, id: 'v2', title: 'Video second cut', subject: 'Claude workflow', at: at(40), agent: 'w2', from: 'v1', waiting: [{ text: 'Keep the second cut?' }] },
+    { ...base, id: 'v3', title: 'Video third cut', subject: 'Claude workflow', at: at(20), agent: 'w3', from: 'v2', waiting: [{ text: 'Keep the third cut?' }] },
+    // Two looks on one subject whose titles lead with it
+    { ...base, id: 'i1', title: 'Old-chat index: first', subject: 'Old-chat index', at: at(300), agent: 'w4' },
+    { ...base, id: 'i2', title: 'Old-chat index: second', subject: 'Old-chat index', at: at(290), agent: 'w5' },
+    // Eight more on one broad subject, none joined
+    ...Array.from({ length: 8 }, (_, n) => ({ ...base, id: `p${n}`, title: `Panel change ${n}`, subject: 'Claude workflow', at: at(100 + n), agent: `x${n}` })),
+  ]
+  for (const r of reps) {
+    files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify(r))
+    files.set(`${MEMORY}/reports/${r.id}/report.md`, `${r.gist}\n`)
+  }
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Results', bodyColumns: 80 }, surface: 'desktop' } as never)
+  const titles = async () => (await list.findAll({ type: 'Button' })).filter(one => /^report-/.test(one.key ?? '')).map(one => String(one.props.label))
+  // 13 reports are 10 rows: the video one, the index one, eight panel changes
+  expect(await list.find({ type: 'Text', text: /^10$/ })).toBeDefined()
+  expect((await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)).toEqual(['Results', 'Waiting on you', 'Recent'])
+  expect(await titles()).toEqual(['Video third cut', 'Panel change 0', 'Panel change 1', 'Panel change 2', 'Panel change 3', 'Panel change 4'])
+  // Nothing under a title: no finding, no subject, no line saying it waits, no mark; the time, Archive
+  expect(await list.find({ type: 'Text', text: /long line|waiting on you|Claude workflow/ })).toBeUndefined()
+  expect((await list.findAll({ type: 'Text', text: /^●$/ })).length).toBe(0)
+  const rowBoxes = (await list.drawn()) as unknown as { props?: { key?: string; height?: number }; children?: unknown[] }
+  const heights: number[] = []
+  const walk = (n: unknown) => {
+    const one = n as { props?: { key?: string; height?: number }; children?: unknown[] }
+    if (one?.props?.key?.startsWith('entry-')) heights.push(one.props.height ?? 0)
+    for (const child of one?.children ?? []) walk(child)
+  }
+  walk(rowBoxes)
+  expect(heights).toEqual([1, 1, 1, 1, 1, 1])
+  // The rest is one row that unfolds
+  expect((await keyed(list, 'earlier-fold'))?.props.label).toBe('▸ Earlier 4')
+  await pressed(list, 'earlier-fold')
+  expect((await titles()).slice(6)).toEqual(['Panel change 5', 'Panel change 6', 'Panel change 7', 'Old-chat index: second'])
+
+  // The chat is told what waits now: the newest round's item, not the older rounds' asked again
+  const told = (await $.prompt.submit({ text: 'what waits', wait: false, origin: composer })).context?.join('\n') ?? ''
+  expect(told).toContain('Keep the third cut?')
+  expect(told).not.toContain('Keep the first cut?')
+  expect(told).not.toContain('Keep the second cut?')
+
+  // Opened, its earlier rounds are listed inside it
+  const tab = await $.ui.mount({ ...LIST, requestId: 'report-v3', surface: 'desktop' } as never)
+  const kin = (await tab.findAll({ type: 'Button' })).map(one => String(one.props.label))
+  expect(kin.some(label => label.includes('Video second cut · this started from it'))).toBe(true)
+  expect(kin.some(label => label.includes('Explainer video · earlier round'))).toBe(true)
+
+  // Archived from its row, every round goes
+  await pressed(list, 'archive-v3')
+  await until(async () => (JSON.parse(files.get(`${MEMORY}/reports/v1/meta.json`) ?? '{}').archived ? true : undefined))
+  expect(['v1', 'v2', 'v3'].map(id => Boolean(JSON.parse(files.get(`${MEMORY}/reports/${id}/meta.json`) ?? '{}').archived))).toEqual([true, true, true])
+  expect(await until(async () => keyed(list, 'archived-fold'))).toBeDefined()
+  expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▸ Archived 1')
+})
+
+test('work whose brief names one result on what it is about is a round of that work; one naming several, or one on something else, is not', async ($, on) => {
+  const { files, clock } = world(on)
+  const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'Done.', agent: 'w0' }
+  for (const r of [{ ...base, id: '20261111-1853-explainer-video', title: 'Claudopus explainer video', at: 1 }, { ...base, id: '20261111-1700-logo', title: 'Draw the logo', at: 2 }]) (files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify(r)), files.set(`${MEMORY}/reports/${r.id}/report.md`, "Done.\n"))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'make the video clearer', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Video second cut', prompt: `Start from ${MEMORY}/reports/20261111-1853-explainer-video/report.md` } as never)
+  await $.agent.spawn({ ...spawn, description: 'Fix the panel', prompt: `Start from ${MEMORY}/reports/20261111-1853-explainer-video/report.md` } as never)
+  await $.agent.spawn({ ...spawn, description: 'Video and logo', prompt: `Read ${MEMORY}/reports/20261111-1853-explainer-video/report.md and ${MEMORY}/reports/20261111-1700-logo/report.md` } as never)
+  for (const id of ['a1', 'a2', 'a3']) await $.turn.complete({ agentId: id, answer: `Finished ${id}.\n\n${'It is in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: `t-${id}`, reason: 'answer' })
+  await clock.advance(10)
+  const metas = await until(async () => {
+    const all = [...files.entries()].filter(([path]) => path.endsWith('/meta.json')).map(([, text]) => JSON.parse(text) as { agent: string; from?: string })
+    return all.length === 5 ? all : undefined
+  })
+  expect(['a1', 'a2', 'a3'].map(id => metas?.find(one => one.agent === id)?.from ?? '')).toEqual(['20261111-1853-explainer-video', '', ''])
+})
+
+// Pictures a piece of work made, in its chat
+
+test("the pictures a work made are in its chat where it made them: drawn small where the panel can, large in place on a press and never in another app, a gone one named", async ($, on) => {
+  const svg = '/tmp/work/chart.svg'
+  const talk = [
+    { role: 'user', text: 'Draw the chart.', toolUses: [] },
+    {
+      role: 'assistant',
+      text: 'Drawing it.',
+      toolUses: [
+        { tool_use_id: 'u1', tool: 'Write', input: { file_path: svg, content: '<svg/>' } },
+        { tool_use_id: 'u2', tool: 'Bash', input: { command: 'sips -g pixelWidth /tmp/old/before.png', description: 'Measure the old one' }, text: 'pixelWidth: 10' },
+        { tool_use_id: 'u4', tool: 'Read', input: { file_path: '/tmp/old/before.png' } },
+      ],
+    },
+    { role: 'assistant', text: 'Here it is.', toolUses: [{ tool_use_id: 'u3', tool: 'SendUserFile', input: { files: ['/tmp/work/gone.png'], status: 'normal' } }] },
+  ]
+  const { files, logged } = world(on, { talk })
+  files.set(svg, '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
+  files.set('/tmp/old/before.png', 'old')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'draw the chart', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Draw the chart.' } as never)
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const pane = await $.ui.mount({ ...LIST, surface } as never)
+    await pressed(pane, 'open-a1')
+    const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface } as never)
+    const labels = (await tab.findAll({ type: 'Button' })).map(one => String(one.props.label))
+    // The picture it wrote, under the run of steps that made it, whether that run is open or not
+    expect(labels.filter(label => label.includes('Picture:'))).toEqual(['▸ Picture: chart.svg'])
+    const svgs = (await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))
+    expect(svgs.map(one => String(one.props.source).slice(0, 4))).toEqual(surface === 'terminal' ? [] : ['<svg'])
+    // One it sent that is gone is named, with nothing to press; one a command or a read only looked at, made before the work, is no picture of it
+    expect((await tab.find({ type: 'Text', text: /^Picture: gone\.png/ }))?.text).toBe('Picture: gone.png · no longer kept')
+    expect(labels.some(label => label.includes('before.png'))).toBe(false)
+    // Pressed, it is drawn large where it is, with where the file is; pressed again, small
+    await pressed(tab, 'pic-open-1-0')
+    expect((await keyed(tab, 'pic-open-1-0'))?.props.label).toBe('▾ Picture: chart.svg')
+    expect((await tab.find({ type: 'Text', text: svg }))?.text).toBe(svg)
+    expect((await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt) === 'Picture: chart.svg').map(one => String(one.props.source).slice(0, 4))).toEqual(surface === 'terminal' ? [] : ['<svg'])
+    await pressed(tab, 'pic-open-1-0')
+    expect((await keyed(tab, 'pic-open-1-0'))?.props.label).toBe('▸ Picture: chart.svg')
+    expect(await tab.find({ type: 'Text', text: svg })).toBeUndefined()
+    await tab.unmount()
+    await pane.unmount()
+  }
+  expect(logged).toEqual([])
+})
+
+// Memory files in the mod's tabs, and the Memory button
+
+test('a memory path in a reply opens in a tab of the mod on the desktop, never the app file pane; the terminal keeps its own', async ($, on) => {
+  const { files, tabs } = world(on)
+  files.set(`${MEMORY}/words/chat-1.md`, `# Launch video\n\nSee also ${MEMORY}/streams/launch.md.\n`)
+  files.set(`${MEMORY}/streams/launch.md`, '# Launch\n\nThe brief.\n')
+  await $.session.start(start)
+  const MSG = { plugin: 'claudopus', component: 'AssistantMessage', requestId: 'm1' } as const
+  const said = `Its account is in \`${MEMORY}/words/chat-1.md\`, and [the brief](${MEMORY}/streams/launch.md); the repo is /repo/x.md. **${MEMORY}/index.md** at ${MEMORY}/log.md:12, run \`cat ${MEMORY}/log.md\`.\n\n\`\`\`\ncat ${MEMORY}/log.md\n\`\`\``
+
+  // The terminal draws the reply as the engine does
+  const plain = await $.ui.mount({ ...MSG, props: { text: said, isFirstOfReply: true }, surface: 'terminal' } as never)
+  expect(await plain.find({ type: 'Text', text: "the engine's own" })).toBeDefined()
+
+  const reply = await $.ui.mount({ ...MSG, props: { text: said, isFirstOfReply: true }, surface: 'desktop' } as never)
+  const drawn = await reply.find({ type: 'Markdown' })
+  const words = `file://${MEMORY}/words/chat-1.md`
+  expect(drawn?.props.text).toContain(`[\`${MEMORY}/words/chat-1.md\`](${words})`)
+  expect(drawn?.props.text).toContain(`[the brief](file://${MEMORY}/streams/launch.md)`)
+  // Other paths and a fenced block stay as written
+  expect(drawn?.props.text).toContain('the repo is /repo/x.md.')
+  expect(drawn?.props.text).toContain(`cat ${MEMORY}/log.md\n`)
+  // Bold keeps its marks, a line number is not the file's, and code holding more than a path stays code
+  expect(drawn?.props.text).toContain(`**[${MEMORY}/index.md](file://${MEMORY}/index.md)**`)
+  expect(drawn?.props.text).toContain(`[${MEMORY}/log.md:12](file://${MEMORY}/log.md),`)
+  expect(drawn?.props.text).toContain(`run \`cat ${MEMORY}/log.md\`.`)
+  expect(drawn?.props.pressableLinks).toEqual([words, `file://${MEMORY}/streams/launch.md`, `file://${MEMORY}/index.md`, `file://${MEMORY}/log.md`])
+  // A reply whose only memory path is in code is the engine's
+  const coded = await $.ui.mount({ ...MSG, requestId: 'm3', props: { text: `\`\`\`\ncat ${MEMORY}/log.md\n\`\`\``, isFirstOfReply: true }, surface: 'desktop' } as never)
+  expect(await coded.find({ type: 'Text', text: "the engine's own" })).toBeDefined()
+
+  // A reply with no memory path is the engine's
+  const other = await $.ui.mount({ ...MSG, requestId: 'm2', props: { text: 'See /repo/x.md', isFirstOfReply: true }, surface: 'desktop' } as never)
+  expect(await other.find({ type: 'Text', text: "the engine's own" })).toBeDefined()
+
+  // Pressed, the file opens in a tab of its own named after its heading, and a memory link in it opens there too
+  await reply.press({ key: String(drawn?.key), link: { href: words } })
+  const opened = await until(async () => tabs.find(tab => tab.startsWith('memory-words-chat-1-md-')))
+  expect(opened).toMatch(/^memory-words-chat-1-md-\d+: Launch video$/)
+  const tab = await $.ui.mount({ ...LIST, requestId: (opened ?? '').split(':')[0], surface: 'desktop' } as never)
+  const text = await tab.find({ type: 'Markdown' })
+  expect(text?.props.text).toContain('# Launch video')
+  expect(text?.props.text).toContain(`[${MEMORY}/streams/launch.md](file://${MEMORY}/streams/launch.md).`)
+  await tab.press({ key: String(text?.key), link: { href: `file://${MEMORY}/streams/launch.md` } })
+  expect(await until(async () => tabs.find(one => /^memory-streams-launch-md-\d+: Launch$/.test(one)))).toBeDefined()
+})
+
+test('Memory, beside Stats, opens the memory folder in Finder', async ($, on) => {
+  const { shown } = world(on)
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect((await keyed(pane, 'memory-open'))?.props.label).toBe('Memory')
+  await pressed(pane, 'memory-open')
+  expect(await until(async () => shown.find(argv => argv[1] === MEMORY))).toEqual(['open', MEMORY])
+})
+
+// Workflows: the blue card
 
 // A workflow as its script's meta names it: two stages, the maker's and the checker's
 const ROUNDS = `export const meta = {
@@ -2086,86 +2337,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   await pane.unmount()
 })
 
-test('the results list is one line a row: what waits first, the five newest, the rest folded, rounds of one work as one row, archived and told as one', async ($, on) => {
-  const { files } = world(on, { panes: ['claudopus', 'reports'] })
-  const base = { chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'A long line that no row shows.' }
-  const at = (n: number) => 1_700_000_000_000 - n * 60_000
-  const reps = [
-    // A video in three rounds by three pieces of work, each started from the one before: the newest waits, the older waits are its to ask again
-    { ...base, id: 'v1', title: 'Explainer video', subject: 'Claude workflow', at: at(60), agent: 'w1', waiting: [{ text: 'Keep the first cut?' }] },
-    { ...base, id: 'v2', title: 'Video second cut', subject: 'Claude workflow', at: at(40), agent: 'w2', from: 'v1', waiting: [{ text: 'Keep the second cut?' }] },
-    { ...base, id: 'v3', title: 'Video third cut', subject: 'Claude workflow', at: at(20), agent: 'w3', from: 'v2', waiting: [{ text: 'Keep the third cut?' }] },
-    // Two looks on one subject whose titles lead with it
-    { ...base, id: 'i1', title: 'Old-chat index: first', subject: 'Old-chat index', at: at(300), agent: 'w4' },
-    { ...base, id: 'i2', title: 'Old-chat index: second', subject: 'Old-chat index', at: at(290), agent: 'w5' },
-    // Eight more on one broad subject, none joined
-    ...Array.from({ length: 8 }, (_, n) => ({ ...base, id: `p${n}`, title: `Panel change ${n}`, subject: 'Claude workflow', at: at(100 + n), agent: `x${n}` })),
-  ]
-  for (const r of reps) {
-    files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify(r))
-    files.set(`${MEMORY}/reports/${r.id}/report.md`, `${r.gist}\n`)
-  }
-  await $.session.start(start)
-  const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Results', bodyColumns: 80 }, surface: 'desktop' } as never)
-  const titles = async () => (await list.findAll({ type: 'Button' })).filter(one => /^report-/.test(one.key ?? '')).map(one => String(one.props.label))
-  // 13 reports are 10 rows: the video one, the index one, eight panel changes
-  expect(await list.find({ type: 'Text', text: /^10$/ })).toBeDefined()
-  expect((await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)).toEqual(['Results', 'Waiting on you', 'Recent'])
-  expect(await titles()).toEqual(['Video third cut', 'Panel change 0', 'Panel change 1', 'Panel change 2', 'Panel change 3', 'Panel change 4'])
-  // Nothing under a title: no finding, no subject, no line saying it waits, no mark; the time, Archive
-  expect(await list.find({ type: 'Text', text: /long line|waiting on you|Claude workflow/ })).toBeUndefined()
-  expect((await list.findAll({ type: 'Text', text: /^●$/ })).length).toBe(0)
-  const rowBoxes = (await list.drawn()) as unknown as { props?: { key?: string; height?: number }; children?: unknown[] }
-  const heights: number[] = []
-  const walk = (n: unknown) => {
-    const one = n as { props?: { key?: string; height?: number }; children?: unknown[] }
-    if (one?.props?.key?.startsWith('entry-')) heights.push(one.props.height ?? 0)
-    for (const child of one?.children ?? []) walk(child)
-  }
-  walk(rowBoxes)
-  expect(heights).toEqual([1, 1, 1, 1, 1, 1])
-  // The rest is one row that unfolds
-  expect((await keyed(list, 'earlier-fold'))?.props.label).toBe('▸ Earlier 4')
-  await pressed(list, 'earlier-fold')
-  expect((await titles()).slice(6)).toEqual(['Panel change 5', 'Panel change 6', 'Panel change 7', 'Old-chat index: second'])
-
-  // The chat is told what waits now: the newest round's item, not the older rounds' asked again
-  const told = (await $.prompt.submit({ text: 'what waits', wait: false, origin: composer })).context?.join('\n') ?? ''
-  expect(told).toContain('Keep the third cut?')
-  expect(told).not.toContain('Keep the first cut?')
-  expect(told).not.toContain('Keep the second cut?')
-
-  // Opened, its earlier rounds are listed inside it
-  const tab = await $.ui.mount({ ...LIST, requestId: 'report-v3', surface: 'desktop' } as never)
-  const kin = (await tab.findAll({ type: 'Button' })).map(one => String(one.props.label))
-  expect(kin.some(label => label.includes('Video second cut · this started from it'))).toBe(true)
-  expect(kin.some(label => label.includes('Explainer video · earlier round'))).toBe(true)
-
-  // Archived from its row, every round goes
-  await pressed(list, 'archive-v3')
-  await until(async () => (JSON.parse(files.get(`${MEMORY}/reports/v1/meta.json`) ?? '{}').archived ? true : undefined))
-  expect(['v1', 'v2', 'v3'].map(id => Boolean(JSON.parse(files.get(`${MEMORY}/reports/${id}/meta.json`) ?? '{}').archived))).toEqual([true, true, true])
-  expect(await until(async () => keyed(list, 'archived-fold'))).toBeDefined()
-  expect((await keyed(list, 'archived-fold'))?.props.label).toBe('▸ Archived 1')
-})
-
-test('work whose brief names one result on what it is about is a round of that work; one naming several, or one on something else, is not', async ($, on) => {
-  const { files, clock } = world(on)
-  const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'Done.', agent: 'w0' }
-  for (const r of [{ ...base, id: '20261111-1853-explainer-video', title: 'Claudopus explainer video', at: 1 }, { ...base, id: '20261111-1700-logo', title: 'Draw the logo', at: 2 }]) (files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify(r)), files.set(`${MEMORY}/reports/${r.id}/report.md`, "Done.\n"))
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'make the video clearer', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Video second cut', prompt: `Start from ${MEMORY}/reports/20261111-1853-explainer-video/report.md` } as never)
-  await $.agent.spawn({ ...spawn, description: 'Fix the panel', prompt: `Start from ${MEMORY}/reports/20261111-1853-explainer-video/report.md` } as never)
-  await $.agent.spawn({ ...spawn, description: 'Video and logo', prompt: `Read ${MEMORY}/reports/20261111-1853-explainer-video/report.md and ${MEMORY}/reports/20261111-1700-logo/report.md` } as never)
-  for (const id of ['a1', 'a2', 'a3']) await $.turn.complete({ agentId: id, answer: `Finished ${id}.\n\n${'It is in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: `t-${id}`, reason: 'answer' })
-  await clock.advance(10)
-  const metas = await until(async () => {
-    const all = [...files.entries()].filter(([path]) => path.endsWith('/meta.json')).map(([, text]) => JSON.parse(text) as { agent: string; from?: string })
-    return all.length === 5 ? all : undefined
-  })
-  expect(['a1', 'a2', 'a3'].map(id => metas?.find(one => one.agent === id)?.from ?? '')).toEqual(['20261111-1853-explainer-video', '', ''])
-})
+// The Stats and About tabs, and the bar of buttons
 
 test('Stats opens in front from its button beside Results, and adds up this chat\'s work from its records: tokens, work, time saved, cost', async ($, on) => {
   const { files, opened, tabs } = world(on)
@@ -2213,15 +2385,6 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').folder).toBe(chat)
 })
 
-test('Memory, beside Stats, opens the memory folder in Finder', async ($, on) => {
-  const { shown } = world(on)
-  await $.session.start(start)
-  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  expect((await keyed(pane, 'memory-open'))?.props.label).toBe('Memory')
-  await pressed(pane, 'memory-open')
-  expect(await until(async () => shown.find(argv => argv[1] === MEMORY))).toEqual(['open', MEMORY])
-})
-
 test('the bar keeps its buttons whole on a row of their own under the header, wrapping in a narrow pane', async ($, on) => {
   world(on)
   await $.session.start(start)
@@ -2248,6 +2411,8 @@ test('About says what Claudopus is, its version and the app\'s, and links the si
   expect(links).toEqual(['https://claudopus.ai', 'https://github.com/dimka3553/claudopus', 'https://github.com/dimka3553/claudopus/blob/main/LICENSE'])
   expect(await about.find({ type: 'Text', text: /a star on GitHub/ })).toBeDefined()
 })
+
+// Config: the person's own texts, settings, and models
 
 test('a copy of the principles in the memory folder is the person\'s own: every conversation carries it in place of the shipped ones', async ($, on) => {
   const { files } = world(on)
@@ -2317,65 +2482,7 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })
 
-test('work that needs the person is heard once: its notification comes as the amber Claudopus Asks carrying the sound, silent when sound is off', async ($, on) => {
-  const app = { noSurface: true, claudopus: 0, asks: 0 }
-  const { played, own, osa, files, clock } = world(on, { app, env: { CLAUDE_CODE_HOST_SESSION_ID: 'local_ab12-cd34' } })
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'make the repo private', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
-  const ask = (id: string, text: string) => $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: id, agentId: 'a1', text } as never)
-  const lead = (argv?: string[]) => argv?.slice(1, argv.indexOf('--title'))
-
-  // The sound goes in the notification, so macOS plays it as the person set Claudopus Asks and as a Focus allows; no second sound
-  await ask('k1', 'Paste the code.')
-  expect(own).toHaveLength(1)
-  expect(lead(own[0])).toEqual(['--asks', '--chime'])
-  expect(own[0]?.slice(3)).toEqual(['--title', 'Hide the repo needs you', '--text', 'Paste the code.', '--open', 'claude://code/continue?session=local_ab12-cd34', '--key', 'ask-a1'])
-  expect(played).toEqual([])
-  // The same ask said again is neither shown nor heard again
-  await ask('k2', 'Paste the code.')
-  expect(own).toHaveLength(1)
-
-  // Sound off in Config: the amber notification, silent, and no chime of the mod's
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ sound: false }))
-  await ask('k3', 'Press Approve.')
-  expect(lead(own.at(-1))).toEqual(['--asks'])
-  expect(played).toEqual([])
-
-  // Claudopus Asks turned off in System Settings: the purple Claudopus, which carries no sound, and the mod's own chime
-  files.set(`${MEMORY}/config.json`, '{}')
-  app.asks = 2
-  await ask('k4', 'Type your password.')
-  expect(lead(own.at(-2))).toEqual(['--asks', '--chime'])
-  expect(lead(own.at(-1))).toEqual([])
-  expect(played).toEqual(['sounds/ready.wav'])
-  expect(osa).toEqual([])
-  // Another within five seconds is shown and not heard again
-  await ask('k4b', 'Type it again.')
-  expect(lead(own.at(-1))).toEqual([])
-  expect(played).toHaveLength(1)
-
-  // The first ask on a Mac waits for macOS's allow question without its sound, so the mod's chime is heard at once instead
-  app.asks = 5
-  await clock.advance(6_000)
-  await ask('k4c', 'Allow it.')
-  expect(lead(own.at(-1))).toEqual(['--asks', '--chime'])
-  expect(played).toHaveLength(2)
-  app.asks = 0
-
-  // Notifications off in Config: only the chime; both off: nothing
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false }))
-  const before = own.length
-  await clock.advance(6_000)
-  await ask('k5', 'Pick a name.')
-  expect(own).toHaveLength(before)
-  expect(played).toHaveLength(3)
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false, sound: false }))
-  await clock.advance(6_000)
-  await ask('k6', 'Pick a colour.')
-  expect(own).toHaveLength(before)
-  expect(played).toHaveLength(3)
-})
+// The asking card: an ask, its Copy, buttons and reply box
 
 test('work that needs the person\'s hands asks: its card stands out first with the ask, the text to paste with its Copy, and answers that go back to it', async ($, on) => {
   // Once its run has ended, a work's chat takes no more lines
@@ -2513,6 +2620,8 @@ test("while the person types into a card's reply box the list's running times st
   await list.unmount()
 })
 
+// The welcome for a new person
+
 test('a new person gets a welcome once: it opens the panel, names /claudopus, and its button starts indexing their old chats', async ($, on) => {
   const { opened, files, submitted } = world(on, { isNew: true })
   await $.session.start(start)
@@ -2564,6 +2673,8 @@ test('someone already set up never sees the welcome, and the panel does not open
   expect(await pane.find({ type: 'Text', text: 'Welcome to Claudopus' })).toBeUndefined()
   await pane.unmount()
 })
+
+// Every chat's work in every panel: other chats listed, answered from here, the header agreeing, ended work shared, names opening chats
 
 // ---- Every chat's work in every panel ----
 
@@ -2723,72 +2834,6 @@ test("with another Mac named in config.json, its chats' work shows here under it
   await list.unmount()
 })
 
-test('opened in one chat, the panel opens in every other chat, at once in one that starts and within seconds in one already running', async ($, on) => {
-  const { opened, files, clock } = world(on)
-  await $.session.start(start)
-  expect(opened).toEqual([])
-  // Another chat on this Mac opened it
-  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_700_000_000_500 }))
-  await clock.advance(2_000)
-  expect(opened).toEqual(['claudopus'])
-  // Followed once: the same choice does not open it again
-  await clock.advance(10_000)
-  expect(opened).toEqual(['claudopus'])
-  // A chat that starts while the choice stands opens it as it loads
-  await $.session.start(start)
-  expect(opened).toEqual(['claudopus', 'claudopus'])
-})
-
-test("a chat that starts reads the other chats before its panel opens, so they never drop out of it while it loads", async ($, on) => {
-  const { files, events } = world(on)
-  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_700_000_000_500 }))
-  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
-  await $.session.start(start)
-  const read = events.indexOf(`list ${MEMORY}/live/pushed`)
-  expect(read).toBeGreaterThanOrEqual(0)
-  expect(read).toBeLessThan(events.indexOf('open claudopus'))
-})
-
-test('/claudopus opens the panel for every chat; closed by hand it closes in every chat and work does not bring it back until asked', async ($, on) => {
-  const { opened, files } = world(on)
-  await $.session.start(start)
-  await $.command.run({ command: 'claudopus', args: '' } as never)
-  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true)
-  // The person's own close, as the app raises it, keeps this choice (the test kit cannot raise a close of the person's)
-  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1_700_000_000_005 }))
-  const closedAt = JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')
-  expect(closedAt.isOpen).toBe(false)
-  opened.length = 0
-  // Work started after it was closed, here or in a chat that loads with work running, leaves it closed
-  await $.prompt.submit({ text: 'The nose on head A is flawed, can you fix it?', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, prompt: 'The nose on head A is flawed, can you fix it?' } as never)
-  await $.session.start(start)
-  expect(opened).toEqual([])
-  // Asked for again, it is open for every chat again, as a choice later than the close
-  await $.command.run({ command: 'claudopus', args: '' } as never)
-  const again = JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')
-  expect(again.isOpen).toBe(true)
-  expect(again.at).toBeGreaterThan(closedAt.at)
-})
-
-test("closed by hand in another chat, the panel closes here; the mod's own close and a screen with nowhere to draw it choose nothing", async ($, on) => {
-  const { closed, files, clock } = world(on, { panes: ['claudopus'] })
-  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_699_999_999_000 }))
-  await $.session.start(start)
-  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1_700_000_000_500 }))
-  await clock.advance(2_000)
-  expect(closed).toContain('claudopus')
-  // That close is the mod's own and leaves the choice as it was
-  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')).toEqual({ isOpen: false, at: 1_700_000_000_500 })
-})
-
-test('/claudopus on a screen with nowhere to draw the panel does not open it for the other chats', async ($, on) => {
-  const { files } = world(on, { unplaced: true })
-  await $.session.start(start)
-  await $.command.run({ command: 'claudopus', args: '' } as never)
-  expect(files.has(`${MEMORY}/panel.json`)).toBe(false)
-})
-
 test("the header says in one line what every chat's cards say, and the octopus beside it agrees", () => {
   const head = (here: number, there: number, chats: number, asks = 0, isDone = false) => {
     const one = { here, there, chats, asks, isDone }
@@ -2839,18 +2884,6 @@ test("with work only in another chat the header and octopus are at work, amber w
   await list.unmount()
 })
 
-test('someone whose panel was open before chats shared it has it open in every chat once this version loads', async ($, on) => {
-  const { files } = world(on, { panes: ['claudopus'] })
-  await $.session.start(start)
-  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true)
-})
-
-test('a chat whose panel was never open writes no choice as it loads', async ($, on) => {
-  const { files } = world(on)
-  await $.session.start(start)
-  expect(files.has(`${MEMORY}/panel.json`)).toBe(false)
-})
-
 test("open chats with nothing going on are listed nowhere, on any Mac and however many, and a chat with work is listed by its name and Mac until that Mac stops answering", async ($, on) => {
   const { files, clock } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
@@ -2879,6 +2912,146 @@ test("open chats with nothing going on are listed nowhere, on any Mac and howeve
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Robot arm' })) ? undefined : true))).toBe(true)
   await list.unmount()
 })
+
+test("work that ends in another chat turns happy in this panel for its pause, then folds into Finished, which then holds every chat's", async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Billing page' }))).toBeDefined()
+  // Its running work finishes: that chat's file says so a moment later
+  const file = JSON.parse(otherChat(NOW)) as { at: number; cards: { status: string; endedAt: number; ask?: unknown }[] }
+  const ended = { ...file, at: NOW + 6000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 5500, ask: undefined })) }
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify(ended))
+  await clock.advance(5000)
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ Finished' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Claudopus' })).toBeDefined()
+  // After its pause it is in the Finished row, named as every chat's, and no longer under its chat
+  await clock.advance(3000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'all chats' })).toBeDefined()
+  expect((await list.findAll({ type: 'Button' })).some(b => /Finished 2/.test(String(b.props.label)))).toBe(true)
+  // On one Mac a chat with only ended work is not listed by name, and this chat's work gets no heading of its own for it
+  expect(await list.find({ type: 'Text', text: 'Billing page' })).toBeUndefined()
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Fix the nose' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
+  await list.unmount()
+})
+
+test("while the person types a reply into an ask, work finishing here and in another chat still turns green and happy for its pause, then leaves", async ($, on) => {
+  const { files, clock } = world(on, { art: true })
+  await $.session.start(start)
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
+  await $.agent.spawn({ ...spawn, description: 'Submit the mod', prompt: 'submit the mod' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Billing page' }))).toBeDefined()
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Submit it to the plugin directory.' } as never)
+  const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await list.input({ key: box?.key ?? '', text: 'Not y', kind: 'change' } as never)
+  // This chat's work finishes mid-typing: green and happy at once, then gone after its pause, the times still held
+  await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
+  expect((await until(async () => list.find({ type: 'Text', text: '✓ Finished' })))?.props.color).toBe('success')
+  expect(await drawn(list)).toContain('happy')
+  await clock.advance(2_100)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: /Draw the eyes/ })) ? undefined : true))).toBe(true)
+  // Another chat's work finishes mid-typing: the same
+  const file = JSON.parse(otherChat(NOW)) as { at: number; cards: { status: string; endedAt: number; ask?: unknown }[] }
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 8000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 7500, ask: undefined })) }))
+  await list.input({ key: box?.key ?? '', text: 'Not ye', kind: 'change' } as never)
+  // This panel reads the other chats every few seconds: the pause runs from the look that saw the end
+  for (let n = 0; n < 6 && !(await list.find({ type: 'Text', text: '✓ Finished' })); n += 1) await clock.advance(1000)
+  expect((await until(async () => list.find({ type: 'Text', text: '✓ Finished' })))?.props.color).toBe('success')
+  expect(await drawn(list)).toContain('happy')
+  await clock.advance(3000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
+  // The half reply is still in its box
+  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('Not ye')
+  await list.unmount()
+})
+
+test('a chat shares the work that ended lately, the newest few, and not work that ended long ago', async () => {
+  const card = (id: string, endedAt: number) => ({ id, parentId: '', isFork: false, tokens: 0, title: id, words: '', items: [], entries: [], answer: '', startedAt: endedAt - 10, endedAt, status: 'done' as const })
+  const list = [card('old', NOW - 13 * 3_600_000), ...Array.from({ length: 12 }, (_, i) => card(`n${i}`, NOW - i * 1000))]
+  const shared = shareable(list as never, NOW).map(one => one.id)
+  expect(shared).toHaveLength(10)
+  expect(shared).not.toContain('old')
+  expect(shared).not.toContain('n11')
+})
+
+test("a chat shares what opens it, and nothing of what was said in it", async ($, on) => {
+  const { files, clock } = world(on, { env: { CLAUDE_CODE_HOST_SESSION_ID: 'local_ab12-cd34' } })
+  files.set(`${HOME}/.claude/sessions/41.json`, JSON.stringify({ sessionId: 'someone-else', bridgeSessionId: 'session_01Other' }))
+  files.set(`${HOME}/.claude/sessions/42.json`, JSON.stringify({ sessionId: 'engine-id', hostSessionId: 'local_ab12-cd34', bridgeSessionId: 'session_01Mine', updatedAt: 5 }))
+  files.set(`${MEMORY}/words/engine-id.md`, '## 2026-11-12T07:00:00.000Z\nSum up last month\n\n### Claude 2026-11-12T07:01:00.000Z\nHere it is.\n\n')
+  await $.session.start(start)
+  const shared = () => JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}')
+  expect(shared().link).toEqual({ bridge: 'session_01Mine', app: 'local_ab12-cd34' })
+  await $.prompt.submit({ text: 'And this month?', origin: composer } as never)
+  await $.turn.complete({ answer: 'Here it is again.', reason: 'end_turn' } as never)
+  await clock.advance(1000)
+  expect(shared().said).toBeUndefined()
+  expect(files.get(`${MEMORY}/live/engine-id.json`) ?? '').not.toContain('this month')
+})
+
+test("another chat's name, shown while it has something going on, opens that chat in the app when pressed, and shows nothing more under it", async ($, on) => {
+  const { files, clock, shown } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const busy = (chat: string, title: string, extra: object) => JSON.stringify({ ...JSON.parse(otherChat(NOW, chat, title)), ...extra })
+  // An old chat still shares what was said: it is not shown
+  const withLink = busy('chat-rc', "Last month's work summary", { said: { you: 'Sum up last month', youAt: NOW, reply: 'Here is the summary.', replyAt: NOW }, link: { bridge: 'session_01Summary', app: 'local_m4-only' } })
+  // A chat of the other Mac with Remote Control off: the app's own id there opens nothing here; an id of no allowed shape is dropped
+  const noLink = busy('chat-t', 'Terminal chat', { link: { bridge: 'session_; rm -rf ~', app: 'local_m4-two' } })
+  // A chat this Mac's app runs on the other Mac over SSH: the app holds it under its own id, so it opens as the sidebar opens it
+  const viaSsh = busy('chat-s', 'SSH chat', { link: { bridge: '', app: 'local_run-from-here' } })
+  files.set(`${HOME}/Library/Application Support/Claude/claude-code-sessions/acct/org/local_run-from-here.json`, '{}')
+  // One run from here on a version that shares no link at all: the app's own file for it names its chat
+  const old = busy('chat-old', 'Old version chat', {})
+  files.set(`${HOME}/Library/Application Support/Claude/claude-code-sessions/acct/org/local_old-one.json`, JSON.stringify({ sessionId: 'local_old-one', cliSessionId: 'chat-old' }))
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${withLink}\n---claudopus-live---\n${noLink}\n---claudopus-live---\n${viaSsh}\n---claudopus-live---\n${old}\n`)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: "Last month's work summary" }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Terminal chat' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Here is the summary.' })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: 'Sum up last month' })).toBeUndefined()
+  expect(JSON.stringify(await list.drawn())).not.toContain('"hover":{"display"')
+  // The chat with Remote Control opens by its Remote Control id, the one this Mac's app runs by the app's own id; the one of the
+  // other Mac's own app without Remote Control has no press at all
+  expect(await until(async () => list.find({ key: 'chat-open-sam@m4.local-chat-s' }))).toBeDefined()
+  const buttons = (await list.findAll({ type: 'Button' })).map(one => String(one.key))
+  expect(buttons.filter(key => key.startsWith('chat-open-')).sort()).toEqual(['chat-open-sam@m4.local-chat-old', 'chat-open-sam@m4.local-chat-rc', 'chat-open-sam@m4.local-chat-s'])
+  await list.press({ key: 'chat-open-sam@m4.local-chat-old' })
+  expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_old-one'])
+  await list.press({ key: 'chat-open-sam@m4.local-chat-rc' })
+  expect(shown.at(-1)).toEqual(['open', 'claude://code/session_01Summary'])
+  await list.press({ key: 'chat-open-sam@m4.local-chat-s' })
+  expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_run-from-here'])
+  await list.unmount()
+})
+
+test("a chat of this Mac with work opens by the app's own id when it has no Remote Control", async ($, on) => {
+  const { files, clock, shown } = world(on)
+  const mine = JSON.parse(otherChat(NOW)) as Record<string, unknown>
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...mine, link: { bridge: '', app: 'local_here-1' } }))
+  await $.session.start(start)
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ key: 'chat-open--chat-b' }))).toBeDefined()
+  await list.press({ key: 'chat-open--chat-b' })
+  expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_here-1'])
+  await list.unmount()
+})
+
+// The app's own prompts shown amber in every panel
 
 test("this chat waiting on the app's own prompt is listed with its prompt, and idle chats beside it are not", async ($, on) => {
   const { files, clock } = world(on)
@@ -2992,6 +3165,8 @@ test("another chat's open prompt shows amber under its name, first; on this Mac 
   expect(await list.find({ type: 'Text', text: 'Web chat' })).toBeUndefined()
   await list.unmount()
 })
+
+// The other Mac: its chats over ssh, the same results on both, and chats the app runs over ssh
 
 test("a Mac that reaches another hands it this Mac's chats in the same trip, and leaves here the answers pressed there for them, once each", async ($, on) => {
   const { files, clock, sshed } = world(on)
@@ -3158,70 +3333,6 @@ test("a Mac handed another Mac's chats lists them by name and Mac with its own, 
   await list.unmount()
 })
 
-test("work that ends in another chat turns happy in this panel for its pause, then folds into Finished, which then holds every chat's", async ($, on) => {
-  const { files, clock } = world(on)
-  await $.session.start(start)
-  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
-  await clock.advance(5000)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Billing page' }))).toBeDefined()
-  // Its running work finishes: that chat's file says so a moment later
-  const file = JSON.parse(otherChat(NOW)) as { at: number; cards: { status: string; endedAt: number; ask?: unknown }[] }
-  const ended = { ...file, at: NOW + 6000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 5500, ask: undefined })) }
-  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify(ended))
-  await clock.advance(5000)
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ Finished' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Claudopus' })).toBeDefined()
-  // After its pause it is in the Finished row, named as every chat's, and no longer under its chat
-  await clock.advance(3000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
-  expect(await list.find({ type: 'Text', text: 'all chats' })).toBeDefined()
-  expect((await list.findAll({ type: 'Button' })).some(b => /Finished 2/.test(String(b.props.label)))).toBe(true)
-  // On one Mac a chat with only ended work is not listed by name, and this chat's work gets no heading of its own for it
-  expect(await list.find({ type: 'Text', text: 'Billing page' })).toBeUndefined()
-  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
-  await clock.advance(1000)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Fix the nose' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
-  await list.unmount()
-})
-
-test("while the person types a reply into an ask, work finishing here and in another chat still turns green and happy for its pause, then leaves", async ($, on) => {
-  const { files, clock } = world(on, { art: true })
-  await $.session.start(start)
-  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
-    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
-  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
-  await $.agent.spawn({ ...spawn, description: 'Submit the mod', prompt: 'submit the mod' } as never)
-  await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
-  await clock.advance(5000)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Billing page' }))).toBeDefined()
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Submit it to the plugin directory.' } as never)
-  const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
-  await list.input({ key: box?.key ?? '', text: 'Not y', kind: 'change' } as never)
-  // This chat's work finishes mid-typing: green and happy at once, then gone after its pause, the times still held
-  await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
-  expect((await until(async () => list.find({ type: 'Text', text: '✓ Finished' })))?.props.color).toBe('success')
-  expect(await drawn(list)).toContain('happy')
-  await clock.advance(2_100)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: /Draw the eyes/ })) ? undefined : true))).toBe(true)
-  // Another chat's work finishes mid-typing: the same
-  const file = JSON.parse(otherChat(NOW)) as { at: number; cards: { status: string; endedAt: number; ask?: unknown }[] }
-  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 8000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 7500, ask: undefined })) }))
-  await list.input({ key: box?.key ?? '', text: 'Not ye', kind: 'change' } as never)
-  // This panel reads the other chats every few seconds: the pause runs from the look that saw the end
-  for (let n = 0; n < 6 && !(await list.find({ type: 'Text', text: '✓ Finished' })); n += 1) await clock.advance(1000)
-  expect((await until(async () => list.find({ type: 'Text', text: '✓ Finished' })))?.props.color).toBe('success')
-  expect(await drawn(list)).toContain('happy')
-  await clock.advance(3000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
-  // The half reply is still in its box
-  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('Not ye')
-  await list.unmount()
-})
-
 test("work on another Mac whose chat runs a version that drops a card as it ends, saying nothing of its end, turns happy here for its pause, then is gone", async ($, on) => {
   const { files, clock } = world(on, { art: true })
   files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
@@ -3260,80 +3371,6 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
   for (let n = 0; n < 20; n += 1) (await clock.advance(1000), (finished ||= await list.find({ type: 'Text', text: '✓ Finished' })))
   expect(finished).toBeUndefined()
   expect(await list.find({ type: 'Text', text: 'Check the totals' })).toBeUndefined()
-  await list.unmount()
-})
-
-test('a chat shares the work that ended lately, the newest few, and not work that ended long ago', async () => {
-  const card = (id: string, endedAt: number) => ({ id, parentId: '', isFork: false, tokens: 0, title: id, words: '', items: [], entries: [], answer: '', startedAt: endedAt - 10, endedAt, status: 'done' as const })
-  const list = [card('old', NOW - 13 * 3_600_000), ...Array.from({ length: 12 }, (_, i) => card(`n${i}`, NOW - i * 1000))]
-  const shared = shareable(list as never, NOW).map(one => one.id)
-  expect(shared).toHaveLength(10)
-  expect(shared).not.toContain('old')
-  expect(shared).not.toContain('n11')
-})
-
-test("a chat shares what opens it, and nothing of what was said in it", async ($, on) => {
-  const { files, clock } = world(on, { env: { CLAUDE_CODE_HOST_SESSION_ID: 'local_ab12-cd34' } })
-  files.set(`${HOME}/.claude/sessions/41.json`, JSON.stringify({ sessionId: 'someone-else', bridgeSessionId: 'session_01Other' }))
-  files.set(`${HOME}/.claude/sessions/42.json`, JSON.stringify({ sessionId: 'engine-id', hostSessionId: 'local_ab12-cd34', bridgeSessionId: 'session_01Mine', updatedAt: 5 }))
-  files.set(`${MEMORY}/words/engine-id.md`, '## 2026-11-12T07:00:00.000Z\nSum up last month\n\n### Claude 2026-11-12T07:01:00.000Z\nHere it is.\n\n')
-  await $.session.start(start)
-  const shared = () => JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}')
-  expect(shared().link).toEqual({ bridge: 'session_01Mine', app: 'local_ab12-cd34' })
-  await $.prompt.submit({ text: 'And this month?', origin: composer } as never)
-  await $.turn.complete({ answer: 'Here it is again.', reason: 'end_turn' } as never)
-  await clock.advance(1000)
-  expect(shared().said).toBeUndefined()
-  expect(files.get(`${MEMORY}/live/engine-id.json`) ?? '').not.toContain('this month')
-})
-
-test("another chat's name, shown while it has something going on, opens that chat in the app when pressed, and shows nothing more under it", async ($, on) => {
-  const { files, clock, shown } = world(on)
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
-  const busy = (chat: string, title: string, extra: object) => JSON.stringify({ ...JSON.parse(otherChat(NOW, chat, title)), ...extra })
-  // An old chat still shares what was said: it is not shown
-  const withLink = busy('chat-rc', "Last month's work summary", { said: { you: 'Sum up last month', youAt: NOW, reply: 'Here is the summary.', replyAt: NOW }, link: { bridge: 'session_01Summary', app: 'local_m4-only' } })
-  // A chat of the other Mac with Remote Control off: the app's own id there opens nothing here; an id of no allowed shape is dropped
-  const noLink = busy('chat-t', 'Terminal chat', { link: { bridge: 'session_; rm -rf ~', app: 'local_m4-two' } })
-  // A chat this Mac's app runs on the other Mac over SSH: the app holds it under its own id, so it opens as the sidebar opens it
-  const viaSsh = busy('chat-s', 'SSH chat', { link: { bridge: '', app: 'local_run-from-here' } })
-  files.set(`${HOME}/Library/Application Support/Claude/claude-code-sessions/acct/org/local_run-from-here.json`, '{}')
-  // One run from here on a version that shares no link at all: the app's own file for it names its chat
-  const old = busy('chat-old', 'Old version chat', {})
-  files.set(`${HOME}/Library/Application Support/Claude/claude-code-sessions/acct/org/local_old-one.json`, JSON.stringify({ sessionId: 'local_old-one', cliSessionId: 'chat-old' }))
-  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${withLink}\n---claudopus-live---\n${noLink}\n---claudopus-live---\n${viaSsh}\n---claudopus-live---\n${old}\n`)
-  await $.session.start(start)
-  await clock.advance(10_000)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: "Last month's work summary" }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Terminal chat' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Here is the summary.' })).toBeUndefined()
-  expect(await list.find({ type: 'Text', text: 'Sum up last month' })).toBeUndefined()
-  expect(JSON.stringify(await list.drawn())).not.toContain('"hover":{"display"')
-  // The chat with Remote Control opens by its Remote Control id, the one this Mac's app runs by the app's own id; the one of the
-  // other Mac's own app without Remote Control has no press at all
-  expect(await until(async () => list.find({ key: 'chat-open-sam@m4.local-chat-s' }))).toBeDefined()
-  const buttons = (await list.findAll({ type: 'Button' })).map(one => String(one.key))
-  expect(buttons.filter(key => key.startsWith('chat-open-')).sort()).toEqual(['chat-open-sam@m4.local-chat-old', 'chat-open-sam@m4.local-chat-rc', 'chat-open-sam@m4.local-chat-s'])
-  await list.press({ key: 'chat-open-sam@m4.local-chat-old' })
-  expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_old-one'])
-  await list.press({ key: 'chat-open-sam@m4.local-chat-rc' })
-  expect(shown.at(-1)).toEqual(['open', 'claude://code/session_01Summary'])
-  await list.press({ key: 'chat-open-sam@m4.local-chat-s' })
-  expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_run-from-here'])
-  await list.unmount()
-})
-
-test("a chat of this Mac with work opens by the app's own id when it has no Remote Control", async ($, on) => {
-  const { files, clock, shown } = world(on)
-  const mine = JSON.parse(otherChat(NOW)) as Record<string, unknown>
-  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...mine, link: { bridge: '', app: 'local_here-1' } }))
-  await $.session.start(start)
-  await clock.advance(5000)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ key: 'chat-open--chat-b' }))).toBeDefined()
-  await list.press({ key: 'chat-open--chat-b' })
-  expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_here-1'])
   await list.unmount()
 })
 

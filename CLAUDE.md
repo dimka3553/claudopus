@@ -1,6 +1,9 @@
 # Claudopus
 
 - The mod is `mods/claudopus`; the site is `site/` (claudopus.ai builds `site/` from `main`).
+- The hooks code is in `src/claudopus/`, a file per job; `node src/claudopus/build.mjs` joins it into `mods/claudopus/hooks/register.tsx`, and `src/claudopus/tests/` into `register.test.tsx`. The directory lets `$` and `on` pass only to functions in the same file, so the mod ships one file. Never edit the two joined files: change the parts, build, then test; `build.mjs --check` fails when they are stale.
+- The parts are scripts with no imports or exports, one scope as in the joined file: an import goes in `imports.tsx`, and a new part goes in build.mjs's list after any part whose values it uses as the module loads. Type check the parts with `tsc -p src/claudopus` and `tsc -p src/claudopus/tests`.
+- Where things are: `register.tsx` (the hooks in order), `common` (names, limits, state, small helpers), `rules` (what chats and work are told), `chat` and `work` (the chat's life, work starting and running), `cards` (a work's states), `panel` (the panel's drawing), `art` and `band` (the octopus), `asking`, `notify`, `prompts` (the app's own prompts), `sharing` (other chats), `macs` (ssh and results on both Macs), `reports` and `results-tab`, `talk` (a work's own chat), `pictures`, `workflows`, `memory`, `subjects` (the index), `settings`, `stats-tab`, `about`, `tabs`, `servers`, `welcome`, `commands`, `tools` (the mod's own tools).
 - Test with the Claude desktop app's own engine, which is newer than the `claude` on the PATH: `"<app engine>" plugin test mods/claudopus` and `plugin validate --strict mods/claudopus` and `plugin validate --strict .`
 - `README.md` and `mods/claudopus/README.md` are the same text; the plugin's copy has paths relative to the plugin folder. Change both together.
 - Raise `version` in `mods/claudopus/.claude-plugin/plugin.json` with every release pushed to `main`, or installs keep the old copy.
