@@ -3181,3 +3181,15 @@ test('presses left on another Mac are read with their clock, each chat once, the
   expect(opensOf('')).toEqual([])
   expect(openTake('sams-m5')).toContain('live/outbox/sams-m5 ')
 })
+
+test("in a chat another Mac's app runs here, with no Mac handing its chats here, a name opens nothing on this Mac", async ($, on) => {
+  const { files, clock, shown } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...JSON.parse(otherChat(NOW)), link: { bridge: '', app: 'local_here-1' } }))
+  await $.session.start(start)
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Billing page' }))).toBeDefined()
+  expect(await list.find({ key: 'chat-open--chat-b' })).toBeUndefined()
+  expect(shown.filter(one => one[0] === 'open')).toEqual([])
+  await list.unmount()
+})

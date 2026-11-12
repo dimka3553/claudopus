@@ -202,7 +202,7 @@ export const OPEN_MARK = '---claudopus-open---'
 // The command that takes them there, run by sh: its clock in seconds, then each press, every file moved aside before it is read so
 // two chats taking at once never take one twice
 export const openTake = (from: string) =>
-  `sh -c 'cd $HOME/.claude/claudopus/${LIVE_DIR}/${OUTBOX}/${from} 2>/dev/null || exit 0; date +%s; for f in o-*.json; do [ -f "$f" ] && mv "$f" "$f.$$" 2>/dev/null && { echo ${OPEN_MARK}; tr -d "\\n" < "$f.$$"; echo; rm -f "$f.$$"; }; done'`
+  `sh -c 'cd $HOME/.claude/claudopus/${LIVE_DIR}/${OUTBOX}/${from} 2>/dev/null || exit 0; find . -name "o-*" -mmin +60 -exec rm -f {} + 2>/dev/null; date +%s; for f in o-*.json; do [ -f "$f" ] && mv "$f" "$f.$$" 2>/dev/null && { echo ${OPEN_MARK}; tr -d "\\n" < "$f.$$"; echo; rm -f "$f.$$"; }; done'`
 // The chats those presses name, each once, as far as they were pressed within OPEN_KEPT by that Mac's clock
 export const opensOf = (text: string): string[] => {
   const [head = '', ...parts] = text.split(`${OPEN_MARK}\n`)
