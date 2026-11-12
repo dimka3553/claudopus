@@ -6,7 +6,7 @@ import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, j
 import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
-import { ANSWERS, answerOf, BEAT, cardsOf, chatName, chatSide, FETCH, FETCH_EVERY, fetchedOf, isMac, LIVE_DIR, LOOK_EVERY, MACS, macName, ordered, shareable, sharedOf, signOf, STALE } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, BEAT, cardsOf, chatName, chatSide, FETCH, FETCH_EVERY, fetchedOf, isMac, LIVE_DIR, LOOK_EVERY, MACS, macName, ordered, shareable, sharedOf, signOf, STALE } from './shared'
 import type { Answer } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
@@ -2667,49 +2667,61 @@ const sentLine = (one: Todo) => {
 
 const others = atom({ plugin: 'claudopus', key: 'others' } as const, [], { shape: 'others-1' })
 const liveDir = () => `${dir}/${LIVE_DIR}`
-// What this chat last wrote to its file and when: written again when it changes or its beat is due, and once more with nothing in
-// it after its last work ended, then left alone
+// What this chat last wrote to its file and when: written again when it changes or its beat is due. Once its last work has ended
+// the file is removed, and nothing is written while it has none
 let sharedSign = ''
 let sharedAt = 0
+const ownLive = (id: string) => `${liveDir()}/${id}.json`
 const shareMine = async ($: EngineInterface) => {
   const { id, title } = await read($, me)
   if (!id || !dir || isOff) return
   const now = await $.clock.now()
   const cards = shareable(await read($, todos))
+  if (!cards.length) return unshare($)
   const sign = signOf(cards)
-  if (!cards.length && !sharedSign) return
   if (sign === sharedSign && now - sharedAt < BEAT) return
   const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards }
-  await $.fs.write(`${liveDir()}/${id}.json`, JSON.stringify(s))
-  sharedSign = cards.length ? sign : ''
+  await $.fs.write(ownLive(id), JSON.stringify(s))
+  sharedSign = sign
   sharedAt = now
 }
-// This chat's file says it has no work, as its session ends: the others drop its cards at once, not after STALE
-const unshare = async ($: EngineInterface) => {
-  const { id, title } = await read($, me)
-  if (!id || !dir || !sharedSign) return
-  await $.fs.write(`${liveDir()}/${id}.json`, JSON.stringify({ chat: id, title, folder: cwd, host: '', at: await $.clock.now(), cards: [] }))
+// This chat's file goes when it has no work, as its session ends, and when it starts (a file a crash or a reload left behind):
+// the others drop its cards at once, not after STALE
+const unshare = async ($: EngineInterface, isSure = false) => {
+  const { id } = await read($, me)
+  if (!id || !dir || (!sharedSign && !isSure)) return
   sharedSign = ''
+  if (await $.fs.exists(ownLive(id)).catch(() => false)) await $.process.run(['rm', '-f', ownLive(id)]).catch(() => undefined)
 }
 
-// The other Macs config.json names under `macs`, as ssh reaches them; none for a person with one Mac
+// The other Macs config.json names under `macs`, as ssh reaches them; none for a person with one Mac. Each is known by the name
+// config.json gives it, and shown by the first part of its host name
 let macs: string[] = []
 const macPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.json`
+const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '--', mac, command]
 type Fetched = { mac: string; text: string; fetchedAt: number; triedAt: number }
 // Each other Mac's chats are fetched over ssh by whichever chat here finds its copy older than FETCH_EVERY: one fetch for every
 // chat on this Mac. What a fetch that failed leaves is the copy before it, which goes stale on its own
+let isFetching = false
 const fetchMacs = async ($: EngineInterface) => {
-  for (const mac of macs) {
-    const now = await $.clock.now()
-    const was = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
-    if (now - Math.max(was.fetchedAt ?? 0, was.triedAt ?? 0) < FETCH_EVERY) continue
-    await $.fs.write(macPath(mac), JSON.stringify({ mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, triedAt: now }))
-    const r = await $.process.run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', mac, FETCH], { timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
-    if (r.exitCode !== 0 || !r.stdout.includes('\n')) {
-      if (!was.triedAt || (was.fetchedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `chats on ${mac} not fetched: ${r.stderr.trim().slice(0, 160)}`)
-      continue
+  if (isFetching) return
+  isFetching = true
+  try {
+    for (const mac of macs) {
+      const now = await $.clock.now()
+      const was = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
+      if (now - Math.max(was.fetchedAt ?? 0, was.triedAt ?? 0) < FETCH_EVERY) continue
+      await $.fs.write(macPath(mac), JSON.stringify({ mac, text: was.text ?? '', fetchedAt: was.fetchedAt ?? 0, triedAt: now }))
+      const r = await $.process.run(ssh(mac, FETCH), { timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+      if (r.exitCode !== 0 || !r.stdout.includes('\n')) {
+        // Said once when the Mac stops answering, not at every try
+        if ((was.fetchedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `chats on ${mac} not fetched: ${r.stderr.trim().slice(0, 160)}`)
+        continue
+      }
+      await $.fs.write(macPath(mac), JSON.stringify({ mac, text: r.stdout, fetchedAt: await $.clock.now(), triedAt: now }))
     }
-    await $.fs.write(macPath(mac), JSON.stringify({ mac, text: r.stdout, fetchedAt: await $.clock.now(), triedAt: now }))
+  } finally {
+    isFetching = false
   }
 }
 
@@ -2720,29 +2732,34 @@ const readOthers = async ($: EngineInterface) => {
   if (!id || !dir) return
   const now = await $.clock.now()
   const found: Shared[] = []
-  for (const entry of await $.fs.list(liveDir()).catch(() => [])) {
-    if (entry.kind !== 'file' || !entry.name.endsWith('.json') || entry.name === `${id}.json`) continue
-    // A file not written for a day is a chat long gone
-    if (entry.mtimeMs && now - entry.mtimeMs > 24 * 3600_000) continue
+  const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && entry.name !== `${id}.json`)
+  for (const name of [...liveRead.keys()]) if (!listed.some(entry => entry.name === name)) liveRead.delete(name)
+  for (const entry of listed) {
+    // A file not written for longer than STALE is a chat gone silent: not read at all
+    if (entry.mtimeMs && now - entry.mtimeMs > STALE) continue
     const key = `${entry.mtimeMs}:${entry.size}`
     const was = liveRead.get(entry.name)
     const text = was && entry.mtimeMs && was.key === key ? was.text : await readOr($, `${liveDir()}/${entry.name}`)
-    liveRead.set(entry.name, { key, text })
     const one = sharedOf(text, now)
+    // A file caught half-written is read again at the next look, not kept as read
+    if (one) liveRead.set(entry.name, { key, text })
+    else liveRead.delete(entry.name)
     if (one && one.chat !== id) found.push(one)
   }
   for (const mac of macs) {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
     // A copy not fetched again for STALE says nothing of that Mac now
     if (!f.text || now - (f.fetchedAt ?? 0) > STALE) continue
-    found.push(...fetchedOf(f.text, macName(mac)).filter(one => one.chat !== id))
+    // A Mac named that is this one shows its chats once, as this Mac's
+    found.push(...fetchedOf(f.text, mac, f.fetchedAt).filter(one => one.chat !== id && !found.some(local => !local.host && local.chat === one.chat)))
   }
   const next = ordered(found)
   if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
 }
 
-// An answer pressed here for another chat's work, left for that chat: on this Mac in its folder of answers, on another over ssh.
-// The ask leaves this panel at once; that chat's own file brings it back if the work asks again
+// An answer pressed here for another chat's work, left for that chat: on this Mac in its folder of answers, on another over ssh,
+// written under another name and then renamed, so it is never read half-written. The ask leaves this panel at once; that chat's own
+// file brings it back if the work asks again, and an answer that could not be left says so and brings the ask back
 const answeredHere = new Set<string>()
 const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, isReply: boolean) => {
   const ask = one.ask
@@ -2754,23 +2771,30 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other' })
   redraw($)
   const at = await $.clock.now()
-  const answer: Answer = { card: chat.agent, choice: said, isReply, ask: ask.text, at }
-  const name = `${at}-${Math.random().toString(36).slice(2, 8)}.json`
-  const mac = chat.host ? macs.find(m => macName(m) === chat.host) : undefined
-  if (!chat.host) return void (await $.fs.write(`${liveDir()}/${ANSWERS}/${chat.id}/${name}`, JSON.stringify(answer)))
-  const r = mac
-    ? await $.process
-        .run(['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', mac, `mkdir -p ~/.claude/claudopus/${LIVE_DIR}/${ANSWERS}/${chat.id} && cat > ~/.claude/claudopus/${LIVE_DIR}/${ANSWERS}/${chat.id}/${name}`], { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
+  const answer: Answer = { card: chat.agent, choice: said, isReply, ask: ask.text, askAt: ask.at, at }
+  const name = `${at}-${Math.random().toString(36).slice(2, 8)}`
+  const mac = chat.host ? macs.find(m => m === chat.host) : undefined
+  const folder = `${ANSWERS}/${chat.id}`
+  const r = !chat.host
+    ? await $.fs
+        .write(`${liveDir()}/${folder}/${name}.part`, JSON.stringify(answer))
+        .then(() => $.process.run(['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
         .catch(err => ({ exitCode: -1, stderr: String(err) }))
-    : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
+    : mac
+      ? await $.process
+          .run(ssh(mac, `d=~/.claude/claudopus/${LIVE_DIR}/${folder} && mkdir -p $d && cat > $d/${name}.part && mv $d/${name}.part $d/${name}.json`), { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
+          .catch(err => ({ exitCode: -1, stderr: String(err) }))
+      : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
   if (r.exitCode !== 0) {
     answeredHere.delete(`${one.id}:${ask.at}`)
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost' })
     redraw($)
-    await log($, `answer for ${chat.host} not sent: ${r.stderr.trim().slice(0, 160)}`)
+    await log($, `answer for the chat ${chat.id}${chat.host ? ` on ${chat.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)
   }
 }
-// Answers other chats left for this one's work: each acted on as if pressed here, once, then put away
+// Answers other chats left for this one's work: each acted on as if pressed here, once, then put away. A press answers the ask it
+// was pressed for and no later one, even in the same words; a reply in words goes to the work whatever it asks now; an answer that
+// waited past ANSWER_KEPT is dropped
 const takenAnswers = new Set<string>()
 const readAnswers = async ($: EngineInterface) => {
   const { id } = await read($, me)
@@ -2782,10 +2806,11 @@ const readAnswers = async ($: EngineInterface) => {
     const path = `${folder}/${entry.name}`
     const answer = answerOf(await readOr($, path))
     await $.process.run(['rm', '-f', path]).catch(() => undefined)
+    const now = await $.clock.now()
     const card = answer ? (await read($, todos)).find(one => one.id === answer.card && !one.parentId) : undefined
-    // A press answers the ask it was pressed for and no later one; a reply in words goes to the work whatever it asks now
-    if (!answer || !card?.ask || (!answer.isReply && answer.ask !== card.ask.text)) {
-      await log($, `answer from another chat dropped: ${answer ? `its ask is gone from ${answer.card}` : 'unreadable'}`)
+    const isSame = Boolean(answer && card?.ask && (answer.askAt ? answer.askAt === card.ask.at : answer.ask === card.ask.text))
+    if (!answer || !card?.ask || now - answer.at > ANSWER_KEPT || (!answer.isReply && !isSame)) {
+      await log($, `answer from another chat dropped: ${!answer ? 'unreadable' : now - answer.at > ANSWER_KEPT ? 'it waited too long' : `its ask is gone from ${answer.card}`}`)
       continue
     }
     await answerAsk($, card, answer.choice, answer.isReply)
@@ -2939,6 +2964,7 @@ export const register: Register = on => {
     // Every chat's work in every panel: this chat's file is kept true each second (written only when it changed or its beat is due),
     // the other chats' files and the answers left for this one are read every few seconds, the other Macs fetched now and then
     sharedSign = ''
+    await unshare($, true).catch(() => undefined)
     if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
@@ -2952,7 +2978,7 @@ export const register: Register = on => {
     return begun
   })
 
-  // A chat that ends says so in its file, so the other panels drop its work at once
+  // A chat that ends removes its file, so the other panels drop its work at once
   on('session.end', async ($, e, next) => {
     await unshare($).catch(() => undefined)
     return next(e)
@@ -4153,7 +4179,11 @@ export const register: Register = on => {
                   {working.length + runningFlows.length === 0 ? 'Nothing is running' : working.length + runningFlows.length === 1 ? 'Working on 1 thing' : `Working on ${working.length + runningFlows.length} things`}
                 </Text>
                 {elsewhere.some(one => one.status === 'working') ? (
-                  <Text dimColor wrap="truncate-end">{`${elsewhere.filter(one => one.status === 'working').length} more in ${otherChats.length === 1 ? '1 other chat' : `${otherChats.length} other chats`}`}</Text>
+                  <Text dimColor wrap="truncate-end">{(() => {
+                    const running = elsewhere.filter(one => one.status === 'working')
+                    const chats = new Set(running.map(one => `${one.chat?.host}/${one.chat?.id}`)).size
+                    return `${running.length} more in ${chats === 1 ? '1 other chat' : `${chats} other chats`}`
+                  })()}</Text>
                 ) : null}
                 <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
               </Box>

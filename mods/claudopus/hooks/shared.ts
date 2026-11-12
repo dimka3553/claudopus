@@ -64,14 +64,21 @@ export const ordered = (list: readonly Shared[]) =>
 
 // What a chat is called above its cards: its title, else its folder's name, and the Mac it runs on when that is another
 export const chatName = (c: { title: string; folder: string }) => c.title.trim() || c.folder.split('/').filter(Boolean).pop() || 'Another chat'
-export const chatSide = (c: { folder: string; host: string }) => [c.folder.split('/').filter(Boolean).pop() ?? '', c.host ? `on ${c.host}` : ''].filter(Boolean).join(' · ')
+// Its folder, unless the name already is the folder, and the Mac it runs on when another
+export const chatSide = (c: { title: string; folder: string; host: string }) => {
+  const folder = c.folder.split('/').filter(Boolean).pop() ?? ''
+  return [folder === chatName(c) ? '' : folder, c.host ? `on ${macName(c.host)}` : ''].filter(Boolean).join(' · ')
+}
 
-// One answer left for another chat: the card by its own id there, what was pressed or written, and the ask it answers
-export type Answer = { card: string; choice: string; isReply: boolean; ask: string; at: number }
+// One answer left for another chat: the card by its own id there, what was pressed or written, and the ask it answers, by its
+// words and the moment it was asked by that chat's clock. `at` is when it was pressed, by the clock of the Mac it was pressed on
+export type Answer = { card: string; choice: string; isReply: boolean; ask: string; askAt: number; at: number }
+// An answer that waited longer than this, as for a chat that was closed and opened again much later, is dropped, not acted on
+export const ANSWER_KEPT = 10 * 60_000
 export const answerOf = (text: string): Answer | undefined => {
   try {
     const one = JSON.parse(text) as Partial<Answer>
-    return typeof one.card === 'string' && typeof one.choice === 'string' && one.choice.trim() ? { card: one.card, choice: one.choice, isReply: Boolean(one.isReply), ask: typeof one.ask === 'string' ? one.ask : '', at: Number(one.at) || 0 } : undefined
+    return typeof one.card === 'string' && typeof one.choice === 'string' && one.choice.trim() ? { card: one.card, choice: one.choice, isReply: Boolean(one.isReply), ask: typeof one.ask === 'string' ? one.ask : '', askAt: Number(one.askAt) || 0, at: Number(one.at) || 0 } : undefined
   } catch {
     return undefined
   }
@@ -79,14 +86,22 @@ export const answerOf = (text: string): Answer | undefined => {
 
 // What one fetch of another Mac answers: its clock, then each chat's file, each on one line. Lines that are not a file are left out
 export const MARK = '---claudopus-live---'
-export const fetchedOf = (text: string, host: string): Shared[] => {
-  const [clock = '', ...files] = text.split(`${MARK}\n`)
-  const now = Number(clock.trim()) * 1000
+// That Mac's times are moved onto this one's clock by how far apart the two were at the fetch, so running times and order hold
+export const fetchedOf = (text: string, host: string, fetchedAt = 0): Shared[] => {
+  const [head = '', ...files] = text.split(`${MARK}\n`)
+  // Its clock is the last line of digits before the first file: a login banner above it is passed over
+  const now = Number([...head.split('\n')].reverse().find(line => /^\d{9,}$/.test(line.trim()))?.trim() ?? 0) * 1000
   if (!now) return []
-  return files.map(one => sharedOf(one, now, host)).filter((one): one is Shared => one !== undefined)
+  const shift = fetchedAt ? fetchedAt - now : 0
+  const moved = (at: number) => (at ? at + shift : at)
+  return files
+    .map(one => sharedOf(one, now, host))
+    .filter((one): one is Shared => one !== undefined)
+    .map(one => ({ ...one, at: moved(one.at), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt) })) }))
 }
-// The command that fetches it, run on that Mac over ssh: its clock in seconds, then every chat file there written in the last day
-export const FETCH = `date +%s; for f in $(find ~/.claude/claudopus/${LIVE_DIR} -maxdepth 1 -name '*.json' -mtime -1 2>/dev/null); do echo '${MARK}'; tr -d '\\n' < "$f"; echo; done`
+// The command that fetches it, run on that Mac over ssh by sh whatever its login shell: its clock in seconds, then every chat file
+// there written in the last three minutes (an older one is stale anyway)
+export const FETCH = `sh -c 'date +%s; for f in $(find ~/.claude/claudopus/${LIVE_DIR} -maxdepth 1 -name "*.json" -mmin -3 2>/dev/null); do echo ${MARK}; tr -d "\\n" < "$f"; echo; done'`
 // A Mac named in config.json `macs`, as ssh takes it: user@host, or a Host line of ~/.ssh/config. Nothing else is run
-export const isMac = (one: unknown): one is string => typeof one === 'string' && /^[A-Za-z0-9_.-]+(@[A-Za-z0-9_.-]+)?$/.test(one) && !one.startsWith('-')
+export const isMac = (one: unknown): one is string => typeof one === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_.-]*(@[A-Za-z0-9_][A-Za-z0-9_.-]*)?$/.test(one)
 export const macName = (one: string) => (one.split('@').pop() ?? one).split('.')[0] ?? one
