@@ -485,9 +485,47 @@ const choose = async ($: EngineInterface, id: string, model: string) => {
   await tell($, id, movedTo(modelName(model), await $.clock.now()))
 }
 
+// One panel for every chat on this Mac: each chat in the app runs on its own, so whether the person last opened or closed it is
+// kept in panel.json, and every chat follows it within PANEL_EVERY: opened in one chat, it is open in each chat they go to;
+// closed by hand in one, it closes in all and stays closed until asked for. Until they first choose, each chat goes on as before
+type PanelChoice = { isOpen: boolean; at: number }
+const PANEL_EVERY = 2000
+// When this chat last followed the choice; a new load follows it afresh
+let panelAt: number | undefined
+const readPanel = ($: EngineInterface) =>
+  readOr($, `${dir}/panel.json`)
+    .then(text => (text ? (JSON.parse(text) as PanelChoice) : undefined))
+    .then(one => (typeof one?.isOpen === 'boolean' && typeof one.at === 'number' ? one : undefined))
+    .catch(() => undefined)
+const choosePanel = async ($: EngineInterface, isOpen: boolean) => {
+  // Kept later than any choice already there, so every chat sees it as new even when two come within one tick of the clock
+  const at = Math.max(await $.clock.now(), ((await readPanel($))?.at ?? 0) + 1)
+  panelAt = at
+  await $.fs.write(`${dir}/panel.json`, JSON.stringify({ isOpen, at })).catch(err => log($, `panel choice not kept: ${String(err)}`))
+}
+// Brings this chat's panel in line with the last choice, once per choice
+const followPanel = async ($: EngineInterface) => {
+  if (!dir) return undefined
+  const choice = await readPanel($)
+  if (!choice || choice.at === panelAt) return choice
+  panelAt = choice.at
+  const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
+  if (choice.isOpen && !isOpen) {
+    await update($, me, one => ({ ...one, isListOpened: true }))
+    await update($, paneShown, () => true)
+    await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => log($, `panel not opened with the others: ${String(err)}`))
+  }
+  if (!choice.isOpen && isOpen) await $.ui.close({ id: LIST }).catch(() => undefined)
+  return choice
+}
+
 // The panel opens by itself with a chat's first piece of work; closed, it stays closed until asked for
 const openList = async ($: EngineInterface) => {
   if ((await read($, me)).isListOpened) return
+  // Closed by hand in any chat, it stays closed in every chat; opened, it is open in all of them already
+  const choice = await readPanel($)
+  if (choice && !choice.isOpen) return
+  if (!choice) await choosePanel($, true)
   await update($, me, one => ({ ...one, isListOpened: true }))
   await update($, paneShown, () => true)
   await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => log($, `panel not opened: ${String(err)}`))
@@ -2791,10 +2829,14 @@ export const register: Register = on => {
     await loadReports($).catch(() => undefined)
     // Work that is running when the chat loads brings the panel up, if it has never opened
     // and comes back after a reload of the mod (which closes it) if it was open or work is running
+    // Once the person has opened or closed the panel, every chat follows that choice instead, as it loads and every PANEL_EVERY
     const isRunning = (await read($, todos)).some(one => !one.parentId && one.status === 'working')
-    if (isRunning || isWelcomeOpen) await openList($)
-    if (((await read($, paneShown)) || isRunning) && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST))
+    panelAt = undefined
+    const choice = await followPanel($).catch(() => undefined)
+    if (!choice && (isRunning || isWelcomeOpen)) await openList($)
+    if (!choice && ((await read($, paneShown)) || isRunning) && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST))
       await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => log($, `panel not opened again: ${String(err)}`))
+    $.clock.every(PANEL_EVERY, () => followPanel($).catch(err => log($, `panel not followed: ${String(err)}`)))
     $.clock.every(FOLLOW_EVERY, () => follow($).catch(err => log($, `work not followed: ${String(err)}`)))
     // Each second the running times on the small cards move on, while any work runs. A Details tab does not read the tick: it is
     // drawn again only when its work moves, since its chat is too long to draw every second and a press must not wait behind a drawing.
@@ -3100,8 +3142,17 @@ export const register: Register = on => {
     await update($, me, one => ({ ...one, isListOpened: true }))
     await update($, paneShown, () => true)
     const opened = await $.ui.open({ id: LIST, title: LIST_TITLE })
+    // Asked for where it can be drawn, it is open in every chat from now on
+    if (opened.isPlaced) await choosePanel($, true)
 
     return { text: opened.isPlaced ? 'Claudopus panel opened.' : nowhere('Claudopus') }
+  })
+
+  // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
+  on('ui.close', async ($, e, next) => {
+    const r = await next(e)
+    if (e.id === LIST && e.origin.kind === 'person' && dir) await choosePanel($, false)
+    return r
   })
 
   on('command.run', { command: 'servers' }, async $ => {

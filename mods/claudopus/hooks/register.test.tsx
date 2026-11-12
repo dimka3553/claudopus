@@ -2238,3 +2238,59 @@ test('someone already set up never sees the welcome, and the panel does not open
   expect(await pane.find({ type: 'Text', text: 'Welcome to Claudopus' })).toBeUndefined()
   await pane.unmount()
 })
+
+test('opened in one chat, the panel opens in every other chat, at once in one that starts and within seconds in one already running', async ($, on) => {
+  const { opened, files, clock } = world(on)
+  await $.session.start(start)
+  expect(opened).toEqual([])
+  // Another chat on this Mac opened it
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_700_000_000_500 }))
+  await clock.advance(2_000)
+  expect(opened).toEqual(['claudopus'])
+  // Followed once: the same choice does not open it again
+  await clock.advance(10_000)
+  expect(opened).toEqual(['claudopus'])
+  // A chat that starts while the choice stands opens it as it loads
+  await $.session.start(start)
+  expect(opened).toEqual(['claudopus', 'claudopus'])
+})
+
+test('/claudopus opens the panel for every chat; closed by hand it closes in every chat and work does not bring it back until asked', async ($, on) => {
+  const { opened, files } = world(on)
+  await $.session.start(start)
+  await $.command.run({ command: 'claudopus', args: '' } as never)
+  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true)
+  // The person's own close, as the app raises it, keeps this choice (the test kit cannot raise a close of the person's)
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1_700_000_000_005 }))
+  const closedAt = JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')
+  expect(closedAt.isOpen).toBe(false)
+  opened.length = 0
+  // Work started after it was closed, here or in a chat that loads with work running, leaves it closed
+  await $.prompt.submit({ text: 'The nose on head A is flawed, can you fix it?', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'The nose on head A is flawed, can you fix it?' } as never)
+  await $.session.start(start)
+  expect(opened).toEqual([])
+  // Asked for again, it is open for every chat again, as a choice later than the close
+  await $.command.run({ command: 'claudopus', args: '' } as never)
+  const again = JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')
+  expect(again.isOpen).toBe(true)
+  expect(again.at).toBeGreaterThan(closedAt.at)
+})
+
+test("closed by hand in another chat, the panel closes here; the mod's own close and a screen with nowhere to draw it choose nothing", async ($, on) => {
+  const { closed, files, clock } = world(on, { panes: ['claudopus'] })
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_699_999_999_000 }))
+  await $.session.start(start)
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1_700_000_000_500 }))
+  await clock.advance(2_000)
+  expect(closed).toContain('claudopus')
+  // That close is the mod's own and leaves the choice as it was
+  expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')).toEqual({ isOpen: false, at: 1_700_000_000_500 })
+})
+
+test('/claudopus on a screen with nowhere to draw the panel does not open it for the other chats', async ($, on) => {
+  const { files } = world(on, { unplaced: true })
+  await $.session.start(start)
+  await $.command.run({ command: 'claudopus', args: '' } as never)
+  expect(files.has(`${MEMORY}/panel.json`)).toBe(false)
+})
