@@ -2929,15 +2929,16 @@ const promptText = (tool: string, input: unknown) => {
 // The start of a command up to its first quote, `$` or line break, as a running shell shows it whatever the quoting
 const snippetOf = (tool: string, input: unknown) => {
   if (tool !== 'Bash') return ''
-  const head = (String((input as { command?: unknown } | undefined)?.command ?? '').split(/['"\\\n$`]/)[0] ?? '').trim()
-  return head.length >= 4 ? head.slice(0, 80) : ''
+  const head = (String((input as { command?: unknown } | undefined)?.command ?? '').split(/['"\\\n$`]/)[0] ?? '').trimEnd()
+  return head.trim().length >= 4 ? head.slice(0, 80) : ''
 }
-// How many processes on this Mac show a command's start: counted as its prompt opens, so only one more than then is this call's
+// How many of Claude's shells on this Mac run a command that starts so (the Bash tool runs it as `eval '<command>'`): counted as its
+// prompt opens, so only one more than then is this call's
 const running = async ($: EngineInterface) => {
   const r = await $.process.run(['ps', '-ww', '-x', '-o', 'args='], { timeoutMs: 5000 })
   return r.exitCode === 0 ? r.stdout.split('\n') : undefined
 }
-const countOf = (lines: string[], snippet: string) => lines.filter(line => line.includes(snippet) && !line.startsWith('ps ')).length
+const countOf = (lines: string[], snippet: string) => lines.filter(line => line.includes(`eval '${snippet}`)).length
 const opened = async ($: EngineInterface, agent: string | undefined, tool: string, input: unknown) => {
   const at = await $.clock.now()
   const id = askedFor(agent, tool, input) ?? `pr-${at}-${Math.random().toString(36).slice(2, 8)}`

@@ -2518,13 +2518,13 @@ test('a command allowed leaves the panel as soon as it is seen running, before i
   const { files, clock } = world(on)
   await $.session.start(start)
   // The same command already running elsewhere, as in a terminal, says nothing of this call
-  files.set('ps:running', "python3 scripts/count_lines.py --all\n")
+  files.set('ps:running', "python3 scripts/count_lines.py --all\n/bin/zsh -c source snap && eval 'python3 scripts/count_lines.py --all' < /dev/null\n")
   await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'python3 scripts/count_lines.py --all', description: 'Count the lines' } } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Allow a command: Count the lines' }))).toBeDefined()
   await clock.advance(2000)
   expect(await list.find({ type: 'Text', text: 'Allow a command: Count the lines' })).toBeDefined()
-  files.set('ps:running', "python3 scripts/count_lines.py --all\n/bin/zsh -c source snap && eval 'python3 scripts/count_lines.py --all' < /dev/null\n")
+  files.set('ps:running', "python3 scripts/count_lines.py --all\n/bin/zsh -c source snap && eval 'python3 scripts/count_lines.py --all' < /dev/null\n/bin/zsh -c source snap && eval 'python3 scripts/count_lines.py --all' < /dev/null\n")
   await clock.advance(2000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Allow a command: Count the lines' })) ? undefined : true))).toBe(true)
   // Beneath the mod, a settings hook answers the request: no prompt is put to the person, and none shows
