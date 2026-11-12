@@ -4424,8 +4424,9 @@ export const register: Register = on => {
       const label = <Text bold dimColor wrap="truncate-end">{name}</Text>
       return (
         <Box key={`chat-head-${key}`} flexDirection="column" paddingTop={1} flexShrink={0}>
-          <Box flexDirection="row" alignItems="flex-end" gap={2} paddingX={2}>
-            <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          {/* One line whatever the name's length: cut short, never wrapped */}
+          <Box flexDirection="row" alignItems="flex-start" gap={2} paddingX={2} height={1} overflow="hidden">
+            <Box flexGrow={1} flexShrink={1} minWidth={0} height={1} overflow="hidden">
               {c && url ? (
                 <Button key={`chat-open-${key}`} plain hover={{ underline: true }} onPress={() => void openChat($, c)}>
                   {label}
