@@ -2730,8 +2730,8 @@ const sentLine = (one: Todo) => {
 
 const others = atom({ plugin: 'claudopus', key: 'others' } as const, [], { shape: 'others-1' })
 const liveDir = () => `${dir}/${LIVE_DIR}`
-// What this chat last wrote to its file and when: written again when it changes or its beat is due. Once its last work has ended
-// the file is removed, and nothing is written while it has none
+// What this chat last wrote to its file and when: written again when it changes or its beat is due, with work or without, so the
+// panels of other Macs list it as open. It is removed as the chat ends
 let sharedSign = ''
 let sharedAt = 0
 const ownLive = (id: string) => `${liveDir()}/${id}.json`
@@ -2740,16 +2740,15 @@ const shareMine = async ($: EngineInterface) => {
   if (!id || !dir || isOff) return
   const now = await $.clock.now()
   const cards = shareable(await read($, todos))
-  if (!cards.length) return unshare($)
-  const sign = signOf(cards)
+  const sign = `${title}\n${signOf(cards)}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
   const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards }
   await $.fs.write(ownLive(id), JSON.stringify(s))
   sharedSign = sign
   sharedAt = now
 }
-// This chat's file goes when it has no work, as its session ends, and when it starts (a file a crash or a reload left behind):
-// the others drop its cards at once, not after STALE
+// This chat's file goes as its session ends, and when it starts (a file a crash or a reload left behind): the others drop its cards
+// at once, not after STALE
 const unshare = async ($: EngineInterface, isSure = false) => {
   const { id } = await read($, me)
   if (!id || !dir || (!sharedSign && !isSure)) return
@@ -3020,7 +3019,7 @@ export const register: Register = on => {
         await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
       }
       const isFlowing = (await read($, flows)).some(f => f.status === 'working')
-      if (isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).length) await update($, tick, n => n + 1)
+      if (isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length)) await update($, tick, n => n + 1)
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
       const now = await $.clock.now()
       for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)].filter(card => isLingering(card, now))) {
@@ -4286,7 +4285,12 @@ export const register: Register = on => {
               // Then each other chat under its name, those that wait on the person first
               ...otherChats.flatMap(c => {
                 const cards = elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
-                return cards.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c)), ...cards.map(one => small(one))] : []
+                // An open chat of another Mac with no work is listed by its name alone, so the person sees what is open there
+                if (!cards.length)
+                  return c.host
+                    ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c)), <Box key={`chat-idle-${c.host}-${c.chat}`} paddingX={3} flexShrink={0}><Text dimColor wrap="truncate-end">Open · nothing running</Text></Box>]
+                    : []
+                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c)), ...cards.map(one => small(one))]
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}

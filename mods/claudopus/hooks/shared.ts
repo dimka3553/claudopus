@@ -8,8 +8,8 @@ export const LIVE_DIR = 'live'
 export const ANSWERS = 'answers'
 // The other Macs' files, as last fetched, one per Mac: live/macs/<host>.json, shared by every chat on this Mac
 export const MACS = 'macs'
-// A chat with work running writes its file again at least this often, so a file not written for STALE has lost its chat: it was
-// closed, it crashed, or its Mac is asleep or gone. Its work then shows nowhere, never as running for ever
+// Every open chat writes its file again at least this often, work or none, so a file not written for STALE has lost its chat: it
+// was closed, it crashed, or its Mac is asleep or gone. It then shows nowhere, and its work never as running for ever
 export const BEAT = 20_000
 export const STALE = 90_000
 // Other chats' files are read this often; the other Macs' fetched this often, by whichever chat on this Mac comes first
@@ -35,15 +35,16 @@ export const shareable = (list: readonly Todo[]): Todo[] =>
 export const signOf = (cards: readonly Todo[]) =>
   JSON.stringify(cards.map(one => [one.id, one.status, one.title, one.model, one.tokens, one.items, one.entries.at(-1)?.text ?? '', one.ask?.text ?? '', one.ask?.at ?? 0, one.ask?.copy ?? '', one.ask?.choices ?? []]))
 
-// A chat's file as read, or nothing when it is no such file, has no work, or has not been written for too long. `now` is the clock
-// of the Mac that wrote it, so a Mac whose clock runs apart from this one's is judged by its own
-export const sharedOf = (text: string, now: number, host = ''): Shared | undefined => {
+// A chat's file as read, or nothing when it is no such file, has not been written for too long, or has no work and `isIdleKept` is
+// not set (a chat of this Mac with no work is not listed; one of another Mac is, so its open chats show). `now` is the clock of the
+// Mac that wrote it, so a Mac whose clock runs apart from this one's is judged by its own
+export const sharedOf = (text: string, now: number, host = '', isIdleKept = false): Shared | undefined => {
   try {
     const one = JSON.parse(text) as Partial<Shared>
     if (typeof one.chat !== 'string' || !one.chat || typeof one.at !== 'number' || !Array.isArray(one.cards)) return undefined
-    if (now - one.at > STALE || !one.cards.length) return undefined
+    if (now - one.at > STALE) return undefined
     const cards = one.cards.filter((card): card is Todo => Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)))
-    if (!cards.length) return undefined
+    if (!cards.length && !isIdleKept) return undefined
     return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards }
   } catch {
     return undefined
@@ -58,9 +59,11 @@ export const remoteId = (s: Shared, id: string) => `${REMOTE}${short(`${s.host}/
 export const cardsOf = (list: readonly Shared[]): Todo[] =>
   list.flatMap(s => s.cards.map(one => ({ ...one, id: remoteId(s, one.id), chat: { id: s.chat, title: s.title, folder: s.folder, host: s.host, agent: one.id } })))
 
-// The other chats in the order the panel shows them: those that wait on the person first, then the one whose work began first
+// The other chats in the order the panel shows them: those that wait on the person first, then the one whose work began first, then
+// the open chats of other Macs with no work, by name
+const firstStart = (s: Shared) => (s.cards.length ? Math.min(...s.cards.map(one => one.startedAt)) : Number.MAX_SAFE_INTEGER)
 export const ordered = (list: readonly Shared[]) =>
-  [...list].sort((a, b) => Number(b.cards.some(one => one.ask)) - Number(a.cards.some(one => one.ask)) || Math.min(...a.cards.map(one => one.startedAt)) - Math.min(...b.cards.map(one => one.startedAt)))
+  [...list].sort((a, b) => Number(b.cards.some(one => one.ask)) - Number(a.cards.some(one => one.ask)) || firstStart(a) - firstStart(b) || chatName(a).localeCompare(chatName(b)))
 
 // What a chat is called above its cards: its title, else its folder's name, and the Mac it runs on when that is another
 export const chatName = (c: { title: string; folder: string }) => c.title.trim() || c.folder.split('/').filter(Boolean).pop() || 'Another chat'
@@ -95,7 +98,7 @@ export const fetchedOf = (text: string, host: string, fetchedAt = 0): Shared[] =
   const shift = fetchedAt ? fetchedAt - now : 0
   const moved = (at: number) => (at ? at + shift : at)
   return files
-    .map(one => sharedOf(one, now, host))
+    .map(one => sharedOf(one, now, host, true))
     .filter((one): one is Shared => one !== undefined)
     .map(one => ({ ...one, at: moved(one.at), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt) })) }))
 }

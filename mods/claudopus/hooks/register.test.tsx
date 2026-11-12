@@ -2291,10 +2291,18 @@ test("the panel shows every open chat's running work under that chat's name, thi
   const buttons = (await list.findAll({ type: 'Button' })).map(one => one.key ?? '')
   expect(buttons.filter(key => key.startsWith('stop-'))).toEqual(['stop-a1'])
   expect(buttons.some(key => key.startsWith('model-r-'))).toBe(false)
-  // The chat's own work ends: its file goes, so the others drop it at once
+  // The chat's own work ends: its file stays, with no work in it, so the others drop the work at once and still know the chat is open
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(1000)
-  expect(await until(async () => (files.has(`${MEMORY}/live/engine-id.json`) ? undefined : true))).toBe(true)
+  expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{"cards":[1]}').cards.length === 0 ? true : undefined))).toBe(true)
+  // A chat of this Mac with no work is not listed in the others' panels
+  files.set(`${MEMORY}/live/chat-d.json`, JSON.stringify({ chat: 'chat-d', title: 'Quiet chat', folder: '/repo/quiet', host: '', at: NOW + 6000, cards: [] }))
+  await clock.advance(5000)
+  expect(await list.find({ type: 'Text', text: 'Quiet chat' })).toBeUndefined()
+  // It keeps saying it is open while it runs
+  const was = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').at
+  await clock.advance(25_000)
+  expect(JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').at).toBeGreaterThan(was)
   // Once that chat stops saying so, its work leaves this panel
   await clock.advance(95_000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Billing page' })) ? undefined : true))).toBe(true)
@@ -2431,4 +2439,25 @@ test('a chat whose panel was never open writes no choice as it loads', async ($,
   const { files } = world(on)
   await $.session.start(start)
   expect(files.has(`${MEMORY}/panel.json`)).toBe(false)
+})
+
+test("an open chat of another Mac with no work running is listed here by its name and Mac, and leaves when that Mac stops answering", async ($, on) => {
+  const { files, clock } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const idle = (at: number) => JSON.stringify({ chat: 'chat-rc', title: '', folder: '/Users/sam/GitHub', host: '', at, cards: [] })
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${idle(NOW)}\n---claudopus-live---\n${otherChat(NOW, 'chat-m4', 'Robot arm')}\n`)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'GitHub' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'on m4' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Open · nothing running' })).toBeDefined()
+  // The chat with work comes before the quiet one, and the count names only work
+  const bold = (await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)
+  expect(bold.indexOf('Robot arm')).toBeLessThan(bold.indexOf('GitHub'))
+  expect(await list.find({ type: 'Text', text: '2 more in 1 other chat' })).toBeDefined()
+  files.delete('ssh:fetch')
+  await clock.advance(100_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Open · nothing running' })) ? undefined : true))).toBe(true)
+  await list.unmount()
 })
