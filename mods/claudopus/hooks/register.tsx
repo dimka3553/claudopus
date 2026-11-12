@@ -510,7 +510,10 @@ const choosePanel = async ($: EngineInterface, isOpen: boolean) => {
 // Whether the row that holds the open chats with nothing going on is unfolded: kept in folds.json, so every chat's panel shows it
 // as the person last left it; each chat reads it again at its next look
 let isQuietOpen = false
+// Until this chat's own press is on disk, a look reads nothing back, so the press is never undone by the file before it
+let foldPressedAt = 0
 const readFolds = async ($: EngineInterface) => {
+  if ((await $.clock.now()) - foldPressedAt < PANEL_EVERY * 2) return
   const text = await readOr($, `${dir}/folds.json`).catch(() => '')
   const isOpen = (() => {
     try {
@@ -523,9 +526,14 @@ const readFolds = async ($: EngineInterface) => {
 }
 const foldQuiet = async ($: EngineInterface) => {
   isQuietOpen = !isQuietOpen
+  foldPressedAt = await $.clock.now()
   presses += 1
   redraw($)
-  await $.fs.write(`${dir}/folds.json`, JSON.stringify({ isQuietOpen })).catch(err => log($, `fold not kept: ${String(err)}`))
+  // Written under another name and then renamed, so no chat reads it half-written
+  await $.fs
+    .write(`${dir}/folds.json.part`, JSON.stringify({ isQuietOpen }))
+    .then(() => $.process.run(['mv', '-f', `${dir}/folds.json.part`, `${dir}/folds.json`]))
+    .catch(err => log($, `fold not kept: ${String(err)}`))
 }
 // Brings this chat's panel in line with the last choice, once per choice. A pane opened where nothing draws it yet stays open and
 // is drawn once a screen that can attaches; an open the engine refused is tried again at the next look
@@ -4480,7 +4488,7 @@ export const register: Register = on => {
     const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     // The open chats with nothing going on, this one too when it has nothing: one folded row, "N other chats", under the cards.
     // Unfolded, each is a row of its name, with its folder and Mac at its right, as the cards' chats are named
-    const isSelfQuiet = !shownWork.length && !shownFlows.length && isMulti()
+    const isSelfQuiet = !shownWork.length && !shownFlows.length && !waiting.length && isMulti()
     const quietCount = quietChats.length + (isSelfQuiet && quietChats.length ? 1 : 0)
     const quietPart = () =>
       quietChats.length ? (

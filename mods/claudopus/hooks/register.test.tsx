@@ -2499,6 +2499,23 @@ test("an open chat of another Mac with no work running is folded into one row, N
   await list.unmount()
 })
 
+test("this chat waiting on the app's own prompt is not counted among the quiet chats", async ($, on) => {
+  const { files, clock } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const idle = JSON.stringify({ chat: 'chat-q', title: 'Quiet one', folder: '/x', host: '', at: NOW, cards: [] })
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${idle}\n`)
+  await $.session.start(start)
+  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build', description: 'Clear the build folder' } } as never)
+  await clock.advance(10_000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Allow a command: Clear the build folder' }))).toBeDefined()
+  expect((await until(async () => keyed(list, 'quiet-fold')))?.props.label).toBe('▸ 1 other chat')
+  await pressed(list, 'quiet-fold')
+  expect(await until(async () => list.find({ type: 'Text', text: 'Quiet one' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
+  await list.unmount()
+})
+
 test('on one Mac a quiet chat shows no folded row, however it was last left', async ($, on) => {
   const { files, clock } = world(on)
   files.set(`${MEMORY}/folds.json`, JSON.stringify({ isQuietOpen: true }))
