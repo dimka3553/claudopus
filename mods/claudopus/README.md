@@ -41,7 +41,8 @@ That is all. Nothing has to be typed in each chat.
 
 - The mod is on in every chat you open from then on, in every folder.
 - You send a message. The chat answers in one line and starts a background agent for it, then is free for your next message.
-- The panel opens beside the chat by itself the first time work starts in that chat. Each piece of work is a card with its to-dos and a line saying where it stands. If you close the panel it stays closed for that chat; `/claudopus` opens it again. Right after you install, it opens once by itself with a welcome that offers to index your old chats.
+- The panel opens beside the chat by itself the first time work starts in that chat. Each piece of work is a card with its to-dos and a line saying where it stands. Once it is open in one chat it opens in every chat on this Mac, including chats that start later. Close it in one chat and it closes in all of them, and new work does not bring it back until `/claudopus` opens it again. Right after you install, it opens once by itself with a welcome that offers to index your old chats.
+- The panel lists the running work of every open chat on this Mac, each chat's cards under that chat's name, this chat's first. You can answer another chat's question from here, and the answer reaches that chat's work. Stop, the model choice and the full record stay in the chat that runs the work. With `macs` set, the chats of your other Macs are listed too.
 - A short band above the prompt says what is being done right now.
 - A message about work that is already running goes to that work as a steer instead of starting new work.
 - When work finishes, the chat passes on its result, and the panel lists it under Finished. What the work left for you to read is listed under Results.
@@ -77,7 +78,8 @@ The settings are `~/.claude/claudopus/config.json`. Every key is optional:
   "agents": true,
   "sound": true,
   "notifications": true,
-  "models": { "work": "opus", "legwork": "sonnet", "heavy": "fable" }
+  "models": { "work": "opus", "legwork": "sonnet", "heavy": "fable" },
+  "macs": ["sam@other-mac.local"]
 }
 ```
 
@@ -88,8 +90,9 @@ The settings are `~/.claude/claudopus/config.json`. Every key is optional:
 | `sound` | `false` silences the short chime played when work is ready. |
 | `notifications` | `false` stops the notification that names work when it is ready, stopped or failed. |
 | `models` | Which model runs most work, long legwork and helpers, and heavy work (`opus`, `sonnet`, `fable` or `haiku`). |
+| `macs` | Up to four other Macs, as `user@host` or a `Host` of `~/.ssh/config`, that this Mac's panel lists the chats of. It uses your own SSH, which must log in without asking; each Mac needs Claudopus of this version or newer. For a Mac's panel to list this Mac's chats in turn, name this Mac in that Mac's `config.json` and turn on Remote Login on this Mac (System Settings, General, Sharing). |
 
-`name` and `agents` are read when a chat starts; `sound` and `notifications` each time work ends.
+`name`, `agents` and `macs` are read when a chat starts; `sound` and `notifications` each time work ends.
 
 ## Turn it off
 
@@ -117,6 +120,8 @@ Everything the mod keeps is in `~/.claude/claudopus`, as plain files:
 | `servers.json` | The servers `/servers` last saw |
 | `config.json` | Your settings, written by the Config tab |
 | `welcome.json` | Whether the first-run welcome still shows |
+| `panel.json` | Whether you last opened or closed the panel, which every chat follows |
+| `live/` | Each chat's running work while it runs, for the other chats' panels; answers left for a chat from another panel; and, with `macs`, what was last fetched from each of those Macs. A chat removes its own file when its work ends or it closes |
 | `rules/CLAUDE.md`, `roles/chat.md`, `roles/work.md` | Your own copies of the three texts, written only when you edit or save one in the Config tab; Reset moves your copy aside as `.old` |
 | `log.md` | The mod's own log |
 
@@ -125,7 +130,7 @@ Delete the folder to start over. The mod writes nowhere else: no build, start-up
 ## Privacy
 
 - **What it keeps.** The files listed under [Memory](#memory), in `~/.claude/claudopus` on your own machine; delete the folder and they are gone. Passwords and keys you type in its boxes are kept in this Mac's keychain instead, and stay there until you remove them.
-- **What it sends.** Only to Claude, through Claude Code: the texts it adds to prompts (its rules, your subjects, briefs and results not yet passed on), and after each reply one short call with the start of your message and of the reply, to title the chat and note what was asked and done. No telemetry, no other network calls of its own.
+- **What it sends.** Only to Claude, through Claude Code: the texts it adds to prompts (its rules, your subjects, briefs and results not yet passed on), and after each reply one short call with the start of your message and of the reply, to title the chat and note what was asked and done. With `macs` set, to those Macs only, over your own SSH: it reads their chats' running work and leaves your answers there. No telemetry, no other network calls of its own.
 - **Keys and passwords.** What you type in its password and key boxes stays in this Mac's keychain and is used only for the commands work runs, on this Mac or over SSH to the host named. [What you see](#what-you-see) says what that allows and where the hiding stops.
 
 The full account is below.
@@ -136,7 +141,7 @@ Everything stays on your machine, apart from what Claude Code itself sends to Cl
 
 ### What it sends, and where
 
-After each reply, one short call through Claude Code (`$.model.complete`, Sonnet) sends the start of your message and of the reply to Claude, to title the chat and note what was asked and done. It sets that title, and reads the chat's own id, through the Claude desktop app's built-in session server (`ccd_session_mgmt`: `get_session`, `set_session_title`). No telemetry, no other network calls.
+After each reply, one short call through Claude Code (`$.model.complete`, Sonnet) sends the start of your message and of the reply to Claude, to title the chat and note what was asked and done. It sets that title, and reads the chat's own id, through the Claude desktop app's built-in session server (`ccd_session_mgmt`: `get_session`, `set_session_title`). With Macs named under `macs`, it runs `ssh` to each (key login only, never asking for a password): every 10 seconds one chat on this Mac reads the files under `~/.claude/claudopus/live` there that changed in the last three minutes, and an answer you press for one of their chats is written into that Mac's `live/answers`. No telemetry, no other network calls.
 
 ### What it puts in prompts
 
@@ -163,7 +168,7 @@ When you press an answer or send a reply on a card whose work has already ended,
 
 ### Programs it runs, and why
 
-Each by name with its arguments in the call: `lsof` and `ps` to list servers for `/servers`, `kill` when you stop one there; `jq` (looked for in `/usr/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, then the path) and `du` for Stats; `head` and `tail` to read the ends of a work's record; `sips` for thumbnails; `mkdir`, `cp` and `find` to copy a result's pictures into its folder and drop old thumbnails; `mv` to set aside your copy of a text on Reset; `open` (or `xdg-open`) to show the memory folder, a picture or a text in your editor; `grep` to search the memory for `recall`; its own `bin/secret` with `--list` and `--hide` to hide kept keys; and its own `bin/notify` with the notification's title, text and what a click opens (`claude://code/continue?session=` with this chat's id in the Claude app, else the app it runs in), which starts `notifier/Claudopus.app`, then `osascript` if that one may not notify.
+Each by name with its arguments in the call: `lsof` and `ps` to list servers for `/servers`, `kill` when you stop one there; `jq` (looked for in `/usr/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, then the path) and `du` for Stats; `head` and `tail` to read the ends of a work's record; `sips` for thumbnails; `mkdir`, `cp` and `find` to copy a result's pictures into its folder and drop old thumbnails; `mv` to set aside your copy of a text on Reset and to put an answer for another chat in place whole; `ssh` to the Macs named under `macs`, with `sh`, `date`, `find`, `tr`, `mkdir`, `cat` and `mv` run there to read their chats' files and leave answers; `open` (or `xdg-open`) to show the memory folder, a picture or a text in your editor; `grep` to search the memory for `recall`; its own `bin/secret` with `--list` and `--hide` to hide kept keys; and its own `bin/notify` with the notification's title, text and what a click opens (`claude://code/continue?session=` with this chat's id in the Claude app, else the app it runs in), which starts `notifier/Claudopus.app`, then `osascript` if that one may not notify.
 
 ### What it does not run by itself
 
