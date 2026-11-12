@@ -69,6 +69,9 @@ export type Todo = {
   startedAt: number
   // 0 while it works
   endedAt: number
+  // When its turn last ended with its answer, finished, while its own background work still held it; absent once it steps again.
+  // Work stopped after that, by the chat, the panel or the engine, had finished: it ends done, not stopped
+  answeredAt?: number
   // Only work that is working has a card; one that has ended is kept, so a message to it brings its card back as it was
   status: 'working' | 'done' | 'stopped' | 'failed'
   // Set on a card another chat shares: that chat, the Mac it runs on when another (empty for this one), and the card's own id there.

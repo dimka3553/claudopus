@@ -1168,6 +1168,80 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   await again.unmount()
 })
 
+test('work that answered while only its own background work held it, then stopped by the chat, the panel or the engine, finished: green and happy for its pause; work stopped before it answered is not', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const { clock, files } = world(on, { art: true, agents, kinds })
+  await $.session.start(start)
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const report = `The hover is gone and idle chats are no longer listed. ${'All tests pass and the version is pushed to main, installed on both Macs. '.repeat(8)}`
+  // Its turn ends with its report while a watcher it started still runs: the engine holds it, and its card goes on working
+  const answer = async (id: string, turnId: string) => {
+    agents[id] = 'waiting'
+    kinds[id] = 'general-purpose'
+    await $.turn.complete({ answer: report, durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId: id } as never)
+  }
+
+  // The chat stops it with TaskStop once its report is in: the engine then lists it as killed
+  await $.agent.spawn({ ...spawn, description: 'Remove the hover', prompt: 'remove the hover' } as never)
+  await clock.advance(60_000)
+  await answer('a1', 't1')
+  expect(await drawn(pane)).toEqual(['working'])
+  // Its report is kept although it is held
+  await clock.advance(10)
+  expect(await until(async () => [...files.keys()].find(key => /\/reports\/[^/]+-remove-the-hover\/report\.md$/.test(key)))).toBeDefined()
+  agents.a1 = 'killed'
+  await clock.advance(20_000)
+  expect((await until(() => pane.find({ type: 'Text', text: '✓ Finished' })))?.props.color).toBe('success')
+  expect(await drawn(pane)).toEqual(['happy'])
+  expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
+  await clock.advance(2_100)
+  expect(await pane.find({ type: 'Text', text: /Remove the hover/ })).toBeUndefined()
+  expect(await drawn(pane)).toEqual(['mark'])
+
+  // The engine ends it as aborted instead: the same
+  await $.agent.spawn({ ...spawn, description: 'Fold the list', prompt: 'fold the list' } as never)
+  await answer('a2', 't2')
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: true, turnId: 't2b', reason: 'answer', agentId: 'a2' } as never)
+  expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  expect(await drawn(pane)).toEqual(['happy'])
+  await clock.advance(2_100)
+
+  // Stop pressed on its card in the panel: the same
+  await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
+  await answer('a3', 't3')
+  await pane.press({ key: 'stop-a3' })
+  expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  expect(await drawn(pane)).toEqual(['happy'])
+  await clock.advance(2_100)
+
+  // Held work its watcher wakes takes a step again: from then it has not finished, and stopped it is stopped
+  await $.agent.spawn({ ...spawn, description: 'Watch the M4', prompt: 'watch the m4' } as never)
+  await answer('a4', 't4')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b4', agentId: 'a4', command: 'ls' } as never)
+  await pane.press({ key: 'stop-a4' })
+  expect(await pane.find({ type: 'Text', text: 'Stopped' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  expect(await drawn(pane)).toEqual(['mark'])
+  await clock.advance(2_100)
+
+  // Work stopped before it ever answered is stopped, by the engine as by the panel; work that failed is not happy either
+  await $.agent.spawn({ ...spawn, description: 'Draw the mouth', prompt: 'draw the mouth' } as never)
+  agents.a5 = 'killed'
+  kinds.a5 = 'general-purpose'
+  await clock.advance(20_000)
+  expect(await drawn(pane)).toEqual(['mark'])
+  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  await clock.advance(2_100)
+  await $.agent.spawn({ ...spawn, description: 'Draw the chin', prompt: 'draw the chin' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't6', reason: 'error', agentId: 'a6' } as never)
+  expect(await drawn(pane)).toEqual(['mark'])
+  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  await pane.unmount()
+})
+
 test('work that is ready plays one sound and raises one notification; helpers, a second report, a Stop press and a reload make none; stopped work says so silently', async ($, on) => {
   // Whether the app takes notifications from a mod
   const app = { noSurface: false, claudopus: 0 }
@@ -2556,8 +2630,8 @@ test("the header says in one line what every chat's cards say, and the octopus b
   expect(head(2, 3, 2)).toEqual(['Working on 5 things here and in 2 other chats', 'working'])
   expect(head(0, 0, 0, 1)).toEqual(['1 thing needs you', 'asking'])
   expect(head(1, 2, 1, 2)).toEqual(['2 things need you, 3 running', 'asking'])
-  // What needs the person outranks a finish; a finish shows on the octopus while other work still runs, and alone in the line
-  expect(head(0, 0, 0, 1, true)).toEqual(['1 thing needs you', 'asking'])
+  // A finish shows on the octopus for its moment whatever else goes on, the line still saying what needs the person or runs
+  expect(head(0, 0, 0, 1, true)).toEqual(['1 thing needs you', 'happy'])
   expect(head(0, 1, 1, 0, true)).toEqual(['Working on 1 thing in another chat', 'happy'])
   expect(head(0, 0, 0, 0, true)).toEqual(['Just finished', 'happy'])
 })
@@ -2937,6 +3011,41 @@ test("work that ends in another chat turns happy in this panel for its pause, th
   await clock.advance(1000)
   expect(await until(async () => list.find({ type: 'Text', text: 'Fix the nose' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
+  await list.unmount()
+})
+
+test("while the person types a reply into an ask, work finishing here and in another chat still turns green and happy for its pause, then leaves", async ($, on) => {
+  const { files, clock } = world(on, { art: true })
+  await $.session.start(start)
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
+  await $.agent.spawn({ ...spawn, description: 'Submit the mod', prompt: 'submit the mod' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Billing page' }))).toBeDefined()
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Submit it to the plugin directory.' } as never)
+  const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await list.input({ key: box?.key ?? '', text: 'Not y', kind: 'change' } as never)
+  // This chat's work finishes mid-typing: green and happy at once, then gone after its pause, the times still held
+  await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
+  expect((await until(async () => list.find({ type: 'Text', text: '✓ Finished' })))?.props.color).toBe('success')
+  expect(await drawn(list)).toContain('happy')
+  await clock.advance(2_100)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: /Draw the eyes/ })) ? undefined : true))).toBe(true)
+  // Another chat's work finishes mid-typing: the same
+  const file = JSON.parse(otherChat(NOW)) as { at: number; cards: { status: string; endedAt: number; ask?: unknown }[] }
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 8000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 7500, ask: undefined })) }))
+  await list.input({ key: box?.key ?? '', text: 'Not ye', kind: 'change' } as never)
+  // This panel reads the other chats every few seconds: the pause runs from the look that saw the end
+  for (let n = 0; n < 6 && !(await list.find({ type: 'Text', text: '✓ Finished' })); n += 1) await clock.advance(1000)
+  expect((await until(async () => list.find({ type: 'Text', text: '✓ Finished' })))?.props.color).toBe('success')
+  expect(await drawn(list)).toContain('happy')
+  await clock.advance(3000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
+  // The half reply is still in its box
+  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('Not ye')
   await list.unmount()
 })
 

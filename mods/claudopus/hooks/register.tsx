@@ -383,6 +383,9 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at, ask: one.ask?.choices?.length ? one.ask : undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
 const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0 })
+// How work that is stopped ends: done when its turn had already ended with its answer and only its own background work held it
+// (the chat stops such work once its report is in), stopped otherwise
+const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
 
 // Work that has ended, the oldest first, then work under way: what `capped` forgets first comes first
 const byEnd = (list: Todo[]) => [...list].sort((a, b) => (a.status === 'working' ? Infinity : a.endedAt) - (b.status === 'working' ? Infinity : b.endedAt) || 0)
@@ -437,7 +440,7 @@ const sync = async ($: EngineInterface) => {
             started(one.id, one.parentId ?? (one.type === 'fork' || ownCalls.has(one.description) ? '' : HELPER), one.description, '', now, one.type === 'fork')
           : undefined
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
-          ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? 'stopped' : 'done', now)
+          ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
           : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
             card.status === 'working' && !card.steps && !card.entries.length && !card.words && one.status === 'idle'
             ? ended(card, 'done', now)
@@ -475,7 +478,7 @@ const stop = async ($: EngineInterface, id: string) => {
   const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
   if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
   const now = await $.clock.now()
-  await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'stopped', now) : one)))
+  await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one)))
   await lookEnds($)
 }
 
@@ -3728,15 +3731,16 @@ export const register: Register = on => {
       const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
       await update($, todos, list => {
         const isWaiting = how === 'done' && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
-        return list.map(one => (one.id !== id ? one : isWaiting ? { ...one, answer: answer || one.answer } : { ...ended(one, how, now), answer: answer || one.answer }))
+        return list.map(one => (one.id !== id ? one : isWaiting ? { ...one, answer: answer || one.answer, answeredAt: answer ? now : one.answeredAt } : { ...ended(one, how === 'stopped' ? stoppedAs(one) : how, now), answer: answer || one.answer }))
       })
       await lookEnds($)
       // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
-      // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report
+      // Work a message of the person's started that has finished leaves its report for good, held on its own background work too;
+      // a helper's answer is no report
       const card = (await read($, todos)).find(one => one.id === id)
       const report = (e.answer ?? '').trim()
-      if (card && !card.parentId && card.status === 'done' && report) {
+      if (card && !card.parentId && (card.status === 'done' || (card.status === 'working' && card.answeredAt === now)) && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
       }
       return done
@@ -3878,7 +3882,7 @@ export const register: Register = on => {
         await update($, todos, list =>
           list.map(one => {
             if (one.id !== id) return one
-            const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1 }
+            const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined }
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1

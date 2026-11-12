@@ -268,6 +268,6 @@ export const headLine = ({ here, there, chats, asks, isDone }: Head) => {
   if (here) return `Working on ${things(here)}`
   return isDone ? 'Just finished' : 'Nothing is running'
 }
-// The octopus beside it says the same: amber while anything needs the person, happy for a moment as work finishes, at work while
-// anything runs, resting only when nothing goes on anywhere
-export const headMood = ({ here, there, asks, isDone }: Head) => (asks ? 'asking' : isDone ? 'happy' : here + there ? 'working' : 'mark')
+// The octopus beside it: happy for the moment work finishes, whatever else goes on, so no finish passes unseen; else amber while
+// anything needs the person, at work while anything runs, resting only when nothing goes on anywhere
+export const headMood = ({ here, there, asks, isDone }: Head) => (isDone ? 'happy' : asks ? 'asking' : here + there ? 'working' : 'mark')
