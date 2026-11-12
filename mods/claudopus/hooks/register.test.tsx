@@ -36,6 +36,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const titles: string[] = []
   const compacts: (string | undefined)[] = []
   const opened: string[] = []
+  // Folders listed and panes opened, in the order they happened
+  const events: string[] = []
   // Each pane opened, with its tab's title
   const tabs: string[] = []
   const stopped: string[] = []
@@ -90,7 +92,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   })
   on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
   // What a folder holds: its files, and the folders its deeper files are in
-  on('fs.list', (_, e) => ({
+  on('fs.list', (_, e) => (events.push(`list ${e.path}`), {
     value: [...new Set([...files.keys()].filter(path => path.startsWith(`${e.path}/`)).map(path => path.slice(e.path.length + 1)))]
       // A file's time is 0 unless the test lays it as mtime:<path>
       .map(rest => ({ name: rest.split('/')[0] ?? rest, kind: rest.includes('/') ? 'dir' : 'file', size: 1, mtimeMs: Number(files.get(`mtime:${e.path}/${rest}`) ?? 0), isLink: false }))
@@ -221,6 +223,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   on('tool.register', (_, e) => ({ value: { tool: `mcp__claudopus__${e.name}` } }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('ui.open', (_, e) => {
+    events.push(`open ${e.id}`)
     opened.push(e.id)
     tabs.push(`${e.id}: ${e.title}`)
     // A screen with nowhere to draw a pane, as a Remote Control chat seen from another device
@@ -274,7 +277,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -2736,6 +2739,16 @@ test('opened in one chat, the panel opens in every other chat, at once in one th
   expect(opened).toEqual(['claudopus', 'claudopus'])
 })
 
+test("a chat that starts reads the other chats before its panel opens, so they never drop out of it while it loads", async ($, on) => {
+  const { files, events } = world(on)
+  files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_700_000_000_500 }))
+  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
+  await $.session.start(start)
+  const read = events.indexOf(`list ${MEMORY}/live/pushed`)
+  expect(read).toBeGreaterThanOrEqual(0)
+  expect(read).toBeLessThan(events.indexOf('open claudopus'))
+})
+
 test('/claudopus opens the panel for every chat; closed by hand it closes in every chat and work does not bring it back until asked', async ($, on) => {
   const { opened, files } = world(on)
   await $.session.start(start)
@@ -3388,6 +3401,30 @@ test("an empty tab an earlier version left open, not drawn, closes as the mod lo
   await $.session.start(start)
   expect(closed.filter(id => id !== 'agents')).toEqual(['work-a9'])
   expect(live.map(one => one.id)).toEqual(['claudopus', 'reports'])
+})
+
+test("a reload while the panel stayed up gives every button a key no load before used, so the app takes each afresh and a press works", async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: true, isPlaced: true }]
+  const { opened, clock } = world(on, { live })
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const before = (await keyed(pane, 'stats-open'))?.key
+  expect(before).toBeDefined()
+  // The code reloads from the folder it is watched in: the panel is still up, and the load runs again
+  await clock.advance(7000)
+  await $.session.start(start)
+  const after = await until(async () => {
+    const key = (await keyed(pane, 'stats-open'))?.key
+    return key && key !== before ? key : undefined
+  })
+  expect(after).toBeDefined()
+  await pressed(pane, 'stats-open')
+  expect(opened).toContain('stats')
+  // Another reload a moment later moves on again
+  const again = (await keyed(pane, 'stats-open'))?.key
+  await clock.advance(1)
+  await $.session.start(start)
+  expect(await until(async () => ((await keyed(pane, 'stats-open'))?.key !== again ? true : undefined))).toBe(true)
 })
 
 test("with no screen attached every tab waits undrawn, and none is closed as the mod loads", async ($, on) => {

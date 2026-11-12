@@ -3562,6 +3562,10 @@ export const register: Register = on => {
     }
     ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
     cwd = e.cwd
+    // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
+    // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press
+    // reached nothing. Keys no load before used make it take each button afresh: the moment of the load, with room for a thousand presses
+    if ((await $.ui.panes().catch(() => [])).length) presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000
     await loadSettings($)
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)
@@ -3572,6 +3576,9 @@ export const register: Register = on => {
     const title = await appTitle($)
     // The first load of a session sends the role text; a reload keeps what stands
     await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id ? m.needsContext : true }))
+    // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
+    // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
+    await readOthers($).catch(() => undefined)
 
     await $.tool.register({
       name: 'update',
