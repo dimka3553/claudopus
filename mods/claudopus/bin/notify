@@ -1,0 +1,48 @@
+#!/bin/sh
+# Shows one notification as Claudopus: bin/notify --title T --text X [--open URL] [--activate BUNDLE-ID] [--key K]
+# The app is copied to one fixed place first, so macOS knows one Claudopus whichever version of the mod is installed, and a
+# click finds it again after the mod updates.
+# Exit codes: 0 shown, 5 macOS is asking the person to allow Claudopus (this one is shown once they do), 2 Claudopus
+# notifications are turned off, anything else failed.
+set -eu
+src="$(cd "$(dirname "$0")/.." && pwd)/notifier/Claudopus.app"
+home="$HOME/Library/Application Support/Claudopus"
+dest="$home/Claudopus.app"
+lock="$home/.copying"
+mkdir -p "$home"
+
+# One copy at a time: another notification copying waits up to five seconds, then this one fails to the plain notification
+tries=0
+until mkdir "$lock" 2>/dev/null; do
+  tries=$((tries + 1))
+  # A lock left by a copy that died long ago is taken over
+  if [ "$tries" -gt 50 ]; then
+    [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rm -rf "$lock" && continue
+    exit 4
+  fi
+  sleep 0.1
+done
+trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+if ! diff -rq "$src" "$dest" >/dev/null 2>&1; then
+  rm -rf "$dest.new"
+  ditto "$src" "$dest.new"
+  # A mod that came as a download carries the quarantine mark, which would stop the app when a click starts it
+  xattr -dr com.apple.quarantine "$dest.new" 2>/dev/null || true
+  rm -rf "$dest"
+  mv "$dest.new" "$dest"
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$dest" >/dev/null 2>&1 || true
+fi
+rmdir "$lock" 2>/dev/null || true
+trap - EXIT
+
+app="$dest/Contents/MacOS/Claudopus"
+[ "$*" = --status ] && exec "$app" --status
+case $("$app" --status) in
+  off) exit 2 ;;
+  not-asked)
+    # macOS's question stays up only while the app runs, so it waits for the answer, started by macOS apart from the mod.
+    # One waits at a time; one sent meanwhile is not shown as Claudopus
+    pgrep -qf "$app --title" || open -g -n -a "$dest" --args "$@"
+    exit 5 ;;
+esac
+exec "$app" "$@"

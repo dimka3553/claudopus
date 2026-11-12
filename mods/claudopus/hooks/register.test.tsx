@@ -28,7 +28,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean }; isNew?: boolean; ended?: Set<string> } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; unplaced?: boolean } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -54,11 +54,13 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const notified: string[] = []
   // What was handed to osascript
   const osa: string[][] = []
+  // What was handed to Claudopus.app, the mod's own notifier
+  const own: string[][] = []
   // What was handed to open: a folder shown in Finder
   const shown: string[][] = []
   prompts.length = 0
   let spawned = 0
-  mock.env(on, { HOME })
+  mock.env(on, { HOME, ...options.env })
   const clock = mock.clock(on, { now: 1_700_000_000_000 })
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
@@ -141,6 +143,11 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   on('process.run', (_, e) => {
     const [tool, ...rest] = e.argv
     if (tool === 'osascript') osa.push([...e.argv])
+    // Claudopus.app answers as the app on this Mac set: 0 shown, 2 turned off in System Settings
+    if (tool?.endsWith('bin/notify')) {
+      own.push([...e.argv])
+      return { value: { exitCode: options.app?.claudopus ?? 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (tool === 'open') shown.push([...e.argv])
     if (tool === 'kill') killed.push(String(rest[0]))
     // A file moved aside
@@ -175,6 +182,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   on('ui.open', (_, e) => {
     opened.push(e.id)
     tabs.push(`${e.id}: ${e.title}`)
+    // A screen with nowhere to draw a pane, as a Remote Control chat seen from another device
+    if (options.unplaced) return { value: { isPlaced: false, reason: 'no-surface' } } as never
     return { value: { isPlaced: true } }
   })
   on('session.append', (_, e, next) => {
@@ -220,7 +229,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, shown, terminals }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, own, shown, terminals }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -1116,8 +1125,8 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
 
 test('work that is ready plays one sound and raises one notification; helpers, a second report, a Stop press and a reload make none; stopped work says so silently', async ($, on) => {
   // Whether the app takes notifications from a mod
-  const app = { noSurface: false }
-  const { clock, played, notified, files, osa } = world(on, { app })
+  const app = { noSurface: false, claudopus: 0 }
+  const { clock, played, notified, files, osa, own } = world(on, { app, env: { CLAUDE_CODE_HOST_SESSION_ID: 'local_ab12-cd34', __CFBundleIdentifier: 'com.anthropic.claudefordesktop' } })
   await $.session.start(start)
   const end = (agentId: string, turnId: string, answer = 'Done.', extra = {}) => $.turn.complete({ answer, durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId, ...extra } as never)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
@@ -1183,28 +1192,71 @@ test('work that is ready plays one sound and raises one notification; helpers, a
   expect(notified.at(-1)).toBe('Draw the ears | The ears are drawn.')
   expect(played).toHaveLength(4)
 
-  // Where the app takes no notification from a mod, this Mac's own Notification Centre is told
+  // Where the app takes no notification from a mod, Claudopus.app raises it, and a click opens this chat in the Claude app
   app.noSurface = true
   await $.agent.spawn({ ...spawn, description: 'Draw the cheeks', prompt: 'draw the cheeks' } as never)
   await end('a9', 't11', 'The cheeks are drawn.')
   await clock.advance(1_000)
-  expect(osa.at(-1)).toEqual(['osascript', '-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', 'Draw the cheeks', 'The cheeks are drawn.'])
+  expect(own.at(-1)?.slice(1)).toEqual(['--title', 'Draw the cheeks', '--text', 'The cheeks are drawn.', '--open', 'claude://code/continue?session=local_ab12-cd34', '--key', 'ready-a9'])
+  expect(own.at(-1)?.[0]).toMatch(/\/bin\/notify$/)
+  expect(osa).toEqual([])
+
+  // Claudopus notifications turned off in System Settings: macOS's plain one instead
+  app.claudopus = 2
+  await $.agent.spawn({ ...spawn, description: 'Draw the chin', prompt: 'draw the chin' } as never)
+  await end('a10', 't12', 'The chin is drawn.')
+  await clock.advance(1_000)
+  expect(own).toHaveLength(2)
+  expect(osa.at(-1)).toEqual(['osascript', '-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', 'Draw the chin', 'The chin is drawn.'])
   app.noSurface = false
 
   // config.json switches each off
   files.set(`${MEMORY}/config.json`, JSON.stringify({ sound: false }))
   await $.agent.spawn({ ...spawn, description: 'Draw the brows', prompt: 'draw the brows' } as never)
-  await end('a10', 't9')
-  await clock.advance(1_000)
-  expect(played).toHaveLength(5)
-  expect(notified).toHaveLength(6)
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false }))
-  await $.agent.spawn({ ...spawn, description: 'Draw the lips', prompt: 'draw the lips' } as never)
-  await end('a11', 't10')
+  await end('a11', 't9')
   await clock.advance(1_000)
   expect(played).toHaveLength(6)
   expect(notified).toHaveLength(6)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false }))
+  await $.agent.spawn({ ...spawn, description: 'Draw the lips', prompt: 'draw the lips' } as never)
+  await end('a12', 't10')
+  await clock.advance(1_000)
+  expect(played).toHaveLength(7)
+  expect(notified).toHaveLength(6)
   expect(osa).toHaveLength(1)
+})
+
+test('outside the Claude app a click on a notification brings forward the app the chat runs in, such as its terminal', async ($, on) => {
+  // A session id not of the app's shape is not put in its link
+  const { clock, own } = world(on, { app: { noSurface: true }, env: { CLAUDE_CODE_HOST_SESSION_ID: 'session_x', __CFBundleIdentifier: 'com.googlecode.iterm2' } })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
+  await $.turn.complete({ answer: 'The eyes are drawn.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(1_000)
+  expect(own.at(-1)?.slice(1)).toEqual(['--title', 'Draw the eyes', '--text', 'The eyes are drawn.', '--activate', 'com.googlecode.iterm2', '--key', 'ready-a1'])
+})
+
+test('with neither a chat in the Claude app nor an app to bring forward, a notification names nothing for a click to open', async ($, on) => {
+  const { clock, own } = world(on, { app: { noSurface: true } })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
+  await $.turn.complete({ answer: 'The eyes are drawn.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(1_000)
+  expect(own.at(-1)?.slice(1)).toEqual(['--title', 'Draw the eyes', '--text', 'The eyes are drawn.', '--key', 'ready-a1'])
+})
+
+test('/claudopus and /servers say the panel opened, and say plainly where it can be seen when this screen has nowhere to draw it', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'claudopus', args: '' } as never)).text).toBe('Claudopus panel opened.')
+  expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe('Servers panel opened.')
+})
+
+test('/claudopus and /servers on a screen with nowhere to draw a panel say it cannot be shown there and where it can', async ($, on) => {
+  world(on, { unplaced: true })
+  await $.session.start(start)
+  expect((await $.command.run({ command: 'claudopus', args: '' } as never)).text).toBe("The Claudopus panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.")
+  expect((await $.command.run({ command: 'servers', args: '' } as never)).text).toBe("The Servers panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.")
 })
 
 test('work the engine runs is listed even when the mod never saw it start, and work it reports as failed leaves the panel', async ($, on) => {

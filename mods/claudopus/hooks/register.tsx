@@ -2546,16 +2546,38 @@ const announce = async ($: EngineInterface) => {
   await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
 }
 
-// One notification, through the app, else this Mac's own Notification Centre; `what` names it in the log
+// What /claudopus and /servers answer where the screen has nowhere to draw a panel, as a Remote Control chat seen from another device
+const nowhere = (panel: string) => `The ${panel} panel can't be shown on this screen. It shows in the Claude app on the Mac this chat runs on.`
+
+// The desktop app's own id for the chat this engine runs, which its link `claude://code/continue?session=` opens (read off the
+// app: it takes `last` or an id of this shape). Unset in a terminal
+const DESKTOP_SESSION = /^local_[A-Za-z0-9-]{1,64}$/
+
+// What a click on a notification opens: this chat in the Claude app, else the app this chat runs in, such as its terminal
+const clickOf = async ($: EngineInterface) => {
+  const session = (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) ?? ''
+  if (DESKTOP_SESSION.test(session)) return ['--open', `claude://code/continue?session=${session}`]
+  const app = (await $.env.get('__CFBundleIdentifier')) ?? ''
+  return /^[A-Za-z0-9.-]{1,200}$/.test(app) ? ['--activate', app] : []
+}
+
+// One notification, through the app, else as Claudopus in this Mac's Notification Centre, with its icon, a click opening the
+// chat; else, where Claudopus may not notify, macOS's plain one. `what` names it in the log
 const alertPerson = async ($: EngineInterface, what: string, title: string, text: string, key: string) => {
   const sent = await $.ui.notify(text, { title, key: key.slice(0, 200) }).catch(err => ({ isSent: false as const, reason: String(err) }))
   if (sent.isSent || sent.reason === 'disabled' || sent.reason === 'refused') return void log($, `${what}: ${title} — ${sent.isSent ? `notified through ${sent.channel}` : `not notified (${sent.reason})`}`)
-  // The desktop app takes no notification from a mod yet (no-surface): this Mac's own Notification Centre is told instead.
-  // Elsewhere osascript is missing and nothing is shown
+  // The desktop app takes no notification from a mod yet (no-surface): Claudopus.app raises it. 0 shown, 5 macOS is asking the
+  // person to allow Claudopus and it is shown once they do
+  const own = await $.process
+    .run([`${$.plugin.root}/bin/notify`, '--title', title, '--text', text, ...(await clickOf($)), '--key', key.slice(0, 200)])
+    .catch(err => ({ exitCode: -1, stderr: String(err) }))
+  if (own.exitCode === 0 || own.exitCode === 5) return void log($, `${what}: ${title} — app said ${sent.reason}; ${own.exitCode === 0 ? 'notified through Claudopus' : 'macOS asked to allow Claudopus'}`)
+  // Claudopus notifications turned off in System Settings, or it failed: macOS's plain notification. Elsewhere osascript is
+  // missing and nothing is shown
   const mac = await $.process
     .run(['osascript', '-e', 'on run argv', '-e', 'display notification (item 2 of argv) with title (item 1 of argv)', '-e', 'end run', title, text])
     .catch(err => ({ exitCode: -1, stderr: String(err) }))
-  void log($, `${what}: ${title} — app said ${sent.reason}; ${mac.exitCode === 0 ? 'notified through macOS' : `macOS notification failed: ${mac.stderr.slice(0, 120)}`}`)
+  void log($, `${what}: ${title} — app said ${sent.reason}; Claudopus said ${own.exitCode}; ${mac.exitCode === 0 ? 'notified through macOS' : `macOS notification failed: ${mac.stderr.slice(0, 120)}`}`)
 }
 
 // Work that needs the person's hands says so at once: the panel comes up with its card standing out, a chime unless config.json
@@ -3077,16 +3099,16 @@ export const register: Register = on => {
   on('command.run', { command: 'claudopus' }, async $ => {
     await update($, me, one => ({ ...one, isListOpened: true }))
     await update($, paneShown, () => true)
-    await $.ui.open({ id: LIST, title: LIST_TITLE })
+    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE })
 
-    return { text: 'Claudopus panel opened.' }
+    return { text: opened.isPlaced ? 'Claudopus panel opened.' : nowhere('Claudopus') }
   })
 
   on('command.run', { command: 'servers' }, async $ => {
     await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
-    await $.ui.open({ id: PANE, title: PANE_TITLE })
+    const opened = await $.ui.open({ id: PANE, title: PANE_TITLE })
 
-    return { text: 'Servers panel opened.' }
+    return { text: opened.isPlaced ? 'Servers panel opened.' : nowhere('Servers') }
   })
 
   on('tool.call', { tool: 'mcp__claudopus__update' }, async ($, e) => {

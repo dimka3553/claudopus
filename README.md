@@ -48,7 +48,7 @@ That is all. Nothing has to be typed in each chat.
 - Stats, beside Results, adds up what the work came to, for this chat or every chat with kept work, today or all time: tokens by model, work finished, to-dos done, your messages, the time saved by running work side by side, a timeline, what the tokens would cost at API prices, and what the memory holds.
 - Memory, at the top of the panel, opens Finder at the folder where Claudopus keeps what it remembers.
 - About, beside Memory, waves hello once, says what Claudopus is and shows its version and Claude Code's, the website, the licence and the GitHub repo.
-- A finish plays a short quiet chime, and a notification names the work and the first words of its result, so you hear and see it when you are elsewhere.
+- A finish plays a short quiet chime, and a notification names the work and the first words of its result, so you hear and see it when you are elsewhere. It comes from Claudopus with its octopus icon, and clicking it opens that chat in the Claude app (in a terminal, it brings the terminal forward). The first one makes macOS ask you once to allow Claudopus notifications.
 - When work needs an admin command, a box asks you once for that Mac's password, hiding what you type; it stays in this Mac's keychain and is never put in a chat, a command line, a file or a log. Once it is kept, every later admin command any agent runs on that Mac goes through without asking you again, until you remove it with `bin/admin <mac> --forget`.
 - When work needs a key, token or password, a box asks you once for it by name, hiding what you type; it stays in this Mac's keychain, work uses it as an environment variable, and the value is hidden where a command prints it by accident. A command that changes the value before printing it is not stopped, and the hook that refuses keychain reads catches the usual commands, not every way there is.
 - `/servers` shows the local servers running on your machine and which chat started each.
@@ -61,7 +61,7 @@ The chat picks a model for each piece of work: Opus for most, Sonnet for long le
 
 - Claude Code 2.1.287 or newer in the terminal, or the desktop app 2.1.286 or newer. The panel draws in VS Code from 2.1.299.
 - Does not work on Windows under WSL (plugins do not load there) or where your organization's admins block mods. In `claude -p` print mode and cloud sessions there is no panel.
-- macOS only: the password and key boxes, the keychain, thumbnails and notifications use `osascript`, `security`, `sips` and `open`.
+- macOS only (12 or newer): the password and key boxes, the keychain, thumbnails and notifications use `osascript`, `security`, `sips`, `open` and a small app of the mod's, `notifier/Claudopus.app`, which is copied to `~/Library/Application Support/Claudopus` on its first notification. If you turn Claudopus off in System Settings, Notifications, macOS's plain notification is used instead, which cannot show the icon or open the chat.
 - Stats reads Claude's records with `jq`, which macOS 15 and later include.
 - Seen working in the macOS desktop app. The terminal and VS Code have not been tried yet.
 
@@ -163,7 +163,7 @@ When you press an answer or send a reply on a card whose work has already ended,
 
 ### Programs it runs, and why
 
-Each by name with its arguments in the call: `lsof` and `ps` to list servers for `/servers`, `kill` when you stop one there; `jq` (looked for in `/usr/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, then the path) and `du` for Stats; `head` and `tail` to read the ends of a work's record; `sips` for thumbnails; `mkdir`, `cp` and `find` to copy a result's pictures into its folder and drop old thumbnails; `mv` to set aside your copy of a text on Reset; `open` (or `xdg-open`) to show the memory folder, a picture or a text in your editor; `grep` to search the memory for `recall`; and its own `bin/secret` with `--list` and `--hide` to hide kept keys.
+Each by name with its arguments in the call: `lsof` and `ps` to list servers for `/servers`, `kill` when you stop one there; `jq` (looked for in `/usr/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, then the path) and `du` for Stats; `head` and `tail` to read the ends of a work's record; `sips` for thumbnails; `mkdir`, `cp` and `find` to copy a result's pictures into its folder and drop old thumbnails; `mv` to set aside your copy of a text on Reset; `open` (or `xdg-open`) to show the memory folder, a picture or a text in your editor; `grep` to search the memory for `recall`; its own `bin/secret` with `--list` and `--hide` to hide kept keys; and its own `bin/notify` with the notification's title, text and what a click opens (`claude://code/continue?session=` with this chat's id in the Claude app, else the app it runs in), which starts `notifier/Claudopus.app`, then `osascript` if that one may not notify.
 
 ### What it does not run by itself
 
@@ -173,6 +173,7 @@ Each by name with its arguments in the call: `lsof` and `ps` to list servers for
 
 - The hooks module itself: the panel, the cards and every behaviour above are this code.
 - `bin/admin` and `bin/secret`: the only way work gets an admin command or a key without the value passing through a chat.
+- `bin/notify` and `notifier/`: the notifications' own app, built from `notifier/main.swift` by `notifier/build.sh` and signed ad hoc; macOS shows a notification's icon and opens what a click names only for an app.
 - `workflows/rounds.js`: the maker-and-checker workflow the chat starts.
 - `onboard/extract.py`: reads your past chats under `~/.claude/projects` into the memory; it runs only after you press Index my old chats.
 - `sounds/ready.wav`, `art/panel.gif` and the icon: the chime, the README's picture and the listing icon.
