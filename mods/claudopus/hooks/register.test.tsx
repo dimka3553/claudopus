@@ -2198,8 +2198,12 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   const again = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   expect(again?.key).not.toBe(box?.key)
   expect(again?.props.value ?? '').toBe('')
-  await pressed(list, (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? '')
+  // Half a reply typed, then Done pressed twice: the answer goes once, and the half reply is not left for the next ask
+  await list.input({ key: again?.key ?? '', text: 'Not y', kind: 'change' } as never)
+  const done = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? ''
+  await Promise.all([list.press({ key: done }), list.press({ key: done }).catch(() => undefined)])
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Done"')))).toContain('Submit new. Done?')
+  expect(appended.filter(line => line.startsWith('a2: ') && line.includes('"Done"'))).toHaveLength(1)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'It is under Manage, then Submit new. Done?' })) ? undefined : true))).toBe(true)
   expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Done” · it reads this at its next step' }))).toBeDefined()
   // A newer line from the work takes the answer's place
@@ -2209,6 +2213,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k8', agentId: 'a2', text: 'Tell me the repo name.' } as never)
   ended.add('a2')
   const box3 = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  expect(box3?.props.value ?? '').toBe('')
   await list.input({ key: box3?.key ?? '', text: 'claudopus' })
   expect(await until(async () => submitted.find(line => line.includes('claudopus') && line.includes('From the Claudopus panel')))).toContain('Tell me the repo name.')
   expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “claudopus” · sent to the chat, which carries the work on' }))).toBeDefined()
@@ -2440,6 +2445,10 @@ test("an ask of another chat's work is answered from this panel and reaches that
   await clock.advance(6000)
   expect(appended.find(line => line.startsWith('a1: ') && line.includes('the old one'))).toContain('Which repo?')
   expect((await read$todos(files)).ask).toBeUndefined()
+  // A second reply in words left right after, with the ask already answered, still reaches the work
+  files.set(`${MEMORY}/live/answers/engine-id/4-d.json`, JSON.stringify({ card: 'a1', choice: 'the one from 2024', isReply: true, ask: 'Which repo?', askAt: t0 + 6000, at: t0 + 13_000 }))
+  await clock.advance(5000)
+  expect(appended.find(line => line.startsWith('a1: ') && line.includes('the one from 2024'))).toContain('Which repo?')
 })
 
 test("with another Mac named in config.json, its chats' work shows here under its chat and Mac, an answer goes there over ssh, and a Mac that stops answering shows none", async ($, on) => {

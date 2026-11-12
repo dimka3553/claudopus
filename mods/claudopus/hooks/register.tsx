@@ -2687,20 +2687,30 @@ const DEFAULT_ANSWERS = ['Done', 'Not now']
 const sentReplies = new Map<string, Sent>()
 // An answer on its way, by the work it was written into: that work's next step reads it, and the card it belongs to says so
 const pending = new Map<string, string>()
+// The asks of this chat's work already answered, by work and when it asked
+const answeredAsks = new Set<string>()
 const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   if (one.chat) return answerElsewhere($, one, choice, isReply)
   const ask = one.ask
   const said = choice.trim()
   if (!ask || !said) return
   const target = ask.from ?? one.id
+  // The amber goes and the box clears at once. Only the first answer to the ask it was made for counts: a second press, or a press
+  // on an ask the work has since replaced, sends nothing. Marked before anything is awaited, so two presses at once count once
+  const asked = `${one.id}:${ask.at}:${ask.text}`
+  if (answeredAsks.has(asked)) return
+  answeredAsks.add(asked)
   const at = await $.clock.now()
-  // The box clears, the amber goes and the card says what was answered before anything is written: nothing the panel does is waited on
-  if (isReply) (replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes())
+  let isCleared = false
+  await update($, todos, list =>
+    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
+  )
+  if (!isCleared) return
+  drafts.delete(one.id)
+  replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
+  if (isReply) freeTimes()
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: one.status === 'working' ? 'work' : 'chat', at, line })
-  await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at ? { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) } : card)),
-  )
   redraw($)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
@@ -2711,6 +2721,12 @@ const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply 
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'chat', at, line })
   redraw($)
   await sendForPerson($, isReply ? `From the Claudopus panel: ${who(true)} replied to what the work "${titleOf(one)}" asked before it ended (${ask.text}):\n${said}` : `From the Claudopus panel: ${who(true)} pressed "${said}" in answer to what the work "${titleOf(one)}" asked before it ended: ${ask.text}`)
+}
+// A reply in words left by another chat for work whose ask is already answered: to the work while it runs, else to the chat
+const replyAfter = async ($: EngineInterface, one: Todo, said: string, asked: string) => {
+  const told = one.status === 'working' ? await tell($, one.id, `${who(true)} added, in their own words, to their answer to your ask ("${asked}"): ${said}`) : undefined
+  if (told && !told.deny) return
+  await sendForPerson($, `From the Claudopus panel: ${who(true)} added, in their own words, to their answer to what the work "${titleOf(one)}" asked (${asked}):\n${said}`)
 }
 // The work an answer was written into starts its next step: that step reads it
 const replyRead = ($: EngineInterface, agentId: string) => {
@@ -3213,7 +3229,11 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   const said = choice.trim()
   const chat = one.chat
   if (!ask || !said || !chat || !/^[A-Za-z0-9_-]+$/.test(chat.id)) return
-  if (isReply) (replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes())
+  // A second press on an ask already answered here sends nothing
+  if (answeredHere.has(`${one.id}:${ask.at}`)) return
+  drafts.delete(one.id)
+  replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
+  if (isReply) freeTimes()
   answeredHere.add(`${one.id}:${ask.at}`)
   const at = await $.clock.now()
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line: lineOf(one) })
@@ -3258,6 +3278,11 @@ const readAnswers = async ($: EngineInterface) => {
     const now = await $.clock.now()
     const card = answer ? (await read($, todos)).find(one => one.id === answer.card && !one.parentId) : undefined
     const isSame = Boolean(answer && card?.ask && (answer.askAt ? answer.askAt === card.ask.at : answer.ask === card.ask.text))
+    // A reply in words to work whose ask was answered a moment ago, as a second message after a press, still reaches it
+    if (answer && card && !card.ask && answer.isReply && now - answer.at <= ANSWER_KEPT) {
+      await replyAfter($, card, answer.choice, answer.ask)
+      continue
+    }
     if (!answer || !card?.ask || now - answer.at > ANSWER_KEPT || (!answer.isReply && !isSame)) {
       await log($, `answer from another chat dropped: ${!answer ? 'unreadable' : now - answer.at > ANSWER_KEPT ? 'it waited too long' : `its ask is gone from ${answer.card}`}`)
       continue
@@ -3869,12 +3894,12 @@ export const register: Register = on => {
     return { text: opened.isPlaced ? 'Claudopus panel opened.' : nowhere('Claudopus') }
   })
 
-  // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
-  // A reply box taking the focus holds the list's times, so the list is not drawn under the person as they start typing
+  // A reply box the person moves the focus into holds the list's times, so the list is not drawn under them as they start typing
   on('ui.focus', async ($, e, next) => {
-    if (e.plugin === 'claudopus' && /-reply-/.test(e.element ?? '')) holdTimes($)
+    if (e.origin.kind === 'person' && e.plugin === 'claudopus' && /-reply-/.test(e.element ?? '')) holdTimes($)
     return next(e)
   })
+  // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
   on('ui.close', async ($, e, next) => {
     const r = await next(e)
     if (e.id === LIST && e.origin.kind === 'person' && dir) await choosePanel($, false)
