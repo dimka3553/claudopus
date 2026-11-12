@@ -2133,15 +2133,37 @@ const isHappy = (cards: { parentId?: string; status: string; endedAt: number }[]
 // How big the octopus is drawn in the panel's header and in the line above the prompt, in the app's pixels
 const HEAD_MARK = 48
 const BAND_MARK = 16
+// The app draws an Svg as a picture and keeps a picture it drew before, animation and all: the same drawing shown again starts
+// where its last showing ended, at rest, so a second finish would stay still. Each time a place turns to a drawing, that drawing
+// is marked with the moment and so is new to the app, and plays from its start; it keeps that mark while it stays, so a redraw
+// does not restart it; a place not drawn for a while, such as a closed panel, starts a new moment. The mark holds this run's own
+// letters, so a drawing of another chat's panel is never the same either
+const moments = new Map<string, { art: keyof typeof ART; mark: string; at: number }>()
+const MOMENT_GAP = 5000
+// The drawings that play once and then rest; the others are still or go round and round, so an old copy of them is right
+const ONCE = new Set<keyof typeof ART>(['happy', 'happySmall', 'wave', 'asking'])
+const RUN_MARK = Math.random().toString(36).slice(2, 8)
+let momentCount = 0
+const momentOf = (key: string, art: keyof typeof ART) => {
+  const was = moments.get(key)
+  const at = Date.now()
+  if (was?.art === art && (at - was.at < MOMENT_GAP || !ONCE.has(art))) return (was.at = at), was.mark
+  momentCount += 1
+  const mark = `${RUN_MARK}-${momentCount}`
+  moments.set(key, { art, mark, at })
+  return mark
+}
 const octopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, alt: string) => {
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number; isInteractive?: boolean }) => JSX.Element }
   const { Box } = ui
   const source = ART[art]
-  return source && table.Svg ? (
+  if (!source || !table.Svg) return null
+  const mark = momentOf(key, art)
+  return (
     <Box key={key} flexShrink={0}>
-      <table.Svg key={`${key}-${art}`} source={source} alt={alt} width={size} height={size} isInteractive={art !== 'mark'} />
+      <table.Svg key={`${key}-${art}-${mark}`} source={source.replace('<svg', `<svg data-moment="${mark}"`)} alt={alt} width={size} height={size} isInteractive={art !== 'mark'} />
     </Box>
-  ) : null
+  )
 }
 
 // ---- Pictures a piece of work made, drawn in its chat where it made them ----

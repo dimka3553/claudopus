@@ -1109,6 +1109,10 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   // The octopus drawings a view shows, by the file each came from
   const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
     (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  // The moment each octopus drawing is marked with: the app keeps a picture it drew before, so a happy moment drawn the same as
+  // the last would start at its end, arms down; each turn to a drawing is marked anew, and keeps its mark while it stays
+  const moment = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /^<svg data-moment="([\w-]+)"/.exec(String(one.props.source))?.[1]).filter(Boolean)[0]
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   expect(await drawn(pane)).toEqual(['working'])
@@ -1119,16 +1123,23 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   await end('a1', 't1')
   expect(await drawn(pane)).toEqual(['happy'])
   expect(await drawn(band)).toEqual(['happy-small'])
+  const first = await moment(pane)
+  const firstBand = await moment(band)
+  expect(first).toBeDefined()
+  expect(firstBand).toBeDefined()
   expect(await band.find({ type: 'Text', text: /Check the ears/ })).toBeDefined()
   // The other finishes in the pause: the same drawing stays, with nothing else running, and the band stays for the pause
   await clock.advance(1_000)
   await end('a2', 't2')
   expect(await drawn(pane)).toEqual(['happy'])
   expect(await drawn(band)).toEqual(['happy-small'])
+  expect(await moment(pane)).toBe(first)
+  expect(await moment(band)).toBe(firstBand)
   expect((await band.find({ type: 'Text', text: '✓ Finished' }))?.props.dimColor).toBe(true)
-  // The first pause ends but the second has not: still happy; once both are over, at rest and the band gone
+  // The first pause ends but the second has not: still happy, the same drawing; once both are over, at rest and the band gone
   await clock.advance(1_100)
   expect(await drawn(pane)).toEqual(['happy'])
+  expect(await moment(pane)).toBe(first)
   await clock.advance(1_000)
   expect(await drawn(pane)).toEqual(['mark'])
   expect(await band.find({ type: 'Text', text: "the engine's own" })).toBeDefined()
@@ -1136,8 +1147,13 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   // Work finishing while another still runs goes back to work after its pause
   await $.agent.spawn({ ...spawn, description: 'Draw the eyes', prompt: 'draw the eyes' } as never)
   await $.agent.spawn({ ...spawn, description: 'Draw the mouth', prompt: 'draw the mouth' } as never)
+  expect(await drawn(band)).toEqual(['working-small'])
   await end('a3', 't3')
   expect(await drawn(pane)).toEqual(['happy'])
+  // A new happy moment is a drawing new to the app, so its arms go up again from the start, in the header and the band
+  expect(await moment(pane)).not.toBe(first)
+  expect(await drawn(band)).toEqual(['happy-small'])
+  expect(await moment(band)).not.toBe(firstBand)
   await clock.advance(2_100)
   expect(await drawn(pane)).toEqual(['working'])
   expect(await drawn(band)).toEqual(['working-small'])
