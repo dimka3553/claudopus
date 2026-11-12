@@ -1,4 +1,4 @@
-import type { Shared, Todo } from '../types'
+import type { Prompt, Shared, Todo } from '../types'
 
 // ---- Every chat's work in every panel: each chat keeps its running work in a small file of its own, the others read it ----
 // ~/.claude/claudopus/live/<chat id>.json, written only by that chat; an answer to one of its asks from another chat's panel is
@@ -35,6 +35,20 @@ export const shareable = (list: readonly Todo[]): Todo[] =>
 export const signOf = (cards: readonly Todo[]) =>
   JSON.stringify(cards.map(one => [one.id, one.status, one.title, one.model, one.tokens, one.items, one.entries.at(-1)?.text ?? '', one.ask?.text ?? '', one.ask?.at ?? 0, one.ask?.copy ?? '', one.ask?.choices ?? []]))
 
+// The prompts a chat's file carries, as far as they are whole: at most a few, each cut short
+const PROMPTS_SHARED = 6
+export const promptsOf = (list: unknown): Prompt[] =>
+  (Array.isArray(list) ? list : [])
+    .filter((one): one is Prompt => Boolean(one && typeof one.id === 'string' && one.id && typeof one.text === 'string' && one.text && typeof one.at === 'number'))
+    .filter((one, i, all) => all.findIndex(other => other.id === one.id) === i)
+    .slice(0, PROMPTS_SHARED)
+    .map(one => ({ id: one.id.slice(0, 80), text: plain(one.text).slice(0, 200), ...(typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {}), at: one.at }))
+// Text from another chat's file with no control characters, so nothing in it can move or colour the terminal
+const plain = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim()
+// The link that opens a chat in the Claude app, as its file gives it; nothing else is taken
+const LINK = /^claude:\/\/code\/continue\?session=local_[A-Za-z0-9-]{1,64}$/
+export const linkOf = (one: unknown) => (typeof one === 'string' && LINK.test(one) ? one : '')
+
 // A chat's file as read, or nothing when it is no such file, has not been written for too long, or has no work and `isIdleKept` is
 // not set (a chat of this Mac with no work is not listed; one of another Mac is, so its open chats show). `now` is the clock of the
 // Mac that wrote it, so a Mac whose clock runs apart from this one's is judged by its own
@@ -44,8 +58,11 @@ export const sharedOf = (text: string, now: number, host = '', isIdleKept = fals
     if (typeof one.chat !== 'string' || !one.chat || typeof one.at !== 'number' || !Array.isArray(one.cards)) return undefined
     if (now - one.at > STALE) return undefined
     const cards = one.cards.filter((card): card is Todo => Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)))
-    if (!cards.length && !isIdleKept) return undefined
-    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards }
+    // A chat waiting on its own prompt is listed whether or not it has work
+    const prompts = promptsOf(one.prompts)
+    if (!cards.length && !prompts.length && !isIdleKept) return undefined
+    const link = linkOf(one.link)
+    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(prompts.length ? { prompts } : {}), ...(link ? { link } : {}) }
   } catch {
     return undefined
   }
@@ -59,11 +76,12 @@ export const remoteId = (s: Shared, id: string) => `${REMOTE}${short(`${s.host}/
 export const cardsOf = (list: readonly Shared[]): Todo[] =>
   list.flatMap(s => s.cards.map(one => ({ ...one, id: remoteId(s, one.id), chat: { id: s.chat, title: s.title, folder: s.folder, host: s.host, agent: one.id } })))
 
-// The other chats in the order the panel shows them: those that wait on the person first, then the one whose work began first, then
+// The other chats in the order the panel shows them: those that wait on the person first (an open prompt, which holds its chat up, before an ask), then the one whose work began first, then
 // the open chats of other Macs with no work, by name
 const firstStart = (s: Shared) => (s.cards.length ? Math.min(...s.cards.map(one => one.startedAt)) : Number.MAX_SAFE_INTEGER)
+const waits = (s: Shared) => (s.prompts?.length ? 2 : s.cards.some(one => one.ask) ? 1 : 0)
 export const ordered = (list: readonly Shared[]) =>
-  [...list].sort((a, b) => Number(b.cards.some(one => one.ask)) - Number(a.cards.some(one => one.ask)) || firstStart(a) - firstStart(b) || chatName(a).localeCompare(chatName(b)))
+  [...list].sort((a, b) => waits(b) - waits(a) || firstStart(a) - firstStart(b) || chatName(a).localeCompare(chatName(b)))
 
 // What a chat is called above its cards: its title, else its folder's name, and the Mac it runs on when that is another
 export const chatName = (c: { title: string; folder: string }) => c.title.trim() || c.folder.split('/').filter(Boolean).pop() || 'Another chat'
@@ -100,7 +118,7 @@ export const fetchedOf = (text: string, host: string, fetchedAt = 0): Shared[] =
   return files
     .map(one => sharedOf(one, now, host, true))
     .filter((one): one is Shared => one !== undefined)
-    .map(one => ({ ...one, at: moved(one.at), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt) })) }))
+    .map(one => ({ ...one, at: moved(one.at), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt) })), ...(one.prompts ? { prompts: one.prompts.map(p => ({ ...p, at: moved(p.at) })) } : {}) }))
 }
 // The command that fetches it, run on that Mac over ssh by sh whatever its login shell: its clock in seconds, then every chat file
 // there written in the last three minutes (an older one is stale anyway)
