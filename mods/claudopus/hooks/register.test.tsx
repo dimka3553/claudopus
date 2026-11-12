@@ -2456,6 +2456,13 @@ test("an open chat of another Mac with no work running is listed here by its nam
   const bold = (await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)
   expect(bold.indexOf('Robot arm')).toBeLessThan(bold.indexOf('GitHub'))
   expect(await list.find({ type: 'Text', text: '2 more in 1 other chat' })).toBeDefined()
+  // A chat that is open on this Mac too, as when this Mac is named under macs, is not listed again as the other Mac's
+  files.set(`${MEMORY}/live/chat-rc.json`, idle(NOW + 9000))
+  await clock.advance(10_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Open · nothing running' })) ? undefined : true))).toBe(true)
+  files.delete(`${MEMORY}/live/chat-rc.json`)
+  await clock.advance(10_000)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Open · nothing running' }))).toBeDefined()
   files.delete('ssh:fetch')
   await clock.advance(100_000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Open · nothing running' })) ? undefined : true))).toBe(true)

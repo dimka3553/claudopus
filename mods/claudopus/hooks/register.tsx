@@ -2735,9 +2735,11 @@ const liveDir = () => `${dir}/${LIVE_DIR}`
 let sharedSign = ''
 let sharedAt = 0
 const ownLive = (id: string) => `${liveDir()}/${id}.json`
+// Set as the session ends, so a beat due after it does not write the file again
+let isEnded = false
 const shareMine = async ($: EngineInterface) => {
   const { id, title } = await read($, me)
-  if (!id || !dir || isOff) return
+  if (!id || !dir || isOff || isEnded) return
   const now = await $.clock.now()
   const cards = shareable(await read($, todos))
   const sign = `${title}\n${signOf(cards)}`
@@ -2794,6 +2796,8 @@ const readOthers = async ($: EngineInterface) => {
   if (!id || !dir) return
   const now = await $.clock.now()
   const found: Shared[] = []
+  // The chats open on this Mac, work or none
+  const here = new Set<string>([id])
   const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && entry.name !== `${id}.json`)
   for (const name of [...liveRead.keys()]) if (!listed.some(entry => entry.name === name)) liveRead.delete(name)
   for (const entry of listed) {
@@ -2802,18 +2806,20 @@ const readOthers = async ($: EngineInterface) => {
     const key = `${entry.mtimeMs}:${entry.size}`
     const was = liveRead.get(entry.name)
     const text = was && entry.mtimeMs && was.key === key ? was.text : await readOr($, `${liveDir()}/${entry.name}`)
-    const one = sharedOf(text, now)
+    const one = sharedOf(text, now, '', true)
     // A file caught half-written is read again at the next look, not kept as read
     if (one) liveRead.set(entry.name, { key, text })
     else liveRead.delete(entry.name)
-    if (one && one.chat !== id) found.push(one)
+    if (one) here.add(one.chat)
+    // A chat of this Mac is listed only while it has work
+    if (one && one.chat !== id && one.cards.length) found.push(one)
   }
   for (const mac of macs) {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
     // A copy not fetched again for STALE says nothing of that Mac now
     if (!f.text || now - (f.fetchedAt ?? 0) > STALE) continue
     // A Mac named that is this one shows its chats once, as this Mac's
-    found.push(...fetchedOf(f.text, mac, f.fetchedAt).filter(one => one.chat !== id && !found.some(local => !local.host && local.chat === one.chat)))
+    found.push(...fetchedOf(f.text, mac, f.fetchedAt).filter(one => !here.has(one.chat)))
   }
   const next = ordered(found)
   if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
@@ -3033,6 +3039,7 @@ export const register: Register = on => {
     // Every chat's work in every panel: this chat's file is kept true each second (written only when it changed or its beat is due),
     // the other chats' files and the answers left for this one are read every few seconds, the other Macs fetched now and then
     sharedSign = ''
+    isEnded = false
     await unshare($, true).catch(() => undefined)
     if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
@@ -3049,6 +3056,7 @@ export const register: Register = on => {
 
   // A chat that ends removes its file, so the other panels drop its work at once
   on('session.end', async ($, e, next) => {
+    isEnded = true
     await unshare($).catch(() => undefined)
     return next(e)
   })
