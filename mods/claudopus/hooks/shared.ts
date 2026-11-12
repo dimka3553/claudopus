@@ -1,4 +1,4 @@
-import type { Shared, Todo } from '../types'
+import type { Link, Said, Shared, Todo } from '../types'
 
 // ---- Every chat's work in every panel: each chat keeps its running work in a small file of its own, the others read it ----
 // ~/.claude/claudopus/live/<chat id>.json, written only by that chat; an answer to one of its asks from another chat's panel is
@@ -51,7 +51,9 @@ export const sharedOf = (text: string, now: number, host = '', isIdleKept = fals
     if (now - one.at > STALE) return undefined
     const cards = one.cards.filter((card): card is Todo => Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)))
     if (!cards.length && !isIdleKept) return undefined
-    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards }
+    const said = saidOf(one.said)
+    const link = linkOf(one.link)
+    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(said ? { said } : {}), ...(link ? { link } : {}) }
   } catch {
     return undefined
   }
@@ -110,7 +112,7 @@ export const fetchedOf = (text: string, host: string, fetchedAt = 0): Shared[] =
   return files
     .map(one => sharedOf(one, now, host, true))
     .filter((one): one is Shared => one !== undefined)
-    .map(one => ({ ...one, at: moved(one.at), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt) })) }))
+    .map(one => ({ ...one, at: moved(one.at), ...(one.said ? { said: { ...one.said, youAt: moved(one.said.youAt), replyAt: moved(one.said.replyAt) } } : {}), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt) })) }))
 }
 
 // ---- The same trip the other way: a Mac that reaches another over ssh hands it its own chats, so that Mac's panels list them with
@@ -170,3 +172,47 @@ export const clockOf = (text: string) => {
 // A Mac named in config.json `macs`, as ssh takes it: user@host, or a Host line of ~/.ssh/config. Nothing else is run
 export const isMac = (one: unknown): one is string => typeof one === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_.-]*(@[A-Za-z0-9_][A-Za-z0-9_.-]*)?$/.test(one)
 export const macName = (one: string) => (one.split('@').pop() ?? one).split('.')[0] ?? one
+
+// ---- A chat's last words, shown as the pointer rests on its name, and the link a press on its name opens ----
+
+// How much of each the file carries: enough for a few lines under the name
+export const LAST_CHARS = { you: 280, reply: 560 }
+const textOr = (one: unknown, most: number) => (typeof one === 'string' ? one.trim().slice(0, most) : '')
+export const saidOf = (one: unknown): Said | undefined => {
+  if (!one || typeof one !== 'object') return undefined
+  const s = one as Partial<Record<keyof Said, unknown>>
+  const said = { you: textOr(s.you, LAST_CHARS.you), youAt: Number(s.youAt) || 0, reply: textOr(s.reply, LAST_CHARS.reply), replyAt: Number(s.replyAt) || 0 }
+  return said.you || said.reply ? said : undefined
+}
+// The ids the Claude app takes, as it checks them: a Remote Control or cloud session, and its own session on this Mac
+export const BRIDGE_ID = /^(cse|session)_[A-Za-z0-9_-]{1,80}$/
+export const APP_ID = /^local_[A-Za-z0-9-]{1,64}$/
+export const linkOf = (one: unknown): Link | undefined => {
+  if (!one || typeof one !== 'object') return undefined
+  const l = one as Partial<Record<keyof Link, unknown>>
+  const link = { bridge: typeof l.bridge === 'string' && BRIDGE_ID.test(l.bridge) ? l.bridge : '', app: typeof l.app === 'string' && APP_ID.test(l.app) ? l.app : '' }
+  return link.bridge || link.app ? link : undefined
+}
+// What a press on a chat's name opens in the Claude app: its Remote Control session, which the app opens as its own chat when it is
+// one of this Mac's and as Remote Control when it runs on another Mac; else, for a chat of this Mac, the app's own id for it. A chat
+// of another Mac with no Remote Control has nothing this Mac can open
+export const openUrl = (c: { host: string; link?: Link }) =>
+  c.link?.bridge ? `claude://code/${c.link.bridge}` : !c.host && c.link?.app ? `claude://code/continue?session=${c.link.app}` : ''
+
+// The last message of the person's and the last answer of Claude's in a chat's saved words (words/<chat id>.md): each message under
+// a line "## <time>", each answer under "### Claude <time>"
+export const lastSaid = (words: string): Said | undefined => {
+  let you = ''
+  let youAt = 0
+  let reply = ''
+  let replyAt = 0
+  for (const block of words.split(/^(?=## \d{4}-\d\d-\d\dT[\d:.]+Z|### Claude \d{4}-\d\d-\d\dT[\d:.]+Z)/m)) {
+    const [head = '', ...rest] = block.split('\n')
+    const body = rest.join('\n').trim()
+    const at = Date.parse(/(\d{4}-\d\d-\d\dT[\d:.]+Z)/.exec(head)?.[1] ?? '') || 0
+    if (!body) continue
+    if (/^### Claude\b/.test(head)) ((reply = body), (replyAt = at))
+    else if (/^## \d{4}-\d\d-\d\dT/.test(head)) ((you = body), (youAt = at))
+  }
+  return saidOf({ you, youAt, reply, replyAt })
+}
