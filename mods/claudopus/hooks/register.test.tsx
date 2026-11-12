@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
+import { shareable } from './shared'
 
 const HOME = '/home/sam'
 const MEMORY = `${HOME}/.claude/claudopus`
@@ -91,7 +92,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   // What a folder holds: its files, and the folders its deeper files are in
   on('fs.list', (_, e) => ({
     value: [...new Set([...files.keys()].filter(path => path.startsWith(`${e.path}/`)).map(path => path.slice(e.path.length + 1)))]
-      .map(rest => ({ name: rest.split('/')[0] ?? rest, kind: rest.includes('/') ? 'dir' : 'file', size: 1, mtimeMs: 0, isLink: false }))
+      // A file's time is 0 unless the test lays it as mtime:<path>
+      .map(rest => ({ name: rest.split('/')[0] ?? rest, kind: rest.includes('/') ? 'dir' : 'file', size: 1, mtimeMs: Number(files.get(`mtime:${e.path}/${rest}`) ?? 0), isLink: false }))
       .filter((one, i, all) => all.findIndex(other => other.name === one.name) === i) as never,
   }))
   on('fs.stat', (_, e) => {
@@ -155,9 +157,11 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     // Another Mac over ssh: what it answers is laid by the test as ssh:<what>; an answer sent there is kept as it was handed over
     if (tool === 'ssh') {
       sshed.push([String(e.argv.at(-1)), String(e.init?.stdin ?? '')])
-      const said = String(e.argv.at(-1)).startsWith("sh -c 'date") ? files.get('ssh:fetch') : files.has('ssh:down') ? undefined : ''
+      const said = String(e.argv.at(-1)).startsWith("sh -c 'L=") ? files.get('ssh:fetch') : files.has('ssh:down') ? undefined : ''
       return { value: { exitCode: said === undefined ? 255 : 0, stdout: said ?? '', stderr: said === undefined ? 'ssh: connect to host m4: timed out' : '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // This Mac's own name, as its Sharing settings give it
+    if (tool === 'scutil') return { value: { exitCode: 0, stdout: 'Sams-MacBook-Air\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'rm') files.delete(String(rest.at(-1)))
     // A file moved aside
     if (tool === 'mv') (files.set(String(rest[2]), files.get(String(rest[1])) ?? ''), files.delete(String(rest[1])))
@@ -1982,7 +1986,7 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(tabs).toContain('stats: Stats')
   const stats = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, title: 'Stats', bodyColumns: 80 }, surface: 'desktop' } as never)
   // At the top, what is counted: this chat, today, each chosen one filled and bold
-  expect((await stats.find({ type: 'Text', text: 'This chat' }))?.props.bold).toBe(true)
+  expect((await stats.find({ type: 'Text', text: /^This chat$/ }))?.props.bold).toBe(true)
   expect((await stats.find({ type: 'Text', text: 'Today' }))?.props.bold).toBe(true)
   expect((await keyed(stats, 'scope-All chats'))?.props.label).toBe('All chats')
   // Once read: 1.5M output tokens on Opus 5.5 at $20 a million, two pieces finished, two to-dos, 30 minutes of work in 20
@@ -2297,10 +2301,10 @@ test("the panel shows every open chat's running work under that chat's name, thi
   const buttons = (await list.findAll({ type: 'Button' })).map(one => one.key ?? '')
   expect(buttons.filter(key => key.startsWith('stop-'))).toEqual(['stop-a1'])
   expect(buttons.some(key => key.startsWith('model-r-'))).toBe(false)
-  // The chat's own work ends: its file stays, with no work in it, so the others drop the work at once and still know the chat is open
+  // The chat's own work ends: its file says so at once, so the others show it finished as this chat does
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(1000)
-  expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{"cards":[1]}').cards.length === 0 ? true : undefined))).toBe(true)
+  expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{"cards":[]}').cards[0]?.status === 'done' ? true : undefined))).toBe(true)
   // A chat of this Mac with no work is not listed in the others' panels
   files.set(`${MEMORY}/live/chat-d.json`, JSON.stringify({ chat: 'chat-d', title: 'Quiet chat', folder: '/repo/quiet', host: '', at: NOW + 6000, cards: [] }))
   await clock.advance(5000)
@@ -2360,7 +2364,7 @@ test("with another Mac named in config.json, its chats' work shows here under it
   await $.session.start(start)
   await clock.advance(10_000)
   // Only a Mac that ssh takes as a name is reached
-  expect(sshed.every(([command]) => command?.startsWith("sh -c 'date") || command?.startsWith('d='))).toBe(true)
+  expect(sshed.every(([command]) => command?.startsWith("sh -c 'L=") || command?.startsWith('d='))).toBe(true)
   expect(sshed.length).toBeGreaterThan(0)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
@@ -2457,21 +2461,28 @@ test("an open chat of another Mac with no work running is listed here by its nam
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'GitHub' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'on m4' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Open · nothing running' })).toBeDefined()
+  // By its name alone: no line under it
+  expect(await list.find({ type: 'Text', text: /nothing running/ })).toBeUndefined()
   // The chat with work comes before the quiet one, and the count names only work
   const bold = (await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)
   expect(bold.indexOf('Robot arm')).toBeLessThan(bold.indexOf('GitHub'))
   expect(await list.find({ type: 'Text', text: '2 more in 1 other chat' })).toBeDefined()
-  // A chat that is open on this Mac too, as when this Mac is named under macs, is not listed again as the other Mac's
+  // Beside another Mac's chats this chat is named too, with nothing running, and says which Mac it is on
+  expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'on sams-macbook-air' })).toBeDefined()
+  // A chat that is open on this Mac too, as when this Mac is named under macs, is listed once, as this Mac's
   files.set(`${MEMORY}/live/chat-rc.json`, idle(NOW + 9000))
   await clock.advance(10_000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Open · nothing running' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: /^on m4$/ })) ? undefined : true))).toBe(true)
+  expect((await list.findAll({ type: 'Text' })).filter(one => one.text === 'GitHub')).toHaveLength(1)
   files.delete(`${MEMORY}/live/chat-rc.json`)
   await clock.advance(10_000)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Open · nothing running' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: /^on m4$/ }))).toBeDefined()
   files.delete('ssh:fetch')
   await clock.advance(100_000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Open · nothing running' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'GitHub' })) ? undefined : true))).toBe(true)
+  // With no other Mac's chats left, this chat is no longer named alone
+  expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
   await list.unmount()
 })
 
@@ -2559,9 +2570,115 @@ test("another chat's open prompt shows amber under its name, first; on this Mac 
   expect(opens).toHaveLength(1)
   await list.press({ key: opens[0]?.key ?? '' })
   expect(await until(async () => shown.find(argv => argv[1]?.startsWith('claude://')))).toEqual(['open', 'claude://code/continue?session=local_ab-12'])
-  // Answered there, its file no longer carries it, and it leaves
+  // Answered there, its file no longer carries it, and its amber card leaves; beside another Mac's chats it stays listed by name
   files.set(`${MEMORY}/live/chat-w.json`, JSON.stringify({ chat: 'chat-w', title: 'Web chat', folder: '/Users/sam/GitHub', host: '', at: NOW + 11_000, cards: [] }))
   await clock.advance(5000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Web chat' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.findAll({ type: 'Button' })).some(one => one.props.label === 'Open that chat') ? undefined : true))).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'Web chat' })).toBeDefined()
   await list.unmount()
+})
+
+test("a Mac that reaches another hands it this Mac's chats in the same trip, and leaves here the answers pressed there for them, once each", async ($, on) => {
+  const { files, clock, sshed } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
+  // The M4 answers its clock, no chats, and one answer pressed there for this Mac's chat-b
+  const pressed = JSON.stringify({ card: 'b1', choice: 'Send', isReply: false, ask: 'May I send 12 invoices?', askAt: NOW, at: NOW, chat: 'chat-b' })
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-answer---\n${NOW}-abc.json\n${pressed}\n---claudopus-answer---\nbad name\n${pressed}\n`)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  const first = await until(async () => sshed.find(([command]) => command?.startsWith("sh -c 'L=")))
+  // What it hands over says who this Mac is, what it calls the M4, and carries this Mac's chats only
+  const [head = '', ...rest] = (first?.[1] ?? '').split('\n')
+  expect(JSON.parse(head)).toEqual({ from: 'sams-macbook-air', you: 'm4' })
+  expect(rest.join('\n')).toContain('"chat":"chat-b"')
+  expect(first?.[0]).toContain('$L/pushed/sams-macbook-air.$$.part')
+  expect(first?.[0]).not.toContain('rm -f 1')
+  // The answer is left for chat-b as one pressed in another chat's panel; the one under a name it does not make is not
+  const left = files.get(`${MEMORY}/live/answers/chat-b/${NOW}-abc.json`)
+  expect(JSON.parse(left ?? '{}')).toMatchObject({ card: 'b1', choice: 'Send', askAt: NOW })
+  expect([...files.keys()].filter(path => path.includes('/live/answers/chat-b/'))).toHaveLength(1)
+  // chat-b takes it; the next trip puts it away there, and carried again it is not left again
+  files.delete(`${MEMORY}/live/answers/chat-b/${NOW}-abc.json`)
+  await clock.advance(10_000)
+  const second = sshed.filter(([command]) => command?.startsWith("sh -c 'L=")).at(-1)
+  expect(second?.[0]).toContain(`rm -f ${NOW}-abc.json`)
+  expect(files.has(`${MEMORY}/live/answers/chat-b/${NOW}-abc.json`)).toBe(false)
+})
+
+test("a Mac handed another Mac's chats lists them by name and Mac with its own, leaves an answer for them to be carried back, and drops them once that Mac stops handing them over", async ($, on) => {
+  const { files, clock } = world(on)
+  // No macs here: this is the Mac that cannot reach the other one. Its clock is an hour behind the other Mac's
+  const ahead = NOW + 3_600_000
+  const push = `${JSON.stringify({ from: 'sams-m5', you: 'sams-m4' })}\n${ahead / 1000}\n---claudopus-live---\n${otherChat(ahead, 'chat-m5', 'Robot arm')}\n---claudopus-live---\n${JSON.stringify({ chat: 'chat-idle', title: 'Quiet one', folder: '/x', host: '', at: ahead, cards: [] })}\n`
+  files.set(`${MEMORY}/live/pushed/sams-m5.json`, push)
+  files.set(`mtime:${MEMORY}/live/pushed/sams-m5.json`, String(NOW))
+  // A copy laid under a name that is not the Mac it says handed it is passed over
+  files.set(`${MEMORY}/live/pushed/other.json`, push)
+  // This Mac's own chat with nothing running
+  files.set(`${MEMORY}/live/chat-own.json`, JSON.stringify({ chat: 'chat-own', title: 'Own quiet', folder: '/y', host: '', at: NOW, cards: [] }))
+  await $.session.start(start)
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'billing · on sams-m5' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Quiet one' })).toBeDefined()
+  // This Mac's chats are listed too, idle or not, named by what the other Mac calls this one
+  expect(await list.find({ type: 'Text', text: 'Own quiet' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeDefined()
+  expect((await list.findAll({ type: 'Text' })).filter(one => one.text === 'y · on sams-m4' || one.text === 'on sams-m4').length).toBe(2)
+  expect((await list.findAll({ type: 'Text' })).filter(one => one.text === 'Robot arm')).toHaveLength(1)
+  // Its running time is told on this Mac's clock
+  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · \d+s$|^Opus 5\.5 · 1m \d\ds$/ })).toBeDefined()
+  // An answer pressed here waits in the outbox for that Mac
+  const send = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Send')
+  await list.press({ key: send?.key ?? '' })
+  const left = await until(async () => [...files.keys()].find(path => path.startsWith(`${MEMORY}/live/outbox/sams-m5/`) && path.endsWith('.json')))
+  expect(JSON.parse(files.get(left ?? '') ?? '{}')).toMatchObject({ card: 'b1', choice: 'Send', chat: 'chat-m5', askAt: ahead })
+  // That Mac goes to sleep: its copy is not handed over again and goes stale, and its chats leave, as does the naming of this one
+  await clock.advance(100_000)
+  files.set(`${MEMORY}/live/chat-own.json`, JSON.stringify({ chat: 'chat-own', title: 'Own quiet', folder: '/y', host: '', at: NOW + 100_000, cards: [] }))
+  await clock.advance(5000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Robot arm' })) ? undefined : true))).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'Own quiet' })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
+  await list.unmount()
+})
+
+test("work that ends in another chat turns happy in this panel for its pause, then folds into Finished, which then holds every chat's", async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Billing page' }))).toBeDefined()
+  // Its running work finishes: that chat's file says so a moment later
+  const file = JSON.parse(otherChat(NOW)) as { at: number; cards: { status: string; endedAt: number; ask?: unknown }[] }
+  const ended = { ...file, at: NOW + 6000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 5500, ask: undefined })) }
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify(ended))
+  await clock.advance(5000)
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ Finished' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Claudopus' })).toBeDefined()
+  // After its pause it is in the Finished row, named as every chat's, and no longer under its chat
+  await clock.advance(3000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'all chats' })).toBeDefined()
+  expect((await list.findAll({ type: 'Button' })).some(b => /Finished 2/.test(String(b.props.label)))).toBe(true)
+  // On one Mac a chat with only ended work is not listed by name, and this chat's work gets no heading of its own for it
+  expect(await list.find({ type: 'Text', text: 'Billing page' })).toBeUndefined()
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Fix the nose' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
+  await list.unmount()
+})
+
+test('a chat shares the work that ended lately, the newest few, and not work that ended long ago', async () => {
+  const card = (id: string, endedAt: number) => ({ id, parentId: '', isFork: false, tokens: 0, title: id, words: '', items: [], entries: [], answer: '', startedAt: endedAt - 10, endedAt, status: 'done' as const })
+  const list = [card('old', NOW - 13 * 3_600_000), ...Array.from({ length: 12 }, (_, i) => card(`n${i}`, NOW - i * 1000))]
+  const shared = shareable(list as never, NOW).map(one => one.id)
+  expect(shared).toHaveLength(10)
+  expect(shared).not.toContain('old')
+  expect(shared).not.toContain('n11')
 })

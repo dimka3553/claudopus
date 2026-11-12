@@ -19,10 +19,16 @@ export const FETCH_EVERY = 10_000
 const ITEMS_SHARED = 30
 const WORDS_SHARED = 1200
 
-// The work of this chat that other chats show: running work, and ended work that still waits on an answer from its buttons
-export const shareable = (list: readonly Todo[]): Todo[] =>
+// Work that ended is shown in other chats' panels too, where it turns happy and folds into Finished as in its own: the newest few
+// that ended in the last hours, while its chat is open
+export const ENDED_SHARED = 10
+export const ENDED_FOR = 12 * 3_600_000
+// The work of this chat that other chats show: running work, ended work that still waits on an answer from its buttons, and the
+// work that ended lately
+export const shareable = (list: readonly Todo[], now = 0): Todo[] =>
   list
-    .filter(one => !one.parentId && !one.chat && (one.status === 'working' || Boolean(one.ask?.choices?.length)))
+    .filter(one => !one.parentId && !one.chat)
+    .filter((one, _, all) => one.status === 'working' || Boolean(one.ask?.choices?.length) || (one.endedAt > now - ENDED_FOR && all.filter(other => other.status !== 'working' && other.endedAt > one.endedAt).length < ENDED_SHARED))
     .map(one => ({
       ...one,
       words: one.words.slice(0, WORDS_SHARED),
@@ -76,9 +82,12 @@ export const remoteId = (s: Shared, id: string) => `${REMOTE}${short(`${s.host}/
 export const cardsOf = (list: readonly Shared[]): Todo[] =>
   list.flatMap(s => s.cards.map(one => ({ ...one, id: remoteId(s, one.id), chat: { id: s.chat, title: s.title, folder: s.folder, host: s.host, agent: one.id } })))
 
-// The other chats in the order the panel shows them: those that wait on the person first (an open prompt, which holds its chat up, before an ask), then the one whose work began first, then
-// the open chats of other Macs with no work, by name
-const firstStart = (s: Shared) => (s.cards.length ? Math.min(...s.cards.map(one => one.startedAt)) : Number.MAX_SAFE_INTEGER)
+// The other chats in the order the panel shows them: those that wait on the person first (an open prompt, which holds its chat up,
+// before an ask), then the one whose running work began first, then the open chats with none running, by name
+const firstStart = (s: Shared) => {
+  const running = s.cards.filter(one => one.status === 'working' || one.ask)
+  return running.length ? Math.min(...running.map(one => one.startedAt)) : Number.MAX_SAFE_INTEGER
+}
 const waits = (s: Shared) => (s.prompts?.length ? 2 : s.cards.some(one => one.ask) ? 1 : 0)
 export const ordered = (list: readonly Shared[]) =>
   [...list].sort((a, b) => waits(b) - waits(a) || firstStart(a) - firstStart(b) || chatName(a).localeCompare(chatName(b)))
@@ -86,9 +95,10 @@ export const ordered = (list: readonly Shared[]) =>
 // What a chat is called above its cards: its title, else its folder's name, and the Mac it runs on when that is another
 export const chatName = (c: { title: string; folder: string }) => c.title.trim() || c.folder.split('/').filter(Boolean).pop() || 'Another chat'
 // Its folder, unless the name already is the folder, and the Mac it runs on when another
-export const chatSide = (c: { title: string; folder: string; host: string }) => {
+// (`self` names this Mac, for a chat of this Mac once other Macs' chats are listed beside it)
+export const chatSide = (c: { title: string; folder: string; host: string }, self = '') => {
   const folder = c.folder.split('/').filter(Boolean).pop() ?? ''
-  return [folder === chatName(c) ? '' : folder, c.host ? `on ${macName(c.host)}` : ''].filter(Boolean).join(' · ')
+  return [folder === chatName(c) ? '' : folder, c.host ? `on ${macName(c.host)}` : self ? `on ${self}` : ''].filter(Boolean).join(' · ')
 }
 
 // One answer left for another chat: the card by its own id there, what was pressed or written, and the ask it answers, by its
@@ -120,9 +130,61 @@ export const fetchedOf = (text: string, host: string, fetchedAt = 0): Shared[] =
     .filter((one): one is Shared => one !== undefined)
     .map(one => ({ ...one, at: moved(one.at), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt) })), ...(one.prompts ? { prompts: one.prompts.map(p => ({ ...p, at: moved(p.at) })) } : {}) }))
 }
-// The command that fetches it, run on that Mac over ssh by sh whatever its login shell: its clock in seconds, then every chat file
-// there written in the last three minutes (an older one is stale anyway)
-export const FETCH = `sh -c 'date +%s; for f in $(find ~/.claude/claudopus/${LIVE_DIR} -maxdepth 1 -name "*.json" -mmin -3 2>/dev/null); do echo ${MARK}; tr -d "\\n" < "$f"; echo; done'`
+
+// ---- The same trip the other way: a Mac that reaches another over ssh hands it its own chats, so that Mac's panels list them with
+// no ssh back and no setting there. It lands there as live/pushed/<this Mac>.json, in the fetch's own form under one line saying who
+// handed it and what it calls the Mac it handed it to; an answer pressed there for one of these chats waits in
+// live/outbox/<this Mac>/ until the next trip carries it here, and is put away there on the trip after ----
+export const PUSHED = 'pushed'
+export const OUTBOX = 'outbox'
+export const ANSWER_MARK = '---claudopus-answer---'
+// A Mac's name as it is handed over and shown: small letters, digits and dashes
+export const isKey = (one: unknown): one is string => typeof one === 'string' && /^[a-z0-9][a-z0-9-]{0,62}$/.test(one)
+export const keyOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 63)
+// An answer's file name, as answerElsewhere makes it
+export const isAnswerName = (one: string) => /^\d+-[a-z0-9]+\.json$/.test(one)
+// What this Mac hands over: who it is and what it calls that Mac, its clock in seconds, then each of its chats' files on one line
+export const pushOf = (from: string, you: string, now: number, files: readonly string[]) =>
+  `${JSON.stringify({ from, you })}\n${Math.floor(now / 1000)}\n${files.map(one => `${MARK}\n${one.replace(/\n/g, '')}\n`).join('')}`
+export const pushHead = (text: string): { from: string; you: string } | undefined => {
+  try {
+    const one = JSON.parse(text.slice(0, Math.max(0, text.indexOf('\n')))) as { from?: unknown; you?: unknown }
+    return isKey(one.from) ? { from: one.from, you: isKey(one.you) ? one.you : '' } : undefined
+  } catch {
+    return undefined
+  }
+}
+// The command of one trip, run there by sh: leave what this Mac hands over, put away the answers the last trip carried and any
+// older than an hour, then its clock in seconds, then every chat file there written in the last three minutes, followed by the answers waiting for this Mac
+export const trip = (from: string, acks: readonly string[]) => {
+  const out = `$L/${OUTBOX}/${from}`
+  const put = acks.filter(isAnswerName)
+  return `sh -c 'L=$HOME/.claude/claudopus/${LIVE_DIR}; mkdir -p $L/${PUSHED} ${out}; cat > $L/${PUSHED}/${from}.$$.part && mv -f $L/${PUSHED}/${from}.$$.part $L/${PUSHED}/${from}.json; cd ${out} && { ${put.length ? `rm -f ${put.join(' ')}; ` : ''}find . -name "*.json" -mmin +60 -exec rm -f {} +; }; cd; date +%s; for f in $(find $L -maxdepth 1 -name "*.json" -mmin -3 2>/dev/null); do echo ${MARK}; tr -d "\\n" < "$f"; echo; done; for f in $(find ${out} -maxdepth 1 -name "*.json" 2>/dev/null); do echo ${ANSWER_MARK}; basename "$f"; tr -d "\\n" < "$f"; echo; done'`
+}
+// One answer waiting there, with the chat here it is for
+export type Carried = { name: string; chat: string; answer: Answer }
+// What a trip answers: the fetch, as fetchedOf reads it, and the answers it carried back
+export const tripOf = (text: string): { text: string; carried: Carried[] } => {
+  const [fetched = '', ...rest] = text.split(`${ANSWER_MARK}\n`)
+  const carried = rest.flatMap(part => {
+    const [name = '', body = ''] = part.split('\n')
+    const answer = answerOf(body)
+    let chat = ''
+    try {
+      chat = String((JSON.parse(body) as { chat?: unknown }).chat ?? '')
+    } catch {
+      chat = ''
+    }
+    return isAnswerName(name) && answer && /^[A-Za-z0-9_-]+$/.test(chat) ? [{ name, chat, answer }] : []
+  })
+  return { text: fetched, carried }
+}
+// That Mac's clock as the head of a fetch gives it, in ms
+export const clockOf = (text: string) => {
+  const [head = ''] = text.split(`${MARK}\n`)
+  return Number([...head.split('\n')].reverse().find(line => /^\d{9,}$/.test(line.trim()))?.trim() ?? 0) * 1000
+}
+
 // A Mac named in config.json `macs`, as ssh takes it: user@host, or a Host line of ~/.ssh/config. Nothing else is run
 export const isMac = (one: unknown): one is string => typeof one === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_.-]*(@[A-Za-z0-9_][A-Za-z0-9_.-]*)?$/.test(one)
 export const macName = (one: string) => (one.split('@').pop() ?? one).split('.')[0] ?? one
