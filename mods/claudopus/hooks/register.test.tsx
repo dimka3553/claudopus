@@ -157,8 +157,24 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     // Another Mac over ssh: what it answers is laid by the test as ssh:<what>; an answer sent there is kept as it was handed over
     if (tool === 'ssh') {
       sshed.push([String(e.argv.at(-1)), String(e.init?.stdin ?? '')])
-      const said = String(e.argv.at(-1)).startsWith("sh -c 'L=") ? files.get('ssh:fetch') : files.has('ssh:down') ? undefined : ''
-      return { value: { exitCode: said === undefined ? 255 : 0, stdout: said ?? '', stderr: said === undefined ? 'ssh: connect to host m4: timed out' : '', isStdoutTruncated: false, isStderrTruncated: false } }
+      const command = String(e.argv.at(-1))
+      const said = command.startsWith("sh -c 'L=") ? files.get('ssh:fetch') : command.startsWith("sh -c 'echo $HOME;") ? files.get('ssh:results') : files.has('ssh:down') ? undefined : ''
+      return { value: { exitCode: said === undefined ? 255 : 0, stdout: said ?? '', stderr: said === undefined ? 'ssh: connect to host m4: timed out' : '', isStdoutTruncated: command.startsWith("sh -c 'echo $HOME;") && files.has('ssh:cut'), isStderrTruncated: false } }
+    }
+    // A shell run here: bringing results from another Mac lays there what the test laid as remote:<folder>/<file>, and a folder moved
+    // into place goes only where none has its name
+    if (tool === 'sh' || tool === 'bash') {
+      sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
+      // A stream cut short lays half of what it carried and fails
+      if (String(rest[1]).includes('tar xf - -C "$S"')) {
+        for (const [key, text] of [...files]) if (key.startsWith('remote:') && !(files.has('pull:cut') && key.endsWith('report.md'))) files.set(`${rest[3]}/${key.slice(7)}`, text)
+        if (files.has('pull:cut')) return { value: { exitCode: 1, stdout: '', stderr: 'tar: Truncated input file', isStdoutTruncated: false, isStderrTruncated: false } }
+      }
+      if (String(rest[1]).startsWith('mkdir "$3"')) {
+        const [from = '', to = ''] = [String(rest[3]), String(rest[4])]
+        if (![...files.keys()].some(key => key.startsWith(`${to}/`))) for (const [key, text] of [...files]) if (key.startsWith(`${from}/`)) (files.set(`${to}${key.slice(from.length)}`, text), files.delete(key))
+      }
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     // This Mac's own name, as its Sharing settings give it
     if (tool === 'scutil') return { value: { exitCode: 0, stdout: 'Sams-MacBook-Air\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -2367,7 +2383,7 @@ test("with another Mac named in config.json, its chats' work shows here under it
   await $.session.start(start)
   await clock.advance(10_000)
   // Only a Mac that ssh takes as a name is reached
-  expect(sshed.every(([command]) => command?.startsWith("sh -c 'L=") || command?.startsWith('d='))).toBe(true)
+  expect(sshed.every(([command]) => command?.startsWith("sh -c 'L=") || command?.startsWith("sh -c 'echo $HOME;") || command?.startsWith('d='))).toBe(true)
   expect(sshed.length).toBeGreaterThan(0)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
@@ -2672,6 +2688,100 @@ test("a Mac that reaches another hands it this Mac's chats in the same trip, and
   const second = sshed.filter(([command]) => command?.startsWith("sh -c 'L=")).at(-1)
   expect(second?.[0]).toContain(`rm -f ${NOW}-abc.json`)
   expect(files.has(`${MEMORY}/live/answers/chat-b/${NOW}-abc.json`)).toBe(false)
+})
+
+test("with another Mac named, the results become the same on both: what each lacks is copied over with its paths moved home, and what was done to one both have goes both ways", async ($, on) => {
+  const { files, clock, sshed } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const result = (id: string, more: object = {}) => ({ id, title: `Result ${id}`, subject: 'S', at: NOW, chat: 'c', chatId: 'c', folder: `${HOME}/repo`, gist: '', files: [], agent: '', ...more })
+  // Here: "both", put away here, and "mine" only here. There: "both", with an answer given there, and "theirs" only there
+  files.set(`${MEMORY}/reports/both/meta.json`, JSON.stringify(result('both', { archived: NOW, waiting: [{ text: 'Ship it?' }] })))
+  files.set(`${MEMORY}/reports/both/report.md`, 'Both.\n')
+  files.set(`${MEMORY}/reports/mine/meta.json`, JSON.stringify(result('mine')))
+  files.set(`${MEMORY}/reports/mine/report.md`, 'Mine.\n')
+  const there = JSON.stringify({ ...result('both', { waiting: [{ text: 'Ship it?', answer: 'Yes' }] }), folder: '/Users/sam/repo' })
+  const theirs = JSON.stringify({ ...result('theirs'), folder: '/Users/sam/repo' })
+  files.set('ssh:results', `/Users/sam\n---claudopus-result---\nboth\n111 222\n${there}\n---claudopus-result---\ntheirs\n3 4\n${theirs}\n`)
+  files.set('remote:theirs/meta.json', theirs)
+  files.set('remote:theirs/report.md', 'See /Users/sam/repo/a.png\n')
+  await $.session.start(start)
+  await clock.advance(10_000)
+  // "theirs" is brought, whole, its paths on this Mac's home
+  await until(async () => files.get(`${MEMORY}/reports/theirs/meta.json`))
+  expect(files.get(`${MEMORY}/reports/theirs/meta.json`)).toContain(`"folder":"${HOME}/repo"`)
+  expect(files.get(`${MEMORY}/reports/theirs/report.md`)).toBe(`See ${HOME}/repo/a.png\n`)
+  expect(sshed.find(([script]) => script?.includes('tar xf - -C "$S"'))?.[1]).toContain('tar cf - -- theirs')
+  // "mine" is handed there, and only it
+  const handed = await until(async () => sshed.find(([script]) => script?.includes('cd "$S" && COPYFILE_DISABLE=1 tar cf')))
+  expect(handed?.[1]).toMatch(/ mine$/)
+  // "both": the answer given there is kept here, and put away here goes there, written only if unchanged there since it was read
+  const marked = await until(async () => sshed.find(([command]) => command?.includes('/reports/both/meta.json')))
+  const here = JSON.parse(files.get(`${MEMORY}/reports/both/meta.json`) ?? '{}')
+  expect(here.waiting).toEqual([{ text: 'Ship it?', answer: 'Yes' }])
+  expect(here.archived).toBe(NOW)
+  expect(marked?.[0]).toContain('= "111 222" ] || exit 3')
+  expect(JSON.parse(marked?.[1] ?? '{}')).toMatchObject({ archived: NOW, folder: '/Users/sam/repo', waiting: [{ text: 'Ship it?', answer: 'Yes' }] })
+  // Within the next two minutes it is not looked at again; nothing here was deleted
+  await clock.advance(60_000)
+  expect(sshed.filter(([command]) => command?.startsWith("sh -c 'echo $HOME;")).length).toBe(1)
+  expect(files.get(`${MEMORY}/reports/mine/report.md`)).toBe('Mine.\n')
+})
+
+test("a result cut short on its way is never put in place, and a list cut short sends nothing either way", async ($, on) => {
+  const { files, clock, sshed } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const theirs = JSON.stringify({ id: 'theirs', title: 'T', subject: 'S', at: NOW, chat: 'c', chatId: 'c', folder: '/x', gist: '', files: [], agent: '' })
+  files.set('ssh:results', `/Users/sam\n---claudopus-result---\ntheirs\n3 4\n${theirs}\n`)
+  files.set('remote:theirs/meta.json', theirs)
+  files.set('remote:theirs/report.md', 'All of it.\n')
+  files.set('pull:cut', '1')
+  files.set(`${MEMORY}/reports/mine/meta.json`, JSON.stringify({ ...JSON.parse(theirs), id: 'mine' }))
+  await $.session.start(start)
+  await clock.advance(10_000)
+  await until(async () => sshed.find(([script]) => script?.includes('tar xf - -C "$S"')))
+  await clock.advance(1_000)
+  expect(files.has(`${MEMORY}/reports/theirs/meta.json`)).toBe(false)
+  // Two minutes on, with the list cut short: nothing is brought, handed or marked
+  files.delete('pull:cut')
+  files.set('ssh:cut', '1')
+  const before = sshed.length
+  await clock.advance(120_000)
+  expect(sshed.slice(before).filter(([script]) => !script?.startsWith("sh -c 'L=") && !script?.startsWith("sh -c 'echo $HOME;") && !script?.startsWith('find'))).toEqual([])
+  expect(files.has(`${MEMORY}/reports/theirs/meta.json`)).toBe(false)
+})
+
+test('a result put away here and brought back on the other Mac by an older version stays brought back on both', async ($, on) => {
+  const { files, clock, sshed } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const r = { id: 'r', title: 'R', subject: 'S', at: NOW, chat: 'c', chatId: 'c', folder: '/x', gist: '', files: [], agent: '' }
+  files.set(`${MEMORY}/reports/r/meta.json`, JSON.stringify({ ...r, archived: NOW - 1000 }))
+  // The last sync left it put away on both; there it is now neither put away nor brought back with a time
+  files.set(`${MEMORY}/live/macs/sam-m4.local.results.json`, JSON.stringify({ syncedAt: 1, triedAt: 1, archived: { r: NOW - 1000 } }))
+  files.set('ssh:results', `/Users/sam\n---claudopus-result---\nr\n1 2\n${JSON.stringify(r)}\n`)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  const here = await until(async () => {
+    const one = JSON.parse(files.get(`${MEMORY}/reports/r/meta.json`) ?? '{}')
+    return one.broughtBack ? one : undefined
+  })
+  expect(here.archived).toBeUndefined()
+  // Nothing puts it away there again
+  expect(sshed.some(([command, stdin]) => command?.includes('/reports/r/meta.json') && JSON.parse(stdin || '{}').archived)).toBe(false)
+})
+
+test('a result brought back after it was put away on the other Mac stays out of the archive, as the later of the two', async ($, on) => {
+  const { files, clock } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const r = { id: 'r', title: 'R', subject: 'S', at: NOW, chat: 'c', chatId: 'c', folder: '/x', gist: '', files: [], agent: '' }
+  files.set(`${MEMORY}/reports/r/meta.json`, JSON.stringify({ ...r, archived: NOW - 1000 }))
+  files.set('ssh:results', `/Users/sam\n---claudopus-result---\nr\n1 2\n${JSON.stringify({ ...r, broughtBack: NOW })}\n`)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  const here = await until(async () => {
+    const one = JSON.parse(files.get(`${MEMORY}/reports/r/meta.json`) ?? '{}')
+    return one.broughtBack ? one : undefined
+  })
+  expect(here.archived).toBeUndefined()
 })
 
 test("a Mac handed another Mac's chats lists them by name and Mac with its own, leaves an answer for them to be carried back, and drops them once that Mac stops handing them over", async ($, on) => {

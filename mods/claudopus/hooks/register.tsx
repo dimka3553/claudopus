@@ -6,6 +6,7 @@ import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, j
 import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
+import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
 import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, LIVE_DIR, LOOK_EVERY, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
 import type { Answer } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
@@ -1399,7 +1400,8 @@ const archiveReport = ($: EngineInterface, r: Report, isArchived: boolean) => {
     const rounds = entriesOf(kept).find(entry => entry.some(one => one.id === r.id)) ?? []
     const now = await $.clock.now()
     // Each round is marked even when another's mark fails, so the press leaves as little half done as it can
-    for (const one of rounds) await markReport($, one, { archived: isArchived ? now : undefined }).catch(err => log($, `result ${one.id} not ${isArchived ? 'archived' : 'brought back'}: ${String(err)}`))
+    // Brought back keeps when, so another Mac that has it put away follows the later of the two
+    for (const one of rounds) await markReport($, one, isArchived ? { archived: now } : { archived: undefined, broughtBack: now }).catch(err => log($, `result ${one.id} not ${isArchived ? 'archived' : 'brought back'}: ${String(err)}`))
     // One brought back is listed in its place, even one that came after the list was opened
     if (!isArchived && reportsListed.length) reportsListed =[...new Set([...reportsListed, ...rounds.map(one => one.id)])]
     if (isArchived) {
@@ -2862,6 +2864,122 @@ const fetchMacs = async ($: EngineInterface) => {
   }
 }
 
+// The results of each other Mac made the same as this one's, at most every RESULTS_EVERY, by whichever chat here comes first: what
+// that Mac lacks is handed to it, what this one lacks is brought here, and the marks of a result both have are made the same on both.
+// A result is moved into place only whole and only where none has its name; nothing is deleted
+const resultsPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.results.json`
+// What one sync with a Mac leaves: when, and each result both have that was put away then, with when
+type Synced = { syncedAt?: number; triedAt?: number; archived?: Record<string, number> }
+let isSyncing = false
+const syncResults = async ($: EngineInterface) => {
+  if (isSyncing) return
+  isSyncing = true
+  try {
+    for (const mac of macs) {
+      const now = await $.clock.now()
+      const was = JSON.parse((await readOr($, resultsPath(mac))) || '{}') as Synced
+      if (now - Math.max(was.syncedAt ?? 0, was.triedAt ?? 0) < RESULTS_EVERY) continue
+      await $.fs.write(resultsPath(mac), JSON.stringify({ ...was, triedAt: now }))
+      const staging = `${reportsDir()}/_sync/${now}-${Math.random().toString(36).slice(2, 8)}`
+      try {
+        await syncWith($, mac, was, now, staging)
+      } finally {
+        await $.process.run(['rm', '-rf', staging, `${staging}-out`]).catch(() => undefined)
+      }
+    }
+    // What a sync cut off left of its own folders goes after an hour; nothing else there is ever touched
+    await $.process.run(['find', `${reportsDir()}/_sync`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(() => undefined)
+  } finally {
+    isSyncing = false
+  }
+}
+const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: number, staging: string) => {
+  const home = dir.slice(0, -'/.claude/claudopus'.length)
+  const looked = await $.process.run(ssh(mac, RESULTS_LOOK), { timeoutMs: 60_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err), isStdoutTruncated: false }))
+  // A list cut short is no list: what it leaves out would look missing there
+  const theirs = looked.exitCode === 0 && !looked.isStdoutTruncated ? resultsOf(looked.stdout) : undefined
+  if (!theirs) {
+    if ((was.syncedAt ?? 0) >= (was.triedAt ?? 0)) await log($, `results on ${mac} not looked at: ${looked.isStdoutTruncated ? 'its list was cut short' : looked.stderr.trim().slice(0, 160)}`)
+    return
+  }
+  // This Mac's results as they stand: each folder with its meta.json, by name
+  const mine = new Map<string, string>()
+  for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
+    if (entry.kind !== 'dir' || !isResultId(entry.name)) continue
+    const text = await readOr($, `${reportsDir()}/${entry.name}/meta.json`)
+    if (text.trim().startsWith('{')) mine.set(entry.name, text)
+  }
+  let changed = 0
+  // Brought here one at a time, each into a folder of its own first, its paths moved onto this Mac's home, then into place whole:
+  // one whose stream was cut short is left out, and brought on a later trip
+  const wanted = [...theirs.results.keys()].filter(id => !mine.has(id)).slice(0, RESULTS_A_TRIP)
+  for (const id of wanted) {
+    const into = `${staging}/${id}`
+    await $.process.run(['mkdir', '-p', into])
+    const r = await $.process.run(['bash', '-c', PULL, 'bash', into, mac, pullThere([id])], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+    if (r.exitCode !== 0) {
+      await log($, `result ${id} from ${mac} not brought: ${r.stderr.trim().slice(0, 160)}`)
+      continue
+    }
+    if ((parsedMeta(await readOr($, `${into}/${id}/meta.json`)) as { id?: unknown }).id !== id) continue
+    for (const file of ['meta.json', 'report.md']) {
+      const text = await readOr($, `${into}/${id}/${file}`)
+      if (text) await $.fs.write(`${into}/${id}/${file}`, rehome(text, theirs.home, home))
+    }
+    const moved = await $.process.run(['sh', '-c', PLACE, 'sh', `${into}/${id}`, `${reportsDir()}/${id}`, `${reportsDir()}/_sync/claim-${id}`]).catch(() => ({ exitCode: -1 }))
+    if (moved.exitCode === 0) changed += 1
+  }
+  // Handed there: copied aside here with its paths moved onto that Mac's home, then sent in one stream, put in place there only
+  // once the whole stream is in
+  const handed = [...mine.keys()].filter(id => !theirs.results.has(id)).slice(0, RESULTS_A_TRIP)
+  if (handed.length) {
+    const out = `${staging}-out`
+    await $.process.run(['mkdir', '-p', out])
+    const ready: string[] = []
+    for (const id of handed) {
+      if ((await $.process.run(['cp', '-Rp', `${reportsDir()}/${id}`, `${out}/${id}`]).catch(() => ({ exitCode: -1 }))).exitCode !== 0) continue
+      for (const file of ['meta.json', 'report.md']) {
+        const text = await readOr($, `${out}/${id}/${file}`)
+        if (text) await $.fs.write(`${out}/${id}/${file}`, rehome(text, home, theirs.home))
+      }
+      ready.push(id)
+    }
+    const r = ready.length ? await $.process.run(['bash', '-c', PUSH, 'bash', out, mac, PUSH_THERE, ...ready], { timeoutMs: 300_000 }).catch(err => ({ exitCode: -1, stderr: String(err) })) : { exitCode: 0, stderr: '' }
+    if (r.exitCode !== 0) await log($, `results not handed to ${mac}: ${r.stderr.trim().slice(0, 160)}`)
+  }
+  // What the person did to a result both have: the later of put away and brought back, every answer, on both. Each side is written
+  // only when it differs; there only when unchanged since it was read
+  let marked = 0
+  const archived: Record<string, number> = {}
+  for (const [id, there] of theirs.results) {
+    const here = mine.get(id)
+    if (!here) continue
+    const wasArchived = was.archived?.[id] ?? 0
+    const theirsNow = broughtBackBy(parsedMeta(there.text), wasArchived, now)
+    const mineNow = broughtBackBy(parsedMeta(here), wasArchived, now)
+    const target = marksOf(mineNow, theirsNow)
+    // Its archive is kept as made the same only once both sides hold it; else what was kept before stands
+    let isSame = marked < RESULTS_A_TRIP
+    if (marked < RESULTS_A_TRIP) {
+      if (merged(here, theirsNow, wasArchived, now)) {
+        const ok = await markReport($, { id } as Report, stored => marksOf(broughtBackBy(stored, wasArchived, now), theirsNow)).then(() => true, err => (void log($, `result ${id} not marked from ${mac}: ${String(err)}`), false))
+        ;(isSame &&= ok), (changed += 1), (marked += 1)
+      }
+      const theirsNext = merged(there.text, mineNow, wasArchived, now)
+      if (theirsNext) {
+        const r = await $.process.run(ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
+        if (r.exitCode !== 0) await log($, `result ${id} not marked on ${mac}: ${r.exitCode === 3 ? 'changed there since' : r.stderr.trim().slice(0, 160)}`)
+        ;(isSame &&= r.exitCode === 0), (marked += 1)
+      }
+    }
+    const kept = isSame ? (target.archived ?? 0) : wasArchived
+    if (kept) archived[id] = kept
+  }
+  if (changed) await loadReports($)
+  await $.fs.write(resultsPath(mac), JSON.stringify({ syncedAt: await $.clock.now(), triedAt: now, brought: wanted.length, handed: handed.length, marked, archived }))
+  if (wanted.length || handed.length || marked) await log($, `results with ${mac}: ${wanted.length} brought, ${handed.length} handed, ${marked} marked`)
+}
+
 // The Macs that handed this one their chats lately, by the name each gave, and what the freshest called this Mac: its name here once
 // other Macs' chats are listed beside its own
 const pushedFrom = new Set<string>()
@@ -3378,6 +3496,7 @@ export const register: Register = on => {
     asked = []
     await unshare($, true).catch(() => undefined)
     if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
+    if (macs.length) $.clock.every(FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
     await readOthers($).catch(() => undefined)

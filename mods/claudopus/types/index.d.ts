@@ -126,6 +126,8 @@ export type Report = {
   from?: string
   // When the person put it away: it leaves the list and the chat's note, and nothing in it waits; its text stays
   archived?: number
+  // When they last brought it back: another Mac's marks follow the later of the two
+  broughtBack?: number
 }
 
 // One thing a report leaves for the person to decide or do; open until `answer` is "Yes", "No", or "Not now" for one set aside
