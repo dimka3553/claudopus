@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { shareable } from './shared'
+import { headLine, headMood, shareable } from './shared'
 
 const HOME = '/home/sam'
 const MEMORY = `${HOME}/.claude/claudopus`
@@ -604,11 +604,11 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await tab.find({ type: 'Text', text: /^Finished ·/ }))?.text).toBe('Finished · 2m 00s')
   expect(await tab.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
   await tab.unmount()
-  // First it stays in its place for two seconds, green, saying it finished; the header counts it as no longer running at once
+  // First it stays in its place for two seconds, green, saying it finished; the header counts it as no longer running at once and says it just finished
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.bold).toBe(true)
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
-  expect((await pane.find({ type: 'Text', text: /^Nothing/ }))?.text).toBe('Nothing is running')
+  expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
   expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Details'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeDefined()
@@ -1862,7 +1862,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
 
   // The notice that it ended ends its card: it leaves the running cards and is under Finished
   await $.prompt.submit({ text: '<task-notification><task-id>wt1</task-id><status>completed</status><result>passed in 2 rounds</result></task-notification>', wait: false, origin: { kind: 'task-notification' } } as never)
-  expect(await until(async () => ((await pane.find({ type: 'Text', text: /^Nothing is running$/ })) ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await pane.find({ type: 'Text', text: /^Just finished$/ })) ? true : undefined))).toBe(true)
   // For two seconds it stays where it was, green, with no Stop, and nothing is under Finished yet
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeDefined()
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
@@ -2296,7 +2296,8 @@ test("the panel shows every open chat's running work under that chat's name, thi
   expect(bold.indexOf('Send the invoices')).toBeLessThan(bold.indexOf('Check the totals'))
   expect(bold).not.toContain('Old landing page')
   expect(await list.find({ type: 'Text', text: 'billing' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: '2 more in 1 other chat' })).toBeDefined()
+  // The header counts every chat's: the ask first, then all that runs, here and there
+  expect(await list.find({ type: 'Text', text: '1 thing needs you, 2 running' })).toBeDefined()
   // Another chat's work is stopped in its own chat: no Stop here, and its model is no control
   const buttons = (await list.findAll({ type: 'Button' })).map(one => one.key ?? '')
   expect(buttons.filter(key => key.startsWith('stop-'))).toEqual(['stop-a1'])
@@ -2441,6 +2442,56 @@ test('/claudopus on a screen with nowhere to draw the panel does not open it for
   expect(files.has(`${MEMORY}/panel.json`)).toBe(false)
 })
 
+test("the header says in one line what every chat's cards say, and the octopus beside it agrees", () => {
+  const head = (here: number, there: number, chats: number, asks = 0, isDone = false) => {
+    const one = { here, there, chats, asks, isDone }
+    return [headLine(one), headMood(one)]
+  }
+  expect(head(0, 0, 0)).toEqual(['Nothing is running', 'mark'])
+  expect(head(1, 0, 0)).toEqual(['Working on 1 thing', 'working'])
+  expect(head(2, 0, 0)).toEqual(['Working on 2 things', 'working'])
+  expect(head(0, 1, 1)).toEqual(['Working on 1 thing in another chat', 'working'])
+  expect(head(0, 3, 2)).toEqual(['Working on 3 things in 2 other chats', 'working'])
+  expect(head(1, 1, 1)).toEqual(['Working on 2 things here and in 1 other chat', 'working'])
+  expect(head(2, 3, 2)).toEqual(['Working on 5 things here and in 2 other chats', 'working'])
+  expect(head(0, 0, 0, 1)).toEqual(['1 thing needs you', 'asking'])
+  expect(head(1, 2, 1, 2)).toEqual(['2 things need you, 3 running', 'asking'])
+  // What needs the person outranks a finish; a finish shows on the octopus while other work still runs, and alone in the line
+  expect(head(0, 0, 0, 1, true)).toEqual(['1 thing needs you', 'asking'])
+  expect(head(0, 1, 1, 0, true)).toEqual(['Working on 1 thing in another chat', 'happy'])
+  expect(head(0, 0, 0, 0, true)).toEqual(['Just finished', 'happy'])
+})
+
+test("with work only in another chat the header and octopus are at work, amber while it asks, happy as it finishes, then at rest", async ($, on) => {
+  const { files, clock } = world(on, { art: true })
+  await $.session.start(start)
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  const file = JSON.parse(otherChat(NOW)) as { at: number; cards: { status: string; endedAt: number; ask?: unknown }[] }
+  // Only its running card, no ask
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, cards: file.cards.slice(1) }))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Working on 1 thing in another chat' }))).toBeDefined()
+  expect(await drawn(list)).toEqual(['working'])
+  expect(await list.find({ type: 'Text', text: /^Nothing/ })).toBeUndefined()
+  // It asks: the line turns amber and says so, and the octopus waves amber
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 5000 }))
+  await clock.advance(5000)
+  const asks = await until(async () => list.find({ type: 'Text', text: '1 thing needs you, 1 running' }))
+  expect(asks?.props.color).toBe('#E5A50A')
+  expect(await drawn(list)).toEqual(['wave'])
+  // Both finish: happy, "Just finished", for the pause; then at rest, "Nothing is running"
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 11_000, cards: file.cards.map(card => ({ ...card, status: 'done', endedAt: NOW + 10_500, ask: undefined })) }))
+  await clock.advance(5000)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Just finished' }))).toBeDefined()
+  expect(await drawn(list)).toEqual(['happy'])
+  await clock.advance(3000)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Nothing is running' }))).toBeDefined()
+  expect(await drawn(list)).toEqual(['mark'])
+  await list.unmount()
+})
+
 test('someone whose panel was open before chats shared it has it open in every chat once this version loads', async ($, on) => {
   const { files } = world(on, { panes: ['claudopus'] })
   await $.session.start(start)
@@ -2465,7 +2516,7 @@ test("open chats with nothing going on are listed nowhere, on any Mac and howeve
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'billing · on m4' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: '2 more in 1 other chat' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 thing needs you, 1 running' })).toBeDefined()
   // No idle chat by name, no row or count of them, and this chat, with nothing going on, gets no heading
   const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(texts.filter(one => /^Quiet \d+$|^M4 idle$|^[▸▾]? ?\d+ other chats?$/.test(one))).toEqual([])
@@ -2685,6 +2736,47 @@ test("work that ends in another chat turns happy in this panel for its pause, th
   await clock.advance(1000)
   expect(await until(async () => list.find({ type: 'Text', text: 'Fix the nose' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
+  await list.unmount()
+})
+
+test("work on another Mac whose chat runs a version that drops a card as it ends, saying nothing of its end, turns happy here for its pause, then is gone", async ($, on) => {
+  const { files, clock } = world(on, { art: true })
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  const running = (at: number) => JSON.stringify({ ...JSON.parse(otherChat(at, 'chat-old', 'Remote connector')), cards: [JSON.parse(otherChat(at)).cards[1]] })
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${running(NOW)}\n`)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Check the totals' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Working on 1 thing in another chat' })).toBeDefined()
+  // The work ends: that chat, still open, writes its file with no card at all
+  const quiet = JSON.stringify({ chat: 'chat-old', title: 'Remote connector', folder: '/repo/billing', host: '', at: NOW + 11_000, cards: [] })
+  files.set('ssh:fetch', `${(NOW + 11_000) / 1000}\n---claudopus-live---\n${quiet}\n`)
+  // It is seen at the next fetch, a second at a time so its pause is not passed over
+  let seen
+  for (let n = 0; n < 20 && !seen; n += 1) (await clock.advance(1000), (seen = await list.find({ type: 'Text', text: '✓ Finished' })))
+  expect(seen).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Check the totals' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Just finished' })).toBeDefined()
+  expect(await drawn(list)).toEqual(['happy'])
+  // After its pause it is gone, and not kept under Finished, since its chat said nothing of how it ended
+  await clock.advance(3000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Check the totals' })) ? undefined : true))).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'Nothing is running' })).toBeDefined()
+  expect(await drawn(list)).toEqual(['mark'])
+  expect((await list.findAll({ type: 'Button' })).some(b => /Finished/.test(String(b.props.label)))).toBe(false)
+  // A chat that closes with its work running shows nothing finished: its work just leaves
+  files.set('ssh:fetch', `${(NOW + 40_000) / 1000}\n---claudopus-live---\n${running(NOW + 40_000)}\n`)
+  let back
+  for (let n = 0; n < 20 && !back; n += 1) (await clock.advance(1000), (back = await list.find({ type: 'Text', text: 'Check the totals' })))
+  expect(back).toBeDefined()
+  files.set('ssh:fetch', `${(NOW + 60_000) / 1000}\n`)
+  let finished
+  for (let n = 0; n < 20; n += 1) (await clock.advance(1000), (finished ||= await list.find({ type: 'Text', text: '✓ Finished' })))
+  expect(finished).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: 'Check the totals' })).toBeUndefined()
   await list.unmount()
 })
 

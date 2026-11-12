@@ -6,7 +6,7 @@ import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, j
 import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
-import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, isKey, isMac, keyOf, LIVE_DIR, LOOK_EVERY, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, LIVE_DIR, LOOK_EVERY, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
 import type { Answer } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
@@ -2089,8 +2089,9 @@ const DONE = 'success'
 // The octopus: resting, working at its computers (drawn from 32 px up), and lifting its arms (for 16 to 24 px). Each is an SVG
 // file of the mod's, art/<name>.svg, read when the session starts: a drawing is swapped by replacing its file. Happy is the
 // octopus in the finished green, bouncing with its arms up once over the two seconds finished work pauses, then still
-const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '' }
-const ART_FILES: Record<keyof typeof ART, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
+// Asking is the wave in the amber of work that needs the person: it waves once as something starts to wait, then rests amber
+const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '', asking: '' }
+const ART_FILES: Record<Exclude<keyof typeof ART, 'asking'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
 // Whether the octopus is happy at a time: work of this chat's that finished, not stopped or failed, is in its pause. A new drawing
 // starts its animation, so it plays from the first finish and holds its last picture through any finish that follows in the pause
 const isHappy = (cards: { parentId?: string; status: string; endedAt: number }[], at: number) =>
@@ -2878,6 +2879,13 @@ const lingers = (one: Todo, at: number) => {
   const seen = endSeen.get(one.id) ?? 0
   return one.status !== 'working' && seen > 0 && at >= seen && at - seen < LINGER
 }
+// Another chat's running work as last read, by its id here, with its chat: a chat on a version from before ended work was shared
+// drops a card from its file as the work ends, saying nothing of how. Such a card, gone while its chat is still there, is shown
+// finished for its pause, green with the happy octopus as any other finish, and is then gone: what is not known is not kept
+const lastRunning = new Map<string, { chat: string; card: Todo; at: number; of: Shared }>()
+// The cards shown finished that way, by id here, with when they were seen gone; only for their pause
+const vanished = new Map<string, { chat: string; card: Todo; at: number; of: Shared }>()
+const isVanished = (id: string) => vanished.has(id)
 // The files of other chats, as last read, by name: a file is read again only when it changed
 const liveRead = new Map<string, { key: string; text: string }>()
 const isWhole = (text: string) => {
@@ -2894,6 +2902,8 @@ const readOthers = async ($: EngineInterface) => {
   const wasSelf = `${isMulti()}:${selfName()}`
   // What other Macs handed this one: a copy not handed again for STALE (that Mac asleep or its chats closed) says nothing now
   const pushed: Shared[] = []
+  // Every chat still open, with or without anything going on, as host/chat
+  const open = new Set<string>()
   // Gathered apart and put in place at the end, so what this Mac knows of them holds while they are read
   const from = new Set<string>()
   let you = ''
@@ -2907,6 +2917,7 @@ const readOthers = async ($: EngineInterface) => {
     from.add(head.from)
     if (head.you && at >= youAt) (you = head.you, (youAt = at))
     pushed.push(...fetchedOf(text, head.from, at))
+    for (const one of fetchedOpen(text, head.from)) open.add(one)
   }
   pushedFrom.clear()
   for (const one of from) pushedFrom.add(one)
@@ -2926,6 +2937,7 @@ const readOthers = async ($: EngineInterface) => {
     const one = sharedOf(text, now)
     // A file caught half-written is read again at the next look, not kept as read; a whole one of a chat with nothing going on is
     // kept as read, so a hundred idle chats are not read again at every look
+    if (openChatOf(text, now)) open.add(openChatOf(text, now))
     if (one || isWhole(text)) liveRead.set(entry.name, { key, text })
     else liveRead.delete(entry.name)
     if (one) here.add(one.chat)
@@ -2936,11 +2948,36 @@ const readOthers = async ($: EngineInterface) => {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
     // A copy not fetched again for STALE says nothing of that Mac now
     if (!f.text || now - (f.fetchedAt ?? 0) > STALE) continue
+    for (const one of fetchedOpen(f.text, mac)) open.add(one)
     // A Mac named that is this one shows its chats once, as this Mac's
     for (const one of fetchedOf(f.text, mac, f.fetchedAt)) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
   }
   // A chat both fetched and handed over, as when two Macs each name the other, is listed once, as fetched
   for (const one of pushed) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
+  // Work gone from a chat still open, with no word of its end: finished, for its pause. A chat with nothing left going on is not
+  // among those found, so it is listed again for that pause from what was last read of it
+  const chatKey = (s: { host: string; chat: string }) => `${s.host}/${s.chat}`
+  const present = new Map(found.map(s => [chatKey(s), s]))
+  for (const [key, was] of [...lastRunning]) {
+    if (!open.has(was.chat)) {
+      if (now - was.at > STALE) lastRunning.delete(key)
+      continue
+    }
+    lastRunning.delete(key)
+    const s = present.get(was.chat)
+    if (!s?.cards.some(card => remoteId(s, card.id) === key) && !vanished.has(key)) vanished.set(key, { chat: was.chat, card: { ...was.card, status: 'done', endedAt: now, ask: undefined }, at: now, of: was.of })
+  }
+  for (const s of found) for (const card of s.cards.filter(one => one.status === 'working')) lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card, at: now, of: { ...s, cards: [] } })
+  for (const [key, one] of [...vanished]) {
+    const s = present.get(one.chat)
+    if (!open.has(one.chat) || now - one.at > LINGER + LOOK_EVERY || s?.cards.some(card => remoteId(s, card.id) === key)) vanished.delete(key)
+    else if (s) s.cards = [...s.cards, one.card]
+    else {
+      const back = { ...one.of, cards: [one.card] }
+      found.push(back)
+      present.set(one.chat, back)
+    }
+  }
   // Work of another chat seen ending, by its id here: it turns happy for its pause from when this panel saw it end, as another
   // chat's file reaches here seconds later. Work that ended well before this panel saw it goes to Finished at once
   const ids = new Set<string>()
@@ -3189,6 +3226,7 @@ export const register: Register = on => {
       const text = await readOr($, `${$.plugin.root}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
     }
+    ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
     cwd = e.cwd
     await loadSettings($)
 
@@ -4464,7 +4502,8 @@ export const register: Register = on => {
     // Work that has ended, under the running cards: one folded row, so nothing above it moves. Unfolded, the newest first, each a
     // steady row of two lines (what it was, how it ended, its model, how long it took, when) that opens its card as for running work
     // Other chats' ended work folds in here too, once its pause is over; the row then says it holds every chat's
-    const endedElsewhere = elsewhere.filter(one => one.status !== 'working' && !one.ask && !lingers(one, at))
+    // Work shown finished only because it left its chat's file is not kept there: its chat said nothing of how it ended
+    const endedElsewhere = elsewhere.filter(one => one.status !== 'working' && !one.ask && !lingers(one, at) && !isVanished(one.id))
     // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none of these and no prompt
     // is not listed at all, however many are open: the app's own list of chats has them
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
@@ -4621,6 +4660,17 @@ export const register: Register = on => {
     // The reports kept, in every chat: on this pane only the button that opens their own
     const kept = await read($, reports)
     const ui = $.ui.resolve(e)
+    // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and
+    // work that just finished (happy too for a workflow in its pause whose card turned green: it finished and its last round passed)
+    const runningThere = elsewhere.filter(one => one.status === 'working' && !one.ask)
+    const head = {
+      here: working.filter(one => !one.ask).length + runningFlows.length,
+      there: runningThere.length,
+      chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
+      asks: own.filter(one => one.ask).length + waiting.length + elsewhere.filter(one => one.ask).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
+      isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
+    }
+    const mood = headMood(head)
 
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
@@ -4629,22 +4679,10 @@ export const register: Register = on => {
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off
           <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
-              {/* Happy too for a workflow in its pause whose card turned green: it finished and its last round did not fail */}
-              {isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false)
-                ? octopus(ui, 'head-mark', 'happy', HEAD_MARK, 'Claudopus, work finished')
-                : octopus(ui, 'head-mark', working.length + runningFlows.length ? 'working' : 'mark', HEAD_MARK, working.length + runningFlows.length ? 'Claudopus at work' : 'Claudopus')}
+              {octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 <Text bold wrap="truncate-end">Claudopus</Text>
-                <Text dimColor wrap="truncate-end">
-                  {working.length + runningFlows.length === 0 ? 'Nothing is running' : working.length + runningFlows.length === 1 ? 'Working on 1 thing' : `Working on ${working.length + runningFlows.length} things`}
-                </Text>
-                {elsewhere.some(one => one.status === 'working') ? (
-                  <Text dimColor wrap="truncate-end">{(() => {
-                    const running = elsewhere.filter(one => one.status === 'working')
-                    const chats = new Set(running.map(one => `${one.chat?.host}/${one.chat?.id}`)).size
-                    return `${running.length} more in ${chats === 1 ? '1 other chat' : `${chats} other chats`}`
-                  })()}</Text>
-                ) : null}
+                <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
                 <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
               </Box>
             </Box>

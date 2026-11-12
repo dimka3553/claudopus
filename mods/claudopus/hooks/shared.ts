@@ -72,6 +72,22 @@ export const sharedOf = (text: string, now: number, host = ''): Shared | undefin
   }
 }
 
+// The chat a file is of, as `host/chat`, while it is open (written within STALE), whether or not it has anything going on
+export const openChatOf = (text: string, now: number, host = '') => {
+  try {
+    const one = JSON.parse(text) as Partial<Shared>
+    return typeof one.chat === 'string' && one.chat && typeof one.at === 'number' && now - one.at <= STALE ? `${host || (typeof one.host === 'string' ? one.host : '')}/${one.chat}` : ''
+  } catch {
+    return ''
+  }
+}
+// The same for each chat of a fetch from another Mac, judged by that Mac's clock
+export const fetchedOpen = (text: string, host: string) => {
+  const [, ...files] = text.split(`${MARK}\n`)
+  const now = clockOf(text)
+  return now ? files.map(one => openChatOf(one, now, host)).filter(Boolean) : []
+}
+
 // The cards of other chats as this panel lists them: each names its chat, and its id is kept apart from this chat's own
 export const REMOTE = 'r-'
 // The chat and its Mac in a few letters, so the id stays short enough to name a Details tab whole
@@ -211,3 +227,20 @@ export const openUrl = (c: { host: string; link?: Link }, held = '') => {
   const app = APP_ID.test(held) ? held : !c.host ? (c.link?.app ?? '') : ''
   return app ? `claude://code/continue?session=${app}` : c.link?.bridge ? `claude://code/${c.link.bridge}` : ''
 }
+
+// The panel's header: one line for everything the panel shows, every chat's, so it never says less than the cards under it.
+// What needs the person comes first; then what runs, here, in other chats, or both; then what just finished; else nothing
+export type Head = { here: number; there: number; chats: number; asks: number; isDone: boolean }
+const things = (n: number) => (n === 1 ? '1 thing' : `${n} things`)
+export const headLine = ({ here, there, chats, asks, isDone }: Head) => {
+  const running = here + there
+  if (asks) return `${things(asks)} ${asks === 1 ? 'needs' : 'need'} you${running ? `, ${running} running` : ''}`
+  const others = chats === 1 ? '1 other chat' : `${chats} other chats`
+  if (here && there) return `Working on ${things(running)} here and in ${others}`
+  if (there) return `Working on ${things(there)} in ${chats === 1 ? 'another chat' : others}`
+  if (here) return `Working on ${things(here)}`
+  return isDone ? 'Just finished' : 'Nothing is running'
+}
+// The octopus beside it says the same: amber while anything needs the person, happy for a moment as work finishes, at work while
+// anything runs, resting only when nothing goes on anywhere
+export const headMood = ({ here, there, asks, isDone }: Head) => (asks ? 'asking' : isDone ? 'happy' : here + there ? 'working' : 'mark')
