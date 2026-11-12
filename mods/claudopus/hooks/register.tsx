@@ -7,7 +7,7 @@ import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
-import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, LIVE_DIR, LOOK_EVERY, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
 import type { Answer } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
@@ -2854,7 +2854,9 @@ const unshare = async ($: EngineInterface, isSure = false) => {
 // config.json gives it, and shown by the first part of its host name
 let macs: string[] = []
 const macPath = (mac: string) => `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.json`
-const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '--', mac, command]
+// One connection to each Mac is kept open a minute after its last use and shared by every chat here, so a trip costs a fraction
+// of a second rather than a new login each time, and a name pressed on that Mac opens here within moments
+const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ControlMaster=auto', '-o', 'ControlPath=/tmp/claudopus-%i-%C', '-o', 'ControlPersist=60', '--', mac, command]
 // This Mac's own name, as its Sharing settings give it, read once: what it is called on the Macs it hands its chats to
 let localName = ''
 const knowLocalName = async ($: EngineInterface) => {
@@ -3052,6 +3054,7 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
 // other Macs' chats are listed beside its own
 const pushedFrom = new Set<string>()
 let pushedYou = ''
+let pushedLatest = ''
 // Whether this Mac lists other Macs' chats, and what it calls itself beside them
 const isMulti = () => macs.length > 0 || pushedFrom.size > 0
 const selfName = () => (isMulti() ? pushedYou || localName : '')
@@ -3094,6 +3097,8 @@ const readOthers = async ($: EngineInterface) => {
   const from = new Set<string>()
   let you = ''
   let youAt = 0
+  let latest = ''
+  let latestAt = 0
   for (const entry of (await $.fs.list(`${liveDir()}/${PUSHED}`).catch(() => [])).filter(one => one.kind === 'file' && one.name.endsWith('.json'))) {
     const at = entry.mtimeMs || now
     if (now - at > STALE) continue
@@ -3102,12 +3107,14 @@ const readOthers = async ($: EngineInterface) => {
     if (!head || `${head.from}.json` !== entry.name) continue
     from.add(head.from)
     if (head.you && at >= youAt) (you = head.you, (youAt = at))
+    if (at >= latestAt) (latest = head.from, (latestAt = at))
     pushed.push(...fetchedOf(text, head.from, at))
     for (const one of fetchedOpen(text, head.from)) open.add(one)
   }
   pushedFrom.clear()
   for (const one of from) pushedFrom.add(one)
   pushedYou = you
+  pushedLatest = latest
   if (macs.length) await knowLocalName($)
   const found: Shared[] = []
   // The chats open on this Mac with something going on
@@ -3227,11 +3234,66 @@ const readAppIds = async ($: EngineInterface, now: number) => {
 }
 
 // A press on another chat's name: that chat in the Claude app, as a notification's click opens this one. Nothing else is run
+// In a chat another Mac's Claude app runs here over SSH the app, and the screen it draws on, are that Mac's: a press is left for
+// that Mac (the one that hands its chats here, the freshest of them), which opens the chat there
 const openChat = async ($: EngineInterface, c: Shared) => {
+  const there = drawnFrom()
+  if (there) {
+    const at = await $.clock.now()
+    const r = await leaveHere($, `${OUTBOX}/${there}`, `o-${at}-${Math.random().toString(36).slice(2, 8)}`, { chat: c.chat, at })
+    return void log($, `chat ${c.chat}${c.host ? ` on ${c.host}` : ''} ${r.exitCode === 0 ? `left for ${there} to open` : `not left for ${there}: ${r.stderr.trim().slice(0, 160)}`}`)
+  }
   const url = openUrl(c, heldApp(c))
-  if (!url) return
+  if (url) await openHere($, c, url)
+}
+const openHere = async ($: EngineInterface, c: { chat: string; host: string }, url: string) => {
   const r = await $.process.run(['open', url]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   await log($, `chat ${c.chat}${c.host ? ` on ${c.host}` : ''} ${r.exitCode === 0 ? `opened: ${url}` : `not opened: ${r.stderr.trim().slice(0, 160)}`}`)
+}
+// Whether this chat runs here for another Mac's Claude app, over SSH: the app's own runner says so, once, at the start
+let isRunFromAfar = false
+const drawnFrom = () => (isRunFromAfar ? pushedLatest : '')
+// The presses left on each Mac named under macs for this one, taken every OPEN_EVERY by whichever chat here comes first, and each
+// chat they name opened here as a press here opens it: this chat, another of this Mac's, or one of that Mac's this app holds
+let isTaking = false
+const takeOpens = async ($: EngineInterface) => {
+  if (isTaking) return
+  isTaking = true
+  try {
+    const from = await knowLocalName($)
+    for (const mac of macs) {
+      const now = await $.clock.now()
+      const stamp = `${liveDir()}/${MACS}/${mac.replace(/[^A-Za-z0-9_.-]/g, '-')}.opens`
+      if (now - (Number(await readOr($, stamp)) || 0) < OPEN_EVERY - 250) continue
+      // A Mac that has not answered a trip for STALE, asleep or gone, is not asked every few seconds
+      const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
+      if (now - (f.fetchedAt ?? 0) > STALE) continue
+      await $.fs.write(stamp, String(now))
+      const r = await $.process.run(ssh(mac, openTake(from)), { timeoutMs: 8_000 }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+      if (r.exitCode !== 0) continue
+      for (const chat of opensOf(r.stdout)) await openTaken($, chat, mac)
+    }
+  } finally {
+    isTaking = false
+  }
+}
+const openTaken = async ($: EngineInterface, chat: string, mac: string) => {
+  const { id } = await read($, me)
+  if (chat === id) {
+    const session = (await $.env.get('CLAUDE_CODE_HOST_SESSION_ID')) ?? ''
+    return DESKTOP_SESSION.test(session) ? openHere($, { chat, host: '' }, `claude://code/continue?session=${session}`) : log($, `chat ${chat} pressed on ${mac}: not in the Claude app here`)
+  }
+  const c = (await read($, others)).find(one => one.chat === chat)
+  // A chat of this Mac with nothing going on now still opens by the link its own file shares
+  let mine: Link | undefined
+  try {
+    mine = c ? undefined : linkOf((JSON.parse((await readOr($, `${liveDir()}/${chat}.json`)) || '{}') as { link?: unknown }).link)
+  } catch {
+    mine = undefined
+  }
+  const url = c ? openUrl(c, heldApp(c)) : mine ? openUrl({ host: '', link: mine }) : ''
+  if (url) await openHere($, c ?? { chat, host: '' }, url)
+  else await log($, `chat ${chat} pressed on ${mac}: nothing here opens it`)
 }
 
 // An answer pressed here for another chat's work, left for that chat: on this Mac in its folder of answers, on a Mac named under
@@ -3577,6 +3639,8 @@ export const register: Register = on => {
     asked = []
     await unshare($, true).catch(() => undefined)
     if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
+    isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
+    if (macs.length) $.clock.every(OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) $.clock.every(FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
@@ -4674,7 +4738,7 @@ export const register: Register = on => {
 
     // The app's own prompt open in a chat, amber at the top of that chat's cards: what it asks in its own few words, the work it came
     // from, and where to answer it. A chat of the Claude app on this Mac opens at a press; the panel answers no prompt itself
-    const promptCard = (p: Prompt, key: string, where: string, link = '') => (
+    const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
       <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
         <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
         <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
@@ -4683,9 +4747,9 @@ export const register: Register = on => {
             <Text dimColor wrap="truncate-end">{where}</Text>
           </Box>
           <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
-          {link ? (
+          {c ? (
             <Box flexDirection="row">
-              <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), $.process.run(['open', link]).catch(err => log($, `chat not opened: ${String(err)}`)))} />
+              <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
             </Box>
           ) : null}
         </Box>
@@ -4695,7 +4759,7 @@ export const register: Register = on => {
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
     // the Claude app when pressed, where its link opens here
     const chatHead = (key: string, name: string, side: string, c?: Shared) => {
-      const url = c ? openUrl(c, heldApp(c)) : ''
+      const url = c ? (drawnFrom() ? 'there' : openUrl(c, heldApp(c))) : ''
       const label = <Text bold dimColor wrap="truncate-end">{name}</Text>
       return (
         <Box key={`chat-head-${key}`} flexDirection="column" paddingTop={1} flexShrink={0}>
@@ -4932,8 +4996,9 @@ export const register: Register = on => {
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
                 // Open that chat whenever its link opens here: a chat of this Mac, or one of another Mac with Remote Control on
-                const url = openUrl(c, heldApp(c))
-                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', url))
+                // In a chat another Mac's app runs here, that Mac opens it
+                const url = drawnFrom() ? 'there' : openUrl(c, heldApp(c))
+                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', url ? c : undefined))
                 return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...cards.map(one => small(one))]
               }),
             ]}

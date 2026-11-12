@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { headLine, headMood, shareable } from './shared'
+import { headLine, headMood, openTake, opensOf, shareable } from './shared'
 
 const HOME = '/home/sam'
 const MEMORY = `${HOME}/.claude/claudopus`
@@ -161,7 +161,10 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     if (tool === 'ssh') {
       sshed.push([String(e.argv.at(-1)), String(e.init?.stdin ?? '')])
       const command = String(e.argv.at(-1))
-      const said = command.startsWith("sh -c 'L=") ? files.get('ssh:fetch') : command.startsWith("sh -c 'echo $HOME;") ? files.get('ssh:results') : files.has('ssh:down') ? undefined : ''
+      // Presses left there for this Mac are taken once, as moving each aside there takes it
+      const opens = files.get('ssh:opens') ?? ''
+      if (command.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/")) files.delete('ssh:opens')
+      const said = command.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/") ? opens : command.startsWith("sh -c 'L=") ? files.get('ssh:fetch') : command.startsWith("sh -c 'echo $HOME;") ? files.get('ssh:results') : files.has('ssh:down') ? undefined : ''
       return { value: { exitCode: said === undefined ? 255 : 0, stdout: said ?? '', stderr: said === undefined ? 'ssh: connect to host m4: timed out' : '', isStdoutTruncated: command.startsWith("sh -c 'echo $HOME;") && files.has('ssh:cut'), isStderrTruncated: false } }
     }
     // A shell run here: bringing results from another Mac lays there what the test laid as remote:<folder>/<file>, and a folder moved
@@ -2464,7 +2467,7 @@ test("with another Mac named in config.json, its chats' work shows here under it
   await $.session.start(start)
   await clock.advance(10_000)
   // Only a Mac that ssh takes as a name is reached
-  expect(sshed.every(([command]) => command?.startsWith("sh -c 'L=") || command?.startsWith("sh -c 'echo $HOME;") || command?.startsWith('d='))).toBe(true)
+  expect(sshed.every(([command]) => command?.startsWith("sh -c 'L=") || command?.startsWith("sh -c 'echo $HOME;") || command?.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/") || command?.startsWith('d='))).toBe(true)
   expect(sshed.length).toBeGreaterThan(0)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
@@ -3127,4 +3130,54 @@ test("with no screen attached every tab waits undrawn, and none is closed as the
   await $.session.start(start)
   await clock.advance(5000)
   expect(closed.filter(id => id !== 'agents')).toEqual([])
+})
+
+test("in a chat another Mac's app runs here over SSH, a chat's name is left for that Mac to open, never opened on this Mac", async ($, on) => {
+  const { files, clock, shown } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  // The Mac whose app runs this chat hands its chats here; one of them shares no link this Mac could open
+  const push = `${JSON.stringify({ from: 'sams-m5', you: 'sams-m4' })}\n${NOW / 1000}\n---claudopus-live---\n${otherChat(NOW, 'chat-m5', 'Robot arm')}\n`
+  files.set(`${MEMORY}/live/pushed/sams-m5.json`, push)
+  files.set(`mtime:${MEMORY}/live/pushed/sams-m5.json`, String(NOW))
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...JSON.parse(otherChat(NOW)), link: { bridge: '', app: 'local_here-1' } }))
+  await $.session.start(start)
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ key: 'chat-open-sams-m5-chat-m5' }))).toBeDefined()
+  await list.press({ key: 'chat-open-sams-m5-chat-m5' })
+  await list.press({ key: 'chat-open--chat-b' })
+  const left = () => [...files.keys()].filter(path => /\/live\/outbox\/sams-m5\/o-\d+-[a-z0-9]+\.json$/.test(path))
+  expect(await until(async () => (left().length === 2 ? true : undefined))).toBe(true)
+  expect(left().map(path => JSON.parse(files.get(path) ?? '{}').chat).sort()).toEqual(['chat-b', 'chat-m5'])
+  expect(shown.filter(one => one[0] === 'open' && String(one[1]).startsWith('claude:'))).toEqual([])
+  await list.unmount()
+})
+
+test('a name pressed on another Mac for this Mac is opened here, by what this Mac holds, once, and not when it waited too long', async ($, on) => {
+  const { files, clock, shown, sshed } = world(on, { env: { CLAUDE_CODE_HOST_SESSION_ID: 'local_self-1' } })
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${otherChat(NOW, 'chat-m4', 'Robot arm')}\n`)
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...JSON.parse(otherChat(NOW)), link: { bridge: '', app: 'local_here-1' } }))
+  // A chat of this Mac with nothing going on still opens by the link its file shares
+  files.set(`${MEMORY}/live/chat-idle.json`, JSON.stringify({ chat: 'chat-idle', title: 'Quiet', folder: '/q', host: '', at: NOW, cards: [], link: { bridge: '', app: 'local_idle-1' } }))
+  await $.session.start(start)
+  await clock.advance(12_000)
+  const now = NOW + 12_000
+  const press = (chat: string, at: number) => `---claudopus-open---\n${JSON.stringify({ chat, at })}\n`
+  files.set('ssh:opens', `${now / 1000}\n${press('chat-b', now - 1000)}${press('engine-id', now - 1000)}${press('chat-idle', now)}${press('chat-old', now - 60_000)}${press('bad id; rm', now)}`)
+  await clock.advance(4000)
+  const opened = () => shown.filter(one => one[0] === 'open').map(one => one[1])
+  expect(await until(async () => (opened().length >= 3 ? true : undefined))).toBe(true)
+  expect(opened().sort()).toEqual(['claude://code/continue?session=local_here-1', 'claude://code/continue?session=local_idle-1', 'claude://code/continue?session=local_self-1'])
+  // Taken over the kept connection, from this Mac's own folder there
+  expect(sshed.some(([command]) => command?.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/sams-macbook-air"))).toBe(true)
+  await clock.advance(10_000)
+  expect(opened()).toHaveLength(3)
+})
+
+test('presses left on another Mac are read with their clock, each chat once, the stale and malformed dropped', () => {
+  const now = 1_700_000_000
+  const text = `banner\n${now}\n---claudopus-open---\n{"chat":"a","at":${now * 1000 - 5000}}\n---claudopus-open---\n{"chat":"a","at":${now * 1000}}\n---claudopus-open---\n{"chat":"b","at":${now * 1000 - 31_000}}\n---claudopus-open---\nnot json\n---claudopus-open---\n{"chat":"$(x)","at":${now * 1000}}\n`
+  expect(opensOf(text)).toEqual(['a'])
+  expect(opensOf('')).toEqual([])
+  expect(openTake('sams-m5')).toContain('live/outbox/sams-m5 ')
 })

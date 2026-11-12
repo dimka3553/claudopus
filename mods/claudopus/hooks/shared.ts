@@ -193,6 +193,33 @@ export const tripOf = (text: string): { text: string; carried: Carried[] } => {
   })
   return { text: fetched, carried }
 }
+// ---- A press on a chat's name in a chat another Mac's Claude app runs here over SSH: that app, and the screen the person looks
+// at, are on the other Mac, so the press is left in live/outbox/<that Mac>/ as o-<time>-<id>.json, which that Mac takes within
+// OPEN_EVERY and opens there with what its own app holds. One pressed more than OPEN_KEPT before it is taken is dropped, not opened late ----
+export const OPEN_EVERY = 2_000
+export const OPEN_KEPT = 30_000
+export const OPEN_MARK = '---claudopus-open---'
+// The command that takes them there, run by sh: its clock in seconds, then each press, every file moved aside before it is read so
+// two chats taking at once never take one twice
+export const openTake = (from: string) =>
+  `sh -c 'cd $HOME/.claude/claudopus/${LIVE_DIR}/${OUTBOX}/${from} 2>/dev/null || exit 0; date +%s; for f in o-*.json; do [ -f "$f" ] && mv "$f" "$f.$$" 2>/dev/null && { echo ${OPEN_MARK}; tr -d "\\n" < "$f.$$"; echo; rm -f "$f.$$"; }; done'`
+// The chats those presses name, each once, as far as they were pressed within OPEN_KEPT by that Mac's clock
+export const opensOf = (text: string): string[] => {
+  const [head = '', ...parts] = text.split(`${OPEN_MARK}\n`)
+  const now = Number([...head.split('\n')].reverse().find(line => /^\d{9,}$/.test(line.trim()))?.trim() ?? 0) * 1000
+  if (!now) return []
+  const chats = parts.flatMap(part => {
+    try {
+      const one = JSON.parse(part.split('\n')[0] ?? '') as { chat?: unknown; at?: unknown }
+      const at = Number(one.at) || 0
+      return typeof one.chat === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(one.chat) && Math.abs(now - at) <= OPEN_KEPT ? [one.chat] : []
+    } catch {
+      return []
+    }
+  })
+  return [...new Set(chats)]
+}
+
 // That Mac's clock as the head of a fetch gives it, in ms
 export const clockOf = (text: string) => {
   const [head = ''] = text.split(`${MARK}\n`)
