@@ -57,10 +57,10 @@ export const marksOf = (mine: Marked, theirs: Marked) => {
 }
 // A meta.json with the marks of both, as it is written: undefined when it would not change
 // (with what its archive was when last made the same, so a bring back by an older version on either side counts as one)
-export const merged = (text: string, theirs: Marked, wasArchived = 0, now = 0) => {
+export const merged = (text: string, theirs: Marked, wasArchived = 0) => {
   try {
     const mine = JSON.parse(text) as Record<string, unknown>
-    const marks = marksOf(broughtBackBy(mine, wasArchived, now), broughtBackBy(theirs, wasArchived, now))
+    const marks = marksOf(broughtBackBy(mine, wasArchived), broughtBackBy(theirs, wasArchived))
     const next: Record<string, unknown> = { ...mine }
     for (const [key, value] of Object.entries(marks)) if (value === undefined) delete next[key]
     else next[key] = value
@@ -84,16 +84,19 @@ export const parsedMeta = (text: string): Marked => {
 // never taken as whole
 export const PULL = 'set -o pipefail; S=$1; M=$2; C=$3; ssh -o BatchMode=yes -o ConnectTimeout=5 -- "$M" "$C" | tar xf - -C "$S"'
 export const pullThere = (ids: readonly string[]) => `cd ~/.claude/claudopus/reports && COPYFILE_DISABLE=1 tar cf - -- ${ids.filter(isResultId).join(' ')}`
-export const PUSH = 'set -o pipefail; S=$1; M=$2; C=$3; shift 3; cd "$S" && COPYFILE_DISABLE=1 tar cf - -- "$@" | ssh -o BatchMode=yes -o ConnectTimeout=5 -- "$M" "$C"'
+// The stream ends with an empty _end, so the other end knows it got all of it even where a cut falls between two files
+export const PUSH = 'set -o pipefail; S=$1; M=$2; C=$3; shift 3; cd "$S" && : > _end && COPYFILE_DISABLE=1 tar cf - -- "$@" _end | ssh -o BatchMode=yes -o ConnectTimeout=5 -- "$M" "$C"'
 // A folder goes in place only when no folder has its name, under a claim only one chat can take at a time (mkdir), so two chats
 // never put one inside the other: run by sh with the folder, where it goes and the claim
 export const PLACE = 'mkdir "$3" 2>/dev/null || exit 4; if [ -e "$2" ]; then s=6; else mv "$1" "$2"; s=$?; fi; rmdir "$3"; exit $s'
-// There, the same for each folder handed over, once the whole stream is in; what was handed and not put in place goes with its own folder
-export const PUSH_THERE = `sh -c 'R=$HOME/.claude/claudopus/reports; T=$R/_sync/in.$$; mkdir -p "$T" && tar xf - -C "$T" || { rm -rf "$T"; exit 5; }; for d in "$T"/*; do n=$(basename "$d"); C=$R/_sync/claim-$n; mkdir "$C" 2>/dev/null || continue; [ -e "$R/$n" ] || mv "$d" "$R/$n"; rmdir "$C"; done; rm -rf "$T"'`
+// There, the same for each folder handed over with its meta.json, once the whole stream is in, _end and all; what was handed and not put
+// in place goes with its own folder, and what a cut-off sync left there over an hour ago goes first, as here
+export const PUSH_THERE = `sh -c 'R=$HOME/.claude/claudopus/reports; mkdir -p "$R/_sync" && find "$R/_sync" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; T=$R/_sync/in.$$; mkdir -p "$T" && tar xf - -C "$T" && [ -f "$T/_end" ] || { rm -rf "$T"; exit 5; }; rm -f "$T/_end"; for d in "$T"/*; do [ -f "$d/meta.json" ] || continue; n=$(basename "$d"); C=$R/_sync/claim-$n; mkdir "$C" 2>/dev/null || continue; [ -e "$R/$n" ] || mv "$d" "$R/$n"; rmdir "$C"; done; rm -rf "$T"'`
 // What a result's archive was on both Macs when last made the same, and what a side now says: a side that had it put away then and
-// has it no longer, with no bring back as late, was brought back there by a version that keeps no time for it
-export const broughtBackBy = <T extends Marked>(one: T, wasArchived: number, now: number): T =>
-  wasArchived && !at(one.archived) && at(one.broughtBack) < wasArchived ? { ...one, broughtBack: now } : one
+// has it no longer, with no bring back as late, was brought back there by a version that keeps no time for it: just after that archive,
+// so a later put away on the other Mac still wins
+export const broughtBackBy = <T extends Marked>(one: T, wasArchived: number): T =>
+  wasArchived && !at(one.archived) && at(one.broughtBack) < wasArchived ? { ...one, broughtBack: wasArchived + 1 } : one
 // Writes a result's marks there only when its meta.json is still what was read, so a press there since is never undone
 export const markThere = (id: string, sum: string) =>
   `sh -c 'f=$HOME/.claude/claudopus/reports/${id}/meta.json; [ "$(cksum < "$f")" = "${sum}" ] || exit 3; cat > "$f.part" && mv -f "$f.part" "$f"'`

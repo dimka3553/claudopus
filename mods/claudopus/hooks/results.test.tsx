@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { isResultId, marksOf, merged, pullThere, rehome, resultsOf } from './results'
+import { broughtBackBy, isResultId, marksOf, merged, pullThere, PUSH, PUSH_THERE, rehome, resultsOf } from './results'
 
 test("another Mac's results are read past a login banner, by folder, with each meta.json's checksum", async () => {
   const out = 'Welcome\n/Users/sam\n---claudopus-result---\n20261112-0812-one\n123 45\n{"id":"20261112-0812-one","title":"One"}\n---claudopus-result---\n../bad\n1 2\n{}\n'
@@ -33,4 +33,16 @@ test('put away on one Mac and brought back on the other: the later wins; an answ
   const next = JSON.parse(merged('{"id":"r","folder":"/Users/sam/x","archived":5}', { broughtBack: 9 }) ?? '{}')
   expect(next).toEqual({ id: 'r', folder: '/Users/sam/x', broughtBack: 9 })
   expect(merged('{"id":"r"}', {})).toBeUndefined()
+})
+
+test('a bring back by an older version counts just after the archive it undid, so a later put away on the other Mac still wins', () => {
+  expect(broughtBackBy({ archived: undefined }, 5).broughtBack).toBe(6)
+  expect(marksOf(broughtBackBy({}, 5), { archived: 9 }).archived).toBe(9)
+  expect(marksOf(broughtBackBy({}, 5), { archived: 5 }).archived).toBeUndefined()
+})
+
+test('a push is put in place there only once its stream reached the _end it closes with, and only folders with a meta.json', () => {
+  expect(PUSH).toContain('"$@" _end |')
+  expect(PUSH_THERE).toContain('tar xf - -C "$T" && [ -f "$T/_end" ] ||')
+  expect(PUSH_THERE).toContain('[ -f "$d/meta.json" ] || continue')
 })

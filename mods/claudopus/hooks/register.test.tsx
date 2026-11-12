@@ -2712,7 +2712,7 @@ test("with another Mac named, the results become the same on both: what each lac
   expect(files.get(`${MEMORY}/reports/theirs/report.md`)).toBe(`See ${HOME}/repo/a.png\n`)
   expect(sshed.find(([script]) => script?.includes('tar xf - -C "$S"'))?.[1]).toContain('tar cf - -- theirs')
   // "mine" is handed there, and only it
-  const handed = await until(async () => sshed.find(([script]) => script?.includes('cd "$S" && COPYFILE_DISABLE=1 tar cf')))
+  const handed = await until(async () => sshed.find(([script]) => script?.includes(': > _end && COPYFILE_DISABLE=1 tar cf')))
   expect(handed?.[1]).toMatch(/ mine$/)
   // "both": the answer given there is kept here, and put away here goes there, written only if unchanged there since it was read
   const marked = await until(async () => sshed.find(([command]) => command?.includes('/reports/both/meta.json')))

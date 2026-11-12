@@ -2875,10 +2875,12 @@ const syncResults = async ($: EngineInterface) => {
   if (isSyncing) return
   isSyncing = true
   try {
+    let isTried = false
     for (const mac of macs) {
       const now = await $.clock.now()
       const was = JSON.parse((await readOr($, resultsPath(mac))) || '{}') as Synced
       if (now - Math.max(was.syncedAt ?? 0, was.triedAt ?? 0) < RESULTS_EVERY) continue
+      isTried = true
       await $.fs.write(resultsPath(mac), JSON.stringify({ ...was, triedAt: now }))
       const staging = `${reportsDir()}/_sync/${now}-${Math.random().toString(36).slice(2, 8)}`
       try {
@@ -2888,10 +2890,17 @@ const syncResults = async ($: EngineInterface) => {
       }
     }
     // What a sync cut off left of its own folders goes after an hour; nothing else there is ever touched
-    await $.process.run(['find', `${reportsDir()}/_sync`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(() => undefined)
+    if (isTried) await $.process.run(['find', `${reportsDir()}/_sync`, '-mindepth', '1', '-maxdepth', '1', '-mmin', '+60', '-exec', 'rm', '-rf', '{}', '+']).catch(() => undefined)
   } finally {
     isSyncing = false
   }
+}
+// The results missing on one side that one trip takes, starting further along each trip, so a few that keep failing never hold
+// back the rest
+const aTrip = (ids: string[], now: number) => {
+  if (ids.length <= RESULTS_A_TRIP) return ids
+  const from = (Math.floor(now / RESULTS_EVERY) * RESULTS_A_TRIP) % ids.length
+  return [...ids, ...ids].slice(from, from + RESULTS_A_TRIP)
 }
 const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: number, staging: string) => {
   const home = dir.slice(0, -'/.claude/claudopus'.length)
@@ -2912,7 +2921,7 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
   let changed = 0
   // Brought here one at a time, each into a folder of its own first, its paths moved onto this Mac's home, then into place whole:
   // one whose stream was cut short is left out, and brought on a later trip
-  const wanted = [...theirs.results.keys()].filter(id => !mine.has(id)).slice(0, RESULTS_A_TRIP)
+  const wanted = aTrip([...theirs.results.keys()].filter(id => !mine.has(id)), now)
   for (const id of wanted) {
     const into = `${staging}/${id}`
     await $.process.run(['mkdir', '-p', into])
@@ -2931,7 +2940,7 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
   }
   // Handed there: copied aside here with its paths moved onto that Mac's home, then sent in one stream, put in place there only
   // once the whole stream is in
-  const handed = [...mine.keys()].filter(id => !theirs.results.has(id)).slice(0, RESULTS_A_TRIP)
+  const handed = aTrip([...mine.keys()].filter(id => !theirs.results.has(id)), now)
   if (handed.length) {
     const out = `${staging}-out`
     await $.process.run(['mkdir', '-p', out])
@@ -2955,17 +2964,17 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
     const here = mine.get(id)
     if (!here) continue
     const wasArchived = was.archived?.[id] ?? 0
-    const theirsNow = broughtBackBy(parsedMeta(there.text), wasArchived, now)
-    const mineNow = broughtBackBy(parsedMeta(here), wasArchived, now)
+    const theirsNow = broughtBackBy(parsedMeta(there.text), wasArchived)
+    const mineNow = broughtBackBy(parsedMeta(here), wasArchived)
     const target = marksOf(mineNow, theirsNow)
     // Its archive is kept as made the same only once both sides hold it; else what was kept before stands
     let isSame = marked < RESULTS_A_TRIP
     if (marked < RESULTS_A_TRIP) {
-      if (merged(here, theirsNow, wasArchived, now)) {
-        const ok = await markReport($, { id } as Report, stored => marksOf(broughtBackBy(stored, wasArchived, now), theirsNow)).then(() => true, err => (void log($, `result ${id} not marked from ${mac}: ${String(err)}`), false))
+      if (merged(here, theirsNow, wasArchived)) {
+        const ok = await markReport($, { id } as Report, stored => marksOf(broughtBackBy(stored, wasArchived), theirsNow)).then(() => true, err => (void log($, `result ${id} not marked from ${mac}: ${String(err)}`), false))
         ;(isSame &&= ok), (changed += 1), (marked += 1)
       }
-      const theirsNext = merged(there.text, mineNow, wasArchived, now)
+      const theirsNext = merged(there.text, mineNow, wasArchived)
       if (theirsNext) {
         const r = await $.process.run(ssh(mac, markThere(id, there.sum)), { stdin: theirsNext, timeoutMs: 15_000 }).catch(err => ({ exitCode: -1, stderr: String(err) }))
         if (r.exitCode !== 0) await log($, `result ${id} not marked on ${mac}: ${r.exitCode === 3 ? 'changed there since' : r.stderr.trim().slice(0, 160)}`)
