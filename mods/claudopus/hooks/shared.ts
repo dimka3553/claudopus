@@ -1,4 +1,4 @@
-import type { Link, Prompt, Said, Shared, Todo } from '../types'
+import type { Link, Prompt, Shared, Todo } from '../types'
 
 // ---- Every chat's work in every panel: each chat keeps its running work in a small file of its own, the others read it ----
 // ~/.claude/claudopus/live/<chat id>.json, written only by that chat; an answer to one of its asks from another chat's panel is
@@ -52,10 +52,10 @@ export const promptsOf = (list: unknown): Prompt[] =>
 // Text from another chat's file with no control characters, so nothing in it can move or colour the terminal
 const plain = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim()
 
-// A chat's file as read, or nothing when it is no such file, has not been written for too long, or has no work and `isIdleKept` is
-// not set (a chat of this Mac with no work is not listed; one of another Mac is, so its open chats show). `now` is the clock of the
+// A chat's file as read, or nothing when it is no such file, has not been written for too long, or has nothing going on: no work,
+// running or ended lately, and no prompt (an open chat with nothing going on is not listed, on any Mac). `now` is the clock of the
 // Mac that wrote it, so a Mac whose clock runs apart from this one's is judged by its own
-export const sharedOf = (text: string, now: number, host = '', isIdleKept = false): Shared | undefined => {
+export const sharedOf = (text: string, now: number, host = ''): Shared | undefined => {
   try {
     const one = JSON.parse(text) as Partial<Shared> & { ended?: unknown }
     if (typeof one.chat !== 'string' || !one.chat || typeof one.at !== 'number' || !Array.isArray(one.cards)) return undefined
@@ -64,10 +64,9 @@ export const sharedOf = (text: string, now: number, host = '', isIdleKept = fals
     const cards = [...one.cards, ...(Array.isArray(one.ended) ? (one.ended as unknown[]) : [])].filter((card): card is Todo => Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)))
     // A chat waiting on its own prompt is listed whether or not it has work
     const prompts = promptsOf(one.prompts)
-    if (!cards.length && !prompts.length && !isIdleKept) return undefined
-    const said = saidOf(one.said)
+    if (!cards.length && !prompts.length) return undefined
     const link = linkOf(one.link)
-    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(prompts.length ? { prompts } : {}), ...(said ? { said } : {}), ...(link ? { link } : {}) }
+    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(prompts.length ? { prompts } : {}), ...(link ? { link } : {}) }
   } catch {
     return undefined
   }
@@ -125,9 +124,9 @@ export const fetchedOf = (text: string, host: string, fetchedAt = 0): Shared[] =
   const shift = fetchedAt ? fetchedAt - now : 0
   const moved = (at: number) => (at ? at + shift : at)
   return files
-    .map(one => sharedOf(one, now, host, true))
+    .map(one => sharedOf(one, now, host))
     .filter((one): one is Shared => one !== undefined)
-    .map(one => ({ ...one, at: moved(one.at), ...(one.said ? { said: { ...one.said, youAt: moved(one.said.youAt), replyAt: moved(one.said.replyAt) } } : {}), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt) })), ...(one.prompts ? { prompts: one.prompts.map(p => ({ ...p, at: moved(p.at) })) } : {}) }))
+    .map(one => ({ ...one, at: moved(one.at), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt) })), ...(one.prompts ? { prompts: one.prompts.map(p => ({ ...p, at: moved(p.at) })) } : {}) }))
 }
 
 // ---- The same trip the other way: a Mac that reaches another over ssh hands it its own chats, so that Mac's panels list them with
@@ -188,17 +187,8 @@ export const clockOf = (text: string) => {
 export const isMac = (one: unknown): one is string => typeof one === 'string' && /^[A-Za-z0-9_][A-Za-z0-9_.-]*(@[A-Za-z0-9_][A-Za-z0-9_.-]*)?$/.test(one)
 export const macName = (one: string) => (one.split('@').pop() ?? one).split('.')[0] ?? one
 
-// ---- A chat's last words, shown as the pointer rests on its name, and the link a press on its name opens ----
+// ---- The link a press on a chat's name opens ----
 
-// How much of each the file carries: enough for a few lines under the name
-export const LAST_CHARS = { you: 280, reply: 560 }
-const textOr = (one: unknown, most: number) => (typeof one === 'string' ? one.trim().slice(0, most) : '')
-export const saidOf = (one: unknown): Said | undefined => {
-  if (!one || typeof one !== 'object') return undefined
-  const s = one as Partial<Record<keyof Said, unknown>>
-  const said = { you: textOr(s.you, LAST_CHARS.you), youAt: Number(s.youAt) || 0, reply: textOr(s.reply, LAST_CHARS.reply), replyAt: Number(s.replyAt) || 0 }
-  return said.you || said.reply ? said : undefined
-}
 // The ids the Claude app takes, as it checks them: a Remote Control or cloud session, and its own session on this Mac
 export const BRIDGE_ID = /^(cse|session)_[A-Za-z0-9_-]{1,80}$/
 export const APP_ID = /^local_[A-Za-z0-9-]{1,64}$/
@@ -219,20 +209,3 @@ export const linkOf = (one: unknown): Link | undefined => {
 export const openUrl = (c: { host: string; link?: Link }) =>
   c.link?.bridge ? `claude://code/${c.link.bridge}` : !c.host && c.link?.app ? `claude://code/continue?session=${c.link.app}` : ''
 
-// The last message of the person's and the last answer of Claude's in a chat's saved words (words/<chat id>.md): each message under
-// a line "## <time>", each answer under "### Claude <time>"
-export const lastSaid = (words: string): Said | undefined => {
-  let you = ''
-  let youAt = 0
-  let reply = ''
-  let replyAt = 0
-  for (const block of words.split(/^(?=## \d{4}-\d\d-\d\dT[\d:.]+Z|### Claude \d{4}-\d\d-\d\dT[\d:.]+Z)/m)) {
-    const [head = '', ...rest] = block.split('\n')
-    const body = rest.join('\n').trim()
-    const at = Date.parse(/(\d{4}-\d\d-\d\dT[\d:.]+Z)/.exec(head)?.[1] ?? '') || 0
-    if (!body) continue
-    if (/^### Claude\b/.test(head)) ((reply = body), (replyAt = at))
-    else if (/^## \d{4}-\d\d-\d\dT/.test(head)) ((you = body), (youAt = at))
-  }
-  return saidOf({ you, youAt, reply, replyAt })
-}

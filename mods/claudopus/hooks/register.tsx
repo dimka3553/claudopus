@@ -1,12 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, McpToolResult, Register, RenderSurface, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
 
-import type { Entry, Flow, FlowAgent, Item, Link, Me, Prompt, Report, Said, Server, Shared, Stream, Todo, Wait } from '../types'
+import type { Entry, Flow, FlowAgent, Item, Link, Me, Prompt, Report, Server, Shared, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
-import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, isKey, isMac, keyOf, lastSaid, LAST_CHARS, LIVE_DIR, LOOK_EVERY, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, isKey, isMac, keyOf, LIVE_DIR, LOOK_EVERY, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
 import type { Answer } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
@@ -507,39 +507,10 @@ const choosePanel = async ($: EngineInterface, isOpen: boolean) => {
   panelSeen = seenOf({ isOpen, at })
   await $.fs.write(`${dir}/panel.json`, JSON.stringify({ isOpen, at })).catch(err => log($, `panel choice not kept: ${String(err)}`))
 }
-// Whether the row that holds the open chats with nothing going on is unfolded: kept in folds.json, so every chat's panel shows it
-// as the person last left it; each chat reads it again at its next look
-let isQuietOpen = false
-// Until this chat's own press is on disk, a look reads nothing back, so the press is never undone by the file before it
-let foldPressedAt = 0
-const readFolds = async ($: EngineInterface) => {
-  if ((await $.clock.now()) - foldPressedAt < PANEL_EVERY * 2) return
-  const text = await readOr($, `${dir}/folds.json`).catch(() => '')
-  const isOpen = (() => {
-    try {
-      return (JSON.parse(text || '{}') as { isQuietOpen?: unknown }).isQuietOpen === true
-    } catch {
-      return false
-    }
-  })()
-  if (isOpen !== isQuietOpen) ((isQuietOpen = isOpen), redraw($))
-}
-const foldQuiet = async ($: EngineInterface) => {
-  isQuietOpen = !isQuietOpen
-  foldPressedAt = await $.clock.now()
-  presses += 1
-  redraw($)
-  // Written under another name and then renamed, so no chat reads it half-written
-  await $.fs
-    .write(`${dir}/folds.json.part`, JSON.stringify({ isQuietOpen }))
-    .then(() => $.process.run(['mv', '-f', `${dir}/folds.json.part`, `${dir}/folds.json`]))
-    .catch(err => log($, `fold not kept: ${String(err)}`))
-}
 // Brings this chat's panel in line with the last choice, once per choice. A pane opened where nothing draws it yet stays open and
 // is drawn once a screen that can attaches; an open the engine refused is tried again at the next look
 const followPanel = async ($: EngineInterface) => {
   if (!dir) return undefined
-  await readFolds($)
   const choice = await readPanel($)
   if (!choice || seenOf(choice) === panelSeen) return choice
   const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
@@ -1011,7 +982,6 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
   await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
   // What Claude answered is kept beside what the person said, so a search finds what happened as well as what was asked
   if (answer.trim()) {
-    await sayMine($, 'reply', answer)
     await appendWords($, m.id, `### Claude ${new Date().toISOString()}\n${answer.trim()}\n\n`).catch(err => log($, `answer not saved: ${String(err)}`))
   }
   // A reply with no message of the person's before it relays an agent's result: it is logged when it says something
@@ -2768,16 +2738,6 @@ let sharedAt = 0
 const ownLive = (id: string) => `${liveDir()}/${id}.json`
 // Set as the session ends, so a beat due after it does not write the file again
 let isEnded = false
-// What was last said in this chat, which the panels show as the pointer rests on its name: kept as the person writes and Claude
-// answers, and read back from its saved words as it loads
-let mySaid: Said | undefined
-const sayMine = async ($: EngineInterface, part: 'you' | 'reply', text: string) => {
-  const said = text.trim().slice(0, LAST_CHARS[part])
-  if (!said) return
-  const at = await $.clock.now()
-  const was = mySaid ?? { you: '', youAt: 0, reply: '', replyAt: 0 }
-  mySaid = part === 'you' ? { ...was, you: said, youAt: at } : { ...was, reply: said, replyAt: at }
-}
 // What opens this chat in the Claude app, read off the engine's own file of this session in ~/.claude/sessions (its Remote Control id
 // appears there once Remote Control is on) at most once a beat; the file found is read again alone until it no longer names this chat
 let myLink: Link | undefined
@@ -2812,9 +2772,9 @@ const shareMine = async ($: EngineInterface) => {
   }
   const cards = shareable(await read($, todos), now)
   const prompts: Prompt[] = waiting.map(({ id: one, text, title: from, at }) => ({ id: one, text, ...(from ? { title: from } : {}), at }))
-  const sign = `${title}\n${JSON.stringify([mySaid ?? null, myLink ?? null])}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}`
+  const sign = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
-  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(prompts.length ? { prompts } : {}), ...(mySaid ? { said: mySaid } : {}), ...(myLink ? { link: myLink } : {}) }
+  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(prompts.length ? { prompts } : {}), ...(myLink ? { link: myLink } : {}) }
   // Ended work is written apart, under `ended`: a chat still running a version from before ended work was shared reads `cards` only,
   // and would show what is there as running for good
   const isLive = (one: Todo) => one.status === 'working' || Boolean(one.ask)
@@ -2920,6 +2880,13 @@ const lingers = (one: Todo, at: number) => {
 }
 // The files of other chats, as last read, by name: a file is read again only when it changed
 const liveRead = new Map<string, { key: string; text: string }>()
+const isWhole = (text: string) => {
+  try {
+    return Boolean(JSON.parse(text))
+  } catch {
+    return false
+  }
+}
 const readOthers = async ($: EngineInterface) => {
   const { id } = await read($, me)
   if (!id || !dir) return
@@ -2946,7 +2913,7 @@ const readOthers = async ($: EngineInterface) => {
   pushedYou = you
   if (macs.length) await knowLocalName($)
   const found: Shared[] = []
-  // The chats open on this Mac, work or none
+  // The chats open on this Mac with something going on
   const here = new Set<string>([id])
   const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && entry.name !== `${id}.json`)
   for (const name of [...liveRead.keys()]) if (!listed.some(entry => entry.name === name)) liveRead.delete(name)
@@ -2956,14 +2923,14 @@ const readOthers = async ($: EngineInterface) => {
     const key = `${entry.mtimeMs}:${entry.size}`
     const was = liveRead.get(entry.name)
     const text = was && entry.mtimeMs && was.key === key ? was.text : await readOr($, `${liveDir()}/${entry.name}`)
-    const one = sharedOf(text, now, '', true)
-    // A file caught half-written is read again at the next look, not kept as read
-    if (one) liveRead.set(entry.name, { key, text })
+    const one = sharedOf(text, now)
+    // A file caught half-written is read again at the next look, not kept as read; a whole one of a chat with nothing going on is
+    // kept as read, so a hundred idle chats are not read again at every look
+    if (one || isWhole(text)) liveRead.set(entry.name, { key, text })
     else liveRead.delete(entry.name)
     if (one) here.add(one.chat)
-    // A chat of this Mac with no work is listed only beside other Macs' chats, so every Mac's panel lists the same open chats; one
-    // that waits on its prompt is listed always
-    if (one && one.chat !== id && (one.cards.length || one.prompts?.length || isMulti())) found.push(one)
+    // Only a chat with something going on is read as one: work running or ended lately, or a prompt open
+    if (one && one.chat !== id) found.push(one)
   }
   for (const mac of macs) {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
@@ -3324,7 +3291,6 @@ export const register: Register = on => {
     sharedSign = ''
     isEnded = false
     linkReadAt = 0
-    mySaid = lastSaid(await readOr($, `${dir}/words/${id}.md`).catch(() => ''))
     // A load starts with no prompt open: one a reload cut off has no call left to end it
     waiting = []
     asked = []
@@ -3390,7 +3356,6 @@ export const register: Register = on => {
 
     said = text
     heard = [...heard, text]
-    await sayMine($, 'you', text)
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
@@ -4422,13 +4387,9 @@ export const register: Register = on => {
     )
 
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
-    // the Claude app when pressed, and with the pointer resting on it shows under it what was last said there: the person's last
-    // message and Claude's last answer, the older first, and what a press opens. Drawn hidden and shown by the surface as the pointer
-    // moves, so nothing crosses to the mod and the cards beneath move down only while it rests there
+    // the Claude app when pressed, where its link opens here
     const chatHead = (key: string, name: string, side: string, c?: Shared) => {
       const url = c ? openUrl(c) : ''
-      const said = c?.said
-      const lines = said ? [...(said.you ? [{ who: 'You', text: said.you, at: said.youAt }] : []), ...(said.reply ? [{ who: 'Claude', text: said.reply, at: said.replyAt }] : [])].sort((a, b) => a.at - b.at) : []
       const label = <Text bold dimColor wrap="truncate-end">{name}</Text>
       return (
         <Box key={`chat-head-${key}`} flexDirection="column" paddingTop={1} flexShrink={0}>
@@ -4449,26 +4410,6 @@ export const register: Register = on => {
               </Box>
             ) : null}
           </Box>
-          {c ? (
-            <Box display="none" hover={{ display: 'flex' }} flexDirection="column" gap={1} marginTop={1} marginX={2} paddingX={1} paddingY={1} backgroundColor={FILL}>
-              {lines.length ? null : <Text dimColor wrap="wrap">Nothing said in this chat yet.</Text>}
-              {lines.map(line => (
-                <Box key={`chat-peek-${key}-${line.who}`} flexDirection="column">
-                  <Text dimColor wrap="truncate-end">{line.at ? `${line.who} · ${ago(line.at, at)}` : line.who}</Text>
-                  <Text wrap="wrap">{cut(oneLine(line.text), line.who === 'Claude' ? 240 : 160)}</Text>
-                </Box>
-              ))}
-              <Text dimColor wrap="wrap">
-                {url
-                  ? c.host
-                    ? `Press the name to open this chat in the Claude app here, through Remote Control.`
-                    : 'Press the name to open this chat in the Claude app.'
-                  : c.host
-                    ? `Opens only on ${macName(c.host)}: Remote Control is off in this chat.`
-                    : 'Opens only where it runs: it is not a chat of the Claude app and Remote Control is off.'}
-              </Text>
-            </Box>
-          ) : null}
         </Box>
       )
     }
@@ -4480,32 +4421,11 @@ export const register: Register = on => {
     // steady row of two lines (what it was, how it ended, its model, how long it took, when) that opens its card as for running work
     // Other chats' ended work folds in here too, once its pause is over; the row then says it holds every chat's
     const endedElsewhere = elsewhere.filter(one => one.status !== 'working' && !one.ask && !lingers(one, at))
-    // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none, when it is another
-    // Mac's or beside other Macs' chats, is not listed among them: it is a row inside one folded row at the bottom, "N other chats"
+    // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none of these and no prompt
+    // is not listed at all, however many are open: the app's own list of chats has them
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
-    const quietChats = otherChats.filter(c => !shownOf(c).length && !c.prompts?.length && (c.host || isMulti()))
     const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
-    // The open chats with nothing going on, this one too when it has nothing: one folded row, "N other chats", under the cards.
-    // Unfolded, each is a row of its name, with its folder and Mac at its right, as the cards' chats are named
-    const isSelfQuiet = !shownWork.length && !shownFlows.length && !waiting.length && isMulti()
-    const quietCount = quietChats.length + (isSelfQuiet && quietChats.length ? 1 : 0)
-    const quietPart = () =>
-      quietChats.length ? (
-        <Box key="quiet" flexDirection="column" flexShrink={0} backgroundColor={FILL} paddingBottom={isQuietOpen ? 1 : 0}>
-          <Box flexDirection="row" alignItems="center" gap={2} paddingX={2} paddingY={1}>
-            <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
-              <Button key={`quiet-fold-${presses}`} label={`${isQuietOpen ? '▾' : '▸'} ${quietCount === 1 ? '1 other chat' : `${quietCount} other chats`}`} plain onPress={() => void foldQuiet($)} />
-            </Box>
-          </Box>
-          {isQuietOpen
-            ? [
-                ...(isSelfQuiet ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-                ...quietChats.map(c => chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c)),
-              ]
-            : null}
-        </Box>
-      ) : null
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>
@@ -4711,9 +4631,8 @@ export const register: Register = on => {
                 return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...cards.map(one => small(one))]
               }),
             ]}
-        {/* The other chats' row and the Finished row sit at the pane's bottom edge, under everything else */}
-        {!alone && (finished.length || endedFlows.length || quietChats.length) ? <Box key="finished-gap" flexGrow={1} /> : null}
-        {!alone ? quietPart() : null}
+        {/* The Finished row sits at the pane's bottom edge, under everything else */}
+        {!alone && (finished.length || endedFlows.length) ? <Box key="finished-gap" flexGrow={1} /> : null}
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
