@@ -203,9 +203,11 @@ export const linkOf = (one: unknown): Link | undefined => {
   const link = { bridge: typeof l.bridge === 'string' && BRIDGE_ID.test(l.bridge) ? l.bridge : '', app: typeof l.app === 'string' && APP_ID.test(l.app) ? l.app : '' }
   return link.bridge || link.app ? link : undefined
 }
-// What a press on a chat's name opens in the Claude app. The app's own id first whenever this Mac's app holds that chat: one of this
-// Mac's, or one this Mac's app runs on another Mac over SSH, which it lists in its own sidebar (`isHere` says which ids it holds).
-// Else its Remote Control session, which the app opens from any Mac. A chat of another Mac's own app with Remote Control off has
-// nothing this Mac can open
-export const openUrl = (c: { host: string; link?: Link }, isHere: (app: string) => boolean = () => false) =>
-  c.link?.app && (!c.host || isHere(c.link.app)) ? `claude://code/continue?session=${c.link.app}` : c.link?.bridge ? `claude://code/${c.link.bridge}` : ''
+// What a press on a chat's name opens in the Claude app. The app's own id first whenever this Mac's app holds that chat (`held`): one
+// of this Mac's, or one it runs on another Mac over SSH, which it lists in its own sidebar. Else its Remote Control session, which the
+// app opens from any Mac; else, for a chat of this Mac, the app's id it shares. A chat of another Mac's own app with Remote Control off
+// has nothing this Mac can open
+export const openUrl = (c: { host: string; link?: Link }, held = '') => {
+  const app = APP_ID.test(held) ? held : !c.host ? (c.link?.app ?? '') : ''
+  return app ? `claude://code/continue?session=${app}` : c.link?.bridge ? `claude://code/${c.link.bridge}` : ''
+}

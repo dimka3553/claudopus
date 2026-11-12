@@ -2723,7 +2723,10 @@ test("another chat's name, shown while it has something going on, opens that cha
   // A chat this Mac's app runs on the other Mac over SSH: the app holds it under its own id, so it opens as the sidebar opens it
   const viaSsh = busy('chat-s', 'SSH chat', { link: { bridge: '', app: 'local_run-from-here' } })
   files.set(`${HOME}/Library/Application Support/Claude/claude-code-sessions/acct/org/local_run-from-here.json`, '{}')
-  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${withLink}\n---claudopus-live---\n${noLink}\n---claudopus-live---\n${viaSsh}\n`)
+  // One run from here on a version that shares no link at all: the app's own file for it names its chat
+  const old = busy('chat-old', 'Old version chat', {})
+  files.set(`${HOME}/Library/Application Support/Claude/claude-code-sessions/acct/org/local_old-one.json`, JSON.stringify({ sessionId: 'local_old-one', cliSessionId: 'chat-old' }))
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${withLink}\n---claudopus-live---\n${noLink}\n---claudopus-live---\n${viaSsh}\n---claudopus-live---\n${old}\n`)
   await $.session.start(start)
   await clock.advance(10_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -2736,7 +2739,9 @@ test("another chat's name, shown while it has something going on, opens that cha
   // other Mac's own app without Remote Control has no press at all
   expect(await until(async () => list.find({ key: 'chat-open-sam@m4.local-chat-s' }))).toBeDefined()
   const buttons = (await list.findAll({ type: 'Button' })).map(one => String(one.key))
-  expect(buttons.filter(key => key.startsWith('chat-open-')).sort()).toEqual(['chat-open-sam@m4.local-chat-rc', 'chat-open-sam@m4.local-chat-s'])
+  expect(buttons.filter(key => key.startsWith('chat-open-')).sort()).toEqual(['chat-open-sam@m4.local-chat-old', 'chat-open-sam@m4.local-chat-rc', 'chat-open-sam@m4.local-chat-s'])
+  await list.press({ key: 'chat-open-sam@m4.local-chat-old' })
+  expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_old-one'])
   await list.press({ key: 'chat-open-sam@m4.local-chat-rc' })
   expect(shown.at(-1)).toEqual(['open', 'claude://code/session_01Summary'])
   await list.press({ key: 'chat-open-sam@m4.local-chat-s' })

@@ -2954,39 +2954,58 @@ const readOthers = async ($: EngineInterface) => {
       if (isNew) $.clock.after(LINGER + 20, () => void update($, tick, n => n + 1))
     }
   for (const key of [...endSeen.keys()]) if (!ids.has(key)) endSeen.delete(key)
-  const isAppChanged = found.some(s => s.host && s.link?.app) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
+  const isAppChanged = found.some(s => s.host) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
   const next = ordered(found)
   if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
   else if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged) redraw($)
 }
 
-// The chats this Mac's Claude app holds, by its own id (local_…): its session files, one per chat, under
-// ~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/. They include the chats it runs on another Mac over SSH,
-// which a press then opens as the app's own sidebar does. Listed again at most every half minute
+// The chats this Mac's Claude app holds: its session files, one per chat, under
+// ~/Library/Application Support/Claude/claude-code-sessions/<account>/<org>/local_….json, each naming the engine's id for that chat
+// (`cliSessionId`, the id a chat shares as `chat`). They include the chats it runs on another Mac over SSH, which a press then opens
+// by the app's own id as its sidebar does, whatever version of the mod runs there. Listed again at most every half minute; a file is
+// read once, as the id it names never changes
 const appIds = new Set<string>()
+const appOfChat = new Map<string, string>()
+const appFiles = new Map<string, string>()
 let appIdsAt = 0
-const isHere = (app: string) => appIds.has(app)
+// The app's own id for a chat this Mac's app holds, or ''
+const heldApp = (c: Shared) => (c.link?.app && appIds.has(c.link.app) ? c.link.app : (appOfChat.get(c.chat) ?? ''))
 // Answers whether what it holds changed, so the names it opens are drawn again
 const readAppIds = async ($: EngineInterface, now: number) => {
   if (now - appIdsAt < 30_000) return false
   appIdsAt = now
   const root = `${(await $.env.get('HOME')) ?? ''}/Library/Application Support/Claude/claude-code-sessions`
-  const found = new Set<string>()
+  const found = new Map<string, string>()
   for (const account of await $.fs.list(root).catch(() => []))
     for (const org of account.kind === 'dir' ? await $.fs.list(`${root}/${account.name}`).catch(() => []) : [])
       for (const one of org.kind === 'dir' ? await $.fs.list(`${root}/${account.name}/${org.name}`).catch(() => []) : []) {
         const app = one.name.replace(/\.json$/, '')
-        if (one.name.endsWith('.json') && APP_ID.test(app)) found.add(app)
+        if (!one.name.endsWith('.json') || !APP_ID.test(app)) continue
+        if (!appFiles.has(app)) {
+          const text = await readOr($, `${root}/${account.name}/${org.name}/${one.name}`).catch(() => '')
+          const chat = (() => {
+            try {
+              return String((JSON.parse(text) as { cliSessionId?: unknown }).cliSessionId ?? '')
+            } catch {
+              return ''
+            }
+          })()
+          if (text) appFiles.set(app, /^[A-Za-z0-9_-]{1,80}$/.test(chat) ? chat : '')
+        }
+        found.set(app, appFiles.get(app) ?? '')
       }
-  const isSame = found.size === appIds.size && [...found].every(one => appIds.has(one))
+  const isSame = found.size === appIds.size && [...found.keys()].every(one => appIds.has(one))
   appIds.clear()
-  for (const one of found) appIds.add(one)
+  appOfChat.clear()
+  for (const app of [...appFiles.keys()]) if (!found.has(app)) appFiles.delete(app)
+  for (const [app, chat] of found) (appIds.add(app), chat && appOfChat.set(chat, app))
   return !isSame
 }
 
 // A press on another chat's name: that chat in the Claude app, as a notification's click opens this one. Nothing else is run
 const openChat = async ($: EngineInterface, c: Shared) => {
-  const url = openUrl(c, isHere)
+  const url = openUrl(c, heldApp(c))
   if (!url) return
   const r = await $.process.run(['open', url]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   await log($, `chat ${c.chat}${c.host ? ` on ${c.host}` : ''} ${r.exitCode === 0 ? `opened: ${url}` : `not opened: ${r.stderr.trim().slice(0, 160)}`}`)
@@ -4414,7 +4433,7 @@ export const register: Register = on => {
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
     // the Claude app when pressed, where its link opens here
     const chatHead = (key: string, name: string, side: string, c?: Shared) => {
-      const url = c ? openUrl(c, isHere) : ''
+      const url = c ? openUrl(c, heldApp(c)) : ''
       const label = <Text bold dimColor wrap="truncate-end">{name}</Text>
       return (
         <Box key={`chat-head-${key}`} flexDirection="column" paddingTop={1} flexShrink={0}>
@@ -4651,7 +4670,7 @@ export const register: Register = on => {
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
                 // Open that chat whenever its link opens here: a chat of this Mac, or one of another Mac with Remote Control on
-                const url = openUrl(c, isHere)
+                const url = openUrl(c, heldApp(c))
                 const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', url))
                 return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...cards.map(one => small(one))]
               }),
