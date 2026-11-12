@@ -1174,7 +1174,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   const again = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await drawn(again)).toEqual(['mark'])
 
-  // A reload in the pause gives it its pause again from the load, which then ends, and the octopus is at rest
+  // Nor after a reload in the pause: the pause still ends, and the octopus is at rest
   await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw the nose' } as never)
   await end('a6', 't6')
   expect(await drawn(again)).toEqual(['happy'])
@@ -1182,22 +1182,38 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   await clock.advance(2_100)
   expect(await drawn(again)).toEqual(['mark'])
 
-  // Work that ends while the mod reloads, which draws nothing for many seconds, is green and happy once it has loaded, for its pause
+  // Seen ended before the reload, it is not shown ended again after it
   await $.agent.spawn({ ...spawn, description: 'Draw the brows', prompt: 'draw the brows' } as never)
   await end('a7', 't7')
-  await clock.advance(15_000)
-  expect(await drawn(again)).toEqual(['mark'])
-  await $.session.start(start)
   expect(await drawn(again)).toEqual(['happy'])
-  expect((await again.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
   await clock.advance(2_100)
+  await $.session.start(start)
   expect(await drawn(again)).toEqual(['mark'])
-  expect(await again.find({ type: 'Text', text: /Draw the brows/ })).toBeUndefined()
+  expect(await again.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
   // Work that ended long before a load is not
   await clock.advance(30_000)
   await $.session.start(start)
   expect(await drawn(again)).toEqual(['mark'])
+  // Work that ends while nothing is drawn, as while the mod reloads, has its pause from the panel's first drawing after the load
   await again.unmount()
+  await clock.advance(1_000)
+  await $.agent.spawn({ ...spawn, description: 'Draw the lips', prompt: 'draw the lips' } as never)
+  await end('a8', 't8')
+  await clock.advance(10_000)
+  await $.session.start(start)
+  await clock.advance(5_000)
+  const after = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await after.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  await clock.advance(2_100)
+  expect(await after.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  // Work stopped in the seconds of a load is not green after it
+  await $.agent.spawn({ ...spawn, description: 'Draw the chin', prompt: 'draw the chin' } as never)
+  await after.press({ key: 'stop-a9' })
+  await clock.advance(5_000)
+  await $.session.start(start)
+  expect(await after.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  expect(await drawn(after)).toEqual(['mark'])
+  await after.unmount()
 })
 
 test('work that answered while only its own background work held it, then stopped by the chat, the panel or the engine, finished: green and happy for its pause; work stopped before it answered is not', async ($, on) => {

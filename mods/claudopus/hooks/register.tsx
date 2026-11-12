@@ -62,8 +62,8 @@ const ANSWER_CHARS = 30_000
 const TICK = 3000
 // Work that has just ended stays in its place among the running cards this long, in its ended look, before it goes to Finished
 const LINGER = 2000
-// Work that ended while the mod was reloading, which draws nothing for many seconds, has its pause from the load instead, by
-// `<id>:<endedAt>`: a finish is never over before the panel could show it
+// Work that ended while the mod was reloading, which draws nothing for many seconds, has its pause from the panel's first drawing
+// after the load instead (Infinity until then), by `<id>:<endedAt>`: a finish is never over before the panel could show it
 const lateFrom = new Map<string, number>()
 // Ended work this long before a load may not have been drawn ended at all
 const RELOAD_GRACE = 30_000
@@ -143,6 +143,9 @@ const servers = atom({ plugin: 'claudopus', key: 'servers' } as const, [], { sha
 // Counts the passes that bring the screen up to date: each one redraws what reads it
 const tick = atom({ plugin: 'claudopus', key: 'tick' } as const, 0, { shape: 'tick-1' })
 // Whether the panel was open when last looked: a reload of the mod closes it, and it comes back by itself if it was
+// When the panel was last drawn, kept through a reload (drawnNow, written by the timer each second, never read while drawing)
+const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
+let drawnNow = 0
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 
 // The chat of the card that is open, as last read: read again only when that work has moved
@@ -3682,15 +3685,18 @@ export const register: Register = on => {
     // drawn again only when its work moves, since its chat is too long to draw every second and a press must not wait behind a drawing.
     // The redraws set for pauses before this start are forgotten, as their timers went with the session that set them
     lingerSet.clear()
-    // Work that ended in the seconds the reload drew nothing has its pause now
+    // Work that ended in the seconds the reload drew nothing has its pause from the panel's next drawing
     {
       const now = await $.clock.now()
+      // Only work that ended after the panel was last drawn: what it already showed ended is not shown again
+      const last = await read($, lastDrawn)
       lateFrom.clear()
       for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)])
-        if (one.status !== 'working' && one.endedAt > 0 && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, now)
+        if (one.status !== 'working' && one.endedAt > last && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, Infinity)
     }
     let seconds = 0
     $.clock.every(1000, async () => {
+      if (drawnNow > (await read($, lastDrawn))) await update($, lastDrawn, () => drawnNow)
       await shareMine($).catch(err => log($, `work not shared: ${String(err)}`))
       if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
@@ -4275,6 +4281,14 @@ export const register: Register = on => {
     const { Box, Button, Markdown, Text } = $.ui.resolve(e)
     // The list's running times move each second; a Details tab is drawn again only when its work moves
     if (paneId === LIST) await read($, tick)
+    if (paneId === LIST) drawnNow = await $.clock.now()
+    // The first drawing after a load begins the pauses of work that ended while it reloaded, and draws again as they end
+    if (paneId === LIST && [...lateFrom.values()].includes(Infinity)) {
+      const from = await $.clock.now()
+      // Only while the reload is recent: a panel first opened long after shows no finish of then
+      for (const [key, value] of lateFrom) if (value === Infinity) from - Number(key.split(':').at(-1)) < RELOAD_GRACE * 2 ? lateFrom.set(key, from) : lateFrom.delete(key)
+      $.clock.after(LINGER + 20, () => void update($, tick, n => n + 1))
+    }
     const { isFinishedOpen = false } = await read($, view)
     const own = (await read($, todos)).filter(one => !one.parentId)
     // The work of the other chats, by chat; an ask answered here leaves its card at once
