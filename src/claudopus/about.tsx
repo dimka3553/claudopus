@@ -75,6 +75,7 @@ const aboutView = async ($: EngineInterface, ui: Ui) => {
         'Links',
         '',
         <Box flexDirection="column" gap={1}>
+          {line('about-changes', 'Changes', <ui.Button key={`about-changelog-${presses}`} label="Changelog" plain onPress={() => void openChangelog($).catch(err => log($, `changelog not opened: ${String(err)}`))} />)}
           {line('about-site', 'Website', <Text><Link href={SITE} label="claudopus.ai" /></Text>)}
           {line(
             'about-repo',

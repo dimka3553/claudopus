@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claudopus changelog</title>
+<meta name="description" content="What changed in each version of Claudopus, the mod for Claude Code.">
+<link rel="canonical" href="https://claudopus.ai/changelog.html">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#111112" media="(prefers-color-scheme:dark)">
+<meta name="theme-color" content="#FAF9F5" media="(prefers-color-scheme:light)">
+<!-- Made by src/claudopus/build.mjs from mods/claudopus/CHANGELOG.md and src/claudopus/changelog-page.html: change those, never this file -->
+<style>
+/* ---- Claudopus design system: tokens and base, as on the home page ---- */
+:root{
+  color-scheme:dark;
+  /* one cell is the unit of everything: the octopus, the corners, the spacing */
+  --cell:4px;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s6:24px;--s8:32px;--s12:48px;--s16:64px;--s24:96px;--s32:128px;
+  /* faces */
+  --sans:"Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  /* type scale */
+  --t-note:13px;--t-small:15px;--t-body:18px;--t-lead:22px;--t-title:22px;
+  --t-head:clamp(30px,5vw,44px);--t-display:clamp(40px,7.2vw,68px);
+  /* the page, dark */
+  --ground:#111112;--raised:#1C1C1F;--line:#2F2F35;
+  --ink:#F3F2EF;--soft:#A6A6AB;--faint:#6A6A70;
+  /* purple is the octopus and the one thing to press */
+  --purple:#8A63F0;--purple-lift:#A58BFA;--purple-deep:#6A45D8;--purple-ink:#A58BFA;--on-purple:#111112;
+  /* green only says finished, coral only says trouble */
+  --green:#4EBA65;--green-ink:#5FC553;--coral:#FF6B4A;--coral-ink:#FF8163;
+  /* screens show the app, which is dark, so they stay dark in both themes */
+  --screen:#0A0A0B;--screen-raised:#252527;--screen-line:#34343A;--screen-key:#3A3A41;
+  --screen-ink:#F3F2EF;--screen-soft:#A6A6AB;--screen-purple:#A58BFA;--screen-green:#5FC553;
+  /* motion: quarter-second beats, moved in steps */
+  --beat:250ms;
+  /* measures */
+  --page:1120px;--text:640px;--rail:96px;--gutter:24px;
+}
+@media (prefers-color-scheme:light){:root{
+  color-scheme:light;
+  --ground:#FAF9F5;--raised:#EFEDE5;--line:#D9D6CB;
+  --ink:#18181A;--soft:#5C5C63;--faint:#9A9AA2;
+  --purple-ink:#6A45D8;--green-ink:#2B7A3D;--coral-ink:#C2401F;
+}}
+@media (max-width:640px){:root{--t-body:17px;--t-lead:19px;--t-title:20px;--gutter:16px}}
+
+/* ---- base ---- */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:var(--s6)}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 var(--t-body)/1.55 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+h1,h2,h3,p,ul,ol,figure{margin:0}
+ul,ol{padding:0;list-style:none}
+img,video,svg{display:block;max-width:100%}
+h1{font:700 var(--t-display)/1.04 var(--sans);letter-spacing:-.035em;text-wrap:balance}
+h2{font:700 var(--t-head)/1.1 var(--sans);letter-spacing:-.03em;text-wrap:balance}
+h3{font:700 var(--t-title)/1.25 var(--sans);letter-spacing:-.01em}
+.lead{font-size:var(--t-lead);line-height:1.45;color:var(--soft);max-width:var(--text);text-wrap:pretty}
+.small{font-size:var(--t-small);line-height:1.5}
+.note{font:400 var(--t-note)/1.4 var(--mono);color:var(--soft)}
+.soft{color:var(--soft)}
+.name{color:var(--purple-ink)}
+a{color:inherit;text-decoration:underline;text-decoration-color:var(--purple);text-decoration-thickness:2px;text-underline-offset:4px}
+a:hover{color:var(--purple-ink)}
+:focus-visible{outline:2px solid var(--purple-ink);outline-offset:3px}
+code,kbd{font:400 .88em/1.4 var(--mono)}
+p code,li code{background:var(--raised);padding:0 var(--s1);white-space:nowrap}
+code.long{white-space:normal;overflow-wrap:anywhere}
+::selection{background:var(--purple);color:var(--on-purple)}
+
+/* ---- this page ---- */
+.wrap{max-width:calc(var(--text) + 2*var(--gutter));margin:0 auto;padding:0 var(--gutter)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:var(--s4);padding:var(--s4) 0}
+.brand{display:flex;align-items:center;gap:var(--s3);font-weight:700;text-decoration:none}
+.top nav a{text-decoration:none;color:var(--soft);font-size:var(--t-small);padding:var(--s3) 0}
+.top nav a:hover{color:var(--ink)}
+.head{padding:var(--s12) 0 var(--s8)}
+.head .lead{margin-top:var(--s3)}
+section{padding:var(--s6) 0;border-top:var(--cell) solid transparent;background:repeating-linear-gradient(90deg,var(--line) 0 var(--cell),transparent var(--cell) var(--s3)) top/100% var(--cell) no-repeat}
+section h2{font-size:var(--t-title)}
+section .note{margin:var(--s1) 0 var(--s3)}
+section li{position:relative;padding-left:var(--s6);margin-top:var(--s2)}
+section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);height:var(--s2);background:var(--purple)}
+.foot{padding:var(--s12) 0 var(--s16);color:var(--soft);font-size:var(--t-small)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <a class="brand" href="/"><svg class="octo mark" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg>Claudopus</a>
+  <nav><a href="/">Home</a></nav>
+</header>
+<main>
+<div class="head">
+  <h1>Changelog</h1>
+  <p class="lead">What changed in each version of Claudopus, newest first. Claudopus updates itself, and shows what is new in its panel when it does.</p>
+</div>
+<!-- versions -->
+</main>
+<footer class="foot"><a href="https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/CHANGELOG.md">The same changelog on GitHub</a></footer>
+</div>
+</body>
+</html>

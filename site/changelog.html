@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Claudopus changelog</title>
+<meta name="description" content="What changed in each version of Claudopus, the mod for Claude Code.">
+<link rel="canonical" href="https://claudopus.ai/changelog.html">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#111112" media="(prefers-color-scheme:dark)">
+<meta name="theme-color" content="#FAF9F5" media="(prefers-color-scheme:light)">
+<!-- Made by src/claudopus/build.mjs from mods/claudopus/CHANGELOG.md and src/claudopus/changelog-page.html: change those, never this file -->
+<style>
+/* ---- Claudopus design system: tokens and base, as on the home page ---- */
+:root{
+  color-scheme:dark;
+  /* one cell is the unit of everything: the octopus, the corners, the spacing */
+  --cell:4px;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s6:24px;--s8:32px;--s12:48px;--s16:64px;--s24:96px;--s32:128px;
+  /* faces */
+  --sans:"Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  /* type scale */
+  --t-note:13px;--t-small:15px;--t-body:18px;--t-lead:22px;--t-title:22px;
+  --t-head:clamp(30px,5vw,44px);--t-display:clamp(40px,7.2vw,68px);
+  /* the page, dark */
+  --ground:#111112;--raised:#1C1C1F;--line:#2F2F35;
+  --ink:#F3F2EF;--soft:#A6A6AB;--faint:#6A6A70;
+  /* purple is the octopus and the one thing to press */
+  --purple:#8A63F0;--purple-lift:#A58BFA;--purple-deep:#6A45D8;--purple-ink:#A58BFA;--on-purple:#111112;
+  /* green only says finished, coral only says trouble */
+  --green:#4EBA65;--green-ink:#5FC553;--coral:#FF6B4A;--coral-ink:#FF8163;
+  /* screens show the app, which is dark, so they stay dark in both themes */
+  --screen:#0A0A0B;--screen-raised:#252527;--screen-line:#34343A;--screen-key:#3A3A41;
+  --screen-ink:#F3F2EF;--screen-soft:#A6A6AB;--screen-purple:#A58BFA;--screen-green:#5FC553;
+  /* motion: quarter-second beats, moved in steps */
+  --beat:250ms;
+  /* measures */
+  --page:1120px;--text:640px;--rail:96px;--gutter:24px;
+}
+@media (prefers-color-scheme:light){:root{
+  color-scheme:light;
+  --ground:#FAF9F5;--raised:#EFEDE5;--line:#D9D6CB;
+  --ink:#18181A;--soft:#5C5C63;--faint:#9A9AA2;
+  --purple-ink:#6A45D8;--green-ink:#2B7A3D;--coral-ink:#C2401F;
+}}
+@media (max-width:640px){:root{--t-body:17px;--t-lead:19px;--t-title:20px;--gutter:16px}}
+
+/* ---- base ---- */
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:var(--s6)}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 var(--t-body)/1.55 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+h1,h2,h3,p,ul,ol,figure{margin:0}
+ul,ol{padding:0;list-style:none}
+img,video,svg{display:block;max-width:100%}
+h1{font:700 var(--t-display)/1.04 var(--sans);letter-spacing:-.035em;text-wrap:balance}
+h2{font:700 var(--t-head)/1.1 var(--sans);letter-spacing:-.03em;text-wrap:balance}
+h3{font:700 var(--t-title)/1.25 var(--sans);letter-spacing:-.01em}
+.lead{font-size:var(--t-lead);line-height:1.45;color:var(--soft);max-width:var(--text);text-wrap:pretty}
+.small{font-size:var(--t-small);line-height:1.5}
+.note{font:400 var(--t-note)/1.4 var(--mono);color:var(--soft)}
+.soft{color:var(--soft)}
+.name{color:var(--purple-ink)}
+a{color:inherit;text-decoration:underline;text-decoration-color:var(--purple);text-decoration-thickness:2px;text-underline-offset:4px}
+a:hover{color:var(--purple-ink)}
+:focus-visible{outline:2px solid var(--purple-ink);outline-offset:3px}
+code,kbd{font:400 .88em/1.4 var(--mono)}
+p code,li code{background:var(--raised);padding:0 var(--s1);white-space:nowrap}
+code.long{white-space:normal;overflow-wrap:anywhere}
+::selection{background:var(--purple);color:var(--on-purple)}
+
+/* ---- this page ---- */
+.wrap{max-width:calc(var(--text) + 2*var(--gutter));margin:0 auto;padding:0 var(--gutter)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:var(--s4);padding:var(--s4) 0}
+.brand{display:flex;align-items:center;gap:var(--s3);font-weight:700;text-decoration:none}
+.top nav a{text-decoration:none;color:var(--soft);font-size:var(--t-small);padding:var(--s3) 0}
+.top nav a:hover{color:var(--ink)}
+.head{padding:var(--s12) 0 var(--s8)}
+.head .lead{margin-top:var(--s3)}
+section{padding:var(--s6) 0;border-top:var(--cell) solid transparent;background:repeating-linear-gradient(90deg,var(--line) 0 var(--cell),transparent var(--cell) var(--s3)) top/100% var(--cell) no-repeat}
+section h2{font-size:var(--t-title)}
+section .note{margin:var(--s1) 0 var(--s3)}
+section li{position:relative;padding-left:var(--s6);margin-top:var(--s2)}
+section li::before{content:"";position:absolute;left:0;top:.6em;width:var(--s2);height:var(--s2);background:var(--purple)}
+.foot{padding:var(--s12) 0 var(--s16);color:var(--soft);font-size:var(--t-small)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <a class="brand" href="/"><svg class="octo mark" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges" aria-hidden="true"><g fill="currentColor"><rect x="5" y="1" width="6" height="1"/><rect x="3" y="2" width="10" height="1"/><rect x="2" y="3" width="12" height="1"/><rect x="2" y="4" width="2" height="1"/><rect x="6" y="4" width="4" height="1"/><rect x="12" y="4" width="2" height="1"/><rect x="2" y="5" width="2" height="1"/><rect x="5" y="5" width="5" height="1"/><rect x="11" y="5" width="3" height="1"/><rect x="2" y="6" width="12" height="1"/><rect x="2" y="7" width="12" height="1"/><rect x="2" y="8" width="2" height="1"/><rect x="5" y="8" width="2" height="1"/><rect x="9" y="8" width="2" height="1"/><rect x="12" y="8" width="2" height="1"/><rect x="2" y="9" width="2" height="1"/><rect x="5" y="9" width="2" height="1"/><rect x="9" y="9" width="2" height="1"/><rect x="12" y="9" width="2" height="1"/><rect x="0" y="10" width="1" height="1"/><rect x="2" y="10" width="2" height="1"/><rect x="5" y="10" width="2" height="1"/><rect x="9" y="10" width="2" height="1"/><rect x="12" y="10" width="2" height="1"/><rect x="15" y="10" width="1" height="1"/><rect x="0" y="11" width="4" height="1"/><rect x="5" y="11" width="2" height="1"/><rect x="9" y="11" width="2" height="1"/><rect x="12" y="11" width="4" height="1"/><rect x="5" y="12" width="2" height="1"/><rect x="9" y="12" width="2" height="1"/><rect x="3" y="13" width="1" height="1"/><rect x="5" y="13" width="2" height="1"/><rect x="9" y="13" width="2" height="1"/><rect x="12" y="13" width="1" height="1"/><rect x="3" y="14" width="4" height="1"/><rect x="9" y="14" width="4" height="1"/></g></svg>Claudopus</a>
+  <nav><a href="/">Home</a></nav>
+</header>
+<main>
+<div class="head">
+  <h1>Changelog</h1>
+  <p class="lead">What changed in each version of Claudopus, newest first. Claudopus updates itself, and shows what is new in its panel when it does.</p>
+</div>
+<section id="v0.2.67"><h2>v0.2.67</h2><p class="note">13 November 2026</p><ul><li>About has a Changelog link: it opens what changed in every version in a tab of the panel. The same list is on claudopus.ai.</li><li>When Claudopus updates, the whole panel greets you with the blue happy octopus, the new version and what changed in every version you did not have yet.</li></ul></section>
+<section id="v0.2.66"><h2>v0.2.66</h2><p class="note">13 November 2026</p><ul><li>Work that is ready now asks you Release it and runs the release itself on your answer, instead of asking you to type a command.</li><li>Your words passed on to work that has ended are labelled as yours, each quoting the message it is about, and your recent words stay yours past the chat's turn.</li><li>A command for you is given whole from its folder, and a chat run from another Mac offers no terminal button.</li></ul></section>
+<section id="v0.2.65"><h2>v0.2.65</h2><p class="note">13 November 2026</p><ul><li>When Claudopus updates, the octopus in the panel header turns blue and happy and jumps for 5 seconds.</li><li>The header says Claudopus updated, then the new version, and a short sound plays once per version on a Mac.</li><li>The moment no longer shows version numbers that do not exist while it changes.</li></ul></section>
+<section id="v0.2.64"><h2>v0.2.64</h2><p class="note">13 November 2026</p><ul><li>In a chat run from another Mac over SSH, requests for an admin password or key now ask in a box at the top of the panel on your own device, not in a dialog on a screen nobody sees.</li><li>What you type goes straight into that Mac's keychain and never reaches the chat, a notice, saved words, a file or the log.</li><li>Stale requests are dropped, and a value for work that has stopped is not kept.</li></ul></section>
+<section id="v0.2.63"><h2>v0.2.63</h2><p class="note">13 November 2026</p><ul><li>Behind-the-scenes fix to the mod's own tests; nothing changes for you.</li></ul></section>
+<section id="v0.2.62"><h2>v0.2.62</h2><p class="note">13 November 2026</p><ul><li>Pieces of work that finish at the same time no longer publish over each other: they take turns, and each one's changes are kept.</li><li>Each piece of work changes your code only in its own copy, never in the folder you work in.</li></ul></section>
+<section id="v0.2.61"><h2>v0.2.61</h2><p class="note">13 November 2026</p><ul><li>In a chat run from another Mac over SSH, every conversation is told that anything needing your hands is done from your own device.</li><li>That means a sign-in by device code or a link opened there, never a browser, window or keychain prompt on the other Mac.</li><li>A local chat is told nothing new, and the principles are no longer sent twice.</li></ul></section>
+<section id="v0.2.60"><h2>v0.2.60</h2><p class="note">13 November 2026</p><ul><li>Titles, notes, to-dos, questions and results now name what is being done, never the model doing it, since the panel already shows each row's model.</li><li>Which model checks the work is unchanged.</li></ul></section>
+<section id="v0.2.59"><h2>v0.2.59</h2><p class="note">13 November 2026</p><ul><li>Work that hands back its report now ends as done at once, though something it started still runs in the background.</li><li>Its card no longer shows it working with the clock counting; nothing it left running is stopped, and a later step brings the card back.</li></ul></section>
+<section id="v0.2.58"><h2>v0.2.58</h2><p class="note">13 November 2026</p><ul><li>In a chat run from another Mac over SSH, an older copy of the mod left running after a typed reload no longer sends a reload the app refuses.</li><li>A copy replaced by a newer load now does nothing.</li></ul></section>
+<section id="v0.2.57"><h2>v0.2.57</h2><p class="note">13 November 2026</p><ul><li>A question from background work shows in its chat as the mod's notice, never as a message in your place.</li><li>An answer on the card to work that has ended starts that work again with it.</li></ul></section>
+<section id="v0.2.56"><h2>v0.2.56</h2><p class="note">13 November 2026</p><ul><li>In a chat run from another Mac over SSH, a picture opened large is now drawn instead of sticking on Making a large copy or going blank after a tab switch.</li><li>There, the mod no longer sends a reload command the app refuses, and the header tells you to type it.</li></ul></section>
+<section id="v0.2.55"><h2>v0.2.55</h2><p class="note">13 November 2026</p><ul><li>Work is told to use a faster way to search your files.</li></ul></section>
+<section id="v0.2.54"><h2>v0.2.54</h2><p class="note">13 November 2026</p><ul><li>Removed the arrow beside a work's title and at the end of a helper's row; the title, helper name and ended row still open on a press.</li></ul></section>
+<section id="v0.2.53"><h2>v0.2.53</h2><p class="note">13 November 2026</p><ul><li>In a chat run from another Mac over SSH, Open large under a picture draws it in the same tab, with Back to Details above and below it.</li><li>The Details no longer jump to their end and freeze.</li></ul></section>
+<section id="v0.2.52"><h2>v0.2.52</h2><p class="note">13 November 2026</p><ul><li>In a chat run from another Mac over SSH, one click on a panel button now works.</li><li>The panel's numbers no longer change every second, so a click lands on a button that is still there.</li><li>The GitHub page, banners and site carry the new pitch, with guides for people who want to contribute.</li></ul></section>
+<section id="v0.2.51"><h2>v0.2.51</h2><p class="note">13 November 2026</p><ul><li>A work's card has no Details button any more: its title opens the Details, and Stop is plain text at the end of that row.</li><li>The card's coloured edge shows its to-dos while it works, amber when it needs you and green when finished.</li><li>A helper's row says its model and context before its time, dropping them where the panel is narrow.</li></ul></section>
+<section id="v0.2.50"><h2>v0.2.50</h2><p class="note">13 November 2026</p><ul><li>For a chat run from another Mac over SSH, button presses and the way tabs open are now written to the log, to find why a first press did nothing there.</li></ul></section>
+<section id="v0.2.49"><h2>v0.2.49</h2><p class="note">13 November 2026</p><ul><li>In a chat run from another Mac over SSH, one press on Stats, Config, About, Memory, Results or Details now opens that tab in front.</li><li>Before, the tab often opened behind and the press seemed to do nothing.</li></ul></section>
+<section id="v0.2.48"><h2>v0.2.48</h2><p class="note">13 November 2026</p><ul><li>A check of finished work runs on Opus, or on Fable for work built on Fable, never on a weaker model than what built it.</li><li>The maker-and-checker workflow checks on Opus, and helpers for legwork stay on Sonnet.</li></ul></section>
+<section id="v0.2.47"><h2>v0.2.47</h2><p class="note">13 November 2026</p><ul><li>When work asks you something, the question also arrives in its chat as a message, with its answers and the pictures it is about.</li><li>An answer typed in the chat reaches the work like a press on the card, and an answer pressed on the card is said in the chat.</li></ul></section>
+<section id="v0.2.46"><h2>v0.2.46</h2><p class="note">13 November 2026</p><ul><li>In a chat run from another Mac over SSH, a picture's Open large opens it in a tab on the screen you are at, not in Preview on the far Mac.</li><li>The picture is drawn as wide as the tab from a copy prepared out of sight; a chat on this Mac still opens Preview.</li></ul></section>
+<section id="v0.2.45"><h2>v0.2.45</h2><p class="note">13 November 2026</p><ul><li>A helper at work has a soft ring that slowly grows out of its dot and fades every 2.4 seconds; ended helpers keep a still dot.</li></ul></section>
+<section id="v0.2.44"><h2>v0.2.44</h2><p class="note">13 November 2026</p><ul><li>Helpers sit inside their work's card as a tree of slim rows: a dot that is purple at work and green when finished, the name and the time.</li><li>Pressing a row opens its Details, and the row of ended helpers is laid out like the rest.</li></ul></section>
+<section id="v0.2.43"><h2>v0.2.43</h2><p class="note">13 November 2026</p><ul><li>Helpers a piece of work starts now hang under its card as a tree joined by lines, each a slim row with its name, model and time.</li><li>Ended helpers fold into one row, each helper has its own Details, and a helper's Details leads back to its work.</li><li>Work under way has its mark in a terminal.</li></ul></section>
+<section id="v0.2.42"><h2>v0.2.42</h2><p class="note">13 November 2026</p><ul><li>A tab opened by a panel button no longer makes the sidebar slide shut and open again.</li></ul></section>
+<section id="v0.2.41"><h2>v0.2.41</h2><p class="note">13 November 2026</p><ul><li>Tabs opened from the panel come to the front again; a fix lost in the version before is back.</li><li>The panel header shows a short moment when Claudopus has just updated.</li></ul></section>
+<section id="v0.2.40"><h2>v0.2.40</h2><p class="note">13 November 2026</p><ul><li>A tab opened by a panel button now comes to the front even when the press left the keyboard in the panel.</li><li>This fixes buttons doing nothing visible in a chat run from another Mac over SSH.</li></ul></section>
+<section id="v0.2.39"><h2>v0.2.39</h2><p class="note">13 November 2026</p><ul><li>Only a steer of what work is already doing goes to that work.</li><li>A fault, question or new request about the same area starts its own helper, and when in doubt the chat starts one.</li></ul></section>
+<section id="v0.2.38"><h2>v0.2.38</h2><p class="note">13 November 2026</p><ul><li>Work with two or more independent, heavy parts is now split across parallel helpers, and small or tightly linked work is done alone.</li></ul></section>
+<section id="v0.2.37"><h2>v0.2.37</h2><p class="note">13 November 2026</p><ul><li>A command a question gives has an Open in Terminal button that opens Terminal with the command typed in its folder, never run, only when you press it.</li><li>Work no longer opens a terminal tab by itself.</li><li>A question stays amber until you answer it, even after the work that asked has finished.</li></ul></section>
+<section id="v0.2.36"><h2>v0.2.36</h2><p class="note">13 November 2026</p><ul><li>An open chat moves to a newer installed version by itself once it has no turn running, and background work carries on through it.</li><li>The header's installed version is now read from Claude Code's own record, which cannot go stale.</li></ul></section>
+<section id="v0.2.35"><h2>v0.2.35</h2><p class="note">13 November 2026</p><ul><li>Pressing a picture's row in a work's Details opens it whole in the Mac's own viewer, large enough to look at and able to go full screen.</li><li>Before, the picture only widened the sidebar.</li></ul></section>
+<section id="v0.2.34"><h2>v0.2.34</h2><p class="note">13 November 2026</p><ul><li>The chat starts its own helper for a request that can be done on its own, even on a subject whose work is running, so nothing waits behind other work.</li></ul></section>
+<section id="v0.2.33"><h2>v0.2.33</h2><p class="note">13 November 2026</p><ul><li>The website now says which version is current, and every hour one chat checks it, updating only when it differs from the installed one.</li><li>With Automatic updates off, that check is skipped too.</li></ul></section>
+<section id="v0.2.32"><h2>v0.2.32</h2><p class="note">13 November 2026</p><ul><li>A new principle in the shipped rules: if work can run in parallel it runs in parallel, and no question waits behind other work.</li></ul></section>
+<section id="v0.2.31"><h2>v0.2.31</h2><p class="note">13 November 2026</p><ul><li>Config has an Automatic updates switch, on as shipped.</li><li>Turned off, Claudopus stays on the installed version until updated by hand; turned back on, it looks for a new version at once if one is due.</li></ul></section>
+<section id="v0.2.30"><h2>v0.2.30</h2><p class="note">13 November 2026</p><ul><li>Panels say when a chat on the other Mac runs without Claudopus, and when this Mac's Claude app has decided new chats there will.</li><li>The other Mac's questions, prompts and finishes arrive here as a notification once, and it opens that chat.</li></ul></section>
+<section id="v0.2.29"><h2>v0.2.29</h2><p class="note">12 November 2026</p><ul><li>The header shows the version this chat loaded, dim beside the name, and the newer one when this Mac has already installed it.</li><li>Chats on two Macs running different versions can now be told apart at a glance.</li></ul></section>
+<section id="v0.2.28"><h2>v0.2.28</h2><p class="note">12 November 2026</p><ul><li>Claudopus now updates itself: every few hours one chat runs Claude Code's own update for it, and chats that start afterwards load the new version.</li><li>About says when a newer version is installed.</li><li>A copy loaded straight from a folder of code is never updated.</li></ul></section>
+<section id="v0.2.27"><h2>v0.2.27</h2><p class="note">12 November 2026</p><ul><li>Behind-the-scenes reorganisation of the mod's code; nothing changes in how it behaves or looks.</li></ul></section>
+<section id="v0.2.26"><h2>v0.2.26</h2><p class="note">12 November 2026</p><ul><li>Buttons keep working after the mod reloads in a chat whose panel stayed open.</li><li>A chat that starts reads the other chats before its panel opens, so they no longer drop out of the list while it loads.</li></ul></section>
+<section id="v0.2.25"><h2>v0.2.25</h2><p class="note">12 November 2026</p><ul><li>Work that ends while the mod reloads still turns green with the happy octopus.</li><li>A finish you have already seen is not shown twice.</li></ul></section>
+<section id="v0.2.24"><h2>v0.2.24</h2><p class="note">12 November 2026</p><ul><li>The happy octopus now lifts its arms at every finish, in the header and above the prompt, for this chat's work and another's.</li><li>Before, the app kept the first drawing, which was already at rest.</li></ul></section>
+<section id="v0.2.23"><h2>v0.2.23</h2><p class="note">12 November 2026</p><ul><li>What needs you now comes as the amber octopus, Claudopus Asks, with a short needs-you sound in the notification.</li><li>The sound plays once and is silent when sound is off; finished work stays purple with its chime.</li></ul></section>
+<section id="v0.2.22"><h2>v0.2.22</h2><p class="note">12 November 2026</p><ul><li>A finished card always turns green with the happy octopus before it leaves, even if work was only held open by something in the background.</li><li>Stopping a chat ends its card at once, and the octopus is happy for that moment even while something needs you.</li></ul></section>
+<section id="v0.2.21"><h2>v0.2.21</h2><p class="note">12 November 2026</p><ul><li>Pressing a chat name in a chat run from another Mac over SSH opens that chat on your own screen, never on the other Mac.</li><li>A dead kept connection now drops within ten seconds, and Details' Open that chat does the same.</li></ul></section>
+<section id="v0.2.20"><h2>v0.2.20</h2><p class="note">12 November 2026</p><ul><li>Details now opens properly in a chat run from another Mac over SSH.</li><li>An empty tab left by an older version closes as the mod loads, and another chat's Details has an Open that chat button.</li></ul></section>
+<section id="v0.2.19"><h2>v0.2.19</h2><p class="note">12 November 2026</p><ul><li>Every question answers on the small card, with its buttons or Done and Not now, and a reply box for your own words.</li><li>Any answer clears the amber at once.</li></ul></section>
+<section id="v0.2.18"><h2>v0.2.18</h2><p class="note">12 November 2026</p><ul><li>With another Mac set up, both Macs now keep the same results: each one gets whatever it is missing.</li><li>Archiving, bringing back and answers travel both ways, and nothing is deleted or overwritten.</li></ul></section>
+<section id="v0.2.17"><h2>v0.2.17</h2><p class="note">12 November 2026</p><ul><li>The header says in one line what every chat's cards say, and the octopus agrees.</li><li>Work that leaves an older chat's list turns green for a pause before going.</li></ul></section>
+<section id="v0.2.16"><h2>v0.2.16</h2><p class="note">12 November 2026</p><ul><li>A chat that this Mac's app runs on another Mac now opens from its name, even on an app version that shares no link.</li></ul></section>
+<section id="v0.2.15"><h2>v0.2.15</h2><p class="note">12 November 2026</p><ul><li>The panel lists a chat only while something is going on in it.</li><li>Removed the hover on chat names and the row of other chats, and nothing of what was said in a chat is shared.</li></ul></section>
+<section id="v0.2.14"><h2>v0.2.14</h2><p class="note">12 November 2026</p><ul><li>An amber card for another Mac's chat opens that chat here when Remote Control is on.</li></ul></section>
+<section id="v0.2.13"><h2>v0.2.13</h2><p class="note">12 November 2026</p><ul><li>Quiet chats fold into one row, chat names can be hovered and opened, and ended work is shown apart from running work.</li><li>The app's own prompt also shows amber in every panel.</li></ul></section>
+<section id="v0.2.12"><h2>v0.2.12</h2><p class="note">12 November 2026</p><ul><li>Every panel on both Macs now lists the same open chats.</li><li>A chat stopped on the app's own prompt, such as allowing a command or approving a plan, shows in amber at the top of every panel.</li><li>A notification comes if the prompt still waits, and an Open that chat button appears; the mod never answers a prompt for you.</li></ul></section>
+<section id="v0.2.11"><h2>v0.2.11</h2><p class="note">12 November 2026</p><ul><li>The panel lists every open chat on another Mac, by chat name and Mac, with Open and nothing running when it is idle.</li><li>A chat of this Mac with no work is still not listed, and a chat leaves the list as it closes.</li></ul></section>
+<section id="v0.2.10"><h2>v0.2.10</h2><p class="note">12 November 2026</p><ul><li>The panel lists the running work of every open chat on this Mac, grouped by chat with this chat's first.</li><li>You can answer another chat's question from the panel.</li><li>A setting can add chats on other Macs over SSH; the panel opens and closes in every chat together.</li></ul></section>
+<section id="v0.2.9"><h2>v0.2.9</h2><p class="note">12 November 2026</p><ul><li>Notifications now come from Claudopus with its octopus icon, and a click opens that chat in the Claude app.</li><li>The /claudopus and /servers commands say plainly when the screen has nowhere to draw the panel.</li></ul></section>
+<section id="v0.2.8"><h2>v0.2.8</h2><p class="note">12 November 2026</p><ul><li>A reply typed in a card's box clears at once and says it was sent, then the work reads it at its next step.</li><li>A reply the work refused, or never read before it ended, goes to the chat instead.</li></ul></section>
+<section id="v0.2.7"><h2>v0.2.7</h2><p class="note">12 November 2026</p><ul><li>A new person's panel opens once with a welcome that names /claudopus and offers to index their old chats.</li><li>Anyone already set up never sees the welcome.</li><li>If python3 is missing, the welcome stops and gives the command to install the Command Line Tools.</li></ul></section>
+<section id="v0.2.6"><h2>v0.2.6</h2><p class="note">12 November 2026</p><ul><li>The website's video shows its play button in the exact middle of the picture, larger, over a light shade, with a focus ring.</li></ul></section>
+<section id="v0.2.5"><h2>v0.2.5</h2><p class="note">12 November 2026</p><ul><li>The README's Privacy section now says passwords and keys stay in the keychain until you remove them.</li><li>It also says the texts the mod adds to prompts are sent to Claude too.</li></ul></section>
+<section id="v0.2.4"><h2>v0.2.4</h2><p class="note">12 November 2026</p><ul><li>A new top for the README, with light and dark banners, a redrawn panel clip, a link row, tables and a Privacy section.</li><li>The README, website and dialogs no longer claim more than the code does about passwords and keys, and say macOS only.</li><li>Removed the author's own folder and wording from the shipped rules and the first-run script.</li></ul></section>
+<section id="v0.2.3"><h2>v0.2.3</h2><p class="note">12 November 2026</p><ul><li>Another fix asked for by the review of the plugin directory.</li><li>Stats keeps turn times as turns, and old totals are worked out again.</li></ul></section>
+<section id="v0.2.2"><h2>v0.2.2</h2><p class="note">12 November 2026</p><ul><li>Fixes the problems that blocked the mod from Anthropic's plugin directory.</li><li>The README now says what the mod does, and the question card has a reply box and working links.</li><li>Answers from the panel are now worded as coming from the panel.</li></ul></section>
+<section id="v0.2.1"><h2>v0.2.1</h2><p class="note">12 November 2026</p><ul><li>A command you must type is shown with a Copy button, and the work can open a terminal for it.</li><li>Claudopus is now built in its own public repository.</li></ul></section>
+<section id="v0.2.0"><h2>v0.2.0</h2><p class="note">12 November 2026</p><ul><li>Adds the Stats, Memory, About and Config tabs to the panel.</li><li>Adds a card that shows when work needs you, a way to store keys and passwords, and a short clip of the panel.</li><li>Adds a website and the details Anthropic's plugin directory asks for.</li></ul></section>
+<section id="v0.1.0"><h2>v0.1.0</h2><p class="note">11 November 2026</p><ul><li>First public version: every chat does its work in the background and says how it is going.</li><li>Saves your words and Claude's answers, keeps subjects, and keeps chats small.</li></ul></section>
+</main>
+<footer class="foot"><a href="https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/CHANGELOG.md">The same changelog on GitHub</a></footer>
+</div>
+</body>
+</html>
