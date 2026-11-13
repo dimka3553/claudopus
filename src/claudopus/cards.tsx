@@ -19,7 +19,8 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 })
 // Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
 // What it kept of its own background work goes with it: started again, it keeps what it starts from then
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at, bg: undefined, waitsSince: undefined })
+// What the person allowed it under "Ask once per piece of work" ends with it
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, status, endedAt: at, bg: undefined, waitsSince: undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
 const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:

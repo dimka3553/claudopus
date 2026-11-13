@@ -18,8 +18,11 @@ const workHooks = (on: On) => {
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool)
+        // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
+        if (grants.length && !(e as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
       }
     }
+    let grants: string[] = []
     if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
@@ -28,6 +31,17 @@ const workHooks = (on: On) => {
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
+    }
+    // The list of admin commands always allowed, and what seals it, are the person's alone
+    if (touchesGate(e)) {
+      await log($, `refused ${e.tool} on the admin gate's own files`)
+      return { deny: NO_GATE_TOUCH() }
+    }
+    // An admin command waits for the person's press on its card, unless they chose never to be asked
+    if (e.tool === 'Bash') {
+      const gated = await gateAdmin($, e, raw as never)
+      if (gated.deny) return { deny: gated.deny }
+      grants = gated.grants
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''

@@ -67,7 +67,7 @@ const panelHooks = (on: On) => {
     const at = await $.clock.now()
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.leftSince)
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince)
     // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of the chat always does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
@@ -237,6 +237,11 @@ const panelHooks = (on: On) => {
                 {askBlock(one, `ask-${one.id}`)}
               </Box>
             ) : null}
+            {one.admins?.length ? (
+              <Box key={`gate-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
+                {adminBlock($, table, one, `gates-${one.id}`)}
+              </Box>
+            ) : null}
             {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
             {one.stuckAt && one.status === 'working' && !one.chat ? (
               <Box key={`stuck-${one.id}`} paddingLeft={lead}>
@@ -284,7 +289,7 @@ const panelHooks = (on: On) => {
     // height, whatever it is; a terminal has no part thinner than a row, so there the edge is whole
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
-      if (one.ask || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={one.ask ? NEEDS : one.status === 'working' ? LIVE : DONE} />
+      if (one.ask || one.admins?.length || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={one.ask || one.admins?.length ? NEEDS : one.status === 'working' ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
         <Box key={`edge-${one.id}`} width={1} flexShrink={0} flexDirection="column">
@@ -768,6 +773,15 @@ const panelHooks = (on: On) => {
               ) : null}
             </Box>
           </Box>
+          {one.admins?.length ? (
+            <Box key="part-gates" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+              <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
+              <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
+                <Text bold dimColor>Needs you now</Text>
+                {adminBlock($, table, one, `gates-big-${one.id}`)}
+              </Box>
+            </Box>
+          ) : null}
           {one.ask ? (
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
@@ -1013,7 +1027,7 @@ const panelHooks = (on: On) => {
       here: working.filter(one => !one.ask).length + runningFlows.length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
-      asks: boxes.length + own.filter(one => one.ask).length + waiting.length + elsewhere.filter(one => one.ask).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
+      asks: boxes.length + looseGates.length + own.filter(one => one.ask || one.admins?.length).length + elsewhere.filter(one => !one.ask && one.admins?.length).length + waiting.length + elsewhere.filter(one => one.ask).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
@@ -1025,7 +1039,7 @@ const panelHooks = (on: On) => {
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     // A password or key box stays above it: the runner waits on it
-    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{screen}</Box>
+    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
     return (
@@ -1073,6 +1087,7 @@ const panelHooks = (on: On) => {
           </Box>
         ) : null}
         {!alone ? boxesPart($, ui) : null}
+        {!alone ? gatesPart($, ui) : null}
         {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone

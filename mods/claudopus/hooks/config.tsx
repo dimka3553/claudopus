@@ -23,7 +23,20 @@ export const ROLES = [
 export type Role = (typeof ROLES)[number]['key']
 export type Models = Record<Role, string>
 export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', fable: 'Fable 5.2', haiku: 'Haiku 5.5' }
-export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; models?: Partial<Models> }
+// `admin`: when the person is asked before an admin command runs: "each" time (as shipped), once for a piece of "work", or "never".
+// "work" and "never" count only with `adminSealed`, the seal a press in this tab makes; without it every command asks.
+// `adminPassword`: "macos" lets macOS ask for the password each time and keeps none; otherwise it is kept in the keychain
+export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; models?: Partial<Models>; admin?: string; adminSealed?: string; adminPassword?: string }
+export const ADMIN_MODES = [
+  { value: 'each', label: 'Ask each time' },
+  { value: 'work', label: 'Ask once per piece of work' },
+  { value: 'never', label: 'Never ask' },
+] as const
+export const ADMIN_PASSWORDS = [
+  { value: 'keep', label: "Keep it in this Mac's keychain" },
+  { value: 'macos', label: 'Let macOS ask, keep nothing' },
+] as const
+export type AdminMode = (typeof ADMIN_MODES)[number]['value']
 
 export const parse = (text: string): Config => {
   try {
@@ -91,7 +104,11 @@ export type ConfigShown = {
   // The version this chat runs, and Check for updates as it stands
   version: string
   check: { isChecking: boolean; said: string; isError: boolean }
-  texts: { text: Text; isOwn: boolean; isStale: boolean; path: string; body: string }[]; config: Config; failed: string }
+  texts: { text: Text; isOwn: boolean; isStale: boolean; path: string; body: string }[]; config: Config; failed: string
+  // Admin commands: what is in force, a "work" or "never" in config.json that no press here sealed, the commands always allowed
+  // (and how many in the file carry no seal of this Mac's), and whether this chat is reached from another device
+  gate: { mode: AdminMode; unsealed: string; password: 'keep' | 'macos'; allowed: { host: string; command: string }[]; unsealedAllowed: number; isAfar: boolean }
+}
 export type ConfigActs = {
   edit: (text: Text, body: string) => void
   open: (text: Text) => void
@@ -100,6 +117,9 @@ export type ConfigActs = {
   putBack: (text: Text) => void
   set: (key: keyof Config, value: unknown, role?: Role) => void
   check: () => void
+  gateMode: (mode: AdminMode) => void
+  gatePassword: (value: 'keep' | 'macos') => void
+  gateRemove: (host: string, command: string) => void
 }
 type Band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => JSX.Element
 const SEGMENT = '#80808050'
@@ -215,6 +235,53 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
               models[one.key] !== one.shipped,
               () => acts.set('models', undefined, one.key),
             ),
+          )}
+        </Box>,
+      )}
+      {band(
+        ui,
+        'config-admin',
+        'Admin commands',
+        '',
+        <Box flexDirection="column" gap={1}>
+          {item(
+            'config-admin-mode',
+            'Ask before an admin command',
+            `Work runs a command as administrator only after you allow it on its card: each time, or once for a piece of work and its helpers until it ends. Never ask runs them without asking.${shown.gate.unsealed ? ` config.json says "${shown.gate.unsealed}", but it was not chosen here, so every command asks.` : ''}`,
+            <Select key="config-admin-mode-pick" options={ADMIN_MODES.map(one => ({ value: one.value, label: one.label }))} value={shown.gate.mode} onSelect={value => acts.gateMode(value as AdminMode)} />,
+            shown.gate.mode !== 'each' || Boolean(shown.gate.unsealed),
+            () => acts.gateMode('each'),
+          )}
+          {item(
+            'config-admin-password',
+            'Admin password',
+            `Kept in this Mac's keychain, a password can be read by any process running as you, so asking first is a check, not a wall. Let macOS ask keeps no password: macOS asks for it on this Mac's screen each time, on this Mac only.${shown.gate.isAfar && shown.gate.password === 'macos' ? ' This chat is reached from another device, where that box cannot be seen: admin commands are refused here.' : shown.gate.isAfar ? ' In a chat reached from another device that box cannot be seen, so admin commands are then refused there.' : ''}`,
+            <Select key="config-admin-password-pick" options={ADMIN_PASSWORDS.map(one => ({ value: one.value, label: one.label }))} value={shown.gate.password} onSelect={value => acts.gatePassword(value === 'macos' ? 'macos' : 'keep')} />,
+            shown.gate.password !== 'keep',
+            () => acts.gatePassword('keep'),
+          )}
+          {item(
+            'config-admin-allowed',
+            'Always allowed',
+            shown.gate.allowed.length
+              ? `These run without asking, each only as written here and only on its Mac.${shown.gate.unsealedAllowed ? ` ${shown.gate.unsealedAllowed} more in the file ${shown.gate.unsealedAllowed === 1 ? 'was' : 'were'} not added by your press and ${shown.gate.unsealedAllowed === 1 ? 'allows' : 'allow'} nothing.` : ''}`
+              : `None yet: Always allow this command on a card adds one.${shown.gate.unsealedAllowed ? ` ${shown.gate.unsealedAllowed} in the file ${shown.gate.unsealedAllowed === 1 ? 'was' : 'were'} not added by your press and ${shown.gate.unsealedAllowed === 1 ? 'allows' : 'allow'} nothing.` : ''}`,
+            null,
+            false,
+            () => undefined,
+            shown.gate.allowed.length ? (
+              <Box key="config-admin-list" flexDirection="column" gap={1} flexShrink={0}>
+                {shown.gate.allowed.map((one, n) => (
+                  <Box key={`config-admin-allowed-${n}`} flexDirection="row" alignItems="flex-start" gap={2} flexShrink={0}>
+                    <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={FILL} paddingLeft={2}>
+                      <Text dimColor wrap="wrap">{one.host === 'here' ? 'This Mac' : one.host}</Text>
+                      <Text mono wrap="wrap">{one.command}</Text>
+                    </Box>
+                    <Button key={`config-admin-remove-${n}-${presses}`} label="Remove" plain dimColor onPress={() => acts.gateRemove(one.host, one.command)} />
+                  </Box>
+                ))}
+              </Box>
+            ) : null,
           )}
         </Box>,
       )}

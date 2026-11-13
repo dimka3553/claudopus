@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 # Runs one admin (sudo) command on this Mac or on a Mac reached over SSH, with that Mac's password
 # from this Mac's keychain. The password is asked once, in a box at the top of the Claudopus panel (a box on this Mac's screen
 # that hides what is typed only where no chat draws a panel), checked, then kept in the keychain. It only ever travels through pipes: never in a command
@@ -7,7 +7,13 @@
 #   admin here '<command>'         on this Mac
 #   admin <ssh host> '<command>'   on that Mac, over SSH
 #   admin <mac> --forget           removes the kept password
+#
+# A command runs only when the person allowed it: the Claudopus hook that holds the Bash call until they press Allow on the work's
+# card leaves a grant for this Mac and this exact command, sealed with a key in this Mac's keychain, and this runner takes it once.
+# With none it refuses, however it was reached. Only "admin": "never" in config.json, sealed by a press in Config, runs as before.
+# -p above: nothing is read from BASH_ENV and no function comes in from the environment
 set -u
+unset PERL5OPT PERL5LIB PERLLIB PERL5DB
 # The runner uses only the system's own programs, so nothing earlier on the PATH is handed the password
 user_path=$PATH
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
@@ -26,6 +32,44 @@ if [ "$command" = --forget ]; then
   forget && echo "The password for $mac is forgotten." || echo "No password was kept for $mac."
   exit 0
 fi
+
+# ---- The gate ----
+# Says "never", "granted" or "refused", then where the password comes from ("keep" or "macos"). "never" in config.json counts
+# only with the seal Config made; a grant counts when it names this Mac and this command as they reached this runner, is under
+# two minutes old and carries the right seal, and it is taken (removed) as it is found
+memory=$HOME/.claude/claudopus
+gate_key() { security find-generic-password -s claudopus-admin-gate -a seal -w 2>/dev/null; }
+gate=$(gate_key | perl -MJSON::PP -MDigest::SHA=hmac_sha256_hex -e '
+  my $k = <STDIN>; $k = "" unless defined $k; chomp $k;
+  my ($config, $grants, $host, $command) = @ARGV;
+  my $read = sub { my $text = do { local $/; open(my $f, "<", $_[0]) or return {}; <$f> }; my $j = eval { decode_json($text) }; ref $j eq "HASH" ? $j : {} };
+  my $bytes = sub { my $v = shift; return "" if !defined $v || ref $v; $v = "$v"; utf8::encode($v); $v };
+  my $c = $read->($config);
+  my $pw = $bytes->($c->{adminPassword}) eq "macos" ? "macos" : "keep";
+  if (length $k && $bytes->($c->{admin}) eq "never" && $bytes->($c->{adminSealed}) eq hmac_sha256_hex("mode\nnever", $k)) { print "never $pw"; exit }
+  my $ok = 0;
+  if (length $k && opendir(my $d, $grants)) {
+    for my $name (sort grep { /\.json$/ } readdir $d) {
+      my $g = $read->("$grants/$name");
+      my ($id, $at) = ($bytes->($g->{id}), $bytes->($g->{at}));
+      next unless $at =~ /^\d+$/ && abs(time() * 1000 - $at) <= 120_000;
+      next unless $bytes->($g->{host}) eq $host && $bytes->($g->{command}) eq $command;
+      next unless $bytes->($g->{seal}) eq hmac_sha256_hex("grant\n$id\n$at\n$host\n$command", $k);
+      next unless rename("$grants/$name", "$grants/$name.$$");
+      unlink "$grants/$name.$$";
+      $ok = 1;
+      last;
+    }
+  }
+  print(($ok ? "granted" : "refused"), " $pw");
+' "$memory/config.json" "$memory/admin-grants" "$mac" "$command")
+case $gate in
+never\ * | granted\ *) ;;
+*)
+  echo "Refused: this admin command did not run, because it was not allowed on its card in the Claudopus panel. Run it as one Bash call of its own, written out in full with nothing for the shell to fill in: $0 here|<ssh host> '<command>'. The card then shows it and asks." >&2
+  exit 6
+  ;;
+esac
 
 ssh_to() { ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -- "$mac" "$@"; }
 
@@ -101,6 +145,34 @@ ask() {
 # On this Mac the command keeps the PATH it was given; over SSH, that Mac's own
 with_path=''
 [ "$mac" = here ] && with_path="PATH=$(printf '%q' "$user_path"); export PATH; "
+
+# "Let macOS ask, keep nothing": macOS asks for the password in its own box on this Mac's screen, each time, and runs the command;
+# no password is kept, typed into the panel or read here. Only on this Mac, and only where its screen is seen
+if [ "${gate#* }" = macos ]; then
+  if [ "$mac" != here ]; then
+    echo "Admin commands are set to let macOS ask for the password and keep none, which works only on this Mac, not on $mac over SSH." >&2
+    exit 7
+  fi
+  if afar; then
+    echo "Admin commands are set to let macOS ask for the password and keep none. macOS asks on this Mac's own screen, which nobody sees from a chat reached over SSH, so nothing ran. It runs from a chat at this Mac, or once Config's Admin password is set back to the keychain." >&2
+    exit 7
+  fi
+  out=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-admin.XXXXXX") || exit 1
+  trap 'rm -rf "$out"' EXIT
+  script="( exec </dev/null; ${with_path}$command ) >$(printf '%q' "$out/out") 2>$(printf '%q' "$out/err"); echo \$? >$(printf '%q' "$out/status")"
+  if ! osascript -e 'on run argv' -e 'do shell script (item 1 of argv) with administrator privileges' -e 'end run' "$script" >/dev/null 2>"$out/osa"; then
+    if grep -q -e '-128' "$out/osa"; then
+      echo "The macOS password box was cancelled, so the command did not run." >&2
+      exit 3
+    fi
+    echo "macOS could not ask for the admin password, so the command did not run: $(cat "$out/osa")" >&2
+    exit 1
+  fi
+  cat "$out/out"
+  cat "$out/err" >&2
+  status=$(cat "$out/status" 2>/dev/null)
+  exit "${status:-1}"
+fi
 
 if [ "$mac" != here ] && ! ssh_to true </dev/null 2>/dev/null; then
   echo "$mac could not be reached over SSH." >&2
