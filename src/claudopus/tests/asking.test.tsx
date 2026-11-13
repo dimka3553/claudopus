@@ -301,14 +301,43 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${other}.json`) ? undefined : true))).toBe(true)
 })
 
-test('a chat on this Mac\'s own screen draws no box: there the runners show their own', async ($, on) => {
-  const { files, logged, clock } = world(on)
+test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {
+  const { files, logged, keychain, clock, opened } = world(on)
   await $.session.start(start)
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await clock.advance(2000)
-  expect(await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' })).toBeUndefined()
+  await clock.advance(1000)
+  expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('top of the Claudopus panel')
+  // The chat takes the request, which tells the runner a panel asks, and brings the panel up with the field ready
+  expect(opened.filter(one => one === 'claudopus').length).toBeGreaterThan(0)
+  const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
+  await list.input({ key: field?.key ?? '', text: 'made-up-local-k3y' })
+  expect(await until(async () => keychain.find(one => one.includes(id)))).toContain('-w "made-up-local-k3y"')
+  expect(logged.some(line => line.includes('local-k3y'))).toBe(false)
+  expect([...files.values()].some(text => text.includes('local-k3y'))).toBe(false)
+})
+
+test("another chat's request is left to that chat a moment, then any chat with a screen takes it", async ($, on) => {
+  const { files, logged, clock } = world(on)
+  await $.session.start(start)
+  const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs NPM_TOKEN for work on this Mac.', chat: 'another-chat', at: 1_700_000_000_000 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  // The box shows here at once, but the notice waits for its own chat
+  expect(await until(async () => list.find({ type: 'Text', text: 'Claudopus needs NPM_TOKEN for work on this Mac.' }))).toBeDefined()
+  expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
+  await clock.advance(6000)
+  expect(await until(async () => logged.find(line => line.includes('NPM_TOKEN')))).toContain('top of the Claudopus panel')
+})
+
+test('a run with nothing to draw on takes no request, so the runner knows no panel asks', async ($, on) => {
+  const { files, logged, clock } = world(on, { headless: true })
+  await $.session.start(start)
+  const id = '4f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', chat: 'engine-id', at: 1_700_000_000_000 }))
+  await clock.advance(3000)
   expect(logged.some(line => line.includes('GITHUB_TOKEN'))).toBe(false)
 })
 

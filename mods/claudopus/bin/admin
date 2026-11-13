@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs one admin (sudo) command on this Mac or on a Mac reached over SSH, with that Mac's password
-# from this Mac's keychain. The password is asked once, in a box on this Mac's screen that hides what
-# is typed (in the panel, in a chat the app runs on another Mac over ssh), checked, then kept in the keychain. It only ever travels through pipes: never in a command
+# from this Mac's keychain. The password is asked once, in a box at the top of the Claudopus panel (a box on this Mac's screen
+# that hides what is typed only where no chat draws a panel), checked, then kept in the keychain. It only ever travels through pipes: never in a command
 # line, a file, the output or a log.
 #
 #   admin here '<command>'         on this Mac
@@ -44,16 +44,16 @@ check() {
   return 1
 }
 
-# In a chat the app runs on another Mac over ssh, a box on this Mac's screen is one nobody sees: the panel beside the chat asks
-# instead. The request names what is needed and never holds a value; what is typed in the panel goes into this Mac's keychain
-# under the request's id, and is taken from there and removed at once. 1 when it is cancelled there or nothing comes in 590 s,
-# under the longest a Bash call may run
+# The Claudopus panel beside the chat asks, in every chat. The request names what is needed and the chat that asks, and never
+# holds a value; what is typed in the panel goes into this Mac's keychain under the request's id, and is taken from there and
+# removed at once. 1 when it is cancelled there or nothing comes in 590 s, under the longest a Bash call may run; 2 when no chat
+# with a panel takes the request in its first 15 s (the .told mark), as in a -p run with no chat open on this Mac
 box_ask() {
-  local text=$1 boxes=${CLAUDOPUS_BOXES:-$HOME/.claude/claudopus/boxes} id value i status=1
+  local text=$1 boxes=${CLAUDOPUS_BOXES:-$HOME/.claude/claudopus/boxes} id value i status=1 taken=${CLAUDOPUS_BOX_TAKEN:-15}
   id=$(/usr/bin/uuidgen | /usr/bin/tr '[:upper:]' '[:lower:]')
   [ -n "$id" ] || return 1
   /bin/mkdir -p "$boxes" || return 1
-  /usr/bin/perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({id => $ARGV[0], text => $ARGV[1], at => time() * 1000}), "\n"' "$id" "$text" >"$boxes/$id.part" &&
+  /usr/bin/perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({id => $ARGV[0], text => $ARGV[1], chat => $ARGV[2], at => time() * 1000}), "\n"' "$id" "$text" "${CLAUDE_CODE_SESSION_ID:-}" >"$boxes/$id.part" &&
     /bin/mv "$boxes/$id.part" "$boxes/$id.json" || return 1
   trap '/bin/rm -f "$boxes/$id.json" "$boxes/$id.told"; /usr/bin/security delete-generic-password -s claudopus-box -a "$id" >/dev/null 2>&1' EXIT
   for ((i = 0; i < 590; i++)); do
@@ -65,6 +65,8 @@ box_ask() {
     fi
     # Cancel in the panel removes the request
     [ -f "$boxes/$id.json" ] || break
+    # No chat took it: no panel draws on this Mac
+    [ "$i" -ge "$taken" ] && [ ! -f "$boxes/$id.told" ] && { status=2; break; }
     /bin/sleep 1
   done
   /bin/rm -f "$boxes/$id.json" "$boxes/$id.told"
@@ -73,16 +75,24 @@ box_ask() {
   return "$status"
 }
 
+# Reached over ssh, nobody sees this Mac's screen
+afar() { [ -n "${CLAUDE_SSH_DAEMON_CHILD:-}${SSH_CONNECTION:-}${SSH_TTY:-}" ]; }
+
 ask() {
-  local label=$mac said=$1
+  local label=$mac said=$1 text status
   [ "$mac" = here ] && label="this Mac"
-  if [ -n "${CLAUDE_SSH_DAEMON_CHILD:-}" ]; then box_ask "${said}Claudopus needs the admin password of $label to run an admin command for work on this Mac. It is kept in this Mac's keychain, and later admin commands on $label run without asking again until it is forgotten."; return; fi
+  text="${said}Claudopus needs the admin password of $label to run an admin command. It is kept only in this Mac's keychain, and later admin commands on $label run without asking again until it is forgotten."
+  box_ask "$text"
+  status=$?
+  [ "$status" = 2 ] || return "$status"
+  # Only where no chat draws a panel on this Mac: a box on its screen, when someone can see it
+  if afar; then echo "No Claudopus panel is open on this Mac to ask in: open a chat here and run it again." >&2; return 1; fi
   osascript \
     -e 'on run argv' \
     -e 'activate' \
     -e 'text returned of (display dialog (item 1 of argv) default answer "" with hidden answer with title "Claudopus" buttons {"Cancel", "OK"} default button "OK" with icon caution giving up after 900)' \
     -e 'end run' \
-    "${said}Claudopus needs the admin password of $label to run an admin command. It is kept only in this Mac's keychain, and later admin commands on $label run without asking again until it is forgotten." 2>/dev/null
+    "$text" 2>/dev/null
 }
 
 if [ "$mac" != here ] && ! ssh_to true </dev/null 2>/dev/null; then

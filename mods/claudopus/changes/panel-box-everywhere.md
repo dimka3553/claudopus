@@ -1,0 +1,3 @@
+- Requests for an admin password or key now ask in the box at the top of the panel in every chat, on this Mac too, not only in a chat run from another Mac: the same notice, wait and Cancel everywhere, and what you type goes straight into this Mac's keychain.
+- The chat that asked tells you and brings the panel up with the field ready to type in.
+- Only a run with no chat open on this Mac to draw a panel still asks in a dialog on this Mac's screen; over SSH it says no panel is open instead.

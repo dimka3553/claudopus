@@ -268,7 +268,7 @@ const NO_COPY = () =>
   `Work is never started as a copy of this chat. Start a fresh agent instead: subagent_type "general-purpose", the model named (${modelsShort(models)}), and a brief as the prompt.`
 // A command that would print a password or key the keychain keeps. Work uses a kept key only through `bin/secret`, which reads it itself
 // or that would point the runner at another store or another box
-const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_SECRET_(?:SERVICE|ASK)\b/
+const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|BOXES|BOX_TAKEN)\b/
 const NO_READ = 'A kept key or password is never read or printed. Use it as an environment variable through the secret runner the work rules name; it hides the value from what the command prints.'
 // A push or merge to main or master by hand: git's own push naming main or master, a push that skips the repo's hooks, the release
 // runner's own pass given by hand, or a pull request merged on GitHub. The command is read as the shell splits it, so words inside
@@ -4628,13 +4628,14 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
   }
 }
 
-// The hidden boxes of bin/secret and bin/admin, in a chat the app runs on another Mac over ssh
+// The hidden boxes of bin/secret and bin/admin, in every chat: on this Mac's own screen and from another Mac over ssh alike
 
-// There a box on this Mac's screen is one nobody sees, so the runner leaves a request in boxes/ instead: what it needs, never a
-// value. The panel draws it at its top with a field; what is typed there goes from the field straight into this Mac's keychain on
-// security's stdin, under the request's id, where the runner takes it and removes it. It never reaches the chat, a notice, the saved
-// words, a file or the log. A chat on this Mac's own screen draws none: there the runner shows its own box
-type Asked = { id: string; text: string; at: number }
+// The runner leaves a request in boxes/: what it needs, never a value. The panel draws it at its top with a field; what is typed
+// there goes from the field straight into this Mac's keychain on security's stdin, under the request's id, where the runner takes it
+// and removes it. It never reaches the chat, a notice, the saved words, a file or the log. The chat that asked (the request names it)
+// takes the request first; any other chat with a screen after BOX_GRACE. Taking it leaves the .told mark, which tells the runner a
+// panel asks: with none in its first seconds, nothing on this Mac draws one (a -p run with no chat open) and it falls back to its own
+type Asked = { id: string; text: string; at: number; chat?: string }
 let boxes: Asked[] = []
 // What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
 const boxDrafts = new Map<string, string>()
@@ -4643,7 +4644,6 @@ const boxSaid = new Map<string, string>()
 // Sent from here: the box goes at once, before the runner removes its request
 const boxSent = new Set<string>()
 let boxPresses = 0
-const BOX_EVERY = 1000
 // A request older than the runner's own wait there (590 s, under the longest a Bash call may run) is one whose runner is gone
 const BOX_OLD = 11 * 60_000
 // What security reads as one line (it cuts a line at about 4095, seen), and gives back as typed: plain printable characters (others it
@@ -4652,11 +4652,20 @@ const BOX_LONGEST = 3800
 const BOX_SERVICE = 'claudopus-box'
 const BOX_ID = /^[0-9a-f-]{36}$/
 const boxesDir = () => `${dir}/boxes`
-// In the chat only the name of what is asked, once per box, in whichever chat sees it first
-const BOX_TOLD = (text: string) => `${text}\n\nType it in the box at the top of the Claudopus panel. What is typed there goes only into this Mac's keychain, never into a chat.`
+// Another chat's request is left to it this long, so its own chat tells it, when that chat is open
+const BOX_GRACE = 5000
+// In the chat only the name of what is asked, once per box, in the chat that asked or else whichever chat sees it first
+const BOX_TOLD = (text: string) => `${text}\n\nType it in the box at the top of the Claudopus panel (/claudopus opens it). What is typed there goes only into this Mac's keychain, never into a chat.`
+// This chat's own id, as the runner reads it from CLAUDE_CODE_SESSION_ID
+let boxChat = ''
+// Requests this chat has told or seen told
+const boxTold = new Set<string>()
 
 const lookBoxes = async ($: EngineInterface) => {
-  if (!dir || !isRunFromAfar) return
+  if (!dir) return
+  // A chat with nothing to draw on (a -p run) takes no request: one it took would wait on a panel nobody sees
+  if (!(await $.session.surfaces().catch(() => [])).length) return
+  boxChat ||= await $.session.id().catch(() => '')
   const now = await $.clock.now()
   const found: Asked[] = []
   for (const entry of await $.fs.list(boxesDir()).catch(() => [])) {
@@ -4664,7 +4673,7 @@ const lookBoxes = async ($: EngineInterface) => {
     if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
     try {
       const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Partial<Asked>
-      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at })
+      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at, chat: typeof one.chat === 'string' ? one.chat : undefined })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`]).catch(() => undefined)
     } catch {
@@ -4673,11 +4682,17 @@ const lookBoxes = async ($: EngineInterface) => {
   }
   found.sort((a, b) => a.at - b.at)
   for (const one of found) {
-    if (boxes.some(b => b.id === one.id)) continue
-    // The first chat to make the mark tells it
+    if (boxTold.has(one.id)) continue
+    // Another chat's request waits for that chat a moment
+    if (one.chat && boxChat && one.chat !== boxChat && now - one.at < BOX_GRACE) continue
+    boxTold.add(one.id)
+    // The first chat to make the mark tells it, and brings its panel up with the field ready to type in
     const mark = await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
-    if (mark.exitCode === 0) $.ui.log(BOX_TOLD(one.text))
+    if (mark.exitCode !== 0) continue
+    $.ui.log(BOX_TOLD(one.text))
+    await $.ui.open({ id: LIST, title: LIST_TITLE, focus: true }).catch(err => log($, `panel not opened for a box: ${String(err)}`))
   }
+  for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of [...boxDrafts.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxDrafts.delete(id), boxSaid.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
@@ -5092,6 +5107,8 @@ const chatHooks = (on: On) => {
     everyLoad($, 1000, async () => {
       if (drawnNow > (await read($, lastDrawn))) await update($, lastDrawn, () => drawnNow)
       await shareMine($).catch(err => log($, `work not shared: ${String(err)}`))
+      // The hidden boxes of the admin and secret runners, drawn in the panel in every chat
+      await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
       if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
@@ -5121,8 +5138,6 @@ const chatHooks = (on: On) => {
     await unshare($, true).catch(() => undefined)
     if (macs.length) everyLoad($, FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
-    // There the hidden boxes of the admin and secret runners are drawn in the panel
-    if (isRunFromAfar) everyLoad($, BOX_EVERY, () => lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`)))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
