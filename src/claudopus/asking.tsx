@@ -72,6 +72,8 @@ const openTerminal = async ($: EngineInterface, one: Todo) => {
 // step; to work that has ended, a message that starts it again. Either way the ask goes at once, and the card
 // says briefly what was answered; the work turns amber again only by asking again
 const replies = new Map<string, number>()
+// Each ask its own mark, so its reply box is a new one, empty, when the work asks something new, and the same one while it is held
+const askMark = (ask: NonNullable<Todo['ask']>) => `${ask.at}-${[...ask.text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)}`
 // What the person has typed into a reply box and not sent, by the work, so a redraw keeps it
 const drafts = new Map<string, string>()
 // While the person types into a reply box the list's running times stand still: the list is drawn again each second, and a box in
@@ -88,7 +90,7 @@ const holdTimes = ($: EngineInterface) => {
 const freeTimes = () => void ((typing += 1), (isTyping = false))
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
-type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string }
+type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -150,7 +152,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
 // A reply in the person's own words that does not settle the ask: the ask stays open on the card, with the reply under it, and the
 // work is told so; its card stays among the running cards while the work acts on it. A button pressed later still answers it
 const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, target: string) => {
-  const key = `${one.id}:${ask.at}:${ask.text}:reply:${said}`
+  // The same words twice at once count once; typed again later, after an earlier reply, they go again
+  const key = `${one.id}:${ask.at}:${ask.text}:reply:${ask.replied?.at ?? ''}:${said}`
   if (answeredAsks.has(key)) return
   answeredAsks.add(key)
   const at = await $.clock.now()
@@ -159,8 +162,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
     list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
+  // The box keeps its place, emptied, so the focus does not fall onto the ask's first button, which a stray key would press
   drafts.delete(one.id)
-  replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   freeTimes()
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line })
@@ -318,16 +321,20 @@ const replyUnread = async ($: EngineInterface, agentId: string) => {
   if (sent && startedBy.delete(`${card}:${sent.at}`)) return void (sent.to === 'work' && (sentReplies.set(card, { ...sent, to: 'read' }), redraw($)))
   const one = (await read($, todos)).find(todo => todo.id === card)
   if (sent?.to !== 'work' || !one) return
-  await toEnded($, one, agentId, `${who(true)} answered your ask ("${sent.ask}"), and you ended before reading it: ${sent.text}\n${RESUMED_BY_ANSWER}`, sent)
+  const isHeld = one.ask?.replied?.text === sent.text
+  await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your ask ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
 }
 // What the card says of the answer last given to its ask, for ANSWER_SHOWN after, until the work writes a newer line or asks again.
 // An answer that could not be left for another Mac says so under the ask, which is back
 const sentLine = (one: Todo, now: number) => {
   const sent = sentReplies.get(one.id)
+  // A held reply this copy did not send (before a reload, or from another chat) is still said under its ask
+  const replied = one.ask?.replied
+  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You replied “${cut(replied.text, 60)}”; it still asks this`
   if (!sent) return ''
   if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}”. That Mac could not be reached; answer it in its own chat` : ''
   const newer = lineOf(one) !== sent.line
-  const isHeld = Boolean(one.ask?.replied && one.ask.text === sent.ask && one.ask.replied.text === sent.text)
+  const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
   const how = {
     work: 'it reads this at its next step',

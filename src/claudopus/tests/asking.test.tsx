@@ -52,7 +52,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect(await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' })).toBeDefined()
   expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
   const fresh = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
-  expect(fresh?.key).not.toBe(box?.key)
+  expect(fresh?.key).toBe(box?.key)
   expect(fresh?.props.value ?? '').toBe('')
   const waiting = '✓ You replied “Where do I do that?” · it reads this at its next step; it still asks this'
   expect(await until(async () => list.find({ type: 'Text', text: waiting }))).toBeDefined()

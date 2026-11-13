@@ -182,7 +182,7 @@ const panelHooks = (on: On) => {
           {'Input' in table ? (
             <Box width="100%" flexDirection="column">
               <table.Input
-                key={`${key}-reply-${replies.get(one.id) ?? 0}`}
+                key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
                 autoFocus={e.surface === 'terminal' && !askFocused ? ((askFocused = true), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={drafts.get(one.id) ?? ''}

@@ -3267,7 +3267,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect(await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' })).toBeDefined()
   expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
   const fresh = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
-  expect(fresh?.key).not.toBe(box?.key)
+  expect(fresh?.key).toBe(box?.key)
   expect(fresh?.props.value ?? '').toBe('')
   const waiting = '✓ You replied “Where do I do that?” · it reads this at its next step; it still asks this'
   expect(await until(async () => list.find({ type: 'Text', text: waiting }))).toBeDefined()
@@ -3850,8 +3850,10 @@ test("an ask of another chat's work is answered from this panel and reaches that
   await list.input({ key: other?.key ?? '', text: 'Only the March ones' })
   const replied = await until(async () => [...files.entries()].find(([path, body]) => path.startsWith(`${MEMORY}/live/answers/chat-b/`) && body.includes('Only the March ones'))?.[1])
   expect(JSON.parse(replied ?? '{}')).toMatchObject({ card: 'b1', choice: 'Only the March ones', isReply: true, askAt: NOW + 4000 })
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'May I send 12 invoices?' })) ? undefined : true))).toBe(true)
-  expect(await list.find({ type: 'Text', text: /^✓ You answered “Only the March ones” · sent to the chat "Billing pages"/ })).toBeDefined()
+  // It is none of the ask's buttons, so the ask stays here, as in its own chat, with the reply under it and its buttons to press
+  expect(await list.find({ type: 'Text', text: 'May I send 12 invoices?' })).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: /^✓ You replied “Only the March ones” · sent to the chat "Billing pages".*; it still asks this$/ }))).toBeDefined()
+  expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Send')).toBe(true)
   // Its Details has the reply box, and says where its chat is
   const id = (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('open-r-'))?.key?.replace(/^open-/, '').replace(/-\d+$/, '') ?? ''
   const details = await $.ui.mount({ ...LIST, requestId: `work-${id}`, surface: 'desktop' } as never)
