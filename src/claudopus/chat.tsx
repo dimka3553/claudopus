@@ -60,6 +60,8 @@ const chatHooks = (on: On) => {
     ART.updated = updatedArt(ART.happy, FLOW)
     // A load that moved this chat to a newer version has the header say so, once its octopus is read
     await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
+    // and a Mac with no record of the changes seen starts one, from the version this chat moved from
+    await noteSeen($).catch(err => log($, `changes seen not noted: ${String(err)}`))
     cwd = e.cwd
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press
