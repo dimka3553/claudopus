@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.72 · 13 November 2026
+- Check for updates no longer says you're on the newest version when the place Claude Code installs Claudopus from is behind claudopus.ai: it says which version that place still has.
+
 ## 0.2.71 · 13 November 2026
 - Config has a Check for updates button under Automatic updates: it looks for a newer release at once and downloads it, also with automatic updates off. Then it says you're on the newest version, that the new version is downloaded and typing /reload-plugins switches this chat to it, or why it could not check. Two presses, or presses in two chats, never run two updates at once.
 
