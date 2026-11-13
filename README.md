@@ -64,6 +64,7 @@ That is all. It is on in every chat from then on, and it keeps itself up to date
 | **Working rules** | A short set of principles goes into every chat: ask less, show the result, have a second agent check the work. They leave the rest to you: edit them in the Config tab, and your copy is the one used. |
 | **Models** | Opus for most work, Sonnet for long legwork, Fable only for heavy work. Checks never run on a weaker model than the one that built the work. An agent named an older model or Haiku is refused, and work the app moves to an older model runs on Fable instead; its card says so. |
 | **Passwords and keys** | Asked for once in a box at the top of the panel, in every chat, kept in the macOS keychain, never put in a chat or a file. The box words itself and work is kept out of its files: this stops slips and common tricks, and is no wall. |
+| **Admin commands ask first** | Before work runs a command as administrator, its card shows the exact command and the Mac with Allow once, Always allow this command and Deny. Config chooses each time, once per piece of work or never, and lists what you always allow. Or let macOS ask for the password each time and keep none. |
 | **One release at a time** | Work changes a repo only in its own worktree and branch, and reaches main only through one release command that takes its turn, numbers the version, builds, checks and pushes. A push to main by hand is refused. |
 | **Tabs** | Results, Stats (tokens, cost at API prices, time saved), Config and About; Memory opens the memory folder. `/claudopus` reopens a closed panel, `/servers` lists the local servers your chats started. |
 
@@ -80,6 +81,8 @@ Everything is set in the panel's **Config** tab, which shows what is in force an
 | `sound` | `true` | `false` silences the chime and the "needs you" sound |
 | `notifications` | `true` | `false` stops the notifications when work is ready, stopped or failed |
 | `updates` | `true` | `false` keeps the version you have |
+| `admin` | `each` | When you are asked before an admin command runs: `each` time, once per piece of `work`, or `never`; set it in Config, which seals it |
+| `adminPassword` | `keep` | `macos` lets macOS ask for the admin password each time and keeps none |
 | `models` | `work` opus, `legwork` sonnet, `heavy` fable | The models for most work, long legwork and heavy work |
 | `macs` | none | Up to four other Macs over SSH whose chats the panel lists |
 
@@ -96,7 +99,7 @@ More on each, and on editing the rules, in the [guide](mods/claudopus/docs/guide
 
 - Everything it keeps is in `~/.claude/claudopus` on your Mac. Delete the folder and it is gone.
 - It sends only to Claude, through Claude Code, and to your own Macs over SSH if you name them. Unless `updates` is off, once an hour it reads a version number from claudopus.ai, and when it changes, Claude Code fetches the new release from GitHub. No telemetry.
-- Passwords and keys stay in this Mac's keychain.
+- Passwords and keys stay in this Mac's keychain. An admin command runs only after you allow it on its card; a kept password can be read by any process running as you, so only "Let macOS ask, keep nothing" is a wall.
 - The two small notification apps are committed built; `mods/claudopus/notifier/checksums.txt` holds the SHA-256 of each of their files, and every release checks the committed apps still match it; the full account says how to rebuild them and compare, and what differs on another toolchain.
 
 The full account of every file, hook and program is in [What Claudopus does on your Mac](mods/claudopus/docs/privacy.md).

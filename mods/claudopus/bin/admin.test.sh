@@ -16,10 +16,17 @@ mkdir -p "$HOME/Library/Keychains" "$HOME/Library/Preferences" "$memory/admin-gr
 keychain=$HOME/Library/Keychains/login.keychain-db
 security create-keychain -p "" "$keychain" && security list-keychains -s "$keychain" && security default-keychain -s "$keychain" || { echo "admin.test.sh: no keychain could be made under $HOME"; exit 1; }
 security unlock-keychain -p "" "$keychain" 2>/dev/null
-# The key the hook would have made, and seals as it makes them
-key=$(openssl rand -hex 32)
-security add-generic-password -s claudopus-admin-gate -a seal -w "$key" || exit 1
-seal() { printf '%s\n%s' "${2:-$key}" "$1" | perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m, $k)'; }
+# Seals are made by the hook's own script, read out of its source (src/claudopus/gate.tsx), which also makes the key: what the hook
+# seals is then what this runner takes. A seal under another key is made here
+hook_seal=$(node -e '
+  const text = require("fs").readFileSync(process.argv[1], "utf8")
+  const GATE_SERVICE = /const GATE_SERVICE = \x27([^\x27]+)\x27/.exec(text)[1]
+  process.stdout.write(eval(/const SEAL = (`[\s\S]*?`)\n/.exec(text)[1]))
+' "$here/../../../src/claudopus/gate.tsx") && [ -n "$hook_seal" ] || { echo "admin.test.sh: the hook's seal script was not read from src/claudopus/gate.tsx"; exit 1; }
+seal() {
+  if [ -n "${2:-}" ]; then printf '%s\n%s' "$2" "$1" | perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m, $k)'; else /bin/sh -c "$hook_seal" sh make "$1"; fi
+}
+[ "$(seal probe | wc -c)" -ge 64 ] || { echo "admin.test.sh: the hook's seal script made no seal"; exit 1; }
 now() { perl -e 'print time() * 1000'; }
 # grant <name> <host> <command> [at] [seal]
 grant() {
@@ -59,7 +66,7 @@ expect 'through a link under another name: refused' 6 "$REFUSED" -- "$tmp/anothe
 expect 'through another spelling of its path: refused' 6 "$REFUSED" -- "$here/../bin/./admin" here 'id -u'
 expect 'through a shell and a variable: refused' 6 "$REFUSED" -- /bin/sh -c 'a=adm; "$1/${a}in" here "id -u"' sh "$here"
 expect 'handed to bash as a script: refused' 6 "$REFUSED" -- /bin/bash "$admin" here 'id -u'
-printf 'security() { echo %s; }\nperl() { echo "granted keep"; }\n' "$key" >"$tmp/env.sh"
+printf 'security() { echo abc; }\nperl() { echo "granted keep"; }\n' >"$tmp/env.sh"
 expect 'with BASH_ENV set to replace its tools: refused' 6 "$REFUSED" -- env BASH_ENV="$tmp/env.sh" "$admin" here 'id -u'
 expect 'with a perl option set to load other code: refused' 6 "$REFUSED" -- env PERL5OPT=-MNoSuchModuleAtAll "$admin" here 'id -u'
 
@@ -100,6 +107,17 @@ expect 'macOS asks, in a chat reached over SSH: nothing runs' 7 'which nobody se
 grant mac2 m4 'id -u'
 expect 'macOS asks, on another Mac: nothing runs' 7 'works only on this Mac' -- "$admin" m4 'id -u'
 
+config '{}'
+# What takes something back makes a new key: a grant and a "never" sealed before it count for nothing
+at=$(now)
+old_grant=$(seal "$(printf 'grant\nkept\n%s\nhere\nid -u' "$at")")
+old_never=$(seal "$(printf 'mode\nnever')")
+/bin/sh -c "$hook_seal" sh new >/dev/null || { echo "NOT OK - no new key was made"; failed=1; }
+grant kept here 'id -u' "$at" "$old_grant"
+expect 'a grant sealed before the key changed: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+rm -f "$memory"/admin-grants/*
+config "{\"admin\":\"never\",\"adminSealed\":\"$old_never\"}"
+expect '"never" sealed before the key changed: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
 config '{}'
 expect 'forgetting a password needs no grant' 0 'No password was kept' -- "$admin" here --forget
 expect 'with no command it says how it is used' 2 'usage' -- "$admin" here

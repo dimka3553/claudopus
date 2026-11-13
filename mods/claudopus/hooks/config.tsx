@@ -256,9 +256,12 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             'config-admin-password',
             'Admin password',
             `Kept in this Mac's keychain, a password can be read by any process running as you, so asking first is a check, not a wall. Let macOS ask keeps no password: macOS asks for it on this Mac's screen each time, on this Mac only.${shown.gate.isAfar && shown.gate.password === 'macos' ? ' This chat is reached from another device, where that box cannot be seen: admin commands are refused here.' : shown.gate.isAfar ? ' In a chat reached from another device that box cannot be seen, so admin commands are then refused there.' : ''}`,
-            <Select key="config-admin-password-pick" options={ADMIN_PASSWORDS.map(one => ({ value: one.value, label: one.label }))} value={shown.gate.password} onSelect={value => acts.gatePassword(value === 'macos' ? 'macos' : 'keep')} />,
+            null,
             shown.gate.password !== 'keep',
             () => acts.gatePassword('keep'),
+            <Box key="config-admin-password-choice" flexDirection="row" flexShrink={0}>
+              <Select key="config-admin-password-pick" options={ADMIN_PASSWORDS.map(one => ({ value: one.value, label: one.label }))} value={shown.gate.password} onSelect={value => acts.gatePassword(value === 'macos' ? 'macos' : 'keep')} />
+            </Box>,
           )}
           {item(
             'config-admin-allowed',
