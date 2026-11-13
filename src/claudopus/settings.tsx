@@ -113,9 +113,9 @@ const openConfig = async ($: EngineInterface) => {
   configFailed = ''
   await front($, CONFIG_PANE, CONFIG_TITLE)
 }
-const configButton = ($: EngineInterface, ui: Ui) => (
+const configButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="config-button" flexShrink={0}>
-    <ui.Button key={`config-open-${presses}`} label="Config" onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
+    <ui.Button key={`config-open-${presses}`} label="Config" hotkey={isKeyed ? 'c' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
   </ui.Box>
 )
 // Check for updates as it stands in this chat: under way, and what the last press found, kept until the next press

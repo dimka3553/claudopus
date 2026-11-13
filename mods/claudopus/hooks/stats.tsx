@@ -360,6 +360,49 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
 }
 
 type Ui = ElementTable
+// The most rows the terminal's timeline takes; more work at once shares the last row
+const TEXT_LANES = 8
+// The timeline in a terminal, which draws no SVG: a row of cells per lane, each cell a block in the colour of the model that ran
+// then, on the same squeezed time axis, and the first and last times under it
+export const timelineRows = (pieces: Piece[], cols: number) => {
+  const { lane, count } = lanesOf(pieces)
+  const { parts, at } = axisOf(pieces, cols)
+  const rows = Array.from({ length: Math.min(TEXT_LANES, Math.max(1, count)) }, () => Array.from({ length: cols }, () => ''))
+  for (const p of pieces)
+    for (const b of p.bars) {
+      const row = rows[Math.min(rows.length - 1, lane.get(p.id) ?? 0)]
+      const [from, to] = [Math.floor(at(b.from)), Math.max(Math.floor(at(b.from)) + 1, Math.ceil(at(b.to)))]
+      for (let x = Math.max(0, from); x < Math.min(cols, to); x++) if (row) row[x] = b.model
+    }
+  const first = parts[0]?.from ?? 0
+  const last = parts.at(-1)?.to ?? 0
+  const label = (t: number) => (dayText(first) === dayText(last) ? clockText(t) : `${dayText(t)} ${clockText(t)}`)
+  return { rows, from: parts.length ? label(first) : '', to: parts.length ? label(last) : '' }
+}
+const timelineText = (ui: Ui, pieces: Piece[], cols: number) => {
+  const { Box, Text } = ui
+  const { rows, from, to } = timelineRows(pieces, cols)
+  // Each row as runs of one model, so a row is a few Texts, not one per cell
+  const runs = (row: string[]) => row.reduce<{ model: string; n: number }[]>((all, model) => {
+    const tail = all.at(-1)
+    if (tail && tail.model === model) tail.n += 1
+    else all.push({ model, n: 1 })
+    return all
+  }, [])
+  return (
+    <Box key="timeline-cells" flexDirection="column" flexShrink={0}>
+      {rows.map((row, i) => (
+        <Box key={`lane-${i}`} flexDirection="row" height={1} flexShrink={0}>
+          {runs(row).map((run, j) => (run.model ? <Text key={`run-${j}`} color={colorOf(run.model)}>{'█'.repeat(run.n)}</Text> : <Text key={`run-${j}`}>{' '.repeat(run.n)}</Text>))}
+        </Box>
+      ))}
+      <Box key="axis" flexDirection="row" justifyContent="space-between" width={cols} height={1} flexShrink={0}>
+        <Text dimColor>{from}</Text>
+        <Text dimColor>{to}</Text>
+      </Box>
+    </Box>
+  )
+}
 export type Scope = 'chat' | 'all'
 type Range = 'today' | 'all'
 export const view = { scope: 'chat' as Scope, range: 'today' as Range, presses: 0 }
@@ -413,7 +456,19 @@ const note = (ui: Ui, key: string, text: string) => (
 
 // A switch of two or more: the chosen one filled, the others plain and dim; each the same width, so nothing moves on a press
 const SEGMENT = '#80808050'
-const segments = (ui: Ui, key: string, items: { label: string; isOn: boolean; onPress: () => void }[], width: number) => (
+const segments = (ui: Ui, key: string, items: { label: string; isOn: boolean; onPress: () => void }[], width: number) =>
+  // The terminal has no fill to mark the chosen one: there it is a filled dot before it, an empty one before each other
+  'isTerminal' in ui ? (
+    <ui.Box key={key} flexDirection="row" flexShrink={0} gap={2} height={1}>
+      {items.map(item =>
+        item.isOn ? (
+          <ui.Text key={`${key}-${item.label}`} bold>{`● ${item.label}`}</ui.Text>
+        ) : (
+          <ui.Button key={`${key}-${item.label}-${view.presses}`} label={`○ ${item.label}`} plain dimColor onPress={item.onPress} />
+        ),
+      )}
+    </ui.Box>
+  ) : (
   <ui.Box key={key} flexDirection="row" flexShrink={0} backgroundColor={FILL} height={1}>
     {items.map(item => (
       <ui.Box key={`${key}-${item.label}`} width={width} height={1} justifyContent="center" alignItems="center" flexShrink={0} backgroundColor={item.isOn ? SEGMENT : undefined}>
@@ -421,15 +476,16 @@ const segments = (ui: Ui, key: string, items: { label: string; isOn: boolean; on
       </ui.Box>
     ))}
   </ui.Box>
-)
+  )
 // One of the headline figures: the number large in weight, what it is under it
-const tile = (ui: Ui, key: string, value: string, label: string) => (
+const tile = (ui: Ui, key: string, value: string, label: string, wraps = false) => (
   <ui.Box key={key} flexDirection="column" flexGrow={1} flexShrink={1} width="30%" minWidth={0} backgroundColor={FILL} paddingX={2} paddingY={1}>
     <ui.Box height={1} overflow="hidden">
       <ui.Text bold wrap="truncate-end">{value}</ui.Text>
     </ui.Box>
-    <ui.Box height={1} overflow="hidden">
-      <ui.Text dimColor wrap="truncate-end">{label}</ui.Text>
+    {/* In the terminal the label wraps rather than being cut: in a narrow one 'pieces of work done' read 'pieces of work d…' */}
+    <ui.Box minWidth={0} {...(wraps ? {} : { height: 1, overflow: 'hidden' as const })}>
+      <ui.Text dimColor wrap={wraps ? 'wrap' : 'truncate-end'}>{label}</ui.Text>
     </ui.Box>
   </ui.Box>
 )
@@ -478,9 +534,9 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
   const money = (n: number) => (n >= 100 ? `$${Math.round(n).toLocaleString('en-US')}` : `$${n.toFixed(2)}`)
   const hero = (
     <Box key="stats-hero" flexDirection="row" gap={1} flexShrink={0}>
-      {tile(ui, 'hero-saved', hours(saved), 'time saved')}
-      {tile(ui, 'hero-cost', money(s.all.cost), 'at API prices')}
-      {tile(ui, 'hero-work', count(s.finished), 'pieces of work done')}
+      {tile(ui, 'hero-saved', hours(saved), 'time saved', surface === 'terminal')}
+      {tile(ui, 'hero-cost', money(s.all.cost), 'at API prices', surface === 'terminal')}
+      {tile(ui, 'hero-work', count(s.finished), 'pieces of work done', surface === 'terminal')}
     </Box>
   )
   const width = Math.max(200, Math.round(px))
@@ -498,8 +554,14 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
           <table.Svg key={`timeline-${view.scope}-${view.range}`} source={svg} alt={`${s.pieces.length} pieces of work on a time axis`} width={width} height={BARS + 18} isInteractive />
         </Box>
       ) : (
-        note(ui, 'timeline-terminal', 'The timeline is drawn in the desktop app.')
+        timelineText(ui, s.pieces, Math.max(20, Math.floor((px + 32) / 7.4) - 6))
       )}
+      {/* The terminal does not wrap a row of boxes: there the legend is one text that wraps, so no model is cut off */}
+      {surface === 'terminal' ? (
+        <Text key="legend-text" wrap="wrap">
+          {legend.flatMap((model, i) => [<Text key={`legend-mark-${model}`} color={colorOf(model)}>{`${i ? '   ' : ''}■ `}</Text>, <Text key={`legend-name-${model}`} dimColor>{nameOf(model)}</Text>])}
+        </Text>
+      ) : (
       <Box flexDirection="row" gap={2} height={1} overflow="hidden" flexShrink={0}>
         {legend.map(model => (
           <Box key={`legend-${model}`} flexDirection="row" gap={1} flexShrink={0}>
@@ -508,6 +570,7 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
           </Box>
         ))}
       </Box>
+      )}
     </Box>,
   )
   const time = band(

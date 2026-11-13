@@ -274,7 +274,10 @@ const askInChat = async ($: EngineInterface, one: Todo) => {
   // The person sees the ask as the mod's notice in the chat: a prompt the mod submitted would be drawn by the desktop app as the
   // person's own message, and a chat cannot send itself a message from another session. Its model reads the ask in a row of its
   // own, with how to pass an answer on; neither starts a turn
-  $.ui.log(named(ASK_IN_CHAT(titleOf(one), ask, answers)))
+  // The terminal draws a notice as one line and a line break in it as a broken character: there each line is a notice of its own
+  const notice = named(ASK_IN_CHAT(titleOf(one), ask, answers))
+  const surfaces = await $.session.surfaces().catch(() => [])
+  for (const line of surfaces.length && surfaces.every(s => s === 'terminal') ? notice.split('\n') : [notice]) $.ui.log(line)
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, titleOf(one), ask, answers)) }] } }).catch(err => (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, `chat not told of an ask: ${String(err)}`)))
 }
 // A line in the chat the person sees (the mod's notice, which the model never reads) and its model reads (a row the person does not

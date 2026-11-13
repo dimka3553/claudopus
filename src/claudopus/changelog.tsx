@@ -46,14 +46,14 @@ const olderLine = (ui: Ui, key: string, left: number, onPress?: () => void) =>
 
 // The Changelog tab: every version, newest first, the one this chat runs marked; a very long one ends where the app's limit
 // would, the rest on the site
-const changelogView = async ($: EngineInterface, ui: Ui) => {
+const changelogView = async ($: EngineInterface, ui: Ui, surface?: string) => {
   const versions = await versionsLogged($)
   const { version } = await versionsOf($)
   const { shown, left } = fitted(versions, TAB_BUDGET)
   return (
     <ui.Box key="changelog" flexDirection="column" gap={1} flexGrow={1}>
       <ui.Box key="changelog-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-        {octopus(ui, 'changelog-mark', 'mark', HEAD_MARK, 'Claudopus')}
+        {octopus(ui, 'changelog-mark', 'mark', HEAD_MARK, 'Claudopus', $, { surface })}
         <ui.Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <ui.Text bold>Changelog</ui.Text>
           <ui.Text dimColor wrap="wrap">What changed in each version, newest first.</ui.Text>
@@ -95,7 +95,7 @@ const closeScreen = async ($: EngineInterface, version: string) => {
 }
 // The screen, over the panel: the blue happy octopus jumping, the version moved to, the changes of every version after the one seen
 // last, and the way back. Nothing in a copy a newer load of this chat replaced, nor for a version whose changes were seen
-const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: number) => {
+const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: number, surface?: string) => {
   if (!dir || !loaded) return undefined
   const seen = seenIn(await readOr($, seenPath()))
   if (!isScreenDue(loaded, seen) || (await read($, ranVersion)) !== loaded) return undefined
@@ -105,15 +105,16 @@ const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: nu
   if (screenSounded !== loaded) void playUpdated($, (screenSounded = loaded))
   const back = (key: string) => (
     <ui.Box key={key} flexDirection="row" flexWrap="wrap" gap={1} flexShrink={0}>
-      <ui.Button key={`${key}-close-${presses}`} label="Back to the panel" onPress={() => void closeScreen($, loaded).catch(err => log($, `update screen not closed: ${String(err)}`))} />
+      <ui.Button key={`${key}-close-${presses}`} label="Back to the panel" hotkey="b" onPress={() => void closeScreen($, loaded).catch(err => log($, `update screen not closed: ${String(err)}`))} />
       <ui.Button key={`${key}-log-${presses}`} label="Changelog" plain onPress={() => void openChangelog($).catch(err => log($, `changelog not opened: ${String(err)}`))} />
     </ui.Box>
   )
   const count = shown.length + left
   return (
-    <ui.Box key="update-screen" flexDirection="column" gap={1} flexGrow={1}>
-      <ui.Box key="update-head" flexDirection="column" alignItems="center" gap={1} backgroundColor={FILL} paddingX={2} paddingY={2} flexShrink={0}>
-        {octopus(ui, 'update-mark', 'updated', UPDATE_MARK, `Claudopus, updated to ${loaded}`)}
+    <ui.Box key="update-screen" flexDirection="column" gap={1} flexGrow={1} {...(surface === 'terminal' ? { width: '100%' } : {})}>
+      {/* The terminal leaves a column's rows as wide as what they hold, so there the head is made as wide as the panel to centre in it */}
+      <ui.Box key="update-head" flexDirection="column" alignItems="center" gap={1} backgroundColor={FILL} paddingX={2} paddingY={2} flexShrink={0} {...(surface === 'terminal' ? { width: '100%' } : {})}>
+        {octopus(ui, 'update-mark', 'updated', UPDATE_MARK, `Claudopus, updated to ${loaded}`, $, { surface, requestId: LIST })}
         <ui.Text bold color={FLOW}>Claudopus updated</ui.Text>
         <ui.Text dimColor wrap="wrap">{`v${seen} → v${loaded}${count > 1 ? ` · ${count} versions` : ''}`}</ui.Text>
       </ui.Box>

@@ -130,6 +130,18 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
   const onOff = (key: 'agents' | 'sound' | 'notifications' | 'updates') => {
     const isOn = config[key] !== false
     return (
+      // The terminal has no fill to mark the one in force: there it is a filled dot before it, an empty one before the other
+      'isTerminal' in ui ? (
+        <Box key={`config-${key}-switch`} flexDirection="row" flexShrink={0} gap={2} height={1}>
+          {[true, false].map(value =>
+            isOn === value ? (
+              <Text key={`config-${key}-${value ? 'on' : 'off'}`} bold>{`● ${value ? 'On' : 'Off'}`}</Text>
+            ) : (
+              <Button key={`config-${key}-${value ? 'on' : 'off'}-${presses}`} label={`○ ${value ? 'On' : 'Off'}`} plain dimColor onPress={() => acts.set(key, value ? undefined : false)} />
+            ),
+          )}
+        </Box>
+      ) :
       <Box key={`config-${key}-switch`} flexDirection="row" flexShrink={0} backgroundColor={FILL} height={1}>
         {[true, false].map(value => (
           <Box key={`config-${key}-${value ? 'on' : 'off'}`} width={5} height={1} justifyContent="center" alignItems="center" flexShrink={0} backgroundColor={isOn === value ? SEGMENT : undefined}>

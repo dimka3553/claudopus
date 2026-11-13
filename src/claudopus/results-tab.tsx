@@ -54,6 +54,23 @@ const front = async ($: EngineInterface, id: string, title: string) => {
   // other tab of the mod may be the one pressed in, so each is closed and opened again, in the order they stand. Elsewhere a
   // roster that says nothing has nothing drawn, and is left alone
   const before = await $.ui.panes()
+  // A terminal has one narrow row of tabs: every press opening a tab of its own crowded it past reading, and the panel, closed and
+  // opened again to let go of the keys, moved along it. There the panel stays first and one other tab is open beside it at a time
+  const surfaces = await $.session.surfaces().catch(() => [])
+  if (surfaces.length && surfaces.every(one => one === 'terminal')) {
+    for (const pane of before) if (pane.id !== LIST && pane.id !== id) await $.ui.close({ id: pane.id }).catch(() => undefined)
+    const list = before.find(pane => pane.id === LIST)
+    const was = before.find(pane => pane.id === id)
+    if (list?.isFocused || (was && !was.isShown)) {
+      if (was) await $.ui.close({ id }).catch(() => undefined)
+      if (list?.isFocused) {
+        await $.ui.close({ id: LIST }).catch(() => undefined)
+        await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => log($, `panel not opened again: ${String(err)}`))
+      }
+    }
+    await $.ui.open({ id, title, focus: true })
+    return
+  }
   const isBlind = isRunFromAfar && before.length > 0 && !before.some(pane => pane.isPlaced || pane.isShown || pane.isFocused)
   const holding = before.filter(pane => (isBlind || pane.isFocused) && pane.id !== id)
   if (isBlind) await log($, `front ${id}: the engine says no tab is shown or holding the keyboard; ${holding.length} other tabs closed and opened again first`)
@@ -191,13 +208,13 @@ const time = (at: number, now: number) => (day(at, now) === day(now, now) ? (dat
 
 // On the Claudopus pane the reports are one small button. It sits on the line above the cards, beside the chat's own size, so
 // nothing below it moves when a report arrives
-const reportsButton = ($: EngineInterface, ui: Ui, all: Report[]) => {
+const reportsButton = ($: EngineInterface, ui: Ui, all: Report[], isKeyed = false) => {
   const { Box, Button } = ui
   const list = all.filter(r => !r.archived)
   if (!list.length) return null
   return (
     <Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
+      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey={isKeyed ? 'r' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
     </Box>
   )
 }
@@ -229,16 +246,20 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
     </Box>
   )
   // One row, one line: the title pressed opens it; when and Archive sit at the right, the same width on every row
+  let rowNo = 0
   const row = (entry: Report[]) => {
     const r = entry[0]
     if (!r) return null
+    // In the terminal the first nine rows are numbered, and the number opens the result
+    rowNo += 1
+    const digit = 'isTerminal' in ui && rowNo <= 9 ? String(rowNo) : undefined
     return (
       <Box key={`entry-${r.id}`} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
         <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
           {/* In the column the folded rows' labels start in */}
           <Box width={1} flexShrink={0} />
           <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
-            <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - 22)} plain onPress={() => openReport($, r.id)} />
+            <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - (digit ? 25 : 22))} plain hotkey={digit} onPress={() => openReport($, r.id)} />
           </Box>
         </Box>
         <Box width={6} flexShrink={0} justifyContent="flex-end">
@@ -356,7 +377,19 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
             ui,
             'report-pictures',
             'Pictures',
-            pictures.length > 1 ? `${at + 1} of ${pictures.length}` : '',
+            'isTerminal' in ui ? `${pictures.length}` : pictures.length > 1 ? `${at + 1} of ${pictures.length}` : '',
+            'isTerminal' in ui ? (
+              // The terminal draws no picture: each is a row, numbered, whose press opens it where the person is
+              <Box flexDirection="column">
+                {pictures.map((one, n) => (
+                  <Box key={`report-pic-${n}`} flexDirection="column">
+                    <Button key={`report-pic-open-${n}`} label={one.file} plain hotkey={n < 9 ? String(n + 1) : undefined} onPress={press => void showPicture($, one.path, '', '', press.surface)} />
+                    {pictureSaidRow($, ui, `report-pic-said-${n}`, one.path)}
+                  </Box>
+                ))}
+                <Text dimColor wrap="wrap">{termFrom ? 'A press sends the picture to the device you are at' : 'A press opens the picture'}</Text>
+              </Box>
+            ) : (
             <Box flexDirection="column" gap={1}>
               {thumb && table.Svg ? <table.Svg key={`report-picture-${r.id}-${at}`} source={thumb.source} alt={pictures[at]?.file ?? 'Picture'} /> : null}
               {/* Shown here, never handed to another app: that would take the person out of Claude and switch their desktop. Where the
@@ -368,7 +401,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
                   <Button key={`report-next-${presses}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)} />
                 </Box>
               ) : null}
-            </Box>,
+            </Box>
+            ),
           )
         : null}
       {band(
