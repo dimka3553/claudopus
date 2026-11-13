@@ -19,7 +19,7 @@ const workHooks = (on: On) => {
       return { deny: NO_READ }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
-    if (e.tool === 'Bash' && PUSH_MAIN.test(String((e as { command?: unknown }).command ?? ''))) {
+    if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }

@@ -12,8 +12,44 @@ const NO_COPY = () =>
 // or that would point the runner at another store or another box
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_SECRET_(?:SERVICE|ASK)\b/
 const NO_READ = 'A kept key or password is never read or printed. Use it as an environment variable through the secret runner the work rules name; it hides the value from what the command prints.'
-// A push or merge to main or master by hand: a git push naming it, or a pull request merged on GitHub
-const PUSH_MAIN = /\bgit\b[^;&|\n]*\spush\b[^;&|\n]*?(?:\s\+?|:|refs\/heads\/)(?:main|master)(?=$|[\s;&|)'"])|\bgh\s+pr\s+merge\b/
+// A push or merge to main or master by hand: git's own push naming main or master, a push that skips the repo's hooks, the release
+// runner's own pass given by hand, or a pull request merged on GitHub. The command is read as the shell splits it, so words inside
+// quotes, a commit message's, never count
+const shellWords = (command: string) => {
+  const parts: string[][] = [[]]
+  let word: string | undefined
+  let quote = ''
+  const end = () => (word !== undefined && parts[parts.length - 1]!.push(word), (word = undefined))
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]!
+    if (quote) {
+      if (c === quote) quote = ''
+      else if (c === '\\' && quote === '"' && i + 1 < command.length) word += command[++i]
+      else word += c
+    } else if (c === "'" || c === '"') (quote = c), (word ??= '')
+    else if (c === '\\' && i + 1 < command.length) word = (word ?? '') + command[++i]
+    else if (/[;&|\n()`]/.test(c)) end(), parts.push([])
+    else if (/\s/.test(c)) end()
+    else word = (word ?? '') + c
+  }
+  end()
+  return parts.filter(one => one.length)
+}
+const pushesMain = (command: string) =>
+  shellWords(command).some(words => {
+    if (words.some(one => /^RELEASE_PUSH=/.test(one))) return true
+    let i = 0
+    while (i < words.length && /^\w+=/.test(words[i]!)) i++
+    const tool = (words[i] ?? '').split('/').pop()
+    if (tool === 'gh') return (words[i + 1] === 'pr' && words[i + 2] === 'merge') || (words[i + 1] === 'api' && words.slice(i + 2).some(one => /\/pulls\/\d+\/merge\b/.test(one)))
+    if (tool !== 'git') return false
+    i++
+    while (i < words.length && words[i]!.startsWith('-')) i += /^-[Cc]$/.test(words[i]!) ? 2 : 1
+    if (words[i] !== 'push') return false
+    const args = words.slice(i + 1)
+    if (args.includes('--no-verify')) return true
+    return args.filter(one => !one.startsWith('-')).slice(1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
+  })
 const NO_PUSH = 'Work never pushes or merges to main itself, so two pieces of work never release at once: commit on your own branch and run the release runner the work rules name, from your worktree.'
 // How long the names of kept keys are trusted before they are asked again
 const SECRETS_MS = 60_000
