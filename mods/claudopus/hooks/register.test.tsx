@@ -33,7 +33,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -126,6 +126,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { value: { content: [{ type: 'text', text }], isError: false } }
   })
   on('session.id', () => ({ value: 'engine-id' }))
+  // A chat drawn on the desktop app, as most are; `headless` none, as a -p run
+  on('session.surfaces', () => ({ value: options.headless ? [] : ['desktop'] }) as never)
   on('session.version', () => ({ value: { version: '2.1.321', base: '2.1.321' } }))
   // The chat of a piece of work as the engine keeps it, or its refusal to read one
   // A promise given as the chat is one the app is slow to give
@@ -1125,6 +1127,53 @@ test('the panel shows how full the context of this chat and of each piece of wor
   expect(await slim.find({ type: 'Text', text: /^Opus 5\.5 · / })).toBeUndefined()
   expect((await slim.find({ type: 'Text', text: /^\d+s$/ }))?.text).toBe('0s')
   await slim.unmount()
+})
+
+test("a card's title, its line of facts and every line under them start at one left edge, on a desktop and in a terminal, at work, asking and finished", async ($, on) => {
+  const { clock } = world(on, { model: 'claude-opus-5-5-20261001' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, subagentType: 'fork', fork: true, prompt: 'fix the nose' } as never)
+  for await (const chunk of $.turn.step({ turnId: 'turn-2', index: 0, model: 'm', messageCount: 2, agentId: 'a1' })) void chunk
+  const call = (tool: string, input: object) => $.tool.call({ tool: `mcp__claudopus__${tool}`, tool_use_id: 't', agentId: 'a1', ...input } as never)
+  await call('todo', { item: 'Fit the nostril', state: 'doing' })
+  await call('note', { text: 'I am fitting the nostril.' })
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Measure the nose', prompt: 'go', parentAgentId: 'a1' } as never)
+
+  // How far in a line's first letter is: the padding on the way down its first parts, and a desktop's own around a plain Button
+  type Drawn = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  const insetOf = (node: unknown, surface: string): string[] => {
+    if (!node || typeof node !== 'object') return []
+    const { type, props = {}, children = [] } = node as Drawn
+    const own = [props.paddingLeft ?? props.paddingX ?? props.padding].filter(step => step !== undefined && step !== 0).map(String)
+    if (type === 'Button') return [...own, ...(props.plain && surface !== 'terminal' ? ['xs'] : [])]
+    return type === 'Box' ? [...own, ...insetOf(children.find(one => one && typeof one === 'object'), surface)] : own
+  }
+  // Each line of the card's column, the title and its facts as two
+  const edges = async (surface: 'desktop' | 'terminal') => {
+    const pane = await $.ui.mount({ ...LIST, surface } as never)
+    const card = (await pane.find({ type: 'Box', key: 'todo-a1' })) as Drawn | undefined
+    await pane.unmount()
+    const column = (card?.children ?? []).filter(one => one && typeof one === 'object').at(-1) as Drawn
+    const [head, ...rest] = (column.children ?? []).filter(one => one && typeof one === 'object') as Drawn[]
+    return [...(head.children ?? []), ...rest].filter(one => one && typeof one === 'object').map(line => insetOf(line, surface).join('+'))
+  }
+  const expectOneEdge = async (lines: number) => {
+    // A desktop moves every line in by the step a plain Button pads its label with; a terminal draws each at the card's edge
+    expect(await edges('desktop')).toEqual(Array(lines).fill('xs'))
+    expect(await edges('terminal')).toEqual(Array(lines).fill(''))
+  }
+  // At work: the title, the model's name that opens the choice of models, the line beside the dots, the helper tree
+  await expectOneEdge(4)
+  // Asking: the ask comes between the facts and the line it wrote
+  await call('ask', { text: 'May I replace the nose?', choices: ['Approve', 'Not now'] })
+  await expectOneEdge(5)
+  await call('ask', { text: '' })
+  // Finished, in its pause: the facts are plain text, the line says it finished
+  await $.turn.complete({ answer: 'Measured.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
+  await $.turn.complete({ answer: 'Fixed.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(500)
+  await expectOneEdge(4)
 })
 
 test('the model a running work is on is pressed and another chosen: its next step runs on it, its card says so at once, and its chat and the work are told', async ($, on) => {
@@ -3470,14 +3519,56 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${other}.json`) ? undefined : true))).toBe(true)
 })
 
-test('a chat on this Mac\'s own screen draws no box: there the runners show their own', async ($, on) => {
-  const { files, logged, clock } = world(on)
+test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {
+  const { files, logged, keychain, clock, opened } = world(on)
   await $.session.start(start)
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await clock.advance(2000)
-  expect(await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' })).toBeUndefined()
+  await clock.advance(1000)
+  expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('top of the Claudopus panel')
+  // The chat takes the request, which tells the runner a panel asks, and brings the panel up with the field ready
+  expect(opened.filter(one => one === 'claudopus').length).toBeGreaterThan(0)
+  const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
+  await list.input({ key: field?.key ?? '', text: 'made-up-local-k3y' })
+  expect(await until(async () => keychain.find(one => one.includes(id)))).toContain('-w "made-up-local-k3y"')
+  expect(logged.some(line => line.includes('local-k3y'))).toBe(false)
+  expect([...files.values()].some(text => text.includes('local-k3y'))).toBe(false)
+})
+
+test("another chat's request is left to that chat a moment, then any chat with a screen takes it", async ($, on) => {
+  const { files, logged, clock } = world(on)
+  await $.session.start(start)
+  const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs NPM_TOKEN for work on this Mac.', chat: 'another-chat', at: 1_700_000_000_000 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  // The box shows here at once, but the notice waits for its own chat
+  expect(await until(async () => list.find({ type: 'Text', text: 'Claudopus needs NPM_TOKEN for work on this Mac.' }))).toBeDefined()
+  expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
+  await clock.advance(6000)
+  expect(await until(async () => logged.find(line => line.includes('NPM_TOKEN')))).toContain('top of the Claudopus panel')
+})
+
+test("with two requests open every box is drawn, this chat's own first and the only one with the keys", async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  const older = '5f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  const mine = '6f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, text: 'Claudopus needs NPM_TOKEN.', chat: 'another-chat', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, text: 'Claudopus needs GITHUB_TOKEN.', chat: 'engine-id', at: 1_700_000_000_500 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length === 2 ? all : undefined })
+  expect(fields?.map(one => [(one.key ?? '').slice(4, 6), one.props.autoFocus])).toEqual([['6f', true], ['5f', undefined]])
+})
+
+test('a run with nothing to draw on takes no request, so the runner knows no panel asks', async ($, on) => {
+  const { files, logged, clock } = world(on, { headless: true })
+  await $.session.start(start)
+  const id = '4f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', chat: 'engine-id', at: 1_700_000_000_000 }))
+  await clock.advance(3000)
   expect(logged.some(line => line.includes('GITHUB_TOKEN'))).toBe(false)
 })
 

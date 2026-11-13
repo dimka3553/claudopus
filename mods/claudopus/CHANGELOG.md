@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.76 · 14 November 2026
+- In the Claude app's panel a card's title, its model line and the line under them now start at one left edge, in every state of the card; a chat's name above its cards no longer sits a little further in or out depending on which Mac the chat is on.
+
+## 0.2.75 · 13 November 2026
+- Requests for an admin password or key now ask in the box at the top of the panel in every chat, on this Mac too, not only in a chat run from another Mac: the same notice, wait and Cancel everywhere, and what you type goes straight into this Mac's keychain.
+- The chat that asked tells you and brings the panel up with the field ready to type in.
+- Only a run with no chat open on this Mac to draw a panel still asks in a dialog on this Mac's screen; over SSH it says no panel is open instead.
+
 ## 0.2.74 · 13 November 2026
 - In the terminal the panel no longer sits on solid grey bars: the app's faint tint, which a terminal cannot draw see-through, is left out, so cards, Stats, Config, Results, About and the Changelog read clearly on dark and light themes and over ssh.
 - In the terminal a question from work is shown above the prompt, under the work's name, with its answers numbered: pressing an answer's number twice in an empty prompt answers it, with no need to reach the panel first.
