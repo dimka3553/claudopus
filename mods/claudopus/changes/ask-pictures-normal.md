@@ -1,0 +1,1 @@
+- The pictures of a question from background work now show in the chat: the chat sends them the way that shows, not the way that left them unseen.
