@@ -245,7 +245,9 @@ test('a reply in words that does not settle an ask keeps it open, and the card a
 })
 
 test('work acting on a reply in words to an ask it keeps open is purple, in the panel and the terminal, with its ask and buttons; stopped again it is amber: the 13 Nov "Explain to me the exact differences first." to "Release PR 54 to production?"', async ($, on) => {
-  const { resumed, clock } = world(on)
+  // What the engine lists of the work, as the terminal's engine does: running while it waits on a command it left running
+  const agents: Record<string, string> = {}
+  const { resumed, clock } = world(on, { agents })
   await $.session.start(start)
   await $.prompt.submit({ text: 'clip wallet versus affiliate', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Clipify affiliate versus clip wallet', prompt: 'clip wallet versus affiliate' } as never)
@@ -297,6 +299,14 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   expect(now.deskEdges.some(isPurple)).toBe(true)
   expect(now.termEdges.some(isPurple)).toBe(true)
   for (const labels of now.buttons) expect(labels).toEqual(expect.arrayContaining(['Release it', 'Not now']))
+  // Its turn ends while a command it started in the background still runs, the engine listing it as running: it has not stopped,
+  // and stays purple
+  agents.a1 = 'running'
+  await $.turn.complete({ answer: 'Writing up the differences.', durationMs: 1, isAborted: false, turnId: 'turn-2a', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(20_000)
+  const held = await look()
+  expect([isPurple(held.desk), isPurple(held.term), isPurple(held.band), held.heading]).toEqual([true, true, true, 'acting'])
+  agents.a1 = 'completed'
   // It stops again with the ask still open: amber again
   await $.turn.complete({ answer: 'Release PR 54 to production? (Answers: Release it / Not now.) The differences are…', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(60_000)
@@ -315,6 +325,12 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   })
   expect(released ?? (await look())).toMatchObject({ desk: undefined })
   expect(released?.heading).toBe('none')
+  // Releasing in the background, its turn ends with the engine still holding it: at work, purple, until it is done
+  agents.a1 = 'running'
+  await $.turn.complete({ answer: 'Releasing in the background.', durationMs: 1, isAborted: false, turnId: 'turn-3a', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(20_000)
+  expect((await edges(desk)).some(isPurple)).toBe(true)
+  agents.a1 = 'completed'
   await $.turn.complete({ answer: 'Released PR 54.', durationMs: 1, isAborted: false, turnId: 'turn-3', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(60_000)
   expect(await until(async () => ((await edges(desk)).some(isPurple) ? undefined : true))).toBe(true)

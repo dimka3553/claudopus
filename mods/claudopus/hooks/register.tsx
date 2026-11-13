@@ -5709,7 +5709,9 @@ const chatHooks = (on: On) => {
       const now = await $.clock.now()
       // A turn that handed back its report with SubagentHandback and says nothing after has that report as its answer
       const answer = ((e.answer ?? '').trim() || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
-      const isHeld = (await $.agent.list().catch(() => [])).some(one => one.id === id && one.status === 'waiting')
+      // Held: the engine keeps it for what it left running. The terminal's engine lists such work as running as its turn ends, others as
+      // waiting; work whose run is over is listed as completed, or not at all
+      const isHeld = (await $.agent.list().catch(() => [])).some(one => one.id === id && (one.status === 'waiting' || one.status === 'running'))
       const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
       // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
       // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
