@@ -219,7 +219,26 @@ const KEEP =
 const KEEP_AGENTS = 'Keep the name or id of each background agent with its subject and where it stands.'
 // What every piece of background work is told as it starts: it keeps its own to-do in the panel true
 const PANEL_RULE =
-  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, a command for {name} to type in `command` (the card opens a terminal for it on their press, so open none yourself); clear it with empty `text` once you have seen it done.'
+  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, the full paths of any pictures it is about in `pictures`, a command for {name} to type in `command` (the card opens a terminal for it on their press, so open none yourself); clear it with empty `text` once you have seen it done.'
+// What the chat is sent when its work asks the person something: the ask as a message the person sees, with its answers and
+// pictures, and, for its model alone, how to pass it on; an answer typed in the chat goes to the work as a press on the card does
+const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
+  [
+    `The work "${title}" needs {name}: ${ask.text}`,
+    `Answers: ${answers.join(' · ')}, or a reply in {name}'s own words, here or on its card.`,
+    ask.copy ? `${ask.isCommand ? 'The command to type' : 'The text to paste'}: ${ask.copy}` : '',
+    ask.pictures?.length ? `Pictures: ${ask.pictures.join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+const ASK_RELAY = (id: string, ask: NonNullable<Todo['ask']>) =>
+  `The Claudopus panel is about to send you an ask from background work, which {name} sees in this chat. Pass it on to {name} as your whole reply: what it asks${ask.copy ? ', the text to paste or type in a code block' : ''} and its answers${ask.pictures?.length ? ', with its pictures shown in this chat by one SendUserFile call (status "proactive"), or each picture\'s full path where that tool is not available' : ''}. Do not answer it yourself or start work for it. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
+// What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
+const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks.`
+const ASK_CLEARED = (title: string) => `The work "${title}" no longer asks {name} anything.`
+// What the work is told when the chat passes on the person's answer to its ask, typed in the chat
+const ANSWERED_IN_CHAT = (asked: string) =>
+  `The message sent to you just now is {name}'s reply, typed in the chat, to your ask: "${asked}". Their card no longer asks it. If it answers the ask, take it as their answer and carry on, and ask again if it leaves something waiting. If it asks for something else, it is a steer: decide whether it is more for this work, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
 // What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
 // own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
 const STEER =
@@ -3312,6 +3331,7 @@ const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: one.status === 'working' ? 'work' : 'chat', at, line })
   redraw($)
+  void askGone($, one, said)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
   // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
@@ -3321,6 +3341,45 @@ const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply 
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'chat', at, line })
   redraw($)
   await sendForPerson($, isReply ? `From the Claudopus panel: ${who(true)} replied to what the work "${titleOf(one)}" asked before it ended (${ask.text}):\n${said}` : `From the Claudopus panel: ${who(true)} pressed "${said}" in answer to what the work "${titleOf(one)}" asked before it ended: ${ask.text}`)
+}
+// Every ask of this chat's work is also sent into the chat, as a message from the mod, with its answers and pictures: the chat
+// shows it to the person, and an answer they type there goes to the work as a press on the card does. Kept by card, so an ask
+// answered or withdrawn on the card is said in the chat too, and the same ask is never sent twice
+const inChat = new Map<string, string>()
+const askKey = (ask: NonNullable<Todo['ask']>) => JSON.stringify([ask.text, ask.choices ?? [], ask.pictures ?? [], ask.copy ?? ''])
+const askInChat = async ($: EngineInterface, one: Todo) => {
+  const ask = one.ask
+  if (!ask || isOff || !dir || inChat.get(one.id) === askKey(ask)) return
+  inChat.set(one.id, askKey(ask))
+  const text = named(ASK_IN_CHAT(titleOf(one), ask, ask.choices?.length ? ask.choices : DEFAULT_ANSWERS))
+  // How to pass it on goes to the chat's model alone, a row the person does not see, just before the ask itself
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, ask)) }] } }).catch(err => log($, `chat not told how to pass an ask on: ${String(err)}`))
+  // Sent off the tool call's own clock: a submit from inside the call would wait on the turn the call holds
+  $.clock.after(5, () => void $.prompt.submit({ text }).catch(err => (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, `ask not sent to the chat: ${String(err)}`))))
+}
+// A line in the chat the person sees (a notice, which the model never reads) and its model reads (a row the person does not see),
+// sent with no turn of its own
+const sayInChat = async ($: EngineInterface, text: string) => {
+  for (const type of ['system', 'user'] as const) await $.session.append({ message: { type, content: [{ type: 'text', text }] } }).catch(err => log($, `chat not told: ${String(err)}`))
+}
+// The ask sent into the chat is gone from the card: answered there, or withdrawn by the work
+const askGone = async ($: EngineInterface, one: Todo, said?: string) => {
+  if (!inChat.has(one.id)) return
+  inChat.delete(one.id)
+  await sayInChat($, named(said === undefined ? ASK_CLEARED(titleOf(one)) : ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`)))
+}
+// The person's answer typed in the chat, passed on by the chat to the work: once on its way the card stops asking and says what was
+// answered, and a helper that asked is told too when the chat sent it to the work it helps; refused, the ask stays to be answered
+const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNullable<Todo['ask']>; key: string; words: string; at: number }, to: string, isSent: boolean) => {
+  if (!isSent) return void answeredAsks.delete(a.key)
+  inChat.delete(a.card.id)
+  await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: undefined } : one)))
+  drafts.delete(a.card.id)
+  sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
+  pending.set(to, a.card.id)
+  const helper = a.ask.from && a.ask.from !== to ? (await read($, todos)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
+  if (helper) await tell($, helper.id, `${who(true)} answered your ask ("${a.ask.text}") in the chat, in their own words: ${a.words}`)
+  redraw($)
 }
 // A reply in words left by another chat for work whose ask is already answered: to the work while it runs, else to the chat
 const replyAfter = async ($: EngineInterface, one: Todo, said: string, asked: string) => {
@@ -4336,7 +4395,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and tells {name}. `text` says what to do, in one plain line; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need (without them the card offers Done and Not now); {name} can always reply in their own words instead; `command` is a command {name} types themselves, shown with a button that opens a terminal with it typed when they press it: open none yourself. The ask stays until {name} answers, even after you finish. An answer clears it and arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Ask again if the answer leaves something waiting. Call it again with empty `text` only once you have seen it done.",
+        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and sends the ask into the chat as a message, where {name} can answer it too. `text` says what to do, in one plain line; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need (without them the card offers Done and Not now); {name} can always reply in their own words instead; `pictures` are the picture files the ask is about, such as the options to pick from; `command` is a command {name} types themselves, shown with a button that opens a terminal with it typed when they press it: open none yourself. The ask stays until {name} answers, even after you finish. An answer clears it and arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Ask again if the answer leaves something waiting. Call it again with empty `text` only once you have seen it done.",
       ),
       inputSchema: {
         type: 'object',
@@ -4346,6 +4405,7 @@ const chatHooks = (on: On) => {
           choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now (Done and Not now when left out); the one pressed comes back to you as a message' },
           command: { type: 'string', description: 'A command for them to type themselves, one line, shown with a Copy button and a button that opens a terminal with it typed, never run' },
           cwd: { type: 'string', description: 'The folder the command runs in, a full path; the chat\'s folder when left out' },
+          pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the picture files the ask is about, such as the options to pick from; shown with the ask in the chat' },
         },
         required: ['text'],
       },
@@ -4630,6 +4690,8 @@ const workHooks = (on: On) => {
     // one between pieces of work or the chat's own note, is told as its sender's
     let steered = ''
     let from = ''
+    let answered = ''
+    let answer: { card: Todo; ask: NonNullable<Todo['ask']>; key: string; words: string; at: number } | undefined
     if (dir && e.tool === 'SendMessage') {
       const to = String((e as { to?: unknown }).to ?? '')
       const message = String((e as { message?: unknown }).message ?? '')
@@ -4638,9 +4700,18 @@ const workHooks = (on: On) => {
       const now = await $.clock.now()
       const list = await read($, todos)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
+      // The person's words passed on to work whose card asks them something answer that ask, as a press on the card does: the card's
+      // own work, or the helper that asked. Marked at once, so a press on the card at the same moment counts once; undone if refused
+      const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => one.ask?.from === target.id)) : undefined
+      const asked = asking?.ask ? `${asking.id}:${asking.ask.at}:${asking.ask.text}` : ''
+      if (asking?.ask && !answeredAsks.has(asked)) {
+        answeredAsks.add(asked)
+        answered = asking.ask.text
+        answer = { card: asking, ask: asking.ask, key: asked, words, at: now }
+      }
       if (target) {
         woken = target.id
-        const isSteer = target.status === 'working' && Boolean(words)
+        const isSteer = target.status === 'working' && Boolean(words) && !answered
         if (target.status === 'working' && message && !isSteer) {
           const sender = list.find(one => one.id === e.agentId)
           const title = (one?: Todo) => (one?.title ? ` "${cut(oneLine(one.title), 60)}"` : '')
@@ -4664,7 +4735,7 @@ const workHooks = (on: On) => {
                 },
           ),
         )
-        if (isSteer || from) steered = target.id
+        if (isSteer || from || answered) steered = target.id
       }
     }
     if (e.agentId !== undefined) {
@@ -4696,7 +4767,8 @@ const workHooks = (on: On) => {
     // The steer is sent as it was written; once it is on its way, the work it goes to is told what a steer asks of it
     if (steered) {
       const sent = await next(e)
-      if (!sent.deny) void tell($, steered, named(from ? FROM(from) : STEER))
+      if (answer) await answeredInChat($, answer, steered, !sent.deny && !sent.isError)
+      if (!sent.deny) void tell($, steered, named(answered ? ANSWERED_IN_CHAT(answered) : from ? FROM(from) : STEER))
       return sent
     }
     if (e.agentId !== undefined) return next(e)
@@ -4896,7 +4968,7 @@ const toolHooks = (on: On) => {
 
   // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
-    const input = e as unknown as { text?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown }
+    const input = e as unknown as { text?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown }
     if (e.agentId === undefined) return { result: `Only background work asks through the panel; a chat's own thread asks ${who()} in its reply.` }
     const text = oneLine(typeof input.text === 'string' ? input.text : '').slice(0, 300)
     const command = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
@@ -4906,19 +4978,30 @@ const toolHooks = (on: On) => {
     const copy = command || (isProse || flat(text).includes(flat(given)) ? '' : given)
     const folder = typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : cwd
     const choices = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one): one is string => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].slice(0, 4)
+    // Pictures the ask is about, by full path; one that is not a picture file on this Mac is left out
+    const givenPics = [...new Set((Array.isArray(input.pictures) ? input.pictures : []).filter((one): one is string => typeof one === 'string').map(one => one.trim()).filter(one => IMAGE.test(one)))].slice(0, 8)
+    const pictures: string[] = []
+    for (const path of givenPics) if (path.startsWith('/') && (await $.fs.stat(path).catch(() => undefined))?.kind === 'file') pictures.push(path)
     const at = await $.clock.now()
     const before = await read($, todos)
     const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
-    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), at } : undefined }))
-    if (!text) return { result: 'Cleared: your card no longer asks for anything.' }
+    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined }))
     const list = await read($, todos)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
+    if (!text) {
+      if (card && was) await askGone($, card)
+      return { result: 'Cleared: your card no longer asks for anything.' }
+    }
     // The same ask said again is not told again
     if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
+    if (card) await askInChat($, card)
     // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
     const terminal = command ? ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.` : ''
     const shown = [command ? 'the command, a Copy button and an Open in Terminal button' : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
-    return { result: `Shown on your card with ${shown}, and ${who()} was told. It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, or to the chat once you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
+    const lost = givenPics.length - pictures.length
+    const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture goes' : `${pictures.length} pictures go`} with it.` : ''
+    const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
+    return { result: `Shown on your card with ${shown}, and sent into the chat as a message, where ${who()} can answer it too.${seen}${missing} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, or to the chat once you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides

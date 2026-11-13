@@ -30,6 +30,8 @@ const workHooks = (on: On) => {
     // one between pieces of work or the chat's own note, is told as its sender's
     let steered = ''
     let from = ''
+    let answered = ''
+    let answer: { card: Todo; ask: NonNullable<Todo['ask']>; key: string; words: string; at: number } | undefined
     if (dir && e.tool === 'SendMessage') {
       const to = String((e as { to?: unknown }).to ?? '')
       const message = String((e as { message?: unknown }).message ?? '')
@@ -38,9 +40,18 @@ const workHooks = (on: On) => {
       const now = await $.clock.now()
       const list = await read($, todos)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
+      // The person's words passed on to work whose card asks them something answer that ask, as a press on the card does: the card's
+      // own work, or the helper that asked. Marked at once, so a press on the card at the same moment counts once; undone if refused
+      const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => one.ask?.from === target.id)) : undefined
+      const asked = asking?.ask ? `${asking.id}:${asking.ask.at}:${asking.ask.text}` : ''
+      if (asking?.ask && !answeredAsks.has(asked)) {
+        answeredAsks.add(asked)
+        answered = asking.ask.text
+        answer = { card: asking, ask: asking.ask, key: asked, words, at: now }
+      }
       if (target) {
         woken = target.id
-        const isSteer = target.status === 'working' && Boolean(words)
+        const isSteer = target.status === 'working' && Boolean(words) && !answered
         if (target.status === 'working' && message && !isSteer) {
           const sender = list.find(one => one.id === e.agentId)
           const title = (one?: Todo) => (one?.title ? ` "${cut(oneLine(one.title), 60)}"` : '')
@@ -64,7 +75,7 @@ const workHooks = (on: On) => {
                 },
           ),
         )
-        if (isSteer || from) steered = target.id
+        if (isSteer || from || answered) steered = target.id
       }
     }
     if (e.agentId !== undefined) {
@@ -96,7 +107,8 @@ const workHooks = (on: On) => {
     // The steer is sent as it was written; once it is on its way, the work it goes to is told what a steer asks of it
     if (steered) {
       const sent = await next(e)
-      if (!sent.deny) void tell($, steered, named(from ? FROM(from) : STEER))
+      if (answer) await answeredInChat($, answer, steered, !sent.deny && !sent.isError)
+      if (!sent.deny) void tell($, steered, named(answered ? ANSWERED_IN_CHAT(answered) : from ? FROM(from) : STEER))
       return sent
     }
     if (e.agentId !== undefined) return next(e)

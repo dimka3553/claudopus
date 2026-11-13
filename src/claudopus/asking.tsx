@@ -123,6 +123,7 @@ const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: one.status === 'working' ? 'work' : 'chat', at, line })
   redraw($)
+  void askGone($, one, said)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
   // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
@@ -132,6 +133,45 @@ const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply 
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'chat', at, line })
   redraw($)
   await sendForPerson($, isReply ? `From the Claudopus panel: ${who(true)} replied to what the work "${titleOf(one)}" asked before it ended (${ask.text}):\n${said}` : `From the Claudopus panel: ${who(true)} pressed "${said}" in answer to what the work "${titleOf(one)}" asked before it ended: ${ask.text}`)
+}
+// Every ask of this chat's work is also sent into the chat, as a message from the mod, with its answers and pictures: the chat
+// shows it to the person, and an answer they type there goes to the work as a press on the card does. Kept by card, so an ask
+// answered or withdrawn on the card is said in the chat too, and the same ask is never sent twice
+const inChat = new Map<string, string>()
+const askKey = (ask: NonNullable<Todo['ask']>) => JSON.stringify([ask.text, ask.choices ?? [], ask.pictures ?? [], ask.copy ?? ''])
+const askInChat = async ($: EngineInterface, one: Todo) => {
+  const ask = one.ask
+  if (!ask || isOff || !dir || inChat.get(one.id) === askKey(ask)) return
+  inChat.set(one.id, askKey(ask))
+  const text = named(ASK_IN_CHAT(titleOf(one), ask, ask.choices?.length ? ask.choices : DEFAULT_ANSWERS))
+  // How to pass it on goes to the chat's model alone, a row the person does not see, just before the ask itself
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, ask)) }] } }).catch(err => log($, `chat not told how to pass an ask on: ${String(err)}`))
+  // Sent off the tool call's own clock: a submit from inside the call would wait on the turn the call holds
+  $.clock.after(5, () => void $.prompt.submit({ text }).catch(err => (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, `ask not sent to the chat: ${String(err)}`))))
+}
+// A line in the chat the person sees (a notice, which the model never reads) and its model reads (a row the person does not see),
+// sent with no turn of its own
+const sayInChat = async ($: EngineInterface, text: string) => {
+  for (const type of ['system', 'user'] as const) await $.session.append({ message: { type, content: [{ type: 'text', text }] } }).catch(err => log($, `chat not told: ${String(err)}`))
+}
+// The ask sent into the chat is gone from the card: answered there, or withdrawn by the work
+const askGone = async ($: EngineInterface, one: Todo, said?: string) => {
+  if (!inChat.has(one.id)) return
+  inChat.delete(one.id)
+  await sayInChat($, named(said === undefined ? ASK_CLEARED(titleOf(one)) : ASK_ANSWERED(titleOf(one), `“${cut(said, 120)}”`)))
+}
+// The person's answer typed in the chat, passed on by the chat to the work: once on its way the card stops asking and says what was
+// answered, and a helper that asked is told too when the chat sent it to the work it helps; refused, the ask stays to be answered
+const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNullable<Todo['ask']>; key: string; words: string; at: number }, to: string, isSent: boolean) => {
+  if (!isSent) return void answeredAsks.delete(a.key)
+  inChat.delete(a.card.id)
+  await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: undefined } : one)))
+  drafts.delete(a.card.id)
+  sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
+  pending.set(to, a.card.id)
+  const helper = a.ask.from && a.ask.from !== to ? (await read($, todos)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
+  if (helper) await tell($, helper.id, `${who(true)} answered your ask ("${a.ask.text}") in the chat, in their own words: ${a.words}`)
+  redraw($)
 }
 // A reply in words left by another chat for work whose ask is already answered: to the work while it runs, else to the chat
 const replyAfter = async ($: EngineInterface, one: Todo, said: string, asked: string) => {

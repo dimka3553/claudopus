@@ -181,3 +181,54 @@ test('an ask outlives the work that made it: amber after the work ends, with or 
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Run this to restart that chat yourself.' })) ? undefined : true))).toBe(true)
   await list.unmount()
 })
+
+test('every ask also goes into the chat as a message, with its answers and pictures; an answer typed there reaches the work and the card stops asking', async ($, on) => {
+  const { appended, submitted, files, clock } = world(on)
+  files.set('/w/shots/a.png', 'png')
+  files.set('/w/shots/b.png', 'png')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'redraw the logo', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Redraw the logo', prompt: 'redraw the logo' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which logo do you want?', choices: ['A', 'B'], pictures: ['/w/shots/a.png', '/w/shots/b.png', '/w/shots/gone.png', 'rel.png'] } as never)
+  expect(String(asked.result)).toContain('sent into the chat as a message')
+  expect(String(asked.result)).toContain('Its 2 pictures go with it.')
+  expect(String(asked.result)).toContain('2 of the pictures given are no picture file found here')
+  // The chat gets the ask as the mod's message, never as the person's words, with what it asks, its answers and its pictures
+  await clock.advance(10)
+  const inChat = (await until(async () => submitted.find(line => line.includes('Which logo do you want?')))) ?? ''
+  expect(inChat).toContain('The work "Redraw the logo" needs the person: Which logo do you want?')
+  expect(inChat).toContain('Answers: A · B, or a reply in the person\'s own words, here or on its card.')
+  expect(inChat).toContain('Pictures: /w/shots/a.png, /w/shots/b.png')
+  // How to pass it on goes to the chat's model alone, never into what the person sees
+  expect(inChat).not.toContain('SendMessage')
+  const relay = appended.find(line => line.startsWith('undefined: The Claudopus panel is about to send you an ask')) ?? ''
+  expect(relay).toContain('SendUserFile')
+  expect(relay).toContain('SendMessage to "a1"')
+  // The same ask said again is not sent again
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Which logo do you want?', choices: ['A', 'B'], pictures: ['/w/shots/a.png', '/w/shots/b.png'] } as never)
+  await clock.advance(10)
+  expect(submitted.filter(line => line.includes('Which logo do you want?'))).toHaveLength(1)
+
+  // The person answers in the chat, which passes their words on: the card stops asking, the work is told it is the answer
+  await $.prompt.submit({ text: 'B, but make it bluer', wait: false, origin: composer })
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 't1', to: 'a1', message: 'Their answer: “B, but make it bluer”' } as never)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Which logo do you want?' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes("the person's reply, typed in the chat, to your ask: \"Which logo do you want?\"")))).toBeDefined()
+  expect(appended.some(line => line.includes('Decide which of three it is'))).toBe(false)
+  // A press on the card no longer counts for that ask
+  expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'B')).toBeUndefined()
+
+  // An ask answered on the card is said in the chat, which sees and reads it; one the work withdraws is said too
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'May I push it?', choices: ['Push', 'Not now'] } as never)
+  await clock.advance(10)
+  expect(await until(async () => submitted.some(line => line.includes('May I push it?')) || undefined)).toBe(true)
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Push')?.key ?? '' })
+  expect(await until(async () => appended.filter(line => line.startsWith('undefined: ✓ The person answered the work "Redraw the logo" on its card: “Push”')).length === 2 || undefined)).toBe(true)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a1', text: 'Sign in to Vercel.' } as never)
+  await clock.advance(10)
+  expect(await until(async () => submitted.some(line => line.includes('Answers: Done · Not now')) || undefined)).toBe(true)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a1', text: '' } as never)
+  expect(appended.some(line => line === 'undefined: The work "Redraw the logo" no longer asks the person anything.')).toBe(true)
+  await list.unmount()
+})

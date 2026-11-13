@@ -22,7 +22,26 @@ const KEEP =
 const KEEP_AGENTS = 'Keep the name or id of each background agent with its subject and where it stands.'
 // What every piece of background work is told as it starts: it keeps its own to-do in the panel true
 const PANEL_RULE =
-  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, a command for {name} to type in `command` (the card opens a terminal for it on their press, so open none yourself); clear it with empty `text` once you have seen it done.'
+  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, the full paths of any pictures it is about in `pictures`, a command for {name} to type in `command` (the card opens a terminal for it on their press, so open none yourself); clear it with empty `text` once you have seen it done.'
+// What the chat is sent when its work asks the person something: the ask as a message the person sees, with its answers and
+// pictures, and, for its model alone, how to pass it on; an answer typed in the chat goes to the work as a press on the card does
+const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
+  [
+    `The work "${title}" needs {name}: ${ask.text}`,
+    `Answers: ${answers.join(' · ')}, or a reply in {name}'s own words, here or on its card.`,
+    ask.copy ? `${ask.isCommand ? 'The command to type' : 'The text to paste'}: ${ask.copy}` : '',
+    ask.pictures?.length ? `Pictures: ${ask.pictures.join(', ')}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+const ASK_RELAY = (id: string, ask: NonNullable<Todo['ask']>) =>
+  `The Claudopus panel is about to send you an ask from background work, which {name} sees in this chat. Pass it on to {name} as your whole reply: what it asks${ask.copy ? ', the text to paste or type in a code block' : ''} and its answers${ask.pictures?.length ? ', with its pictures shown in this chat by one SendUserFile call (status "proactive"), or each picture\'s full path where that tool is not available' : ''}. Do not answer it yourself or start work for it. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
+// What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
+const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks.`
+const ASK_CLEARED = (title: string) => `The work "${title}" no longer asks {name} anything.`
+// What the work is told when the chat passes on the person's answer to its ask, typed in the chat
+const ANSWERED_IN_CHAT = (asked: string) =>
+  `The message sent to you just now is {name}'s reply, typed in the chat, to your ask: "${asked}". Their card no longer asks it. If it answers the ask, take it as their answer and carry on, and ask again if it leaves something waiting. If it asks for something else, it is a steer: decide whether it is more for this work, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
 // What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
 // own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
 const STEER =
