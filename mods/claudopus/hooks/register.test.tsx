@@ -3534,6 +3534,8 @@ test("a press inside the list gives it the keyboard, and the engine shows no new
   // The list was closed and opened again before Stats, and is open still
   expect(closed).toContain('claudopus')
   expect(opened.lastIndexOf('claudopus')).toBeLessThan(opened.lastIndexOf('stats'))
+  // Stats opened behind before the list closed, so the sidebar never stood empty
+  expect(opened.indexOf('stats')).toBeLessThan(opened.lastIndexOf('claudopus'))
   expect(live.map(one => one.id)).toEqual(['claudopus', 'stats'])
   await pane.unmount()
 })

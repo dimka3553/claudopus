@@ -44,8 +44,11 @@ const front = async ($: EngineInterface, id: string, title: string) => {
   const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown)
   // A press inside a tab gives that tab the keyboard, and the engine never shows a new tab over the one holding it: it waits on
   // the screen to honour the open's focus, which a screen with a turn running or text in the box refuses (seen every press in a
-  // chat the app runs on another Mac over ssh). The tab holding the keyboard is closed and opened again first, so it lets go
-  for (const held of (await $.ui.panes()).filter(pane => pane.isFocused && pane.id !== id)) {
+  // chat the app runs on another Mac over ssh). The tab holding the keyboard is closed and opened again first, so it lets go.
+  // The new tab opens behind it before that, so the sidebar always holds a tab: with none open it slid shut and open again
+  const holding = (await $.ui.panes()).filter(pane => pane.isFocused && pane.id !== id)
+  if (holding.length && !(await $.ui.panes()).some(pane => pane.id === id)) await $.ui.open({ id, title })
+  for (const held of holding) {
     await $.ui.close({ id: held.id }).catch(() => undefined)
     await $.ui.open({ id: held.id, title: held.title }).catch(err => log($, `${held.id} not opened again: ${String(err)}`))
   }
