@@ -4861,8 +4861,9 @@ const panelHooks = (on: On) => {
     // narrower than a cell, the terminal's are one each
     const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
     // Three moving dots: beside the line a small card gives, and beside the to-do being done on the big one
+    // A terminal draws no picture, so there the mark is a letter
     const live = (key: string) =>
-      'Svg' in table ? (
+      'Svg' in table && e.surface !== 'terminal' ? (
         <Box flexShrink={0}>
           <table.Svg key={key} source={LIVE_DOTS} alt="Being done now" width={22} height={LINE} isInteractive />
         </Box>
