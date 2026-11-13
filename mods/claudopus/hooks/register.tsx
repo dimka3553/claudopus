@@ -346,7 +346,7 @@ const drifted = (steps: number) =>
   `You have taken ${steps} steps since you last touched your to-dos or said where the work stands. Look at your to-do list now: tick what is done, mark the one you are on as doing, add what you took on, and say where the work stands with the \`note\` tool. If all of it is already true, carry on.`
 // The chat is told once when nothing new has come back under a piece of work for a while
 const STUCK_IN_CHAT = (title: string, mins: number) =>
-  `"${title}" has had nothing new come back to it or its helpers for ${mins} minutes: it may be stuck waiting on something that will not come. Its card says what is running.`
+  `"${title}" has had nothing new come back to it or its helpers for ${mins} minutes: it may be stuck waiting on something that will not come. Its card shows where it stands.`
 // The work is reminded after this many steps past a steer with no decision, and after this many without touching its to-dos
 const OWED_AFTER = 2
 const QUIET_STEPS = 12
@@ -594,7 +594,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, newAt: at })
 // How work that is stopped ends: done when its turn had already ended with its report and only its own background work held it
 // (the chat stops such work once its report is in), stopped otherwise
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
@@ -689,7 +689,8 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false) => {
 const helpersChecked = new Set<string>()
 // The engine's own list is the truth: work it runs is listed, and work that failed or was stopped ends no turn
 const sync = async ($: EngineInterface) => {
-  const live = await $.agent.list().catch(() => [])
+  const listed = await $.agent.list().catch(() => undefined)
+  const live = listed ?? []
   const now = await $.clock.now()
   // Work the mod never saw start (it was running when the mod was installed or renamed) that no loop is said to have started:
   // the chat's own Agent calls tell a piece of work from a helper whose start the engine did not record
@@ -733,7 +734,7 @@ const sync = async ($: EngineInterface) => {
       isChanged ||= Boolean(next)
     }
     // Finished work the engine no longer lists has nothing of its own left running
-    for (const card of cards.values()) if (card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
+    for (const card of cards.values()) if (listed && card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
   await keepStoppedReports($, now)
@@ -940,7 +941,8 @@ const loadFinished = async ($: EngineInterface) => {
   const kept = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   if (!Array.isArray(kept) || !kept.length) return
   await update($, todos, list => {
-    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id))
+    // What it left running is looked at afresh: the record of how it ended does not outlive the load
+    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined }))
     return fresh.length ? capped(byEnd([...fresh, ...list])) : list
   })
 }
@@ -4881,6 +4883,8 @@ const STUCK_AFTER = 12 * 60_000
 const RUNNING_SHOWN = 2 * 60_000
 // Lines each agent has seen come back, so a wait that returns what it returned before is no news; kept to this many each
 const SEEN_KEPT = 5000
+// Only this many lines of one result are looked at
+const LINES_READ = 2000
 
 // The calls running now, by tool_use_id: whose, what, since when
 const inFlight = new Map<string, { agent: string; what: string; at: number }>()
@@ -4888,7 +4892,7 @@ const seenLines = new Map<string, Set<string>>()
 
 // What a running call is, in a few words, for its row
 const runningWhat = (tool: string) =>
-  tool === 'Bash' ? 'one command running' : tool === 'Grep' || tool === 'Glob' ? 'one search running' : tool === 'Agent' ? 'waiting on its helper' : tool === 'Monitor' ? 'watching' : `${tool.replace(/^mcp__[^_]+__/, '')} running`
+  tool === 'Bash' ? 'one command running' : tool === 'Grep' || tool === 'Glob' ? 'one search running' : tool === 'Agent' ? 'its helper running' : `${tool.replace(/^mcp__.*__/, '')} running`
 
 // A result as lines: its text where it has some, else its parts each on a line of their own
 const resultLines = (result: unknown): string[] => {
@@ -4901,18 +4905,28 @@ const resultLines = (result: unknown): string[] => {
           ? Object.values(result as Record<string, unknown>).map(value => (typeof value === 'string' ? value : JSON.stringify(value) ?? '')).join('\n')
           : String(result ?? '')
   // Digits are left out, so a wait that only prints a new time or count says nothing new
-  return text.split('\n').map(line => line.trim().replace(/\d/g, '#').slice(0, 300)).filter(Boolean)
+  return text.split('\n', LINES_READ).map(line => line.trim().replace(/\d/g, '#').slice(0, 300)).filter(Boolean)
 }
 
 // The longest-running call of an agent, as its card keeps it
-const runningOf = (agent: string) => [...inFlight.values()].filter(one => one.agent === agent).sort((a, b) => a.at - b.at)[0]
+const runningOf = (agent: string) => {
+  const first = [...inFlight.values()].filter(one => one.agent === agent).sort((a, b) => a.at - b.at)[0]
+  return first ? { what: first.what, at: first.at } : undefined
+}
+// A card with its running call as it is now, worked out as it is changed, so calls that begin and end together leave it true;
+// the list itself when nothing changed
+const withRunning = (list: Todo[], agent: string, newAt?: number) => {
+  const running = runningOf(agent)
+  const at = list.findIndex(one => one.id === agent)
+  const one = list[at]
+  if (!one || (one.running?.at === running?.at && one.running?.what === running?.what && (newAt === undefined || one.newAt === newAt))) return list
+  return list.map((card, n) => (n === at ? { ...card, running, newAt: newAt ?? card.newAt } : card))
+}
 
 // A call of a piece of work begins: its card keeps the one it has been running longest
 const callBegun = async ($: EngineInterface, id: string, agent: string, tool: string) => {
-  const now = await $.clock.now()
-  inFlight.set(id, { agent, what: runningWhat(tool), at: now })
-  const running = runningOf(agent)
-  await update($, todos, list => list.map(one => (one.id === agent && one.running?.at !== running?.at ? { ...one, running: running ? { what: running.what, at: running.at } : undefined } : one)))
+  inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now() })
+  await update($, todos, list => withRunning(list, agent))
 }
 
 // A call of a piece of work ended with what it returned: a line its agent had not seen come back before is news. The mod's own
@@ -4924,28 +4938,27 @@ const callEnded = async ($: EngineInterface, id: string, agent: string, tool: st
   if (r && !r.deny && !tool.startsWith(TOOLS) && !tool.startsWith(OLD_TOOLS)) {
     const seen = seenLines.get(agent) ?? new Set<string>()
     for (const line of resultLines(r.result)) if (!seen.has(line)) ((isNew = true), seen.add(line))
-    if (seen.size > SEEN_KEPT) seenLines.set(agent, new Set([...seen].slice(-SEEN_KEPT)))
+    if (seen.size > SEEN_KEPT) seenLines.set(agent, new Set([...seen].slice(-SEEN_KEPT / 2)))
     else seenLines.set(agent, seen)
   }
-  const running = runningOf(agent)
-  await update($, todos, list =>
-    list.map(one => (one.id !== agent ? one : { ...one, running: running ? { what: running.what, at: running.at } : undefined, newAt: isNew ? now : one.newAt })),
-  )
+  await update($, todos, list => withRunning(list, agent, isNew ? now : undefined))
 }
 
 // When something last moved under a piece of work: it or a helper started, ended, or had something new come back
 const movedAt = (list: Todo[], top: Todo) => Math.max(...[top, ...underOf(list, top.id)].map(one => Math.max(one.startedAt, one.endedAt, one.newAt ?? 0)))
 
 // Looked at as the list is followed: work under which nothing new has come back for STUCK_AFTER is flagged on its card, and the
-// chat is told once; it clears when something does. Work asking the person something waits on them, and is not flagged
+// chat is told once; it clears when something does. Work waiting on the person is not flagged: asking them something, or stopped
+// on the app's own prompt to allow a call; nor work that gave its report and is only held by what it left running
 const lookStuck = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const told: Todo[] = []
   await update($, todos, list => {
     let isChanged = false
+    const isPrompted = (one: Todo) => waiting.some(p => p.agent && topOf(list, p.agent) === one.id)
     const next = list.map(one => {
       if (one.parentId || one.chat) return one
-      const isStuck = one.status === 'working' && !one.ask && now - movedAt(list, one) >= STUCK_AFTER
+      const isStuck = one.status === 'working' && !one.ask && !one.answeredAt && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
       if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
       return one
@@ -4953,15 +4966,21 @@ const lookStuck = async ($: EngineInterface) => {
     return isChanged ? next : list
   })
   for (const one of told) await sayInChat($, named(STUCK_IN_CHAT(titleOf(one), Math.round((now - movedAt(await read($, todos), one)) / 60_000))))
+  // What agents that have ended had seen come back is let go
+  const list = await read($, todos)
+  for (const agent of seenLines.keys()) if (!list.some(one => one.id === agent && one.status === 'working')) seenLines.delete(agent)
 }
 
-// What a stuck card says, in place of its line: how long nothing new has come back, and what is running under it
+// What a stuck card says above its line: how long nothing new has come back, and whether its helpers, or it, sit in a long call
 const stuckLine = (list: Todo[], one: Todo, at: number) => {
   if (!one.stuckAt) return ''
   const mins = Math.max(1, Math.round((at - one.stuckAt) / 60_000))
+  const isLong = (kid: Todo) => Boolean(kid.running && at - kid.running.at >= RUNNING_SHOWN)
   const helpers = underOf(list, one.id).filter(kid => kid.status === 'working')
-  const waiting = helpers.filter(kid => kid.running)
-  return `Nothing new for ${mins} min.${helpers.length ? (waiting.length === helpers.length ? ` ${helpers.length === 1 ? 'Its helper keeps' : helpers.length === 2 ? 'Both helpers keep' : `All ${helpers.length} helpers keep`} waiting.` : '') : one.running ? ` It keeps waiting on ${one.running.what.replace(/ running$/, '')}.` : ''}`
+  const tail = helpers.length
+    ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper keeps' : helpers.length === 2 ? 'Both helpers keep' : `All ${helpers.length} helpers keep`} waiting.` : ''
+    : isLong(one) ? ` One call has run ${took(at - (one.running?.at ?? at))}.` : ''
+  return `Nothing new for ${mins} min.${tail}`
 }
 
 // A row's running call, with its time, once it has run RUNNING_SHOWN
@@ -4981,13 +5000,13 @@ const workHooks = (on: On) => {
     const run = async (call: typeof e) => {
       // What work runs, and what comes back of it, tells the stuck check whether it moves
       const isWatched = e.agentId !== undefined && Boolean(dir)
-      if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool).catch(() => undefined)
+      if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool).catch(err => log($, `call not followed: ${String(err)}`))
       let r: Awaited<ReturnType<typeof raw>> | undefined
       try {
         r = await raw(call)
         return r
       } finally {
-        if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(() => undefined)
+        if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool)
       }
@@ -5597,7 +5616,7 @@ const panelHooks = (on: On) => {
             </Box>
             {one.ask ? askBlock(one, `ask-${one.id}`) : null}
             {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
-            {one.stuckAt && one.status === 'working' ? (
+            {one.stuckAt && one.status === 'working' && !one.chat ? (
               <Text key={`stuck-${one.id}`} color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
             ) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden">

@@ -190,7 +190,7 @@ const panelHooks = (on: On) => {
             </Box>
             {one.ask ? askBlock(one, `ask-${one.id}`) : null}
             {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
-            {one.stuckAt && one.status === 'working' ? (
+            {one.stuckAt && one.status === 'working' && !one.chat ? (
               <Text key={`stuck-${one.id}`} color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
             ) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden">

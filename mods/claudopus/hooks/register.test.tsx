@@ -4292,6 +4292,33 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
   expect(await rows()).toEqual([])
 })
 
+test('work sent a message after a long rest, and work only held by what it left running after its report, are not flagged', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = { a2: 'general-purpose' }
+  const { clock, logged } = world(on, { agents, kinds })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' } as never)
+  await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(30 * 60_000)
+  await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'bigger', resume: { agentId: 'a1' } } as never)
+  await clock.advance(25_000)
+  const look = async () => {
+    const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+    const r = await pane.find({ type: 'Text', text: /^Nothing new for / })
+    await pane.unmount()
+    return r
+  }
+  expect(await look()).toBeUndefined()
+  await $.turn.complete({ answer: 'Bigger now.', durationMs: 1, isAborted: false, turnId: 't1b', reason: 'answer', agentId: 'a1' } as never)
+  // Held on a watch it started after a report as long as one: its card goes on, but it is not stuck
+  agents.a2 = 'waiting'
+  await $.agent.spawn({ ...spawn, description: 'Watch the build', prompt: 'watch' } as never)
+  await $.turn.complete({ answer: `The build is watched. ${'Every check passes and it is pushed. '.repeat(15)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
+  await clock.advance(13 * 60_000)
+  expect(await look()).toBeUndefined()
+  expect(logged.filter(line => line.includes('has had nothing new'))).toEqual([])
+})
+
 test('work asking the person something waits on them and is never flagged', async ($, on) => {
   const { clock, logged } = world(on)
   await $.session.start(start)

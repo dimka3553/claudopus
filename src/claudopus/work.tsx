@@ -9,13 +9,13 @@ const workHooks = (on: On) => {
     const run = async (call: typeof e) => {
       // What work runs, and what comes back of it, tells the stuck check whether it moves
       const isWatched = e.agentId !== undefined && Boolean(dir)
-      if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool).catch(() => undefined)
+      if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool).catch(err => log($, `call not followed: ${String(err)}`))
       let r: Awaited<ReturnType<typeof raw>> | undefined
       try {
         r = await raw(call)
         return r
       } finally {
-        if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(() => undefined)
+        if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool)
       }

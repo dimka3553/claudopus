@@ -20,7 +20,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, newAt: at })
 // How work that is stopped ends: done when its turn had already ended with its report and only its own background work held it
 // (the chat stops such work once its report is in), stopped otherwise
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
@@ -115,7 +115,8 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false) => {
 const helpersChecked = new Set<string>()
 // The engine's own list is the truth: work it runs is listed, and work that failed or was stopped ends no turn
 const sync = async ($: EngineInterface) => {
-  const live = await $.agent.list().catch(() => [])
+  const listed = await $.agent.list().catch(() => undefined)
+  const live = listed ?? []
   const now = await $.clock.now()
   // Work the mod never saw start (it was running when the mod was installed or renamed) that no loop is said to have started:
   // the chat's own Agent calls tell a piece of work from a helper whose start the engine did not record
@@ -159,7 +160,7 @@ const sync = async ($: EngineInterface) => {
       isChanged ||= Boolean(next)
     }
     // Finished work the engine no longer lists has nothing of its own left running
-    for (const card of cards.values()) if (card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
+    for (const card of cards.values()) if (listed && card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
   await keepStoppedReports($, now)
@@ -366,7 +367,8 @@ const loadFinished = async ($: EngineInterface) => {
   const kept = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   if (!Array.isArray(kept) || !kept.length) return
   await update($, todos, list => {
-    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id))
+    // What it left running is looked at afresh: the record of how it ended does not outlive the load
+    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined }))
     return fresh.length ? capped(byEnd([...fresh, ...list])) : list
   })
 }
