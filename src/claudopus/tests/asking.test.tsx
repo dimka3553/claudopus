@@ -189,6 +189,58 @@ test('an ask outlives the work that made it: amber after the work ends, with or 
   await list.unmount()
 })
 
+test('a reply in words that does not settle an ask keeps it open, and the card active, until it is settled: the 13 Nov "Show me images first." to work that asked "Release it?" and handed in its report', async ($, on) => {
+  const { resumed, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'second round of terminal fixes', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Terminal look, second round', prompt: 'second round of terminal fixes' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const ASK = 'Release the second round of terminal fixes?'
+  const texts = async () => (await list.findAll({ type: 'Text' })).map(one => one.text ?? '')
+  const labels = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label))
+  const isFinished = async () => (await labels()).some(label => label.includes('Finished')) || (await texts()).some(text => text.startsWith('Finished'))
+  // It asks, then hands in its report with the ask as its first line, as that work did at 20:27
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Release it', 'Not now'] } as never)
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Release it? (Answers: Release it / Not now.) Built, tested and checked; nothing is released.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(60_000)
+  expect(await until(async () => list.find({ type: 'Text', text: ASK }))).toBeDefined()
+  expect(await labels()).toContain('Release it')
+  // The person replies in their own words, asking for something first: the work is started again with it and told the ask stays open
+  const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await list.input({ key: box?.key ?? '', text: 'Show me images first.' })
+  const told = (await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('in their own words: Show me images first.')))) ?? ''
+  expect(told).toContain('stays open')
+  expect(told).toContain('this answer starts you again')
+  // The card stays among the running cards, at work, with its ask, its buttons and the reply under it; nothing is under Finished
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Show me images first.” · it reads this at its next step; it still asks this' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: ASK })).toBeDefined()
+  expect(await labels()).toContain('Release it')
+  expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
+  // Woken from the timer, the work had no panel tools: it ran no step the mod saw, and ended with the ask as its report's first line.
+  // Its ask stays open and its card active; it is not started a second time with the same reply
+  await $.turn.complete({ answer: 'Release it? (Answers: Release it / Not now.) Here are the images.', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(60_000)
+  expect(await list.find({ type: 'Text', text: ASK })).toBeDefined()
+  expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
+  expect(resumed.filter(line => line.startsWith('a1: '))).toHaveLength(1)
+  // More words from the person keep it open still; Release it settles it, and the card finishes once the work has acted on it
+  const box2 = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await list.input({ key: box2?.key ?? '', text: 'And the narrow window too, please.' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('the narrow window too')))).toBeDefined()
+  await $.turn.complete({ answer: 'Here is the narrow window.', durationMs: 1, isAborted: false, turnId: 'turn-3', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(60_000)
+  expect(await list.find({ type: 'Text', text: ASK })).toBeDefined()
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()
+  expect(await until(async () => ((await list.find({ type: 'Text', text: ASK })) ? undefined : true))).toBe(true)
+  expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
+  await $.turn.complete({ answer: 'Released as 0.2.77.', durationMs: 1, isAborted: false, turnId: 'turn-4', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(60_000)
+  expect(await until(async () => ((await isFinished()) ? true : undefined))).toBe(true)
+  await list.unmount()
+})
+
 test('every ask also shows in the chat as the mod\'s notice, never as the person\'s message, with its answers and pictures; an answer typed there reaches the work and the card stops asking', async ($, on) => {
   const { appended, submitted, logged, files, clock } = world(on)
   files.set('/w/shots/a.png', 'png')

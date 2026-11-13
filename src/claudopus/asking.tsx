@@ -189,7 +189,6 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
   sentReplies.set(one.id, { ...sent, to: 'work' })
-  await wakeCard($, target)
   redraw($)
   // One message for a work: a second answer for the same one joins the first
   const same = wakes.find(w => w.target === target)
@@ -217,6 +216,8 @@ const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await $.session.send({ to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (!r.isDelivered) return wakeFailed($, wake, r.reason)
+  // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
+  await wakeCard($, wake.target)
   // Started by the message, the work reads it in the run it starts: that run's end never sends it a second time, even when no hook
   // of the mod saw its steps (a wake from the timer)
   for (const { one, sent } of wake.answers) startedBy.add(`${one.id}:${sent.at}`)
@@ -228,30 +229,14 @@ const writtenIn = (target: string, card: string) => {
   pending.set(target, card)
   for (const key of startedBy) if (key.startsWith(`${card}:`)) startedBy.delete(key)
 }
-// Work an answer or the person's message starts again is at work from that moment: its card is back among the running cards, not
-// under Finished, while it acts on it. Undone if the message could not be sent
-const wokenFrom = new Map<string, { status: Todo['status']; steps: number }>()
+// Work an answer or the person's message started again is at work from then: its card is back among the running cards, not under
+// Finished, while it acts on it
 const wakeCard = async ($: EngineInterface, target: string) => {
   const now = await $.clock.now()
-  await update($, todos, list =>
-    list.map(card => {
-      if (card.id !== target || card.status === 'working') return card
-      wokenFrom.set(target, { status: card.status, steps: card.steps ?? 0 })
-      endedByHandback.delete(target)
-      return resumed(card, now)
-    }),
-  )
-}
-const unwakeCard = async ($: EngineInterface, target: string) => {
-  const was = wokenFrom.get(target)
-  if (!was) return
-  wokenFrom.delete(target)
-  const now = await $.clock.now()
-  await update($, todos, list => list.map(card => (card.id === target && card.status === 'working' && (card.steps ?? 0) === was.steps ? ended(card, was.status, now) : card)))
+  await update($, todos, list => list.map(card => (card.id !== target || card.status === 'working' ? card : (endedByHandback.delete(target), resumed(card, now)))))
 }
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
   if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
-  await unwakeCard($, target)
   await log($, `work ${target} not started again with an answer: ${reason}`)
   for (const { one, sent } of answers) {
     sentReplies.set(one.id, { ...sent, to: 'chat' })
@@ -317,7 +302,6 @@ const replyAfter = async ($: EngineInterface, one: Todo, said: string, asked: st
 }
 // The work an answer was written into starts its next step: that step reads it
 const replyRead = ($: EngineInterface, agentId: string) => {
-  wokenFrom.delete(agentId)
   const card = pending.get(agentId)
   if (card === undefined) return
   pending.delete(agentId)
@@ -331,7 +315,7 @@ const replyUnread = async ($: EngineInterface, agentId: string) => {
   pending.delete(agentId)
   const sent = sentReplies.get(card)
   // The run that ends was started by the answer itself: it read it
-  if (sent && startedBy.delete(`${card}:${sent.at}`)) return void (wokenFrom.delete(agentId), sent.to === 'work' && (sentReplies.set(card, { ...sent, to: 'read' }), redraw($)))
+  if (sent && startedBy.delete(`${card}:${sent.at}`)) return void (sent.to === 'work' && (sentReplies.set(card, { ...sent, to: 'read' }), redraw($)))
   const one = (await read($, todos)).find(todo => todo.id === card)
   if (sent?.to !== 'work' || !one) return
   await toEnded($, one, agentId, `${who(true)} answered your ask ("${sent.ask}"), and you ended before reading it: ${sent.text}\n${RESUMED_BY_ANSWER}`, sent)
@@ -351,6 +335,6 @@ const sentLine = (one: Todo, now: number) => {
     chat: 'left in the chat, which carries the work on',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose work reads it at its next step`,
   }[sent.to]
-  if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? 'it is acting on it' : how}; it still asks this`
+  if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'it is acting on it' : 'it has read it') : how}; it still asks this`
   return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
 }
