@@ -2,6 +2,20 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.74 · 13 November 2026
+- In the terminal the panel no longer sits on solid grey bars: the app's faint tint, which a terminal cannot draw see-through, is left out, so cards, Stats, Config, Results, About and the Changelog read clearly on dark and light themes and over ssh.
+- In the terminal a question from work is shown above the prompt, under the work's name, with its answers numbered: pressing an answer's number twice in an empty prompt answers it, with no need to reach the panel first.
+- In the terminal the panel's buttons show their keys: r Results, s Stats, m Memory, c Config, a About, f Finished, a number for each card and each result, p in every tab to go back to the panel and r in a result to go back to Results. ctrl+x Tab gives the panel the keys, Esc goes back to the chat; while a question waits, what you type there goes into its reply box until Tab leaves it.
+- In the terminal the octopus is small, three rows beside the header's three lines: at rest, paddling at work, amber with a hand up when something waits, cheering green when work finishes, waving in About and jumping blue on the update screen; a tiny one sits above the prompt while work runs.
+- In the terminal a switch such as On and Off marks the one in force with a filled dot instead of a grey box.
+- In the terminal a picture work made is a row you press instead of a blur of blocks: on the Mac you are at it opens in the Mac's own viewer; in a terminal reached over ssh it is sent to the device you are at by Tailscale where both have it and that device is on (Tailscale keeps it in Downloads), and otherwise the row gives the one command that fetches and opens it on a Mac.
+- In a narrow terminal, where Claude Code shows the panel only once you type /claudopus, its header is two lines so the work's cards show, and while this chat's work runs the line above the prompt says how to bring the panel up.
+- In the terminal one tab opens beside the panel at a time and the panel stays first, instead of every press adding a tab until their names were cut off.
+- In a terminal or a chat run over ssh, Memory opens the memory folder as a tab of the panel, each file a button, instead of Finder on a Mac you may not be looking at.
+- Stats draws its timeline in the terminal, as coloured blocks, and its labels are no longer cut short.
+- An ask's notice in the terminal chat no longer shows a broken character between the question and its answers.
+- In the terminal a running card's three dots and a working helper's dot move, as they do in the app.
+
 ## 0.2.73 · 14 November 2026
 - Work that answers a question while something it started is still running, such as a long copy, and still has that step to finish, now stays shown as running instead of turning green under Finished. Its card says what it is waiting for and how long that has run, and the answer it gave along the way is not kept as its result.
 - A long wait for work's own background command is no longer flagged as maybe stuck.

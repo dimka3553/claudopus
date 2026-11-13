@@ -72,8 +72,9 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   // Its edge is its to-dos, one part each: the one being done lighter than a done one, the rest a dim tint; a terminal's edge is whole
   const edgeOf = async (of: typeof pane) => (await of.findAll({ type: 'Box' })).map(b => String(b.props.backgroundColor)).filter(colour => colour.startsWith('#8A63F0'))
   expect(await edgeOf(pane)).toEqual(['#8A63F0AD', '#8A63F05C'])
+  // in a purple that a terminal of 256 colours rounds to the octopus's own (no COLORTERM here)
   const flat = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
-  expect(await edgeOf(flat)).toEqual(['#8A63F0'])
+  expect((await flat.findAll({ type: 'Box' })).map(b => String(b.props.backgroundColor)).filter(colour => colour === '#6E3CFF')).toEqual(['#6E3CFF'])
   await flat.unmount()
   // The title opens its Details, with no mark beside it, and Stop is plain text on the same row: the card has no filled button
   expect(await keyed(pane, 'go-a1')).toBeUndefined()
@@ -812,8 +813,8 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
   expect((await tab.find({ type: 'Text', text: / in all$/ }))?.text).toBe('2 at work · 4 in all')
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
-  // One at work has a dot at the end of its line, one that finished a tick
-  expect((await tab.findAll({ type: 'Text', text: '●' })).length).toBe(2)
+  // One at work has a dot at the end of its line, a ring growing out of it (cells the terminal repaints), one that finished a tick
+  expect((await tab.findAll({ type: 'Raster' })).filter(one => String(one.key).endsWith('-ring')).length).toBe(2)
   expect((await tab.findAll({ type: 'Text', text: '✓' })).length).toBe(2)
   expect(await keyed(tab, 'open-details-a3')).toBeDefined()
   await tab.unmount()

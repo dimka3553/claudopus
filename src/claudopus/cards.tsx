@@ -241,7 +241,7 @@ const followPanel = async ($: EngineInterface) => {
   if (!choice || seenOf(choice) === panelSeen) return choice
   const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
   if (choice.isOpen && !isOpen) {
-    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => (log($, `panel not opened with the others: ${String(err)}`), undefined))
+    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => (log($, `panel not opened with the others: ${String(err)}`), undefined))
     if (!opened) return choice
     await update($, me, one => ({ ...one, isListOpened: true }))
     await update($, paneShown, () => true)
@@ -260,7 +260,7 @@ const openList = async ($: EngineInterface) => {
   if (!choice) await choosePanel($, true)
   await update($, me, one => ({ ...one, isListOpened: true }))
   await update($, paneShown, () => true)
-  await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => log($, `panel not opened: ${String(err)}`))
+  await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => log($, `panel not opened: ${String(err)}`))
 }
 
 // Keeps the list true while work runs: the engine's list, and the minutes

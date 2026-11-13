@@ -1,13 +1,39 @@
 // The panel's drawing: the Claudopus pane, a work's Details and a workflow's, every card in them
 
+// Back from a tab to the panel, in the terminal: the tab is closed and the panel, opened again, holds the keys
+const backToPanel = async ($: EngineInterface, id: string) => {
+  await $.ui.close({ id }).catch(() => undefined)
+  await $.ui.close({ id: LIST }).catch(() => undefined)
+  await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS, focus: true })
+}
 const panelHooks = (on: On) => {
+
+  // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
+  // tab of the mod's but the panel has a first row whose key, p, closes it and hands the keys back to the panel
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    const id = e.requestId ?? ''
+    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start))
+    if (e.surface !== 'terminal' || !isTab) return next(e)
+    const { Box, Button, Text } = uiOf($, e)
+    const body = await next({ ...e, props: { ...e.props, scroll: { ...e.props.scroll, bodyRows: Math.max(1, e.props.scroll.bodyRows - 2) } } } as typeof e)
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
+          <Button key="tab-back" label="Panel" plain hotkey="p" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
+          {id.startsWith('report-') ? <Button key="tab-results" label="Results" plain hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
+          <Text dimColor>{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x Tab for keys'}</Text>
+        </Box>
+        {body}
+      </Box>
+    )
+  })
 
   // Beside the chat: one small card per piece of work under way, as wide as the panel, every card the same height whatever the work
   // writes. Work that has ended leaves the panel. A card's Details is a tab of its own, drawn here too: all its to-dos, then its own chat
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
-    const { Box, Button, Markdown, Text } = $.ui.resolve(e)
+    const { Box, Button, Markdown, Text } = uiOf($, e)
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
     if (large) {
@@ -94,7 +120,7 @@ const panelHooks = (on: On) => {
     // Where a piece of work is: the line it last wrote about itself
     const now = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')?.text ?? ''
 
-    const table = $.ui.resolve(e)
+    const table = uiOf($, e)
     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are
     // narrower than a cell, the terminal's are one each
     const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
@@ -108,12 +134,15 @@ const panelHooks = (on: On) => {
           <table.Svg key={key} source={LIVE_DOTS} alt="Being done now" width={22} height={LINE} isInteractive />
         </Box>
       ) : (
-        <Text color={LIVE}>▸</Text>
+        (e.surface === 'terminal' ? termDots(table, $, paneId, key) : null) ?? <Text color={LIVE}>▸</Text>
       )
 
     // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button, then
     // the same three ways to answer on every ask, on the small card as in Details: the work's own buttons, or Done and Not now when
     // it gave none, and a box for a reply in the person's own words. The list's times stand still while the person types (holdTimes)
+    // In the terminal the first ask's reply box holds the keys as the panel takes them: what is typed then is the person's words,
+    // never a button's letter, and Tab leaves it for the buttons and their keys
+    let askFocused = false
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
@@ -146,6 +175,7 @@ const panelHooks = (on: On) => {
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}`}
+                autoFocus={e.surface === 'terminal' && !askFocused ? ((askFocused = true), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={drafts.get(one.id) ?? ''}
                 submitLabel="send"
@@ -163,7 +193,12 @@ const panelHooks = (on: On) => {
     // The small card: its title, which opens its Details, with Stop at the far end of that row; where it stands and how many
     // to-dos are done; the line the work last wrote beside the three dots; its helpers. Each part has a fixed number of rows
     // and is clipped to them, so a card never changes height as the work goes
+    let cardNo = 0
+    let keyed = false
     const small = (one: Todo) => {
+      // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
+      cardNo += 1
+      const digit = keyed && cardNo <= 9 ? String(cardNo) : undefined
       const kept = one.items.filter(item => item.state !== 'dropped')
       const done = kept.filter(item => item.state === 'done').length
       const tree = treeUnder(one)
@@ -175,7 +210,7 @@ const panelHooks = (on: On) => {
             <Box flexDirection="column">
               <Box flexDirection="row" gap={1} height={1} overflow="hidden">
                 <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
-                  <Button key={`open-${one.id}-${presses}`} plain hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
+                  <Button key={`open-${one.id}-${presses}`} plain hotkey={digit} hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
                     <Text bold wrap="truncate-end">{titleOf(one)}</Text>
                   </Button>
                 </Box>
@@ -268,9 +303,9 @@ const panelHooks = (on: On) => {
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
           <Text dimColor>{twigText(t)}</Text>
-          <Text color={status === 'working' ? LIVE : status === 'done' ? DONE : status === 'failed' ? 'error' : undefined} dimColor={!status || status === 'stopped'}>
+          {status === 'working' && e.surface === 'terminal' && 'Raster' in table ? termRing(table, $, paneId, `${key}-ring`) : <Text color={status === 'working' ? LIVE : status === 'done' ? DONE : status === 'failed' ? 'error' : undefined} dimColor={!status || status === 'stopped'}>
             {status === 'working' ? '●' : status === 'done' ? '✓' : status === 'failed' ? '✕' : status === 'stopped' ? '■' : '○'}
-          </Text>
+          </Text>}
         </Box>
       )
     // One row of the tree, in the same columns whatever it says: the lines and dot, what a press opens, the time
@@ -571,7 +606,7 @@ const panelHooks = (on: On) => {
     const talk = (one: Todo, lines: Line[] | undefined, shots: Map<number, Pic[]>) => {
       // The pictures a run of steps made, under its row whether it is open or not: each drawn small where the panel can, with
       // a row under it that opens it whole in a window of its own, large enough to look at; one that is gone is named
-      const drawing = $.ui.resolve(e)
+      const drawing = uiOf($, e)
       const picturesOfRun = (block: Line[], at: number) => {
         const made = block.flatMap(line => shots.get(line.at ?? -1) ?? [])
         if (!made.length) return null
@@ -579,7 +614,7 @@ const panelHooks = (on: On) => {
           <Box key={`pics-${at}`} flexDirection="column" alignItems="flex-start" gap={1} width="100%">
             {made.map((pic, n) => (
               <Box key={`pic-${at}-${n}`} flexDirection="column" alignItems="flex-start" width="100%">
-                {pic.thumb && 'Svg' in drawing ? (
+                {pic.thumb && e.surface !== 'terminal' && 'Svg' in drawing ? (
                   <drawing.Svg
                     key={`pic-svg-${at}-${n}`}
                     source={pic.thumb.source}
@@ -594,9 +629,10 @@ const panelHooks = (on: On) => {
                     key={`pic-open-${at}-${n}-${presses}`}
                     label={`⤢ ${pic.thumb && e.surface !== 'terminal' ? 'Open large' : 'Open'}: ${cut(pic.name, Math.max(12, room - 14))}`}
                     plain
-                    onPress={() => ((presses += 1), redraw($), void showPicture($, pic.path, paneId, `pic-${at}-${n}`))}
+                    onPress={press => ((presses += 1), redraw($), void showPicture($, pic.path, paneId, `pic-${at}-${n}`, press.surface))}
                   />
                 )}
+                {e.surface === 'terminal' && !pic.isGone ? pictureSaidRow($, drawing, `pic-said-${at}-${n}`, pic.path) : null}
               </Box>
             ))}
           </Box>
@@ -808,6 +844,7 @@ const panelHooks = (on: On) => {
                 key={`finished-fold-${presses}`}
                 label={`${isOpen ? '▾' : '▸'} Finished ${finished.length + endedFlows.length}`}
                 plain
+                hotkey={keyed ? 'f' : undefined}
                 onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
               />
             </Box>
@@ -949,7 +986,9 @@ const panelHooks = (on: On) => {
     const talked = alone ? talks.get(alone.id) : undefined
     // The reports kept, in every chat: on this pane only the button that opens their own
     const kept = await read($, reports)
-    const ui = $.ui.resolve(e)
+    const ui = uiOf($, e)
+    // A terminal too narrow to dock the panel seats it above the prompt, a few rows tall
+    const isInline = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
     // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and
     // work that just finished (happy too for a workflow in its pause whose card turned green: it finished and its last round passed)
     const runningThere = elsewhere.filter(one => one.status === 'working' && !one.ask)
@@ -961,21 +1000,26 @@ const panelHooks = (on: On) => {
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
+    // A letter for each header button, in the terminal alone, and only while the panel has no password box to type in: there the
+    // letters are the person's words, never a press. An ask's reply box takes the keys itself (askFocused)
+    const isKeyed = e.surface === 'terminal' && !boxes.length
+    keyed = isKeyed
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
-    const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks)
+    const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
     return (
-      <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={e.props.scroll.bodyRows}>
         {!alone ? (
           // The mark and its lines across the whole width, so the chat's size is read whole; the buttons on a row of their own under
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off
-          <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+          <Box key="head" flexDirection="column" gap={isInline ? 0 : 1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
-              {/* Just moved to a newer version: the octopus turns blue and jumps for the moment */}
-              {updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
+              {/* Just moved to a newer version: the octopus turns blue and jumps for the moment. Above the prompt in a narrow terminal the
+                  panel is a few rows tall, so it keeps them for the work and leaves the octopus to the line above the prompt */}
+              {isInline ? null : updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
                 {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
@@ -989,17 +1033,25 @@ const panelHooks = (on: On) => {
                     {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
                   </Box>
                 )}
-                <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
-                <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
+                <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>
+                {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>}
               </Box>
             </Box>
-            <Box key="head-buttons" flexDirection="row" flexWrap="wrap" gap={1}>
-              {reportsButton($, ui, kept)}
-              {statsButton($, ui)}
-              {memoryButton($, ui)}
-              {configButton($, ui)}
-              {aboutButton($, ui)}
+            <Box key="head-buttons" flexDirection="row" flexWrap="wrap" columnGap={isKeyed ? 2 : 1} rowGap={0}>
+              {reportsButton($, ui, kept, isKeyed)}
+              {statsButton($, ui, isKeyed)}
+              {memoryButton($, ui, isKeyed)}
+              {configButton($, ui, isKeyed)}
+              {aboutButton($, ui, isKeyed)}
+              {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x Tab for keys</Text> : null}
             </Box>
+            {/* The terminal reaches a pane from the keys only after ctrl+x Tab, which nothing else tells; once it holds them each
+                button above answers its first letter */}
+            {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
+              <Text key="head-keys" dimColor wrap="wrap">
+                {!e.props.isFocused ? 'ctrl+x Tab for keys' : [...own, ...elsewhere].some(one => one.ask) ? 'What you type goes in the reply box · Tab leaves it for the keys shown · Esc: back to the chat' : 'Esc: back to the chat'}
+              </Text>
+            ) : null}
           </Box>
         ) : null}
         {!alone ? boxesPart($, ui) : null}

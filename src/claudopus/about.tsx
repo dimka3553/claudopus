@@ -12,9 +12,9 @@ const openAbout = async ($: EngineInterface) => {
   aboutOpens += 1
   await front($, ABOUT_PANE, ABOUT_TITLE)
 }
-const aboutButton = ($: EngineInterface, ui: Ui) => (
+const aboutButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="about-button" flexShrink={0}>
-    <ui.Button key={`about-open-${presses}`} label="About" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
+    <ui.Button key={`about-open-${presses}`} label="About" hotkey={isKeyed ? 'a' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
   </ui.Box>
 )
 // The version this chat loaded, read once from its own copy, so a chat on an older copy shows its own number; and a newer one the
@@ -35,7 +35,7 @@ const versionsOf = async ($: EngineInterface) => {
   const installed = await installedNow($).catch(() => '')
   return { version, installed, isWaiting: Boolean(version && installed && isNewer(installed, version)) }
 }
-const aboutView = async ($: EngineInterface, ui: Ui) => {
+const aboutView = async ($: EngineInterface, ui: Ui, surface?: string) => {
   const { Box, Link, Text } = ui
   const app = await (async () => (await $.session.version()).version)().catch(() => '')
   const { version, installed, isWaiting } = await versionsOf($)
@@ -52,7 +52,7 @@ const aboutView = async ($: EngineInterface, ui: Ui) => {
   return (
     <Box key="about" flexDirection="column" gap={1} flexGrow={1}>
       <Box key="about-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-        {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving')}
+        {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving', $, { surface, requestId: ABOUT_PANE })}
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold>Claudopus</Text>
           <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} is installed, new chats use it` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
