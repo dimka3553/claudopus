@@ -1273,6 +1273,9 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   expect(svgs[0]?.source).toContain('d="M9 0V20M9 10H22M27 15V20"')
   expect(svgs[1]?.source).toContain('d="M9 0V20M27 0V5Q27 10 32 10H40"')
   expect(svgs[1]?.source).toContain('<circle cx="45" cy="10" r="3.5" fill="#8A63F0"/>')
+  // A row at work has its slow ring round the dot; the closing row of those that ended is still
+  expect(svgs[1]?.source).toContain('<animate attributeName="r" values="3.5;8" dur="2.4s" repeatCount="indefinite"/>')
+  expect(svgs[2]?.source).not.toContain('<animate')
   expect(svgs[2]?.source).toContain('d="M9 0V5Q9 10 14 10H22"')
   expect(svgs[2]?.source).toContain('fill="none" stroke="#808080" stroke-width="1.5"/></svg>')
   // No row names a model, and none has the three dots: only the card itself does

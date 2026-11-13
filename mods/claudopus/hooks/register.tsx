@@ -557,12 +557,12 @@ const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[]
 const twigText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`
 // The same lines drawn thin, for a surface that draws, as tall as one line of text: the last row under a parent turns to it in a
 // curve, the line ends in a dot in the colour of how the row stands (a ring for the row of those that ended), and a row's own
-// helpers hang from that dot
+// helpers hang from that dot. A row at work has a soft ring that grows out of its dot and fades, slowly, again and again
 const TWIG_STEP = 18
 const TWIG_ENDED = '#4EBA65'
 const TWIG_FAILED = '#E5484D'
-const twigWidth = (t: Twig) => t.rails.length * TWIG_STEP + 32
-const twigSvg = (t: Twig, line: number, dot: string) => {
+const twigWidth = (t: Twig) => t.rails.length * TWIG_STEP + 36
+const twigSvg = (t: Twig, line: number, dot: string, isMoving = false) => {
   const mid = line / 2
   const x = (level: number) => level * TWIG_STEP + 9
   const own = x(t.rails.length)
@@ -572,7 +572,10 @@ const twigSvg = (t: Twig, line: number, dot: string) => {
     t.isLast ? `M${own} 0V${mid - 5}Q${own} ${mid} ${own + 5} ${mid}H${at - 5}` : `M${own} 0V${line}M${own} ${mid}H${at - 5}`,
     ...(t.hasKids ? [`M${at} ${mid + 5}V${line}`] : []),
   ]
-  const mark = dot ? `<circle cx="${at}" cy="${mid}" r="3.5" fill="${dot}"/>` : `<circle cx="${at}" cy="${mid}" r="3" fill="none" stroke="#808080" stroke-width="1.5"/>`
+  const ring = `<circle cx="${at}" cy="${mid}" r="3.5" fill="${dot}" opacity="0"><animate attributeName="r" values="3.5;8" dur="2.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.7;0" dur="2.4s" repeatCount="indefinite"/></circle>`
+  const mark = dot
+    ? `${isMoving ? ring : ''}<circle cx="${at}" cy="${mid}" r="3.5" fill="${dot}"/>`
+    : `<circle cx="${at}" cy="${mid}" r="3" fill="none" stroke="#808080" stroke-width="1.5"/>`
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`
 }
 
@@ -5047,13 +5050,14 @@ const panelHooks = (on: On) => {
     // ---- The helpers a piece of work started, inside its card as a tree: each one slim row joined to its parent by a line ----
     // A row is a dot at the end of its line, the helper's name, its time, and a mark to open it: a press on the name or the mark
     // opens its own Details. The dot is purple while it works, green once it finished, red when an error stopped it, grey when it
-    // was stopped; one that ended is dim. The lines are drawn as a card's three dots are, which the app is seen to draw
+    // was stopped; one that ended is dim, and one at work has a ring that slowly grows out of its dot and fades.
+    // The lines are drawn as a card's three dots are, which the app is seen to draw
     const twigLines = (t: Twig, key: string, status?: Todo['status']) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
           <table.Svg
             key={`${key}-svg`}
-            source={twigSvg(t, LINE, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '')}
+            source={twigSvg(t, LINE, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '', status === 'working')}
             alt={status ? { working: 'At work', done: 'Finished', failed: 'Stopped by an error', stopped: 'Stopped' }[status] : 'Ended'}
             width={twigWidth(t)}
             height={LINE}

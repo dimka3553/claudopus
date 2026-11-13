@@ -197,13 +197,14 @@ const panelHooks = (on: On) => {
     // ---- The helpers a piece of work started, inside its card as a tree: each one slim row joined to its parent by a line ----
     // A row is a dot at the end of its line, the helper's name, its time, and a mark to open it: a press on the name or the mark
     // opens its own Details. The dot is purple while it works, green once it finished, red when an error stopped it, grey when it
-    // was stopped; one that ended is dim. The lines are drawn as a card's three dots are, which the app is seen to draw
+    // was stopped; one that ended is dim, and one at work has a ring that slowly grows out of its dot and fades.
+    // The lines are drawn as a card's three dots are, which the app is seen to draw
     const twigLines = (t: Twig, key: string, status?: Todo['status']) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
           <table.Svg
             key={`${key}-svg`}
-            source={twigSvg(t, LINE, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '')}
+            source={twigSvg(t, LINE, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '', status === 'working')}
             alt={status ? { working: 'At work', done: 'Finished', failed: 'Stopped by an error', stopped: 'Stopped' }[status] : 'Ended'}
             width={twigWidth(t)}
             height={LINE}
