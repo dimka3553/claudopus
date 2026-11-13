@@ -102,7 +102,7 @@ const ASK_TEXT = 300
 const ASK_DETAILS = 12_000
 // Words by which an ask points at an explanation somewhere else (the chat, a report, a message still to come), never at something
 // shown, such as a code on a page or a picture
-const POINTS_AWAY = /\b(?:as (?:i |we )?(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out)|(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out) (?:in (?:the|my|this) (?:chat|report|message|result|explanation)|above|below|earlier|before)|(?:see|per|in) (?:my|the) (?:report|last message|explanation|message above)|(?:the )?(?:differences|explanation|details|summary) (?:above|below))|\(see (?:above|below)\)/i
+const POINTS_AWAY = /\b(?:as (?:i |we )?(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out|outlined|noted|agreed|said)|(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out|outlined|noted|said|wrote) (?:in (?:the|my|this) (?:chat|report|message|result|explanation)|above|below|earlier|before)|(?:see|per) (?:my|the) (?:report|last message|explanation|message above)|in my (?:report|last message)|(?:the )?(?:differences|changes) (?:above|below|i listed)|see (?:above|below)\b)|\(see (?:above|below)\)/i
 // How much of what an ask is about the small card shows; Details shows it whole, as does the chat's notice
 const DETAILS_ON_CARD = 1500
 // How much of it the row the chat's model reads carries: the person has it whole, and the chat stays small

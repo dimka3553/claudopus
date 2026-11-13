@@ -3791,11 +3791,11 @@ test('an ask carries what it is about, whole, on the small card, in Details and 
   expect(String(away.result)).toContain('Not shown: the ask points at an explanation it does not carry')
   expect(await list.find({ type: 'Text', text: /Release PR 54/ })).toBeUndefined()
   expect(notified.some(line => line.includes('Release PR 54'))).toBe(false)
-  for (const text of ['Release it, as I explained?', 'Release it with the differences above?', 'Release it (see above)?', 'Release it, as described in my report?']) {
+  for (const text of ['Release it, as I explained?', 'Release it with the differences above?', 'Release it (see above)?', 'Release it, as described in my report?', 'Release it as agreed?', 'Release it, see above?']) {
     expect(String((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${text}`, agentId: 'a1', text, choices: ['Release it', 'Not now'] } as never)).result)).toContain('Not shown')
   }
   // Asks about something shown, such as a code on a page or a picture, are not taken for one
-  for (const text of ['Paste the code shown in your terminal.', 'Pick the logo shown in the pictures.', 'Should I post the summary in the chat?']) {
+  for (const text of ['Paste the code shown in your terminal.', 'Pick the logo shown in the pictures.', 'Should I post the summary in the chat?', 'Move the summary above the chart?', 'Add these numbers in the report?']) {
     expect(String((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${text}`, agentId: 'a1', text } as never)).result)).toContain('Shown on your card')
   }
   // A go-ahead with nothing under it is shown, and said back to the work
@@ -3819,6 +3819,8 @@ test('an ask carries what it is about, whole, on the small card, in Details and 
   expect(notice).toContain(`Release PR 54 to production?\nWhat it is about:\n${differences.replaceAll('**', '')}\nAnswers: Release it · Not now`)
   const relay = [...appended].reverse().find(line => line.startsWith('undefined: The background work "Fix the wallet" asked the person') && line.includes('Release PR 54 to production?')) ?? ''
   expect(relay).toContain(`what it is about, shown to the person whole with it on the card and in the notice: ${differences}`)
+  // The chat is told not to say it again: the person has just read it
+  expect(relay).toContain('do not repeat what it is about')
   // A pressed answer still matches the ask that carries details
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Release it"') && line.includes('Release PR 54 to production?')))).toBeDefined()

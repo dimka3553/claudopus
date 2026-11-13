@@ -502,7 +502,7 @@ const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: stri
     .filter(Boolean)
     .join('\n')
 const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
-  `The background work "${title}" asked {name}, on its card and in this chat as a notice from the Claudopus panel that {name} sees and you do not: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, shown to {name} whole with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} has it already: do not pass it on, do not answer it yourself, and start no work for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
+  `The background work "${title}" asked {name}, on its card and in this chat as a notice from the Claudopus panel that {name} sees and you do not: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, shown to {name} whole with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} has it already: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and start no work for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
 const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks.`
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
@@ -4254,7 +4254,7 @@ const ASK_TEXT = 300
 const ASK_DETAILS = 12_000
 // Words by which an ask points at an explanation somewhere else (the chat, a report, a message still to come), never at something
 // shown, such as a code on a page or a picture
-const POINTS_AWAY = /\b(?:as (?:i |we )?(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out)|(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out) (?:in (?:the|my|this) (?:chat|report|message|result|explanation)|above|below|earlier|before)|(?:see|per|in) (?:my|the) (?:report|last message|explanation|message above)|(?:the )?(?:differences|explanation|details|summary) (?:above|below))|\(see (?:above|below)\)/i
+const POINTS_AWAY = /\b(?:as (?:i |we )?(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out|outlined|noted|agreed|said)|(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out|outlined|noted|said|wrote) (?:in (?:the|my|this) (?:chat|report|message|result|explanation)|above|below|earlier|before)|(?:see|per) (?:my|the) (?:report|last message|explanation|message above)|in my (?:report|last message)|(?:the )?(?:differences|changes) (?:above|below|i listed)|see (?:above|below)\b)|\(see (?:above|below)\)/i
 // How much of what an ask is about the small card shows; Details shows it whole, as does the chat's notice
 const DETAILS_ON_CARD = 1500
 // How much of it the row the chat's model reads carries: the person has it whole, and the chat stays small
@@ -6665,7 +6665,8 @@ const bandHooks = (on: On) => {
                 </Text>
               </Box>
             </Box>
-            {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{'    What it is about is in the chat above and on its card'}</Text> : null}
+            {/* The chat's notice with what it is about went only to the chat that started the work */}
+            {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{cards.includes(first) ? '    What it is about is in the chat above and on its card' : '    What it is about is on its card'}</Text> : null}
             {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
             <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
               {answers.map((choice, n) => (
