@@ -100,7 +100,16 @@ const sentReplies = new Map<string, Sent>()
 const pending = new Map<string, string>()
 // The asks of this chat's work already answered, by work and when it asked
 const answeredAsks = new Set<string>()
-const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
+// Answers on their way, so a press hook can wait for the one its press started (a button's handler does not await it)
+const answersOnWay = new Set<Promise<unknown>>()
+const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
+  const run = answerNow($, one, choice, isReply)
+  if (one.chat) return run
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   if (one.chat) return answerElsewhere($, one, choice, isReply)
   const ask = one.ask
   const said = choice.trim()
@@ -133,22 +142,60 @@ const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply 
   await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line })
 }
 // An answer to work that has ended starts that work again with it, as a message to it: the chat then gets the work's report as
-// it gets any, and nothing goes into the chat in the person's place. A work that cannot be started again leaves the answer to the
-// chat as a notice the person sees and a row its model reads, with no turn of its own
+// it gets any, and nothing goes into the chat in the person's place.
+// The engine runs what a mod sends from outside its hooks (a timer, a button's own handler) under the mod's own origin, and work
+// started again that way runs with every hook of the mod skipped: each of its panel tools answered "no tool.call hook answered",
+// and its ask never reached the card. So the message waits here and is sent from inside a hook (the press's or the reply's own,
+// a prompt, the end of a turn, a change in how full the chat is), where the work it wakes keeps its tools. Not from a tool call's
+// hook: the engine leaves the calling hook out of what that call raises, and may of what it starts, and work woken there could miss its own tool calls' hook. One no hook takes within WAKE_WAIT, in a chat where
+// nothing runs, is sent from the timer all the same: the work does what it was asked, and its rules have it end with any ask as
+// its report's first line when the panel does not answer, which the chat puts to the person. One a copy a reload replaced still
+// holds goes to the chat instead: a notice the person sees and a row its model reads, with no turn of its own
+const WAKE_WAIT = 4000
+// Each wake carries every answer joined into it, so each card's line and the chat's notice are settled for every one
+const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[] }[] = []
 const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
   sentReplies.set(one.id, { ...sent, to: 'work' })
   redraw($)
-  const r = await $.session.send({ to: { agentId: target }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-  if (r.isDelivered) return
-  if (pending.get(target) === one.id) pending.delete(target)
-  await log($, `work ${target} not started again with an answer: ${r.reason}`)
-  sentReplies.set(one.id, { ...sent, to: 'chat' })
+  // One message for a work: a second answer for the same one joins the first
+  const same = wakes.find(w => w.target === target)
+  if (same) return void ((same.text = `${same.text}\n\n${text}`), same.answers.push({ one, sent }))
+  const wake = { target, text, answers: [{ one, sent }] }
+  wakes.push(wake)
+  void $.clock.after(WAKE_WAIT, () => {
+    const at = wakes.indexOf(wake)
+    if (at < 0) return
+    wakes.splice(at, 1)
+    void log($, `work ${target} started again from a timer: no hook of the mod ran within ${WAKE_WAIT / 1000} s, so its panel tools will not answer`)
+    void sendWake($, wake)
+  })
+}
+// Sends what waits, from inside the hook that calls it; a press's or a reply's hook first waits for the answer it started
+const sendWakes = async ($: EngineInterface, isAnswering = false) => {
+  if (isAnswering && answersOnWay.size) await Promise.allSettled([...answersOnWay])
+  while (wakes.length) {
+    const wake = wakes.shift()
+    if (wake) await sendWake($, wake)
+  }
+}
+const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
+  const r = (await isReplaced($))
+    ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
+    : await $.session.send({ to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  if (!r.isDelivered) await wakeFailed($, wake, r.reason)
+}
+const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
+  if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
+  await log($, `work ${target} not started again with an answer: ${reason}`)
+  for (const { one, sent } of answers) {
+    sentReplies.set(one.id, { ...sent, to: 'chat' })
+    const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))
+    $.ui.log(said)
+    await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: `${said}\n${named(ANSWER_FOR_CHAT_RELAY)}` }] } }).catch(err => log($, `chat not told of an answer: ${String(err)}`))
+  }
   redraw($)
-  const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))
-  $.ui.log(said)
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: `${said}\n${named(ANSWER_FOR_CHAT_RELAY)}` }] } }).catch(err => log($, `chat not told of an answer: ${String(err)}`))
 }
 // Every ask of this chat's work is also sent into the chat, as a message from the mod, with its answers and pictures: the chat
 // shows it to the person, and an answer they type there goes to the work as a press on the card does. Kept by card, so an ask
@@ -209,7 +256,7 @@ const replyRead = ($: EngineInterface, agentId: string) => {
 // Work whose run ended with an answer written in but never read is started again with it
 const replyUnread = async ($: EngineInterface, agentId: string) => {
   const card = pending.get(agentId)
-  if (card === undefined) return
+  if (card === undefined || wakes.some(w => w.target === agentId)) return
   pending.delete(agentId)
   const sent = sentReplies.get(card)
   const one = (await read($, todos)).find(todo => todo.id === card)
