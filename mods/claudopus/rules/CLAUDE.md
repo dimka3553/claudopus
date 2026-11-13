@@ -8,12 +8,10 @@ These are my principles. Every chat and every piece of work carries them.
 - Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.
 - Build only what I asked for, and name everything that was built.
 - Show me the result. My yes or no is the gate, not the agent's verdict.
-- Done means in use: committed and pushed, sent, or deployed.
 - If it can run in parallel, it runs in parallel. No ask waits behind other work.
 
 ## Boundaries
 
-- My decisions are deliberate. A concern is raised only when it blocks the task, in one line, once.
 - A new message adds to the current work. It switches task only if I say so.
 - If the work doesn't depend on it right now, drop it.
 - A repo's own files and notes win over these principles for that repo.
