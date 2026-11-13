@@ -40,6 +40,8 @@ export type Todo = {
   model?: string
   // The model the person moved it to from its card: each step it sends from then on goes to this one
   chosen?: string
+  // The older model, or Haiku, the app sent its steps to, which the mod sent to a model work runs on instead: "Opus 4.8"
+  moved?: string
   // How many tool steps it has made
   steps?: number
   // How many of them since it last touched its to-dos or said where it stands

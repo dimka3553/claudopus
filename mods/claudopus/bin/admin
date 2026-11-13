@@ -47,16 +47,18 @@ check() {
   return 1
 }
 
-# The Claudopus panel beside the chat asks, in every chat. The request names what is needed and the chat that asks, and never
-# holds a value; what is typed in the panel goes into this Mac's keychain under the request's id, and is taken from there and
+# The Claudopus panel beside the chat asks, in every chat. The request names what is needed in fields (kind admin or secret, the
+# Mac as host or the key as name, and why it asks again), which the panel words itself, and the chat that asks; it holds no text that
+# is shown and never a value; what is typed in the panel goes into this Mac's keychain under the request's id, and is taken from there and
 # removed at once. 1 when it is cancelled there or nothing comes in 590 s, under the longest a Bash call may run; 2 when no chat
 # with a panel takes the request in its first 15 s (the .told mark), as in a -p run with no chat open on this Mac
 box_ask() {
-  local text=$1 boxes=${CLAUDOPUS_BOXES:-$HOME/.claude/claudopus/boxes} id value i status=1 taken=${CLAUDOPUS_BOX_TAKEN:-15}
+  local boxes=${CLAUDOPUS_BOXES:-$HOME/.claude/claudopus/boxes} id value i status=1 taken=${CLAUDOPUS_BOX_TAKEN:-15}
   id=$(/usr/bin/uuidgen | /usr/bin/tr '[:upper:]' '[:lower:]')
   [ -n "$id" ] || return 1
   /bin/mkdir -p "$boxes" || return 1
-  /usr/bin/perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({id => $ARGV[0], text => $ARGV[1], chat => $ARGV[2], at => time() * 1000}), "\n"' "$id" "$text" "${CLAUDE_CODE_SESSION_ID:-}" >"$boxes/$id.part" &&
+  # $@: the request's fields as name value pairs; an empty value is left out
+  /usr/bin/perl -MJSON::PP -e 'my %r = (id => shift, chat => shift, at => time() * 1000); while (@ARGV) { my ($k, $v) = splice @ARGV, 0, 2; $r{$k} = $v if length $v } print JSON::PP->new->canonical->encode(\%r), "\n"' "$id" "${CLAUDE_CODE_SESSION_ID:-}" "$@" >"$boxes/$id.part" &&
     /bin/mv "$boxes/$id.part" "$boxes/$id.json" || return 1
   trap '/bin/rm -f "$boxes/$id.json" "$boxes/$id.told"; /usr/bin/security delete-generic-password -s claudopus-box -a "$id" >/dev/null 2>&1' EXIT
   for ((i = 0; i < 590; i++)); do
@@ -81,11 +83,13 @@ box_ask() {
 # Reached over ssh, nobody sees this Mac's screen
 afar() { [ -n "${CLAUDE_SSH_DAEMON_CHILD:-}${SSH_CONNECTION:-}${SSH_TTY:-}" ]; }
 
+# $1: why it asks again, empty or refused
 ask() {
-  local label=$mac said=$1 text status
+  local label=$mac again=$1 said='' text status
   [ "$mac" = here ] && label="this Mac"
+  [ "$again" = refused ] && said='That password was refused. '
   text="${said}Claudopus needs the admin password of $label to run an admin command. It is kept only in this Mac's keychain, and later admin commands on $label run without asking again until it is forgotten."
-  box_ask "$text"
+  box_ask kind admin host "$mac" again "$again"
   status=$?
   [ "$status" = 2 ] || return "$status"
   # Only where no chat draws a panel on this Mac: a box on its screen, when someone can see it
@@ -108,9 +112,9 @@ if [ "$mac" != here ] && ! ssh_to true </dev/null 2>/dev/null; then
 fi
 
 if ! kept >/dev/null; then
-  said=''
+  again=''
   for try in 1 2 3; do
-    pw=$(ask "$said") || { echo "No password was typed for $mac." >&2; exit 3; }
+    pw=$(ask "$again") || { echo "No password was typed for $mac." >&2; exit 3; }
     [ -n "$pw" ] || { echo "No password was typed for $mac." >&2; exit 3; }
     printf '%s\n' "$pw" | check
     status=$?
@@ -126,7 +130,7 @@ if ! kept >/dev/null; then
     unset pw
     [ "$status" = 5 ] && { echo "$mac could not be reached over SSH." >&2; exit 5; }
     [ "$try" = 3 ] && { echo "The password typed for $mac was refused three times." >&2; exit 4; }
-    said='That password was refused. '
+    again=refused
   done
 fi
 

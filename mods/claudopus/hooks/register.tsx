@@ -208,11 +208,33 @@ const share = (tokens: number, window: number) => (window ? `context ${percent(t
 
 // A model's name as the app writes it, from its id or alias: "Opus 5.5". Nothing for a name it cannot read
 const modelName = (id: string) => {
-  const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:-(\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
+  const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:[-.](\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
   return m?.[1] ? `${m[1].charAt(0).toUpperCase()}${m[1].slice(1)}${m[2] ? ` ${m[2]}${m[3] ? `.${m[3]}` : ''}` : ''}` : ''
 }
 // The models the person can move running work to from its card, by the id each step is sent with. Never Haiku
 const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2']
+// The model a step of work is sent to in place of one no work runs on: an older version than the newest above, which the app moves
+// work to after its safeguards flag a message, goes to the newest Fable or Sonnet, and Haiku to Sonnet. Nothing for a model work
+// may run on: the three above or a newer version, a name with no version, which the app reads as the newest, and Haiku when the
+// settings name it for a kind of work
+const INSTEAD: Record<string, string> = { Opus: 'claude-fable-5-2', Fable: 'claude-fable-5-2', Sonnet: 'claude-sonnet-5-5', Haiku: 'claude-sonnet-5-5' }
+const rightModel = (id: string): string | undefined => {
+  const [family = '', version = ''] = modelName(id).split(' ')
+  if (!family) return undefined
+  if (family === 'Haiku') return Object.values(models).includes('haiku') ? undefined : INSTEAD.Haiku
+  if (!version) return undefined
+  const newest = MODELS.map(modelName).find(one => one.startsWith(family))?.split(' ')[1] ?? ''
+  const [major = 0, minor = 0] = version.split('.').map(Number)
+  const [topMajor = 0, topMinor = 0] = newest.split('.').map(Number)
+  // An id that leads with a date or an old numbering ("claude-3-5-sonnet-20241022") is an older model too
+  const isOlder = major > 99 || major < topMajor || (major === topMajor && minor < topMinor)
+  return isOlder ? INSTEAD[family] : undefined
+}
+// The work and helpers whose steps the app sent to such a model, each said in the log once
+const sentElsewhere = new Set<string>()
+// What an Agent call is answered when it names such a model
+const WRONG_MODEL = (named: string) =>
+  `No work runs on ${modelName(named) || named}. Name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
 // The line written into a piece of work's own chat when the person moves it to another model; the panel draws it as a line of its own
 const MODEL_HEAD = 'Model changed to '
 const MODEL_LINE = /^Model changed to (.+?) at (\d{1,2}:\d{2})\./
@@ -346,6 +368,107 @@ const pushesMain = (command: string): boolean =>
     if (args.includes('--no-verify')) return true
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
+// The boxes of the password and key runners are theirs alone: work never writes into their folder, ~/.claude/claudopus/boxes, nor
+// reads their keychain service, claudopus-box. A command is read as the shell splits it, in small letters (this Mac's files take any),
+// with each simple {a,b} tried each way, then as words split at any sign a path or a program joins words with; a word counts when it
+// is the name itself or a pattern (*, ?, [...]) that matches it, and a lone * matches nothing, so a folder listed whole is not taken
+// for the boxes. The folder is .claude (or the setting that moves it) followed by claudopus (a cd between them aside), then boxes; the
+// service is claudopus-box with security (or a program's keychain library). A command that only reads and writes nothing (a search, a
+// listing, git and gh, which a commit message naming the folder runs through) counts only for what it sends into a file with >.
+// Setting the runners' own folder by hand counts too. This stops slips and common tricks: a name pieced together as the command runs,
+// a link made to the folder, or a script run some other way gets past it, so it is no wall
+const BOX_READERS = ['rg', 'grep', 'egrep', 'fgrep', 'ls', 'du', 'git', 'gh', 'wc', 'head', 'tail', 'less', 'file', 'stat', 'tree']
+const BOX_WRAPPERS = ['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'nice', 'timeout', 'xargs', 'caffeinate']
+// Where a command's own words start, past settings and what runs a command it is handed
+const commandAt = (words: string[]) => {
+  let i = 0
+  for (;;) {
+    while (i < words.length && /^\w+=/.test(words[i]!)) i++
+    const head = (words[i] ?? '').split('/').pop() ?? ''
+    if (!BOX_WRAPPERS.includes(head)) return i
+    i++
+    // its own flags and numbers (nice's -n 5, timeout's duration), and the value sudo's -u and the like take
+    while (i < words.length && (words[i]!.startsWith('-') || /^\d[\d.]*[smhd]?$/.test(words[i]!))) i += head === 'sudo' && /^-[ugCchpUrt]$/.test(words[i]!) ? 2 : 1
+  }
+}
+const BOX_WORDS = (text: string) => text.replace(/["'\\`]/g, '').split(/[^a-z0-9._*?[\]-]+/).filter(Boolean)
+const wordIs = (word: string, name: string) => {
+  // A list's brackets around a word, as a program's code writes it, are not part of it
+  const bare = word.replace(/^\[+(?=[^\]]*$)/, '').replace(/(?<=^[^[]*)\]+$/, '')
+  if (word === name || bare === name) return true
+  if (!/[*?[]/.test(bare) || /^[*?]+$/.test(bare)) return false
+  try {
+    return new RegExp(`^${bare.replace(/[.+^${}()|\\-]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.').replace(/\[!/g, '[^')}$`).test(name)
+  } catch {
+    return false
+  }
+}
+const namesBoxes = (text: string): boolean => {
+  const words = BOX_WORDS(text)
+  const has = (name: string) => words.some(word => wordIs(word, name))
+  const isFolder = words.some((word, i) => {
+    if (!wordIs(word, '.claude') && word !== 'claude_config_dir') return false
+    // claudopus within a few words after it (a cd, or a command started there, between them), then boxes
+    const j = words.slice(i + 1, i + 6).findIndex(one => wordIs(one, 'claudopus'))
+    return j >= 0 && words.slice(i + 2 + j).some(one => wordIs(one, 'boxes'))
+  })
+  return isFolder || (has('claudopus-box') && (has('security') || has('keyring') || has('ksecattrservice')))
+}
+const touchesBoxes = (text: string): boolean => {
+  if (/\bCLAUDOPUS_BOX(?:ES|_TAKEN)\b/.test(text)) return true
+  const kept = shellWords(text.toLowerCase())
+    .map(words => {
+      const part = words.join(' ')
+      if (!BOX_READERS.includes((words[commandAt(words)] ?? '').split('/').pop() ?? '')) return part
+      return part.includes('>') ? part.slice(part.indexOf('>')) : ''
+    })
+    .join('\n')
+  return [0, 1, 2, 3].some(k => namesBoxes(k ? kept.replace(/\{([^{}]*,[^{}]*)\}/g, (_, alts: string) => alts.split(',')[k - 1] ?? '') : kept))
+}
+// A file a command runs, against the folder it runs in (a cd in it moves that): the first word of each of its commands when it is a
+// path, what a shell, source or another language's program is handed to run or reads on its stdin, and a file cat pipes into a
+// shell. The system's own programs are not read
+const RUNNERS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'source', '.', 'python', 'python3', 'node', 'bun', 'deno', 'perl', 'ruby', 'php', 'osascript', 'swift', 'tsx', 'ts-node']
+const filesRun = (command: string, home: string, from: string): string[] => {
+  let folder = from
+  const found: string[] = []
+  const parts = shellWords(command)
+  parts.forEach((words, n) => {
+    const i = commandAt(words)
+    const head = words[i] ?? ''
+    const name = head.split('/').pop() ?? ''
+    if ((name === 'cd' || name === 'pushd') && words[i + 1]) return void (folder = pathOf(words[i + 1]!, home, folder))
+    const take = (path: string) => found.push(pathOf(path, home, folder))
+    if (RUNNERS.includes(name) || /^python3(?:\.\d+)?$/.test(name)) {
+      const rest = words.slice(i + 1).filter(word => word !== 'run')
+      const fed = rest.findIndex(word => word.startsWith('<'))
+      if (fed >= 0) take(rest[fed] === '<' ? (rest[fed + 1] ?? '') : rest[fed]!.slice(1))
+      const at = rest.findIndex(word => !word.startsWith('-') && !word.startsWith('<'))
+      // A program handed its code inline (-c, -e) is read as part of the command already
+      if (at >= 0 && !rest.slice(0, at).some(flag => /^-[cem]$/.test(flag))) take(rest[at]!)
+      // a shell's -c is a command of its own, whose files are looked for the same way
+      if (['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'].includes(name) && at >= 0 && rest[at - 1] === '-c') found.push(...filesRun(rest[at]!, home, folder))
+      // Nothing to run named: what it reads is what the command before it gives, such as a file cat prints
+      const before = parts[n - 1] ?? []
+      if (at < 0 && fed < 0 && (before[commandAt(before)] ?? '').split('/').pop() === 'cat') for (const one of before.slice(commandAt(before) + 1)) if (!one.startsWith('-')) take(one)
+      return
+    }
+    if (head.includes('/') && !/^\/(?:usr|bin|sbin|System|Library\/Apple)\//.test(head)) take(head)
+  })
+  return found
+}
+// A path as written, with ~ and $HOME read and . and .. taken out, against the folder given
+const pathOf = (path: string, home: string, folder: string) => {
+  const full = path.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, home)
+  const parts: string[] = []
+  for (const part of (full.startsWith('/') ? full : `${folder}/${full}`).split('/')) {
+    if (part === '..') parts.pop()
+    else if (part && part !== '.') parts.push(part)
+  }
+  return `/${parts.join('/')}`
+}
+const NO_BOXES =
+  'The boxes of the password and key runners are theirs alone: work never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner and for a key only through the secret runner the work rules name.'
 const NO_PUSH = 'Work never pushes or merges to main itself, so two pieces of work never release at once: commit on your own branch and run the release runner the work rules name, from your worktree.'
 // How long the names of kept keys are trusted before they are asked again
 const SECRETS_MS = 60_000
@@ -5098,7 +5221,38 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
 // and removes it. It never reaches the chat, a notice, the saved words, a file or the log. The chat that asked (the request names it)
 // takes the request first; any other chat with a screen after BOX_GRACE. Taking it leaves the .told mark, which tells the runner a
 // panel asks: with none in its first seconds, nothing on this Mac draws one (a -p run with no chat open) and it falls back to its own
+// The box's wording is the panel's own, made from the request's fields: its kind (admin or secret), the Mac (host) or the key's name
+// (name), and why it asks again (again). A request carries no text that is shown: one with any field the panel does not know how to
+// word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
+// any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
+// it is no wall against code set on getting round it
 type Asked = { id: string; text: string; at: number; chat?: string }
+// What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
+const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
+const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/
+const BOX_AGAIN: Record<string, string> = {
+  refused: 'That password was refused. ',
+  short: 'That was shorter than 4 characters. ',
+  control: 'That held a line break or another control character. ',
+}
+// The wording for a request, or undefined for one the panel does not draw
+const boxWording = (one: Record<string, unknown>): string | undefined => {
+  // A reason it does not know is left out
+  const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
+  if (one.kind === 'admin') {
+    if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined) return undefined
+    const mac = one.host === 'here' ? 'this Mac' : one.host
+    return `${again}Claudopus needs the admin password of ${mac} to run an admin command. It is kept only in this Mac's keychain, and later admin commands on ${mac} run without asking again until it is forgotten.`
+  }
+  if (one.kind === 'secret') {
+    if (one.host !== undefined) return undefined
+    // No name: the first box of a key saved by hand asks its name
+    if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.'
+    if (typeof one.name !== 'string' || !BOX_NAME.test(one.name)) return undefined
+    return `${again}Claudopus needs ${one.name}. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print.`
+  }
+  return undefined
+}
 let boxes: Asked[] = []
 // What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
 const boxDrafts = new Map<string, string>()
@@ -5139,8 +5293,9 @@ const lookBoxes = async ($: EngineInterface) => {
     const id = entry.name.replace(/\.json$/, '')
     if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
     try {
-      const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Partial<Asked>
-      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
+      const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Record<string, unknown>
+      const text = one && typeof one === 'object' ? boxWording(one) : undefined
+      if (one.id === id && text && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text, at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) {
@@ -5975,6 +6130,32 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 // Work starting and running: the chat's own thread kept to handing work over, how full the chat is, each step of work, and new
 // work's card
 
+// A call that writes into the runners' boxes folder or reads their keychain service: a command that names them, a file it runs that
+// does, or a file written or edited there. The runners themselves, the mod's own bin/admin and bin/secret, are what may
+const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<boolean> => {
+  if (!dir) return false
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) {
+    // in small letters, as this Mac's files take any; and a runner of the mod's planted where its copies are let through unread
+    const path = pathOf(String(input.file_path ?? input.notebook_path ?? ''), home, cwd || home).toLowerCase()
+    const boxes = boxesDir().toLowerCase()
+    return path === boxes || path.startsWith(`${boxes}/`) || path.startsWith(`${home.toLowerCase()}/.claude/plugins/cache/claudopus/`)
+  }
+  if (e.tool !== 'Bash') return false
+  const command = String(input.command ?? '')
+  if (touchesBoxes(command)) return true
+  const root = $.plugin.root
+  for (const path of filesRun(command, home, cwd || home)) {
+    const runner = /\/bin\/(admin|secret)$/.exec(path)?.[1]
+    if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret)$`).test(path))) continue
+    const text = (await readOr($, path)).slice(0, 1_000_000)
+    if (runner && text && text === (await readOr($, `${root}/bin/${runner}`))) continue
+    if (touchesBoxes(text)) return true
+  }
+  return false
+}
+
 const workHooks = (on: On) => {
 
   // A chat's own thread starts agents and talks to them; the work runs in the agents, which carry an agent id
@@ -5993,6 +6174,10 @@ const workHooks = (on: On) => {
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool)
       }
+    }
+    if (await isBoxesTouched($, e)) {
+      await log($, `refused ${e.tool} touching the password and key boxes`)
+      return { deny: NO_BOXES }
     }
     if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that reads the keychain')
@@ -6116,6 +6301,12 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       return r
     }
+    // No agent, the chat's or a work's helper, is started on an older model or on Haiku
+    if (!isOff && e.tool === 'Agent' && rightModel(String((e as { model?: unknown }).model ?? ''))) {
+      const wrong = String((e as { model?: unknown }).model)
+      await log($, `refused an Agent call on ${modelName(wrong)}`)
+      return { deny: WRONG_MODEL(wrong) }
+    }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
     // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
@@ -6167,7 +6358,18 @@ const workHooks = (on: On) => {
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-    const r = yield* next(chosen && modelName(chosen) !== modelName(e.model) ? { ...e, model: chosen } : e)
+    // A step the app sends to an older model or to Haiku (it moves work to an older model after its safeguards flag a message) goes
+    // to a model work runs on instead, and the work's card says which model it was kept off
+    const instead = id !== undefined && !chosen && !isOff ? rightModel(e.model) : undefined
+    if (id !== undefined && instead && !sentElsewhere.has(`${id} ${e.model}`)) {
+      sentElsewhere.add(`${id} ${e.model}`)
+      await log($, `work ${id} was sent to ${modelName(e.model)} by the app: its steps go to ${modelName(instead)}`)
+    }
+    // The card says so only while it holds: not once the app sends its steps to a right model again, or the person picked one
+    const moved = instead ? modelName(e.model) : undefined
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
+    const to = chosen && modelName(chosen) !== modelName(e.model) ? chosen : instead
+    const r = yield* next(to ? { ...e, model: to } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)
@@ -6582,8 +6784,10 @@ const panelHooks = (on: On) => {
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
+    // Work the app sent to an older model says which one it was kept off; work that answers from one all the same says so
+    const offModel = (one: Todo) => (rightModel(one.model ?? '') ? 'not a model work should run on' : one.moved ? `kept off ${one.moved}` : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -6616,7 +6820,7 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
         )
-      const rest = [one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
+      const rest = [offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
       return (
         <Box flexDirection="row" alignItems="flex-start">
           <Button
