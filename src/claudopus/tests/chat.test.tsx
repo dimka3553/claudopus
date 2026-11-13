@@ -74,6 +74,63 @@ test('work uses a kept key without reading it: the keychain is not read, and wha
   expect(JSON.stringify(shown.result)).not.toContain('sk-live-123456')
 })
 
+test('work never writes into the boxes folder or reads the boxes\' keychain service, by any common way, while the admin and secret runners still run', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
+  const bin = /(\/\S*mods\/claudopus\/bin)\/secret NAME/.exec(prompts[0] ?? '')?.[1] ?? ''
+  expect(bin).not.toBe('')
+  let n = 0
+  const call = async (input: Record<string, unknown>, agentId = 'w1') => (await $.tool.call({ tool: 'Bash', tool_use_id: `b${n++}`, agentId, ...input } as never)).deny
+  const refused = async (command: string, agentId?: string) => expect([command, await call({ command }, agentId)]).toEqual([command, expect.stringContaining('theirs alone')])
+  const runs = async (command: string) => expect([command, await call({ command })]).toEqual([command, undefined])
+  // A direct command and redirections, in every spelling of the folder
+  await refused(`echo '{"id":"x","kind":"admin","host":"here"}' > ~/.claude/claudopus/boxes/x.json`)
+  await refused('cat req.json >> "$HOME/.claude/claudopus/boxes/$(uuidgen).json"')
+  await refused('cp req.json ${HOME}/.claude//claudopus/./boxes/')
+  await refused('tee /home/sam/.claude/claudopus/../claudopus/boxes/a.json < req.json')
+  await refused('cp req.json ~/.cl*/claudo*/box?s/')
+  await refused(`cp req.json ~/.claude/"claud"'opus'/bo\\xes/`)
+  await refused('cd ~/.claude && cd claudopus && cp /tmp/req.json boxes/a.json')
+  await refused('cp req.json "$CLAUDE_CONFIG_DIR/claudopus/boxes/"')
+  // Pointing the runners at a folder of one's own
+  await refused(`CLAUDOPUS_BOXES=/tmp/mine ${bin}/secret API_KEY here 'true'`)
+  // Reading the service, with or without the value
+  await refused('security find-generic-password -s claudopus-box -a 0f1e2d3c-4b5a-4987-a654-3210fedcba98')
+  await refused("/usr/bin/security find-generic-password -s 'claudopus-box' -a x -w")
+  await refused('security find-generic-password -s claudopus-b* -a x')
+  // Another language's program handed the code inline: a helper's call
+  await refused(`python3 -c "import subprocess; subprocess.run(['security','find-generic-password','-s','claudopus-box','-a','x'])"`)
+  await refused(`node -e "require('fs').writeFileSync(require('os').homedir() + '/.claude/claudopus/boxes/a.json', '{}')"`)
+  // A script that does it, run every usual way, and a planted copy named like a runner
+  files.set('/repo/plant.sh', 'cat > ~/.claude/claudopus/boxes/a.json <<EOF\n{"kind":"admin","host":"here"}\nEOF\n')
+  files.set('/tmp/peek.py', "import subprocess\nsubprocess.run(['/usr/bin/security', 'find-generic-password', '-s', 'claudopus-box', '-a', 'x', '-w'])\n")
+  files.set('/tmp/bin/secret', '#!/bin/bash\nmkdir -p "$HOME/.claude/claudopus/boxes"\n')
+  await refused('bash plant.sh')
+  await refused('./plant.sh')
+  await refused('cd /tmp && sh /repo/plant.sh')
+  await refused('env FOO=1 python3 /tmp/peek.py')
+  await refused('source /repo/plant.sh')
+  await refused("/tmp/bin/secret API_KEY here 'true'")
+  // A helper work starts is held to it as the work is
+  await refused('bash /repo/plant.sh', 'helper-1')
+  // A file written or edited into the folder
+  for (const [tool, path] of [['Write', '/home/sam/.claude/claudopus/boxes/a.json'], ['Edit', '~/.claude/claudopus/boxes/b.json'], ['Write', '/home/sam/.claude/claudopus/./boxes']] as const)
+    expect([tool, path, (await $.tool.call({ tool, tool_use_id: `b${n++}`, agentId: 'w1', file_path: path, content: '{}', old_string: 'a', new_string: 'b' } as never)).deny]).toEqual([tool, path, expect.stringContaining('theirs alone')])
+  // The runners themselves, and what only looks near the folder or the service, still run
+  files.set('keychain:API_KEY', 'sk-live-123456')
+  await runs(`${bin}/secret API_KEY here 'curl -H "Authorization: Bearer $API_KEY" https://api.example.com'`)
+  await runs(`${bin}/admin here 'whoami'`)
+  await runs(`bash ${bin}/secret API_KEY here 'true'`)
+  await runs('cat src/claudopus/boxes.tsx && rg -n boxes src/claudopus')
+  await runs('ls ~/.claude/claudopus/*')
+  await runs('security find-generic-password -s claudopus-secret -a API_KEY')
+  files.set('/repo/build.sh', 'node src/claudopus/build.mjs\n')
+  await runs('bash build.sh')
+  expect((await $.tool.call({ tool: 'Write', tool_use_id: `b${n++}`, agentId: 'w1', file_path: '/home/sam/.claude/claudopus/streams/x.md', content: 'boxes' } as never)).deny).toBeUndefined()
+})
+
 test('work reaches main only through the release runner: its rules name it, and a push or merge to main by hand is refused', async ($, on) => {
   world(on)
   await $.session.start(start)

@@ -5,7 +5,37 @@
 // and removes it. It never reaches the chat, a notice, the saved words, a file or the log. The chat that asked (the request names it)
 // takes the request first; any other chat with a screen after BOX_GRACE. Taking it leaves the .told mark, which tells the runner a
 // panel asks: with none in its first seconds, nothing on this Mac draws one (a -p run with no chat open) and it falls back to its own
+// The box's wording is the panel's own, made from the request's fields: its kind (admin or secret), the Mac (host) or the key's name
+// (name), and why it asks again (again). A request carries no text that is shown: one with any field the panel does not know how to
+// word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
+// any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
+// it is no wall against code set on getting round it
 type Asked = { id: string; text: string; at: number; chat?: string }
+const BOX_HOST = /^(?:here|[A-Za-z0-9][A-Za-z0-9._-]{0,62}(?:@[A-Za-z0-9][A-Za-z0-9._-]{0,62})?)$/
+const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+const BOX_AGAIN: Record<string, string> = {
+  refused: 'That password was refused. ',
+  short: 'That was shorter than 4 characters. ',
+  control: 'That held a line break or another control character. ',
+}
+// The wording for a request, or undefined for one the panel does not draw
+const boxWording = (one: Record<string, unknown>): string | undefined => {
+  // A reason it does not know is left out
+  const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
+  if (one.kind === 'admin') {
+    if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined) return undefined
+    const mac = one.host === 'here' ? 'this Mac' : one.host
+    return `${again}Claudopus needs the admin password of ${mac} to run an admin command. It is kept only in this Mac's keychain, and later admin commands on ${mac} run without asking again until it is forgotten.`
+  }
+  if (one.kind === 'secret') {
+    if (one.host !== undefined) return undefined
+    // No name: the first box of a key saved by hand asks its name
+    if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.'
+    if (typeof one.name !== 'string' || !BOX_NAME.test(one.name)) return undefined
+    return `${again}Claudopus needs ${one.name}. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print.`
+  }
+  return undefined
+}
 let boxes: Asked[] = []
 // What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
 const boxDrafts = new Map<string, string>()
@@ -46,8 +76,9 @@ const lookBoxes = async ($: EngineInterface) => {
     const id = entry.name.replace(/\.json$/, '')
     if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
     try {
-      const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Partial<Asked>
-      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
+      const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Record<string, unknown>
+      const text = one && typeof one === 'object' ? boxWording(one) : undefined
+      if (one.id === id && text && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text, at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) {

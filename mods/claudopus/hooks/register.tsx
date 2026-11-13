@@ -346,6 +346,65 @@ const pushesMain = (command: string): boolean =>
     if (args.includes('--no-verify')) return true
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
+// The boxes of the password and key runners are theirs alone: work never writes into their folder, ~/.claude/claudopus/boxes, nor
+// reads their keychain service, claudopus-box. A command is read as words with its quotes and backslashes dropped, split at any sign
+// a path or a program joins words with, and a word counts when it is the name itself or a pattern (*, ?, [...]) that matches it; a
+// lone * matches nothing, so a folder listed whole is not taken for the boxes. The folder needs all three of .claude (or the
+// setting that moves it), claudopus and boxes; the service needs claudopus-box with security. Setting the runners' own folder by hand
+// counts too. This stops slips and common tricks: a name pieced together as the command runs gets past it, so it is no wall
+const BOX_WORDS = (text: string) => text.replace(/["'\\`]/g, '').split(/[^A-Za-z0-9._*?[\]-]+/).filter(Boolean)
+const wordIs = (word: string, name: string) => {
+  if (word === name) return true
+  if (!/[*?[]/.test(word) || /^[*?]+$/.test(word)) return false
+  try {
+    return new RegExp(`^${word.replace(/[.+^${}()|\\-]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.').replace(/\[!/g, '[^')}$`).test(name)
+  } catch {
+    return false
+  }
+}
+const touchesBoxes = (text: string): boolean => {
+  if (/\bCLAUDOPUS_BOX(?:ES|_TAKEN)\b/.test(text)) return true
+  const words = BOX_WORDS(text)
+  // A list's brackets around a word, as a program's code writes it, are not part of it
+  const has = (name: string) => words.some(word => wordIs(word, name) || wordIs(word.replace(/^\[+/, '').replace(/\]+$/, ''), name))
+  return ((has('.claude') || /CLAUDE_CONFIG_DIR/.test(text)) && has('claudopus') && has('boxes')) || (has('claudopus-box') && has('security'))
+}
+// A file a command runs: the first word of each of its commands (past env, command, sudo, nohup, time, exec and settings) when it is a
+// path, and what a shell, source or another language's program is handed to run. The system's own programs are not read
+const RUNNERS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'source', '.', 'python', 'python3', 'node', 'bun', 'deno', 'perl', 'ruby', 'php', 'osascript', 'swift', 'tsx', 'ts-node']
+const filesRun = (command: string): string[] =>
+  shellWords(command).flatMap(words => {
+    let i = 0
+    for (;;) {
+      while (i < words.length && /^\w+=/.test(words[i]!)) i++
+      const head = (words[i] ?? '').split('/').pop() ?? ''
+      if (['env', 'command', 'sudo', 'nohup', 'time', 'exec'].includes(head)) {
+        i++
+        while (i < words.length && words[i]!.startsWith('-')) i++
+      } else break
+    }
+    const head = words[i] ?? ''
+    const name = head.split('/').pop() ?? ''
+    if (RUNNERS.includes(name) || /^python3(?:\.\d+)?$/.test(name)) {
+      const rest = words.slice(i + 1)
+      const at = rest.findIndex(word => !word.startsWith('-'))
+      // A program handed its code inline (-c, -e) is read as part of the command already
+      return at < 0 || rest.slice(0, at).some(flag => /^-[ce]$/.test(flag)) ? [] : [rest[at]!]
+    }
+    return head.includes('/') && !/^\/(?:usr|bin|sbin|System|Library\/Apple)\//.test(head) ? [head] : []
+  })
+// A path as written, with ~ and $HOME read and . and .. taken out, against the folder given
+const pathOf = (path: string, home: string, folder: string) => {
+  const full = path.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, home)
+  const parts: string[] = []
+  for (const part of (full.startsWith('/') ? full : `${folder}/${full}`).split('/')) {
+    if (part === '..') parts.pop()
+    else if (part && part !== '.') parts.push(part)
+  }
+  return `/${parts.join('/')}`
+}
+const NO_BOXES =
+  'The boxes of the password and key runners are theirs alone: work never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner and for a key only through the secret runner the work rules name.'
 const NO_PUSH = 'Work never pushes or merges to main itself, so two pieces of work never release at once: commit on your own branch and run the release runner the work rules name, from your worktree.'
 // How long the names of kept keys are trusted before they are asked again
 const SECRETS_MS = 60_000
@@ -5086,7 +5145,37 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
 // and removes it. It never reaches the chat, a notice, the saved words, a file or the log. The chat that asked (the request names it)
 // takes the request first; any other chat with a screen after BOX_GRACE. Taking it leaves the .told mark, which tells the runner a
 // panel asks: with none in its first seconds, nothing on this Mac draws one (a -p run with no chat open) and it falls back to its own
+// The box's wording is the panel's own, made from the request's fields: its kind (admin or secret), the Mac (host) or the key's name
+// (name), and why it asks again (again). A request carries no text that is shown: one with any field the panel does not know how to
+// word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
+// any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
+// it is no wall against code set on getting round it
 type Asked = { id: string; text: string; at: number; chat?: string }
+const BOX_HOST = /^(?:here|[A-Za-z0-9][A-Za-z0-9._-]{0,62}(?:@[A-Za-z0-9][A-Za-z0-9._-]{0,62})?)$/
+const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+const BOX_AGAIN: Record<string, string> = {
+  refused: 'That password was refused. ',
+  short: 'That was shorter than 4 characters. ',
+  control: 'That held a line break or another control character. ',
+}
+// The wording for a request, or undefined for one the panel does not draw
+const boxWording = (one: Record<string, unknown>): string | undefined => {
+  // A reason it does not know is left out
+  const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
+  if (one.kind === 'admin') {
+    if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined) return undefined
+    const mac = one.host === 'here' ? 'this Mac' : one.host
+    return `${again}Claudopus needs the admin password of ${mac} to run an admin command. It is kept only in this Mac's keychain, and later admin commands on ${mac} run without asking again until it is forgotten.`
+  }
+  if (one.kind === 'secret') {
+    if (one.host !== undefined) return undefined
+    // No name: the first box of a key saved by hand asks its name
+    if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.'
+    if (typeof one.name !== 'string' || !BOX_NAME.test(one.name)) return undefined
+    return `${again}Claudopus needs ${one.name}. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print.`
+  }
+  return undefined
+}
 let boxes: Asked[] = []
 // What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
 const boxDrafts = new Map<string, string>()
@@ -5127,8 +5216,9 @@ const lookBoxes = async ($: EngineInterface) => {
     const id = entry.name.replace(/\.json$/, '')
     if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
     try {
-      const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Partial<Asked>
-      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
+      const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Record<string, unknown>
+      const text = one && typeof one === 'object' ? boxWording(one) : undefined
+      if (one.id === id && text && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text, at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) {
@@ -5962,6 +6052,31 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 // Work starting and running: the chat's own thread kept to handing work over, how full the chat is, each step of work, and new
 // work's card
 
+// A call that writes into the runners' boxes folder or reads their keychain service: a command that names them, a file it runs that
+// does, or a file written or edited there. The runners themselves, the mod's own bin/admin and bin/secret, are what may
+const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<boolean> => {
+  if (!dir) return false
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) {
+    const path = pathOf(String(input.file_path ?? input.notebook_path ?? ''), home, cwd || home)
+    return path === boxesDir() || path.startsWith(`${boxesDir()}/`)
+  }
+  if (e.tool !== 'Bash') return false
+  const command = String(input.command ?? '')
+  if (touchesBoxes(command)) return true
+  const root = $.plugin.root
+  for (const file of filesRun(command)) {
+    const path = pathOf(file, home, cwd || home)
+    const runner = /\/bin\/(admin|secret)$/.exec(path)?.[1]
+    if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret)$`).test(path))) continue
+    const text = (await readOr($, path)).slice(0, 1_000_000)
+    if (runner && text && text === (await readOr($, `${root}/bin/${runner}`))) continue
+    if (touchesBoxes(text)) return true
+  }
+  return false
+}
+
 const workHooks = (on: On) => {
 
   // A chat's own thread starts agents and talks to them; the work runs in the agents, which carry an agent id
@@ -5980,6 +6095,10 @@ const workHooks = (on: On) => {
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool)
       }
+    }
+    if (await isBoxesTouched($, e)) {
+      await log($, `refused ${e.tool} touching the password and key boxes`)
+      return { deny: NO_BOXES }
     }
     if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that reads the keychain')
