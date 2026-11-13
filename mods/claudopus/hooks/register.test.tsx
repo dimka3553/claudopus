@@ -3191,23 +3191,27 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await ears.press({ key: approve?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Approve"')))).toContain('May I delete the old repo?')
   expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')).toBeUndefined()
-  // Or a reply in the person's own words, right on the small card: the reply goes to the work and the amber goes at once, the card
-  // saying briefly what was answered; the box is in Details too
+  // Or a reply in the person's own words, right on the small card: the reply goes to the work. One that is none of the ask's buttons,
+  // such as a question back, does not settle it: the ask stays open with the reply under it, and a button still answers it later
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a2', text: 'Submit it to the plugin directory.', choices: ['Submitted', 'Not now'] } as never)
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Reply…')).toBe(false)
   expect((await ears.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(true)
   const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   expect(box?.props.placeholder).toBe('Or reply in your own words')
   await list.input({ key: box?.key ?? '', text: 'Where do I do that?' })
-  expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('Where do I do that?')))).toContain('Submit it to the plugin directory.')
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' })) ? undefined : true))).toBe(true)
-  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeUndefined()
-  expect(await list.find({ type: 'Input' } as never)).toBeUndefined()
-  const waiting = '✓ You answered “Where do I do that?” · it reads this at its next step'
+  const toWork = (await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('Where do I do that?')))) ?? ''
+  expect(toWork).toContain('Submit it to the plugin directory.')
+  expect(toWork).toContain('does not settle your ask, so it stays open')
+  expect(await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' })).toBeDefined()
+  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
+  const fresh = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  expect(fresh?.key).not.toBe(box?.key)
+  expect(fresh?.props.value ?? '').toBe('')
+  const waiting = '✓ You replied “Where do I do that?” · it reads this at its next step; it still asks this'
   expect(await until(async () => list.find({ type: 'Text', text: waiting }))).toBeDefined()
   expect(await until(async () => ears.find({ type: 'Text', text: waiting }))).toBeDefined()
   for await (const _ of $.turn.step({ turnId: 'turn-9', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a2' })) void _
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Where do I do that?” · it has read it' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Where do I do that?” · it is acting on it; it still asks this' }))).toBeDefined()
   // The work asks again: amber again, with an empty box
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5b', agentId: 'a2', text: 'It is under Manage, then Submit new. Done?' } as never)
   expect((await list.find({ type: 'Text', text: 'It is under Manage, then Submit new. Done?' }))?.props.color).toBe('#E5A50A')
