@@ -20,7 +20,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, newAt: at })
 // How work that is stopped ends: done when its turn had already ended with its report and only its own background work held it
 // (the chat stops such work once its report is in), stopped otherwise
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
@@ -28,6 +28,8 @@ const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'sto
 const handedBack = new Map<string, string>()
 // Work whose card a handback ended, until it works again: a turn of words alone that what it left running wakes changes nothing
 const endedByHandback = new Set<string>()
+// Work stopped by the chat or the panel: whatever the engine still lists of it is going, so it is never said to have left something running
+const stoppedHere = new Set<string>()
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
@@ -113,7 +115,8 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false) => {
 const helpersChecked = new Set<string>()
 // The engine's own list is the truth: work it runs is listed, and work that failed or was stopped ends no turn
 const sync = async ($: EngineInterface) => {
-  const live = await $.agent.list().catch(() => [])
+  const listed = await $.agent.list().catch(() => undefined)
+  const live = listed ?? []
   const now = await $.clock.now()
   // Work the mod never saw start (it was running when the mod was installed or renamed) that no loop is said to have started:
   // the chat's own Agent calls tell a piece of work from a helper whose start the engine did not record
@@ -144,6 +147,10 @@ const sync = async ($: EngineInterface) => {
           : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
             card.status === 'working' && !card.steps && !card.entries.length && !card.words && one.status === 'idle'
             ? ended(card, 'done', now)
+          : // Work that handed in its report and that the engine still holds on its own background work left something running;
+            // once nothing does, or it was stopped, not
+            !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id)) !== Boolean(card.leftSince)
+            ? { ...card, leftSince: card.leftSince ? undefined : now }
           : card.parentId === HELPER && !one.parentId && ownCalls.has(one.description)
             ? { ...card, parentId: '', title: card.title || oneLine(one.description) }
             : !card.title && one.description
@@ -152,6 +159,8 @@ const sync = async ($: EngineInterface) => {
       if (next) cards.set(one.id, next)
       isChanged ||= Boolean(next)
     }
+    // Finished work the engine no longer lists has nothing of its own left running
+    for (const card of cards.values()) if (listed && card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
   await keepStoppedReports($, now)
@@ -178,8 +187,10 @@ const stop = async ($: EngineInterface, id: string) => {
   if ((await read($, todos)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
   const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
   if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
+  stoppedHere.add(id)
   const now = await $.clock.now()
-  await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one)))
+  // What finished work left running is stopped with it
+  await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === id && one.leftSince ? { ...one, leftSince: undefined } : one)))
   await keepStoppedReports($, now)
   await lookEnds($)
 }
@@ -356,13 +367,15 @@ const loadFinished = async ($: EngineInterface) => {
   const kept = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   if (!Array.isArray(kept) || !kept.length) return
   await update($, todos, list => {
-    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id))
+    // What it left running is looked at afresh: the record of how it ended does not outlive the load
+    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined }))
     return fresh.length ? capped(byEnd([...fresh, ...list])) : list
   })
 }
 
 const follow = async ($: EngineInterface) => {
   await sync($)
+  await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
   const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)

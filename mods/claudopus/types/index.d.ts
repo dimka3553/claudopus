@@ -72,6 +72,14 @@ export type Todo = {
   // When its turn last ended with its answer, finished, while its own background work still held it; absent once it steps again.
   // Work stopped after that, by the chat, the panel or the engine, had finished: it ends done, not stopped
   answeredAt?: number
+  // The call it has been running longest, while one runs: what it is in a few words, and since when
+  running?: { what: string; at: number }
+  // When something new last came back to it: a result holding a line it had not seen come back before
+  newAt?: number
+  // Set while nothing new has come back to it or any helper under it for a while: when something last did
+  stuckAt?: number
+  // Finished work that its own background work still holds: since when the mod has seen it so. Absent once nothing holds it
+  leftSince?: number
   // Only work that is working has a card; one that has ended is kept, so a message to it brings its card back as it was
   status: 'working' | 'done' | 'stopped' | 'failed'
   // Set on a card another chat shares: that chat, the Mac it runs on when another (empty for this one), and the card's own id there.
