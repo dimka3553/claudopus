@@ -69,7 +69,7 @@ const openTerminal = async ($: EngineInterface, one: Todo) => {
 }
 
 // The person's answer to an ask, a button pressed or a reply in their own words: to work under way, a message it reads at its next
-// step; to work that has ended, a message to the chat, which carries the work on. Either way the ask goes at once, and the card
+// step; to work that has ended, a message that starts it again. Either way the ask goes at once, and the card
 // says briefly what was answered; the work turns amber again only by asking again
 const replies = new Map<string, number>()
 // What the person has typed into a reply box and not sent, by the work, so a redraw keeps it
@@ -121,7 +121,7 @@ const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply 
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   if (isReply) freeTimes()
   const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: one.status === 'working' ? 'work' : 'chat', at, line })
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line })
   redraw($)
   void askGone($, one, said)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
@@ -130,9 +130,25 @@ const answerAsk = async ($: EngineInterface, one: Todo, choice: string, isReply 
   // Marked on its way once written, so a step that began before it never counts as reading it
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) return void (pending.set(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line }), redraw($))
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'chat', at, line })
+  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line })
+}
+// An answer to work that has ended starts that work again with it, as a message to it: the chat then gets the work's report as
+// it gets any, and nothing goes into the chat in the person's place. A work that cannot be started again leaves the answer to the
+// chat as a notice the person sees and a row its model reads, with no turn of its own
+const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
+  // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
+  pending.set(target, one.id)
+  sentReplies.set(one.id, { ...sent, to: 'work' })
   redraw($)
-  await sendForPerson($, isReply ? `From the Claudopus panel: ${who(true)} replied to what the work "${titleOf(one)}" asked before it ended (${ask.text}):\n${said}` : `From the Claudopus panel: ${who(true)} pressed "${said}" in answer to what the work "${titleOf(one)}" asked before it ended: ${ask.text}`)
+  const r = await $.session.send({ to: { agentId: target }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  if (r.isDelivered) return
+  if (pending.get(target) === one.id) pending.delete(target)
+  await log($, `work ${target} not started again with an answer: ${r.reason}`)
+  sentReplies.set(one.id, { ...sent, to: 'chat' })
+  redraw($)
+  const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))
+  $.ui.log(said)
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: `${said}\n${named(ANSWER_FOR_CHAT_RELAY)}` }] } }).catch(err => log($, `chat not told of an answer: ${String(err)}`))
 }
 // Every ask of this chat's work is also sent into the chat, as a message from the mod, with its answers and pictures: the chat
 // shows it to the person, and an answer they type there goes to the work as a press on the card does. Kept by card, so an ask
@@ -143,16 +159,18 @@ const askInChat = async ($: EngineInterface, one: Todo) => {
   const ask = one.ask
   if (!ask || isOff || !dir || inChat.get(one.id) === askKey(ask)) return
   inChat.set(one.id, askKey(ask))
-  const text = named(ASK_IN_CHAT(titleOf(one), ask, ask.choices?.length ? ask.choices : DEFAULT_ANSWERS))
-  // How to pass it on goes to the chat's model alone, a row the person does not see, just before the ask itself
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, ask)) }] } }).catch(err => log($, `chat not told how to pass an ask on: ${String(err)}`))
-  // Sent off the tool call's own clock: a submit from inside the call would wait on the turn the call holds
-  $.clock.after(5, () => void $.prompt.submit({ text }).catch(err => (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, `ask not sent to the chat: ${String(err)}`))))
+  const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
+  // The person sees the ask as the mod's notice in the chat: a prompt the mod submitted would be drawn by the desktop app as the
+  // person's own message, and a chat cannot send itself a message from another session. Its model reads the ask in a row of its
+  // own, with how to pass an answer on; neither starts a turn
+  $.ui.log(named(ASK_IN_CHAT(titleOf(one), ask, answers)))
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, titleOf(one), ask, answers)) }] } }).catch(err => (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, `chat not told of an ask: ${String(err)}`)))
 }
-// A line in the chat the person sees (a notice, which the model never reads) and its model reads (a row the person does not see),
-// sent with no turn of its own
+// A line in the chat the person sees (the mod's notice, which the model never reads) and its model reads (a row the person does not
+// see), sent with no turn of its own. The notice is the mod's log line: the desktop app leaves out a system row the mod appends
 const sayInChat = async ($: EngineInterface, text: string) => {
-  for (const type of ['system', 'user'] as const) await $.session.append({ message: { type, content: [{ type: 'text', text }] } }).catch(err => log($, `chat not told: ${String(err)}`))
+  $.ui.log(text)
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text }] } }).catch(err => log($, `chat not told: ${String(err)}`))
 }
 // The ask sent into the chat is gone from the card: answered there, or withdrawn by the work
 const askGone = async ($: EngineInterface, one: Todo, said?: string) => {
@@ -177,7 +195,8 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
 const replyAfter = async ($: EngineInterface, one: Todo, said: string, asked: string) => {
   const told = one.status === 'working' ? await tell($, one.id, `${who(true)} added, in their own words, to their answer to your ask ("${asked}"): ${said}`) : undefined
   if (told && !told.deny) return
-  await sendForPerson($, `From the Claudopus panel: ${who(true)} added, in their own words, to their answer to what the work "${titleOf(one)}" asked (${asked}):\n${said}`)
+  const at = await $.clock.now()
+  await toEnded($, one, one.id, `${who(true)} added, in their own words, to their answer to your ask ("${asked}"): ${said}\n${RESUMED_BY_ANSWER}`, { text: said, ask: asked, at, line: lineOf(one) })
 }
 // The work an answer was written into starts its next step: that step reads it
 const replyRead = ($: EngineInterface, agentId: string) => {
@@ -187,7 +206,7 @@ const replyRead = ($: EngineInterface, agentId: string) => {
   const sent = sentReplies.get(card)
   if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
 }
-// Work whose run ended with an answer written in but never read leaves it to the chat, which carries the work on
+// Work whose run ended with an answer written in but never read is started again with it
 const replyUnread = async ($: EngineInterface, agentId: string) => {
   const card = pending.get(agentId)
   if (card === undefined) return
@@ -195,9 +214,7 @@ const replyUnread = async ($: EngineInterface, agentId: string) => {
   const sent = sentReplies.get(card)
   const one = (await read($, todos)).find(todo => todo.id === card)
   if (sent?.to !== 'work' || !one) return
-  sentReplies.set(card, { ...sent, to: 'chat' })
-  redraw($)
-  await sendForPerson($, `From the Claudopus panel: ${who(true)} answered what the work "${titleOf(one)}" asked, and it ended before reading the answer (${sent.ask}):\n${sent.text}`)
+  await toEnded($, one, agentId, `${who(true)} answered your ask ("${sent.ask}"), and you ended before reading it: ${sent.text}\n${RESUMED_BY_ANSWER}`, sent)
 }
 // What the card says of the answer last given to its ask, for ANSWER_SHOWN after, until the work writes a newer line or asks again.
 // An answer that could not be left for another Mac says so under the ask, which is back
@@ -210,7 +227,7 @@ const sentLine = (one: Todo, now: number) => {
   const how = {
     work: 'it reads this at its next step',
     read: 'it has read it',
-    chat: 'sent to the chat, which carries the work on',
+    chat: 'left in the chat, which carries the work on',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose work reads it at its next step`,
   }[sent.to]
   return `✓ You answered “${cut(sent.text, 60)}” · ${how}`

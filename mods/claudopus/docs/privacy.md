@@ -20,7 +20,7 @@ Into every chat: the working principles (`rules/CLAUDE.md`, or your copy), as on
 
 ## The prompts it submits
 
-When you press an answer or send a reply on a card whose work has already ended, the panel submits it to the chat as a message from the mod, saying what you pressed and what it answers, so the chat carries the work on.
+It submits a prompt to the chat when you press an answer to what a kept result waits on, and when you press the welcome's button to index your past chats. An ask from work, and an answer on a card, never go in as a prompt: an ask is shown in the chat as the mod's notice, with a row only the chat's Claude reads, and an answer to a card whose work has already ended is sent to that work as a message, saying what you pressed and what it answers, and the work starts again from it.
 
 ## What its hooks do
 

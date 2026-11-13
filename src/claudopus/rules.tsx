@@ -23,8 +23,9 @@ const KEEP_AGENTS = 'Keep the name or id of each background agent with its subje
 // What every piece of background work is told as it starts: it keeps its own to-do in the panel true
 const PANEL_RULE =
   '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, the full paths of any pictures it is about in `pictures`, a command for {name} to type in `command` (the card opens a terminal for it on their press, so open none yourself); clear it with empty `text` once you have seen it done.'
-// What the chat is sent when its work asks the person something: the ask as a message the person sees, with its answers and
-// pictures, and, for its model alone, how to pass it on; an answer typed in the chat goes to the work as a press on the card does
+// What the chat shows when its work asks the person something: the ask as the mod's own notice in the chat, with its answers and
+// pictures, never a message in the person's place; its model reads the ask in a row of its own, with how to pass an answer on.
+// An answer typed in the chat goes to the work as a press on the card does
 const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
   [
     `The work "${title}" needs {name}: ${ask.text}`,
@@ -34,10 +35,15 @@ const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: stri
   ]
     .filter(Boolean)
     .join('\n')
-const ASK_RELAY = (id: string, ask: NonNullable<Todo['ask']>) =>
-  `The Claudopus panel is about to send you an ask from background work, which {name} sees in this chat. Pass it on to {name} as your whole reply: what it asks${ask.copy ? ', the text to paste or type in a code block' : ''} and its answers${ask.pictures?.length ? ', with its pictures shown in this chat by one SendUserFile call (status "proactive"), or each picture\'s full path where that tool is not available' : ''}. Do not answer it yourself or start work for it. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
+const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
+  `The background work "${title}" asked {name}, on its card and in this chat as a notice from the Claudopus panel that {name} sees and you do not: ${ask.text} (answers: ${answers.join(' · ')}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} has it already: do not pass it on, do not answer it yourself, and start no work for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "proactive"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
 const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks.`
+// What work that had ended is told when the person answers its ask on the card: the answer starts it again
+const RESUMED_BY_ANSWER = `You had ended; this answer starts you again. Carry the work on with it, then end with your report as before.`
+// What the chat's model reads, and the person sees as a notice, when that work could not be started again with the answer
+const ANSWER_FOR_CHAT = (title: string, asked: string, said: string) => `{Name} answered on its card what the work "${title}" asked after it ended (${asked}): ${said}. That work could not be started again, so the answer waits here for {name}'s next message.`
+const ANSWER_FOR_CHAT_RELAY = `With {name}'s next message here, carry that work on with this answer as you would with their own words, beside whatever that message asks.`
 const ASK_CLEARED = (title: string) => `The work "${title}" no longer asks {name} anything.`
 // What the work is told when the chat passes on the person's answer to its ask, typed in the chat
 const ANSWERED_IN_CHAT = (asked: string) =>

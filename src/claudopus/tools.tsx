@@ -95,9 +95,9 @@ const toolHooks = (on: On) => {
     const terminal = command ? ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.` : ''
     const shown = [command ? 'the command, a Copy button and an Open in Terminal button' : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
     const lost = givenPics.length - pictures.length
-    const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture goes' : `${pictures.length} pictures go`} with it.` : ''
+    const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} named with it, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
-    return { result: `Shown on your card with ${shown}, and sent into the chat as a message, where ${who()} can answer it too.${seen}${missing} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, or to the chat once you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
+    return { result: `Shown on your card with ${shown}, and shown in the chat as a notice from the panel, where ${who()} can answer it too.${seen}${missing} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, and starts you again if you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides

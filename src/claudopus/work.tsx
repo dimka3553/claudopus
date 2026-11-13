@@ -108,7 +108,10 @@ const workHooks = (on: On) => {
     if (steered) {
       const sent = await next(e)
       if (answer) await answeredInChat($, answer, steered, !sent.deny && !sent.isError)
-      if (!sent.deny) void tell($, steered, named(answered ? ANSWERED_IN_CHAT(answered) : from ? FROM(from) : STEER))
+      // Work that had ended is started again by the message, and may not be running yet to take a row: it gets the line as a
+      // message of its own instead, read once it reaches it
+      const line = named(answered ? ANSWERED_IN_CHAT(answered) : from ? FROM(from) : STEER)
+      if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? $.session.send({ to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
       return sent
     }
     if (e.agentId !== undefined) return next(e)

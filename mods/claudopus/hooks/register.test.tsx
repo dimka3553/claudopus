@@ -32,7 +32,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[] } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[] } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -54,6 +54,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const sent: string[] = []
   const appended: string[] = []
   const submitted: string[] = []
+  // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
+  const resumed: string[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   const played: string[] = []
@@ -258,6 +260,11 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     appended.push(`${e.agentId}: ${(e.message.content[0] as { text?: string }).text ?? ''}`)
     return next(e)
   })
+  on('session.send', (_, e) => {
+    if (options.unresumable?.has(e.to)) return { isDelivered: false, reason: 'no such agent' } as never
+    resumed.push(`${e.to}: ${e.text}`)
+    return { isDelivered: true } as never
+  })
   on('tool.call', (_, e) => {
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
     if (e.tool === 'SendMessage') sent.push(String((e as { message?: string }).message))
@@ -299,7 +306,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -2801,7 +2808,7 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
 test('work that needs the person\'s hands asks: its card stands out first with the ask, the text to paste with its Copy, and answers that go back to it', async ($, on) => {
   // Once its run has ended, a work's chat takes no more lines
   const ended = new Set<string>()
-  const { played, notified, appended, terminals, submitted, shown, files } = world(on, { ended })
+  const { played, notified, appended, terminals, submitted, resumed, shown, files } = world(on, { ended })
   const clip: string[] = []
   on('ui.copy', (_, e) => (clip.push(e.text), { value: { isCopied: true } }) as never)
   await $.session.start(start)
@@ -2874,14 +2881,15 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   // A newer line from the work takes the answer's place
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a2', text: 'I submitted it.' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'I submitted it.' }))).toBeDefined()
-  // A reply to work whose run has ended goes to the chat, as the panel's, says so, and clears the amber
+  // A reply to work whose run has ended starts that work again with it, never as a message in the person's place, and clears the amber
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k8', agentId: 'a2', text: 'Tell me the repo name.' } as never)
   ended.add('a2')
   const box3 = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   expect(box3?.props.value ?? '').toBe('')
   await list.input({ key: box3?.key ?? '', text: 'claudopus' })
-  expect(await until(async () => submitted.find(line => line.includes('claudopus') && line.includes('From the Claudopus panel')))).toContain('Tell me the repo name.')
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “claudopus” · sent to the chat, which carries the work on' }))).toBeDefined()
+  expect(await until(async () => resumed.find(line => line.startsWith('a2: ') && line.includes('in their own words: claudopus')))).toContain('this answer starts you again')
+  expect(submitted.some(line => line.includes('claudopus'))).toBe(false)
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “claudopus” · it reads this at its next step' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Tell me the repo name.' })).toBeUndefined()
   // Instructions passed as text to copy get no Copy: only what is pasted elsewhere does
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k6', agentId: 'a2', text: 'Open the plugin directory and submit the form.', copy: 'Open the plugin directory page and fill in the form with the details' } as never)
@@ -2924,15 +2932,16 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   const second = await until(async () => shown.slice(before2).find(argv => String(argv[1]).endsWith('/open.command')))
   expect(files.get(String(second?.[1]))).toContain("cd '/repo/it'\\''s here'")
 
-  // A reply written into work that then ends without another step was never read: the chat gets it, and the box says so
+  // A reply written into work that then ends without another step was never read: it starts the work again
   ended.delete('a2')
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k9', agentId: 'a2', text: 'Which branch?', choices: ['main', 'Not now'] } as never)
   const box4 = (await ears.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await ears.input({ key: box4?.key ?? '', text: 'main' })
   expect(await until(async () => ears.find({ type: 'Text', text: '✓ You answered “main” · it reads this at its next step' }))).toBeDefined()
   await $.turn.complete({ answer: 'Stopping here.', durationMs: 1, isAborted: false, turnId: 'turn-10', reason: 'answer', agentId: 'a2' } as never)
-  expect(await until(async () => submitted.find(line => line.includes('ended before reading the answer') && line.includes('Which branch?')))).toContain('\nmain')
-  expect(await until(async () => ears.find({ type: 'Text', text: '✓ You answered “main” · sent to the chat, which carries the work on' }))).toBeDefined()
+  expect(await until(async () => resumed.find(line => line.startsWith('a2: ') && line.includes('you ended before reading it: main')))).toContain('Which branch?')
+  expect(submitted.some(line => line.includes('Which branch?'))).toBe(false)
+  expect(await until(async () => ears.find({ type: 'Text', text: '✓ You answered “main” · it reads this at its next step' }))).toBeDefined()
   await Promise.all([list.unmount(), ears.unmount()])
 })
 
@@ -2959,7 +2968,7 @@ test("while the person types into a card's reply box the list's running times st
 })
 
 test('an ask outlives the work that made it: amber after the work ends, with or without buttons of its own, until the person answers', async ($, on) => {
-  const { submitted, clock } = world(on)
+  const { submitted, resumed, clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'restart the old chat', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Restart the old chat', prompt: 'restart the old chat' } as never)
@@ -2973,15 +2982,16 @@ test('an ask outlives the work that made it: amber after the work ends, with or 
   expect(labels).toContain('Done')
   expect(labels).toContain('Not now')
   expect(labels).toContain('Open in Terminal')
-  // Done goes to the chat, which carries the finished work on, and the ask goes at once
+  // Done starts the finished work again with the answer, and the ask goes at once; nothing is sent in the person's place
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? '' })
-  expect(await until(async () => submitted.find(line => line.includes('pressed "Done"') && line.includes('Run this to restart that chat yourself.')))).toBeDefined()
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Done"') && line.includes('Run this to restart that chat yourself.')))).toBeDefined()
+  expect(submitted.some(line => line.includes('Run this to restart'))).toBe(false)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Run this to restart that chat yourself.' })) ? undefined : true))).toBe(true)
   await list.unmount()
 })
 
-test('every ask also goes into the chat as a message, with its answers and pictures; an answer typed there reaches the work and the card stops asking', async ($, on) => {
-  const { appended, submitted, files, clock } = world(on)
+test('every ask also shows in the chat as the mod\'s notice, never as the person\'s message, with its answers and pictures; an answer typed there reaches the work and the card stops asking', async ($, on) => {
+  const { appended, submitted, logged, files, clock } = world(on)
   files.set('/w/shots/a.png', 'png')
   files.set('/w/shots/b.png', 'png')
   await $.session.start(start)
@@ -2989,24 +2999,27 @@ test('every ask also goes into the chat as a message, with its answers and pictu
   await $.agent.spawn({ ...spawn, description: 'Redraw the logo', prompt: 'redraw the logo' } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which logo do you want?', choices: ['A', 'B'], pictures: ['/w/shots/a.png', '/w/shots/b.png', '/w/shots/gone.png', 'rel.png'] } as never)
-  expect(String(asked.result)).toContain('sent into the chat as a message')
-  expect(String(asked.result)).toContain('Its 2 pictures go with it.')
+  expect(String(asked.result)).toContain('shown in the chat as a notice from the panel')
+  expect(String(asked.result)).toContain('Its 2 pictures are named with it')
   expect(String(asked.result)).toContain('2 of the pictures given are no picture file found here')
-  // The chat gets the ask as the mod's message, never as the person's words, with what it asks, its answers and its pictures
+  // The chat shows the ask as the mod's notice, never a prompt in the person's place, with what it asks, its answers and its pictures
   await clock.advance(10)
-  const inChat = (await until(async () => submitted.find(line => line.includes('Which logo do you want?')))) ?? ''
+  const inChat = (await until(async () => logged.find(line => line.includes('Which logo do you want?')))) ?? ''
+  expect(submitted.some(line => line.includes('Which logo do you want?'))).toBe(false)
   expect(inChat).toContain('The work "Redraw the logo" needs the person: Which logo do you want?')
   expect(inChat).toContain('Answers: A · B, or a reply in the person\'s own words, here or on its card.')
   expect(inChat).toContain('Pictures: /w/shots/a.png, /w/shots/b.png')
-  // How to pass it on goes to the chat's model alone, never into what the person sees
+  // The chat's model reads the ask, and how to pass an answer on, in a row the person does not see
   expect(inChat).not.toContain('SendMessage')
-  const relay = appended.find(line => line.startsWith('undefined: The Claudopus panel is about to send you an ask')) ?? ''
+  const relay = appended.find(line => line.startsWith('undefined: The background work "Redraw the logo" asked the person')) ?? ''
+  expect(relay).toContain('Which logo do you want? (answers: A · B; pictures: /w/shots/a.png, /w/shots/b.png)')
+  expect(relay).toContain('do not pass it on')
   expect(relay).toContain('SendUserFile')
   expect(relay).toContain('SendMessage to "a1"')
   // The same ask said again is not sent again
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Which logo do you want?', choices: ['A', 'B'], pictures: ['/w/shots/a.png', '/w/shots/b.png'] } as never)
   await clock.advance(10)
-  expect(submitted.filter(line => line.includes('Which logo do you want?'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes('Which logo do you want?'))).toHaveLength(1)
 
   // The person answers in the chat, which passes their words on: the card stops asking, the work is told it is the answer
   await $.prompt.submit({ text: 'B, but make it bluer', wait: false, origin: composer })
@@ -3020,14 +3033,32 @@ test('every ask also goes into the chat as a message, with its answers and pictu
   // An ask answered on the card is said in the chat, which sees and reads it; one the work withdraws is said too
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'May I push it?', choices: ['Push', 'Not now'] } as never)
   await clock.advance(10)
-  expect(await until(async () => submitted.some(line => line.includes('May I push it?')) || undefined)).toBe(true)
+  expect(await until(async () => logged.some(line => line.includes('May I push it?')) || undefined)).toBe(true)
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Push')?.key ?? '' })
-  expect(await until(async () => appended.filter(line => line.startsWith('undefined: ✓ The person answered the work "Redraw the logo" on its card: “Push”')).length === 2 || undefined)).toBe(true)
+  expect(await until(async () => appended.find(line => line.startsWith('undefined: ✓ The person answered the work "Redraw the logo" on its card: “Push”')))).toBeDefined()
+  expect(logged.some(line => line.startsWith('✓ The person answered the work "Redraw the logo" on its card: “Push”'))).toBe(true)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a1', text: 'Sign in to Vercel.' } as never)
   await clock.advance(10)
-  expect(await until(async () => submitted.some(line => line.includes('Answers: Done · Not now')) || undefined)).toBe(true)
+  expect(await until(async () => logged.some(line => line.includes('Answers: Done · Not now')) || undefined)).toBe(true)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a1', text: '' } as never)
   expect(appended.some(line => line === 'undefined: The work "Redraw the logo" no longer asks the person anything.')).toBe(true)
+  expect(logged.some(line => line === 'The work "Redraw the logo" no longer asks the person anything.')).toBe(true)
+  expect(submitted).toEqual([])
+  await list.unmount()
+})
+
+test('an answer to ended work that cannot be started again is left in the chat as the mod\'s notice and a row its model reads, never in the person\'s place', async ($, on) => {
+  const { submitted, logged, appended } = world(on, { unresumable: new Set(['a1']) })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'pick a colour', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Pick a colour', prompt: 'pick a colour' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Red or blue?', choices: ['Red', 'Blue'] } as never)
+  await $.turn.complete({ answer: 'Waiting on your colour.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  await list.press({ key: (await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Blue')))?.key ?? '' })
+  expect(await until(async () => logged.find(line => line.includes('answered on its card what the work "Pick a colour" asked after it ended (Red or blue?)')))).toContain('(Red or blue?): Blue')
+  expect(await until(async () => appended.find(line => line.startsWith('undefined: ') && line.includes('could not be started again')))).toBeDefined()
+  expect(submitted.some(line => line.includes('Blue'))).toBe(false)
   await list.unmount()
 })
 

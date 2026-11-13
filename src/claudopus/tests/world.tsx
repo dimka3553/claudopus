@@ -27,7 +27,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[] } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[] } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -49,6 +49,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const sent: string[] = []
   const appended: string[] = []
   const submitted: string[] = []
+  // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
+  const resumed: string[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
   const played: string[] = []
@@ -253,6 +255,11 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     appended.push(`${e.agentId}: ${(e.message.content[0] as { text?: string }).text ?? ''}`)
     return next(e)
   })
+  on('session.send', (_, e) => {
+    if (options.unresumable?.has(e.to)) return { isDelivered: false, reason: 'no such agent' } as never
+    resumed.push(`${e.to}: ${e.text}`)
+    return { isDelivered: true } as never
+  })
   on('tool.call', (_, e) => {
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
     if (e.tool === 'SendMessage') sent.push(String((e as { message?: string }).message))
@@ -294,7 +301,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
