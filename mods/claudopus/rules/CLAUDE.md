@@ -36,4 +36,5 @@ These are my principles. Every chat and every piece of work carries them.
 
 - Context lives in files. Chats are disposable and stay small.
 - Read files in one batch. Send big searches and outputs to helpers.
+- Search with rg, and use rg -a for packed app files.
 - Each session works on its own branch and ends with what shipped and what's left.
