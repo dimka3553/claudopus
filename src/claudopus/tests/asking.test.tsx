@@ -266,6 +266,9 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   expect(relay).toContain('Which logo do you want? (answers: A · B; pictures: /w/shots/a.png, /w/shots/b.png)')
   expect(relay).toContain('do not pass it on')
   expect(relay).toContain('SendUserFile')
+  // Pictures sent as "proactive" did not show in the chat; "normal" ones did
+  expect(relay).toContain('status "normal"')
+  expect(relay).not.toContain('proactive')
   expect(relay).toContain('SendMessage to "a1"')
   // The same ask said again is not sent again
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Which logo do you want?', choices: ['A', 'B'], pictures: ['/w/shots/a.png', '/w/shots/b.png'] } as never)

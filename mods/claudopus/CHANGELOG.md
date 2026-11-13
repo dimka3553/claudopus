@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.77 · 13 November 2026
+- The pictures of a question from background work, and of a result, are sent to the chat the way that showed in a remote chat; sent the other way, they did not show.
+
 ## 0.2.76 · 14 November 2026
 - In the Claude app's panel a card's title, its model line and the line under them now start at one left edge, in every state of the card; a chat's name above its cards no longer sits a little further in or out depending on which Mac the chat is on.
 
