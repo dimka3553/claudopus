@@ -71,9 +71,16 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
 test('work sent a message after a long rest, and work only held by what it left running after its report, are not flagged', async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = { a2: 'general-purpose' }
-  const { clock, logged } = world(on, { agents, kinds })
+  const { clock, logged, held } = world(on, { agents, kinds })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' } as never)
+  // Its first run, moving all along, takes longer than the stuck check waits; then it rests
+  for (const part of ['left ear', 'right ear', 'lobes']) {
+    await clock.advance(5 * 60_000)
+    void $.tool.call({ tool: 'Bash', tool_use_id: `e-${part}`, agentId: 'a1', command: `hold ${part}` } as never)
+    const letGo = await until(async () => held.get(part))
+    letGo?.(`drew the ${part}`)
+  }
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(30 * 60_000)
   await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'bigger', resume: { agentId: 'a1' } } as never)
