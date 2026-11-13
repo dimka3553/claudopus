@@ -20,7 +20,8 @@ const panelHooks = (on: On) => {
       <Box flexDirection="column" gap={1}>
         <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
           <Button key="tab-back" label="Panel" plain hotkey="p" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
-          <Text dimColor>{e.props.isFocused ? 'Tab Enter press · arrows scroll · Esc chat' : 'ctrl+x Tab for keys'}</Text>
+          {id.startsWith('report-') ? <Button key="tab-results" label="Results" plain hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
+          <Text dimColor>{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x Tab for keys'}</Text>
         </Box>
         {body}
       </Box>
@@ -1044,7 +1045,7 @@ const panelHooks = (on: On) => {
                 button above answers its first letter */}
             {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
               <Text key="head-keys" dimColor wrap="wrap">
-                {e.props.isFocused ? 'Press a key shown · Tab Enter press · Esc chat' : 'ctrl+x Tab for keys'}
+                {!e.props.isFocused ? 'ctrl+x Tab for keys' : [...own, ...elsewhere].some(one => one.ask) ? 'What you type goes in the reply box · Tab leaves it for the keys shown · Esc: back to the chat' : 'Esc: back to the chat'}
               </Text>
             ) : null}
           </Box>

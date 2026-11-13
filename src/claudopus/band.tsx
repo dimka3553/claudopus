@@ -1,5 +1,8 @@
 // Above the prompt: the small octopus while work runs
 
+// The answer picked above the prompt by its number, and how long the pick waits for the same number again
+let bandPick: { id: string; n: number } | undefined
+const BAND_PICK = 6000
 const bandHooks = (on: On) => {
 
   // Above the prompt, while work runs: a small mark that it does, and nothing of what it is doing
@@ -15,28 +18,43 @@ const bandHooks = (on: On) => {
     const { Box, Button, Text } = ui
 
     // In the terminal the panel is out of the keys' reach until ctrl+x Tab, and a narrow one seats no panel until it is asked for:
-    // there what needs the person is said here, every chat's, with its answers numbered. A bare digit typed in an empty prompt
-    // presses a band's Button, so one key answers it from where the person already is
+    // there what needs the person is said here, every chat's, under the name of the work that asks, whole, with its answers
+    // numbered. A bare digit typed in an empty prompt presses a band's Button, so the person answers from where they already are.
+    // A message may begin with a digit too, so one press only picks the answer and says so; the same digit again sends it
     if (e.surface === 'terminal') {
       const asking = [...cards.filter(one => !one.parentId && one.ask), ...cardsOf(await read($, others)).filter(one => one.ask && !answeredHere.has(`${one.id}:${one.ask.at}`))]
       const [first] = asking
       const ask = first?.ask
       if (first && ask) {
         const answers = (ask.choices?.length ? ask.choices : DEFAULT_ANSWERS).slice(0, 9)
+        const id = `${first.id}:${ask.at}`
+        const picked = bandPick?.id === id ? bandPick.n : -1
+        const press = (n: number, choice: string) => {
+          if (picked === n) return (bandPick = undefined), void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))
+          const pick = (bandPick = { id, n })
+          $.ui.invalidate('ui.render')
+          // Left alone, the pick is let go
+          $.clock.after(BAND_PICK, () => void (bandPick === pick && ((bandPick = undefined), $.ui.invalidate('ui.render'))))
+        }
         return (
           <Box flexDirection="column">
-            <Box flexDirection="row" gap={1} height={1} overflow="hidden">
+            <Box flexDirection="row" gap={1}>
               {octopus(ui, 'band-mark', 'asking', BAND_MARK, 'Claudopus, something needs you', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
-                <Text color={NEEDS} bold wrap="truncate-end">{oneLine(ask.text)}</Text>
+                <Text wrap="wrap">
+                  <Text dimColor>{`${titleOf(first)}: `}</Text>
+                  <Text color={NEEDS} bold>{cut(oneLine(ask.text), Math.max(80, e.props.bodyColumns * 3))}</Text>
+                </Text>
               </Box>
             </Box>
             {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
             <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
               {answers.map((choice, n) => (
-                <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))} />
+                <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
               ))}
-              <Text dimColor>{`type the number${asking.length > 1 ? ` · ${asking.length - 1} more waiting` : ''} · /claudopus to reply in words`}</Text>
+              <Text dimColor={picked < 0} color={picked < 0 ? undefined : NEEDS}>
+                {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.length > 1 ? ` · ${asking.length - 1} more waiting` : ''} · /claudopus to reply in words`}
+              </Text>
             </Box>
           </Box>
         )

@@ -75,7 +75,7 @@ test('in the terminal a picture is not drawn: its row, pressed, opens it in the 
 test('in a terminal reached over ssh a picture pressed is sent to the device it is watched from, by Tailscale where both have it', async ($, on) => {
   const { tab, shown, dropped, svg } = await pictured($, on, { env: { SSH_CONNECTION: '100.72.19.2 65204 100.97.255.107 22', USER: 'sam' }, tailscale: '100.72.19.2\tsams-laptop\n100.86.184.91\tphone\toffline; last seen 4h ago\n' })
   await pressed(tab, 'pic-open-1-0')
-  await until(async () => tab.find({ type: 'Text', text: /Sent to sams-laptop: it is in Downloads there/ }))
+  await until(async () => tab.find({ type: 'Text', text: /Sent to sams-laptop by Tailscale/ }))
   expect(dropped.map(argv => argv.slice(1))).toEqual([['file', 'cp', svg, '100.72.19.2:']])
   // Nothing opens on this Mac, where nobody looks
   expect(shown.some(argv => argv.includes(svg))).toBe(false)

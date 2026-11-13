@@ -6,7 +6,7 @@
 const TERM_DEFAULT = 0x01000000
 type Cells = { columns: number; rows: number; cells: string }
 
-// ---- Cells: pixels two to a cell, packed as the Raster takes them ----
+// ---- Cells, packed as the Raster takes them ----
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 const toBase64 = (bytes: Uint8Array) => {
@@ -191,7 +191,7 @@ const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, a
   const elapsed = now - (momentStarts.get(mark) ?? now)
   if (size <= BAND_MARK) {
     const tiny = art === 'happySmall' || art === 'happy' ? TINY.happy : TINY.working
-    const color = art === 'happySmall' || art === 'happy' ? colorOf('#4EBA65') : colorOf(art === 'asking' ? NEEDS : termLive || LIVE)
+    const color = art === 'happySmall' || art === 'happy' ? colorOf('#4EBA65') : colorOf(art === 'asking' ? NEEDS : LIVE)
     const frames = tiny.map(rows => glyphCells(brailleOf(rows), color))
     // Happy lifts its arms four times over the finish's two seconds, then rests; at work it paddles on
     const loops = tiny === TINY.happy ? 4 : Infinity
@@ -204,7 +204,7 @@ const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, a
   // Everywhere else the small octopus, three rows tall beside the header's three lines, as big as Claude Code's own mark; on the
   // update screen the same drawing twice as large
   const play = TERM_PLAYS[art] ?? { frames: ['rest'], color: 'live', frameMs: 0, loops: 1 }
-  const color = colorOf(play.color === 'live' ? termLive || LIVE : play.color)
+  const color = colorOf(play.color === 'live' ? LIVE : play.color)
   const frames = play.frames.map(name => (size > HEAD_MARK ? doubledCells : quadCells)(TERM_OCTO[name] ?? TERM_OCTO_HEAD, color))
   return (
     <Box key={key} flexShrink={0}>

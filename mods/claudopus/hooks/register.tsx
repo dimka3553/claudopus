@@ -2591,7 +2591,7 @@ const octopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, alt: 
 const TERM_DEFAULT = 0x01000000
 type Cells = { columns: number; rows: number; cells: string }
 
-// ---- Cells: pixels two to a cell, packed as the Raster takes them ----
+// ---- Cells, packed as the Raster takes them ----
 
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 const toBase64 = (bytes: Uint8Array) => {
@@ -2776,7 +2776,7 @@ const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, a
   const elapsed = now - (momentStarts.get(mark) ?? now)
   if (size <= BAND_MARK) {
     const tiny = art === 'happySmall' || art === 'happy' ? TINY.happy : TINY.working
-    const color = art === 'happySmall' || art === 'happy' ? colorOf('#4EBA65') : colorOf(art === 'asking' ? NEEDS : termLive || LIVE)
+    const color = art === 'happySmall' || art === 'happy' ? colorOf('#4EBA65') : colorOf(art === 'asking' ? NEEDS : LIVE)
     const frames = tiny.map(rows => glyphCells(brailleOf(rows), color))
     // Happy lifts its arms four times over the finish's two seconds, then rests; at work it paddles on
     const loops = tiny === TINY.happy ? 4 : Infinity
@@ -2789,7 +2789,7 @@ const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, a
   // Everywhere else the small octopus, three rows tall beside the header's three lines, as big as Claude Code's own mark; on the
   // update screen the same drawing twice as large
   const play = TERM_PLAYS[art] ?? { frames: ['rest'], color: 'live', frameMs: 0, loops: 1 }
-  const color = colorOf(play.color === 'live' ? termLive || LIVE : play.color)
+  const color = colorOf(play.color === 'live' ? LIVE : play.color)
   const frames = play.frames.map(name => (size > HEAD_MARK ? doubledCells : quadCells)(TERM_OCTO[name] ?? TERM_OCTO_HEAD, color))
   return (
     <Box key={key} flexShrink={0}>
@@ -2831,7 +2831,7 @@ type Pic = { name: string; path: string; thumb: Thumb; isGone?: boolean }
 // own, which from a Details tab closed the tab pressed in and opened it again so it let go of the keyboard: that tab came back drawn
 // afresh, its chat at its end and slow to scroll, and the picture's tab stayed behind it (seen on 0.2.49 in a helper's Details)
 const showPicture = async ($: EngineInterface, path: string, pane: string, row: string, surface?: RenderSurface) => {
-  if (surface === 'terminal' && termFrom) return sendPicture($, path)
+  if (surface === 'terminal' && (termFrom || isRunFromAfar)) return sendPicture($, path)
   if (isRunFromAfar) return showPictureIn($, path, pane, row)
   const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `picture ${path} not opened: ${opened.stderr}`)
@@ -2843,26 +2843,31 @@ const showPicture = async ($: EngineInterface, path: string, pane: string, row: 
 // starts from SSH_CONNECTION: the device the terminal is watched from, and this Mac as that device reaches it
 let termFrom = ''
 let termHere = ''
+let termPort = ''
 // What the last press on a picture came to, by its path, said under its row
 const pictureSaid = new Map<string, { text: string; copy?: string }>()
 const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale']
 const shQuoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`
 const sendPicture = async ($: EngineInterface, path: string) => {
   const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), $.ui.invalidate('ui.render'))
+  // A terminal with no word of where it is watched from: where the picture is, and no more
+  if (!termFrom) return say(`It is at ${path} on this Mac`)
   say('Sending it to your device…')
   for (const bin of TAILSCALES) {
     const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined)
     if (!targets || targets.exitCode !== 0) continue
-    const [, name = termFrom] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom && !parts.slice(2).join(' ').startsWith('offline')) ?? []
-    if (name === termFrom && !targets.stdout.includes(termFrom)) break
-    const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 120_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
-    if (sent.exitCode === 0) return say(`✓ Sent to ${name}: it is in Downloads there`)
+    // Each line a device: its address, its name, and a word when it is not reachable now
+    const [, name = '', ...state] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom) ?? []
+    if (!name || state.join(' ').startsWith('offline')) break
+    const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
+    if (sent.exitCode === 0) return say(`✓ Sent to ${name} by Tailscale, which keeps what it is sent in Downloads`)
     await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`)
     break
   }
   const user = (await $.env.get('USER')) ?? ''
-  const command = `scp ${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`
-  say('Run this on your own device, and it opens there:', command)
+  const port = termPort && termPort !== '22' ? `-P ${termPort} ` : ''
+  const command = `scp ${port}${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`
+  say('Run this on your own device (a Mac), and it opens there:', command)
 }
 // Under a picture's row in the terminal: what its press came to, with the command to copy when there is one
 const pictureSaidRow = ($: EngineInterface, ui: Ui, key: string, path: string) => {
@@ -5263,7 +5268,7 @@ const chatHooks = (on: On) => {
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
     termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
-    ;[termFrom = '', , termHere = ''] = ((await $.env.get('SSH_CONNECTION')) ?? '').trim().split(/\s+/)
+    ;[termFrom = '', , termHere = '', termPort = ''] = ((await $.env.get('SSH_CONNECTION')) ?? '').trim().split(/\s+/)
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
       const text = await readOr($, `${$.plugin.root}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
@@ -6163,6 +6168,9 @@ const toolHooks = (on: On) => {
 
 // Above the prompt: the small octopus while work runs
 
+// The answer picked above the prompt by its number, and how long the pick waits for the same number again
+let bandPick: { id: string; n: number } | undefined
+const BAND_PICK = 6000
 const bandHooks = (on: On) => {
 
   // Above the prompt, while work runs: a small mark that it does, and nothing of what it is doing
@@ -6178,28 +6186,43 @@ const bandHooks = (on: On) => {
     const { Box, Button, Text } = ui
 
     // In the terminal the panel is out of the keys' reach until ctrl+x Tab, and a narrow one seats no panel until it is asked for:
-    // there what needs the person is said here, every chat's, with its answers numbered. A bare digit typed in an empty prompt
-    // presses a band's Button, so one key answers it from where the person already is
+    // there what needs the person is said here, every chat's, under the name of the work that asks, whole, with its answers
+    // numbered. A bare digit typed in an empty prompt presses a band's Button, so the person answers from where they already are.
+    // A message may begin with a digit too, so one press only picks the answer and says so; the same digit again sends it
     if (e.surface === 'terminal') {
       const asking = [...cards.filter(one => !one.parentId && one.ask), ...cardsOf(await read($, others)).filter(one => one.ask && !answeredHere.has(`${one.id}:${one.ask.at}`))]
       const [first] = asking
       const ask = first?.ask
       if (first && ask) {
         const answers = (ask.choices?.length ? ask.choices : DEFAULT_ANSWERS).slice(0, 9)
+        const id = `${first.id}:${ask.at}`
+        const picked = bandPick?.id === id ? bandPick.n : -1
+        const press = (n: number, choice: string) => {
+          if (picked === n) return (bandPick = undefined), void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))
+          const pick = (bandPick = { id, n })
+          $.ui.invalidate('ui.render')
+          // Left alone, the pick is let go
+          $.clock.after(BAND_PICK, () => void (bandPick === pick && ((bandPick = undefined), $.ui.invalidate('ui.render'))))
+        }
         return (
           <Box flexDirection="column">
-            <Box flexDirection="row" gap={1} height={1} overflow="hidden">
+            <Box flexDirection="row" gap={1}>
               {octopus(ui, 'band-mark', 'asking', BAND_MARK, 'Claudopus, something needs you', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
-                <Text color={NEEDS} bold wrap="truncate-end">{oneLine(ask.text)}</Text>
+                <Text wrap="wrap">
+                  <Text dimColor>{`${titleOf(first)}: `}</Text>
+                  <Text color={NEEDS} bold>{cut(oneLine(ask.text), Math.max(80, e.props.bodyColumns * 3))}</Text>
+                </Text>
               </Box>
             </Box>
             {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
             <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
               {answers.map((choice, n) => (
-                <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))} />
+                <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
               ))}
-              <Text dimColor>{`type the number${asking.length > 1 ? ` · ${asking.length - 1} more waiting` : ''} · /claudopus to reply in words`}</Text>
+              <Text dimColor={picked < 0} color={picked < 0 ? undefined : NEEDS}>
+                {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.length > 1 ? ` · ${asking.length - 1} more waiting` : ''} · /claudopus to reply in words`}
+              </Text>
             </Box>
           </Box>
         )
@@ -6260,7 +6283,8 @@ const panelHooks = (on: On) => {
       <Box flexDirection="column" gap={1}>
         <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
           <Button key="tab-back" label="Panel" plain hotkey="p" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
-          <Text dimColor>{e.props.isFocused ? 'Tab Enter press · arrows scroll · Esc chat' : 'ctrl+x Tab for keys'}</Text>
+          {id.startsWith('report-') ? <Button key="tab-results" label="Results" plain hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
+          <Text dimColor>{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x Tab for keys'}</Text>
         </Box>
         {body}
       </Box>
@@ -7284,7 +7308,7 @@ const panelHooks = (on: On) => {
                 button above answers its first letter */}
             {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
               <Text key="head-keys" dimColor wrap="wrap">
-                {e.props.isFocused ? 'Press a key shown · Tab Enter press · Esc chat' : 'ctrl+x Tab for keys'}
+                {!e.props.isFocused ? 'ctrl+x Tab for keys' : [...own, ...elsewhere].some(one => one.ask) ? 'What you type goes in the reply box · Tab leaves it for the keys shown · Esc: back to the chat' : 'Esc: back to the chat'}
               </Text>
             ) : null}
           </Box>

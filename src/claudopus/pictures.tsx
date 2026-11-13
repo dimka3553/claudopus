@@ -20,7 +20,7 @@ type Pic = { name: string; path: string; thumb: Thumb; isGone?: boolean }
 // own, which from a Details tab closed the tab pressed in and opened it again so it let go of the keyboard: that tab came back drawn
 // afresh, its chat at its end and slow to scroll, and the picture's tab stayed behind it (seen on 0.2.49 in a helper's Details)
 const showPicture = async ($: EngineInterface, path: string, pane: string, row: string, surface?: RenderSurface) => {
-  if (surface === 'terminal' && termFrom) return sendPicture($, path)
+  if (surface === 'terminal' && (termFrom || isRunFromAfar)) return sendPicture($, path)
   if (isRunFromAfar) return showPictureIn($, path, pane, row)
   const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `picture ${path} not opened: ${opened.stderr}`)
@@ -32,26 +32,31 @@ const showPicture = async ($: EngineInterface, path: string, pane: string, row: 
 // starts from SSH_CONNECTION: the device the terminal is watched from, and this Mac as that device reaches it
 let termFrom = ''
 let termHere = ''
+let termPort = ''
 // What the last press on a picture came to, by its path, said under its row
 const pictureSaid = new Map<string, { text: string; copy?: string }>()
 const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale']
 const shQuoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`
 const sendPicture = async ($: EngineInterface, path: string) => {
   const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), $.ui.invalidate('ui.render'))
+  // A terminal with no word of where it is watched from: where the picture is, and no more
+  if (!termFrom) return say(`It is at ${path} on this Mac`)
   say('Sending it to your device…')
   for (const bin of TAILSCALES) {
     const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined)
     if (!targets || targets.exitCode !== 0) continue
-    const [, name = termFrom] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom && !parts.slice(2).join(' ').startsWith('offline')) ?? []
-    if (name === termFrom && !targets.stdout.includes(termFrom)) break
-    const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 120_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
-    if (sent.exitCode === 0) return say(`✓ Sent to ${name}: it is in Downloads there`)
+    // Each line a device: its address, its name, and a word when it is not reachable now
+    const [, name = '', ...state] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom) ?? []
+    if (!name || state.join(' ').startsWith('offline')) break
+    const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
+    if (sent.exitCode === 0) return say(`✓ Sent to ${name} by Tailscale, which keeps what it is sent in Downloads`)
     await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`)
     break
   }
   const user = (await $.env.get('USER')) ?? ''
-  const command = `scp ${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`
-  say('Run this on your own device, and it opens there:', command)
+  const port = termPort && termPort !== '22' ? `-P ${termPort} ` : ''
+  const command = `scp ${port}${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`
+  say('Run this on your own device (a Mac), and it opens there:', command)
 }
 // Under a picture's row in the terminal: what its press came to, with the command to copy when there is one
 const pictureSaidRow = ($: EngineInterface, ui: Ui, key: string, path: string) => {
