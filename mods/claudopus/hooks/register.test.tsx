@@ -401,6 +401,44 @@ test('work never starts as a copy of the chat: a fork or an agent with no model 
   expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`)
 })
 
+test('no agent is started on an older model or on Haiku, by the chat or by a piece of work; the three aliases and their newest versions pass', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  const call = (model: string, agentId?: string) => $.tool.call({ tool: 'Agent', tool_use_id: `m-${model}-${agentId ?? ''}`, prompt: 'fix the nose', subagent_type: 'general-purpose', model, ...(agentId ? { agentId } : {}) } as never)
+
+  // A newer version than the mod knows is no older model; nor is an id with a date, a window or a provider around it
+  for (const model of ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5.5', 'claude-opus-5-6', 'claude-opus-6', 'claude-fable-5-3', 'claude-sonnet-6', 'claude-opus-5-5-20261001', 'opus[1m]', 'us.anthropic.claude-opus-5-5-v1:0', 'inherit']) expect((await call(model)).deny).toBeUndefined()
+  for (const model of ['haiku', 'claude-haiku-5-5', 'claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-3-5-sonnet-20241022', 'claude-sonnet-4-5-20250929']) expect((await call(model)).deny).toContain('No work runs on')
+  expect((await call('claude-opus-4-8')).deny).toBe(
+    'No work runs on Opus 4.8. Name the model by its alias: "opus" for most work, "sonnet" for long legwork, "fable" only for heavy or really complicated work, "opus" or "fable" for checking what was built, never weaker than what built it. Never an older version, never Haiku.',
+  )
+  // A helper a piece of work starts is held to the same, and one that names no model keeps its work's
+  expect((await call('haiku', 'a1')).deny).toContain('No work runs on Haiku')
+  expect((await call('claude-opus-4-8', 'a1')).deny).toContain('No work runs on Opus 4.8')
+  expect((await call('sonnet', 'a1')).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'h0', prompt: 'look it up', subagent_type: 'general-purpose', agentId: 'a1' } as never)).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain('refused an Agent call on Opus 4.8')
+})
+
+test('with Haiku named in the settings for a kind of work, an agent on Haiku is let through; an older model still is not', async ($, on) => {
+  const { files } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ models: { legwork: 'haiku' } }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'haiku' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)).deny).toContain('No work runs on Opus 4.8')
+})
+
+test('with the handing-over switched off the mod refuses no model and moves no step', async ($, on) => {
+  const { files, stepped } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ agents: false }))
+  await $.session.start(start)
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'o1', prompt: 'index', subagent_type: 'general-purpose', model: 'haiku' } as never)).deny).toBeUndefined()
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-4-8', messageCount: 2, agentId: 'a1' })) void _
+  expect(stepped).toEqual(['claude-opus-4-8'])
+})
+
 test("the work's rules name where the admin runner is, the one way work uses a Mac's password", async ($, on) => {
   world(on)
   await $.session.start(start)
@@ -1178,6 +1216,72 @@ test("a card's title, its line of facts and every line under them start at one l
   await $.turn.complete({ answer: 'Fixed.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(500)
   await expectOneEdge(4)
+})
+
+test('work the app moves to an older model, or a helper it starts on Haiku, has each step sent to a model work runs on, and its card says what it was kept off', async ($, on) => {
+  const { stepped, files } = world(on, { model: 'claude-fable-5-2' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  const step = async (index: number, model: string, agentId: string | undefined = 'a1') => {
+    for await (const _ of $.turn.step({ turnId: 'turn-2', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) void _
+  }
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const line = async () => (await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')
+
+  // On the model it was started on, nothing is changed and the card says nothing more
+  await step(0, 'claude-opus-5-5')
+  expect(stepped).toEqual(['claude-opus-5-5'])
+  expect(await line()).not.toContain('kept off')
+
+  // The app's safeguards flagged a message and the app sends the next steps to Opus 4.8: they go to Fable 5.2
+  await step(1, 'claude-opus-4-8')
+  await step(2, 'claude-opus-4-8')
+  expect(stepped).toEqual(['claude-opus-5-5', 'claude-fable-5-2', 'claude-fable-5-2'])
+  expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Fable 5.2')
+  expect(await line()).toContain('kept off Opus 4.8')
+  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was sent to Opus 4.8 by the app: its steps go to Fable 5.2').length).toBe(2)
+
+  // Once the app sends its steps to a right model again, a newer one too, nothing is changed and the card no longer says so
+  await step(3, 'claude-opus-5-6')
+  expect(stepped.at(-1)).toBe('claude-opus-5-6')
+  expect(await line()).not.toContain('kept off')
+  await step(4, 'claude-opus-4-8')
+  expect(await line()).toContain('kept off Opus 4.8')
+
+  // A helper of an agent type the app runs on Haiku runs on Sonnet 5.5; an older Sonnet too
+  await $.agent.spawn({ ...spawn, description: 'Look it up', prompt: 'look it up', parentAgentId: 'a1' } as never)
+  await step(0, 'claude-haiku-5-5', 'a2')
+  await step(1, 'claude-sonnet-5', 'a2')
+  expect(stepped.slice(-2)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5-5'])
+
+  // The chat's own thread runs on the model the person picked for it, whichever that is
+  await step(0, 'claude-opus-4-8', '')
+  expect(stepped.at(-1)).toBe('claude-opus-4-8')
+
+  // A model the person picks on the card wins over the app's move
+  await pressed(pane, 'model-a1')
+  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
+  await step(5, 'claude-opus-4-8')
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  expect(await line()).not.toContain('kept off')
+
+  // An agent a workflow's script started has no card of its own: its step is moved all the same, and the log says so
+  await step(0, 'claude-haiku-5-5', 'w1')
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  expect(files.get(`${MEMORY}/log.md`)).toContain('work w1 was sent to Haiku 5.5 by the app: its steps go to Sonnet 5.5')
+})
+
+test('work that answers from an older model all the same says so on its card', async ($, on) => {
+  const answered: { by?: string } = { by: 'claude-opus-4-8' }
+  world(on, { model: 'claude-fable-5-2', answered })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  for await (const _ of $.turn.step({ turnId: 'turn-2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Opus 4.8')
+  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')).toContain('not a model work should run on')
 })
 
 test('the model a running work is on is pressed and another chosen: its next step runs on it, its card says so at once, and its chat and the work are told', async ($, on) => {
