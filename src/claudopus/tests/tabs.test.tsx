@@ -103,3 +103,70 @@ test('About says what Claudopus is, its version and the app\'s, and links the si
   expect(links).toEqual(['https://claudopus.ai', 'https://github.com/dimka3553/claudopus', 'https://github.com/dimka3553/claudopus/blob/main/LICENSE'])
   expect(await about.find({ type: 'Text', text: /a star on GitHub/ })).toBeDefined()
 })
+
+// ---- The changelog and the update screen ----
+
+const CHANGELOG = [
+  '# Changelog',
+  '',
+  '## 0.1.0 · 13 November 2026',
+  '- The panel shows what changed.',
+  '- A second change.',
+  '',
+  '## 0.0.9 · 12 November 2026',
+  '- Pictures open large.',
+  '',
+  '## 0.0.8 · 11 November 2026',
+  '- An old change.',
+  '',
+].join('\n')
+
+test('About opens the changelog in a tab of its own, every version newest first, the one this chat runs marked', async ($, on) => {
+  const { tabs } = world(on, { changelog: CHANGELOG })
+  await $.session.start(start)
+  const about = await $.ui.mount({ ...LIST, requestId: 'about', props: { ...LIST.props, title: 'About', bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect((await keyed(about, 'about-changelog'))?.props.label).toBe('Changelog')
+  await pressed(about, 'about-changelog')
+  expect(await until(async () => tabs.find(tab => tab === 'changelog: Changelog'))).toBe('changelog: Changelog')
+  const log = await $.ui.mount({ ...LIST, requestId: 'changelog', props: { ...LIST.props, title: 'Changelog', bodyColumns: 60 }, surface: 'desktop' } as never)
+  const texts = (await log.findAll({ type: 'Text' })).map(one => one.text)
+  expect(texts.filter(one => /^v0\./.test(one))).toEqual(['v0.1.0', 'v0.0.9', 'v0.0.8'])
+  expect(texts).toContain('13 November 2026 · yours')
+  expect(texts).toContain('Pictures open large.')
+})
+
+test('a newer version than the one whose changes were seen covers the panel with what changed since, until Back to the panel', async ($, on) => {
+  const { files } = world(on, { changelog: CHANGELOG })
+  files.set(`${MEMORY}/seen.json`, JSON.stringify({ version: '0.0.8' }))
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect(await until(async () => pane.find({ type: 'Text', text: 'Claudopus updated' }))).toBeDefined()
+  const texts = (await pane.findAll({ type: 'Text' })).map(one => one.text)
+  expect(texts).toContain('v0.0.8 → v0.1.0 · 2 versions')
+  expect(texts.filter(one => /^v0\.\d\.\d+$/.test(one))).toEqual(['v0.1.0', 'v0.0.9'])
+  expect(texts).not.toContain('An old change.')
+  // The whole panel: no header buttons under it
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).not.toContain('Stats')
+  await pressed(pane, 'update-top-close')
+  expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0')
+  await pane.unmount()
+  const after = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect(await until(async () => (await after.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
+  expect(await after.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+  // A load of the same version again shows nothing
+  await after.unmount()
+  await $.session.start(start)
+  const again = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect(await until(async () => (await again.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
+  expect(await again.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+})
+
+test('a first install starts the record of changes seen at its own version, and shows no update screen', async ($, on) => {
+  const { files } = world(on, { changelog: CHANGELOG })
+  await $.session.start(start)
+  expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0')
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect(await until(async () => (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+})
+

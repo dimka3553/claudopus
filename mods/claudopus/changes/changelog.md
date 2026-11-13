@@ -1,0 +1,3 @@
+- About has a Changelog link that opens every version's changes in a tab of the panel. The same changelog is on claudopus.ai.
+- When Claudopus updates, the whole panel shows the blue happy octopus, the new version and what changed in every version you did not have yet.
+- Back to the panel closes it, and it shows once per update on a Mac, whichever chat you close it in.

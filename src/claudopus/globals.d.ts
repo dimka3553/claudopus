@@ -7,6 +7,7 @@ import * as M4 from '../../mods/claudopus/hooks/results'
 import * as M5 from '../../mods/claudopus/hooks/shared'
 import * as M6 from '../../mods/claudopus/hooks/config'
 import * as M7 from '../../mods/claudopus/hooks/update'
+import * as M8 from '../../mods/claudopus/hooks/changelog'
 
 declare global {
   export import atom = M0.atom
@@ -168,4 +169,11 @@ declare global {
   export import VERSION_PAGE = M7.VERSION_PAGE
   export import VERSION_WAIT = M7.VERSION_WAIT
   export import versionOnPage = M7.versionOnPage
+  export import changelogOf = M8.changelogOf
+  export import fitted = M8.fitted
+  export import isScreenDue = M8.isScreenDue
+  export import missedOf = M8.missedOf
+  export import seenIn = M8.seenIn
+  export import TAB_BUDGET = M8.TAB_BUDGET
+  export import Version = M8.Version
 }

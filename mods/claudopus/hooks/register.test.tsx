@@ -32,7 +32,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[] } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -90,6 +90,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     if (isShipped && e.path.endsWith('roles/chat.md')) return { value: options.chatRole ?? 'CHAT ROLE' }
     if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
     if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: PRINCIPLES }
+    if (isShipped && options.changelog !== undefined && e.path.endsWith('/CHANGELOG.md')) return { value: options.changelog }
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
@@ -2846,6 +2847,72 @@ test('About says what Claudopus is, its version and the app\'s, and links the si
   const links = (await about.findAll({ type: 'Link' })).map(one => one.props.href)
   expect(links).toEqual(['https://claudopus.ai', 'https://github.com/dimka3553/claudopus', 'https://github.com/dimka3553/claudopus/blob/main/LICENSE'])
   expect(await about.find({ type: 'Text', text: /a star on GitHub/ })).toBeDefined()
+})
+
+// ---- The changelog and the update screen ----
+
+const CHANGELOG = [
+  '# Changelog',
+  '',
+  '## 0.1.0 · 13 November 2026',
+  '- The panel shows what changed.',
+  '- A second change.',
+  '',
+  '## 0.0.9 · 12 November 2026',
+  '- Pictures open large.',
+  '',
+  '## 0.0.8 · 11 November 2026',
+  '- An old change.',
+  '',
+].join('\n')
+
+test('About opens the changelog in a tab of its own, every version newest first, the one this chat runs marked', async ($, on) => {
+  const { tabs } = world(on, { changelog: CHANGELOG })
+  await $.session.start(start)
+  const about = await $.ui.mount({ ...LIST, requestId: 'about', props: { ...LIST.props, title: 'About', bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect((await keyed(about, 'about-changelog'))?.props.label).toBe('Changelog')
+  await pressed(about, 'about-changelog')
+  expect(await until(async () => tabs.find(tab => tab === 'changelog: Changelog'))).toBe('changelog: Changelog')
+  const log = await $.ui.mount({ ...LIST, requestId: 'changelog', props: { ...LIST.props, title: 'Changelog', bodyColumns: 60 }, surface: 'desktop' } as never)
+  const texts = (await log.findAll({ type: 'Text' })).map(one => one.text)
+  expect(texts.filter(one => /^v0\./.test(one))).toEqual(['v0.1.0', 'v0.0.9', 'v0.0.8'])
+  expect(texts).toContain('13 November 2026 · yours')
+  expect(texts).toContain('Pictures open large.')
+})
+
+test('a newer version than the one whose changes were seen covers the panel with what changed since, until Back to the panel', async ($, on) => {
+  const { files } = world(on, { changelog: CHANGELOG })
+  files.set(`${MEMORY}/seen.json`, JSON.stringify({ version: '0.0.8' }))
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect(await until(async () => pane.find({ type: 'Text', text: 'Claudopus updated' }))).toBeDefined()
+  const texts = (await pane.findAll({ type: 'Text' })).map(one => one.text)
+  expect(texts).toContain('v0.0.8 → v0.1.0 · 2 versions')
+  expect(texts.filter(one => /^v0\.\d\.\d+$/.test(one))).toEqual(['v0.1.0', 'v0.0.9'])
+  expect(texts).not.toContain('An old change.')
+  // The whole panel: no header buttons under it
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).not.toContain('Stats')
+  await pressed(pane, 'update-top-close')
+  expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0')
+  await pane.unmount()
+  const after = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect(await until(async () => (await after.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
+  expect(await after.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+  // A load of the same version again shows nothing
+  await after.unmount()
+  await $.session.start(start)
+  const again = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect(await until(async () => (await again.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
+  expect(await again.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+})
+
+test('a first install starts the record of changes seen at its own version, and shows no update screen', async ($, on) => {
+  const { files } = world(on, { changelog: CHANGELOG })
+  await $.session.start(start)
+  expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0')
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
+  expect(await until(async () => (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
 })
 
 // Config: the person's own texts, settings, and models

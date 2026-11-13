@@ -959,6 +959,9 @@ const panelHooks = (on: On) => {
     const mood = headMood(head)
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
+    // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed
+    const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks)
+    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{screen}</Box>
 
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
