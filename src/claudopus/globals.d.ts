@@ -146,6 +146,7 @@ declare global {
   export import Models = M6.Models
   export import Role = M6.Role
   export import installedFrom = M7.installedFrom
+  export import installedVersionOf = M7.installedVersionOf
   export import isNewer = M7.isNewer
   export import isUpdateDue = M7.isUpdateDue
   export import scopeOf = M7.scopeOf
@@ -154,4 +155,7 @@ declare global {
   export import UPDATE_LOOK = M7.UPDATE_LOOK
   export import updatedTo = M7.updatedTo
   export import updateSteps = M7.updateSteps
+  export import VERSION_PAGE = M7.VERSION_PAGE
+  export import VERSION_WAIT = M7.VERSION_WAIT
+  export import versionOnPage = M7.versionOnPage
 }

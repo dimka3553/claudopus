@@ -77,6 +77,9 @@ const files = [
   [join(here, 'globals.d.ts'), globalsOf(importsOf(join(here, 'imports.tsx')), m => (m.startsWith('./') ? `../../mods/claudopus/hooks/${m.slice(2)}` : m === '../types' ? '../../mods/claudopus/types' : m))],
   [join(hooks, 'register.test.tsx'), joined(join(here, 'tests'), TEST_PARTS, "Its tests run with the engine's plugin test.")],
   [join(here, 'tests/globals.d.ts'), globalsOf(importsOf(join(here, 'tests/imports.tsx')), m => (m.startsWith('./') ? `../../../mods/claudopus/hooks/${m.slice(2)}` : m))],
+  // The page claudopus.ai serves with the current version, which every install reads to know when to update: made from plugin.json,
+  // so it moves with each release pushed to main
+  [join(here, '../../site/version.json'), `${JSON.stringify({ version: JSON.parse(read(join(hooks, '../.claude-plugin/plugin.json'))).version })}\n`],
 ]
 
 const isCheck = process.argv.includes('--check')

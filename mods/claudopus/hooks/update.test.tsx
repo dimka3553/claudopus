@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { installedFrom, isNewer, isUpdateDue, scopeOf, stampOf, UPDATE_EVERY, updatedTo, updateSteps } from './update'
+import { installedFrom, installedVersionOf, isNewer, isUpdateDue, scopeOf, stampOf, UPDATE_EVERY, updatedTo, updateSteps, VERSION_PAGE, versionOnPage } from './update'
 
 test('only a copy installed from a marketplace is updated, read off its cache folder', async () => {
   expect(installedFrom('/Users/sam/.claude/plugins/cache/claudopus/claudopus/0.2.25')).toEqual({ plugins: '/Users/sam/.claude/plugins', marketplace: 'claudopus', plugin: 'claudopus' })
@@ -30,7 +30,7 @@ test("what plugin update printed is read as the version it moved to or found", a
   expect(updatedTo('✘ Failed to update')).toBeUndefined()
 })
 
-test('a look is due every few hours, at once when none was made or the clock moved back', async () => {
+test('a look is due every hour, at once when none was made or the clock moved back', async () => {
   expect(isUpdateDue(undefined, 1000)).toBe(true)
   expect(isUpdateDue({ at: 1000, version: '', result: '' }, 1000 + UPDATE_EVERY - 1)).toBe(false)
   expect(isUpdateDue({ at: 1000, version: '', result: '' }, 1000 + UPDATE_EVERY)).toBe(true)
@@ -44,4 +44,21 @@ test('versions compare by their numbers', async () => {
   expect(isNewer('0.2.10', '0.2.9')).toBe(true)
   expect(isNewer('0.2.25', '0.2.25')).toBe(false)
   expect(isNewer('0.2.9', '0.2.10')).toBe(false)
+})
+
+test('the version page on claudopus.ai is read as one version, anything else as none', async () => {
+  expect(VERSION_PAGE).toBe('https://www.claudopus.ai/version.json')
+  expect(versionOnPage('{"version":"0.2.32"}\n')).toBe('0.2.32')
+  expect(versionOnPage('{"version":"1.0.0-beta.1"}')).toBe('1.0.0-beta.1')
+  expect(versionOnPage('<!doctype html><title>404</title>')).toBeUndefined()
+  expect(versionOnPage('{"version":"; rm -rf ~"}')).toBeUndefined()
+  expect(versionOnPage('{"version":32}')).toBeUndefined()
+})
+
+test('the version compared with the page is the one the Mac has installed, not only the one this chat loaded', async () => {
+  const installed = JSON.stringify({ plugins: { 'claudopus@m': [{ scope: 'user', installPath: '/p/cache/m/claudopus/0.2.32', version: '0.2.32' }, { scope: 'project', version: '0.2.30' }] } })
+  expect(installedVersionOf(installed, 'claudopus@m', '/p/cache/m/claudopus/0.2.31', 'user')).toBe('0.2.32')
+  expect(installedVersionOf(installed, 'claudopus@m', '/p/cache/m/claudopus/0.2.31', 'project')).toBe('0.2.30')
+  expect(installedVersionOf('not json', 'claudopus@m', '/p/cache/m/claudopus/0.2.31/')).toBe('0.2.31')
+  expect(installedVersionOf(installed, 'claudopus@other', '/p/cache/m/claudopus/0.2.31')).toBe('0.2.31')
 })

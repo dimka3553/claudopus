@@ -1,8 +1,9 @@
-// Claudopus keeps itself up to date: every few hours one chat runs Claude Code's own update steps for it (the pure parts are in hooks/update.ts)
+// Claudopus keeps itself up to date: every hour one chat reads the version page on claudopus.ai, and when it names a version other than the one installed runs Claude Code's own update steps for it (the pure parts are in hooks/update.ts)
 
 // ---- Keeping itself up to date (the pure parts are in ./update) ----
 
-// Every few hours one chat on this Mac runs Claude Code's own two update steps for the mod, under a lock the other chats see, and
+// Every hour one chat on this Mac reads the version page and, when it differs from the installed version, runs Claude Code's own two
+// update steps for the mod, under a lock the other chats see, and
 // keeps what it learnt in update.json; a copy not installed from a marketplace (its maker's folder) is never updated
 let isUpdating = false
 const selfUpdate = async ($: EngineInterface) => {
@@ -35,8 +36,28 @@ const selfUpdate = async ($: EngineInterface) => {
       const now = await $.clock.now()
       // and the person may have turned automatic updates off while this chat waited for it
       if (!isUpdateDue(before, now) || (await readConfig($, dir)).updates === false) return
+      const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
+      const id = `${from.plugin}@${from.marketplace}`
+      const scope = scopeOf(installed, id, $.plugin.root)
+      const have = installedVersionOf(installed, id, $.plugin.root, scope)
+      // The version page on claudopus.ai says which version is current; the same one installed means nothing is run
+      const page = await Promise.race([
+        $.http.fetch(VERSION_PAGE).catch(err => ({ ok: false, status: 0, text: String(err) })),
+        new Promise<{ ok: false; status: 0; text: string }>(done => void $.clock.after(VERSION_WAIT, () => done({ ok: false, status: 0, text: 'no answer' }))),
+      ])
+      const current = page.ok ? versionOnPage(page.text) : undefined
+      if (!current) {
+        const result = `version page not read: ${page.ok ? 'no version on it' : page.status || page.text.slice(0, 120)}`
+        await $.fs.write(stampPath, JSON.stringify({ at: now, version: before?.version || have, result }))
+        await log($, `Claudopus ${result}`)
+        return
+      }
+      if (current === have) {
+        await $.fs.write(stampPath, JSON.stringify({ at: now, version: have, result: 'latest' }))
+        return
+      }
+      await log($, `Claudopus ${current} is on the version page and ${have} is installed: updating`)
       const engine = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
-      const scope = scopeOf(await readOr($, `${from.plugins}/installed_plugins.json`), `${from.plugin}@${from.marketplace}`, $.plugin.root)
       const [refresh, update] = updateSteps(engine, from, scope)
       const run = (argv: string[], timeoutMs: number) => $.process.run(argv, { timeoutMs }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
       const refreshed = await run(refresh, 180_000)

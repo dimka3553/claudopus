@@ -12,4 +12,4 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
-import { installedFrom, isNewer, isUpdateDue, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedTo, updateSteps } from './update'
+import { installedFrom, installedVersionOf, isNewer, isUpdateDue, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedTo, updateSteps, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'

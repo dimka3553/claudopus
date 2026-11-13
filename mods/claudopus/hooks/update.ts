@@ -1,10 +1,17 @@
 // Claudopus keeps itself up to date: Claude Code leaves a marketplace that is not Anthropic's alone unless each person turns its
 // auto-update on, and the desktop app runs its engine with DISABLE_AUTOUPDATER=1, which turns that pass off anyway. So every few
 // hours one chat on the Mac asks Claude Code itself to refresh this mod's marketplace and update the mod, the two steps a person
-// would type. Chats that start after an update load the new version; chats already open keep the one they loaded.
+// would type. It runs those steps only when the version page on claudopus.ai names a version other than the one installed, so a
+// look is one small fetch, with no model or agent in it. Chats that start after an update load the new version; chats already open
+// keep the one they loaded.
 
-// How often the Mac looks for a new version, and how long a look may hold the lock before another chat takes over
-export const UPDATE_EVERY = 4 * 60 * 60 * 1000
+// The page that says which version is current: site/version.json, made by build.mjs from plugin.json and served from main
+export const VERSION_PAGE = 'https://www.claudopus.ai/version.json'
+// How long the page may take to answer before the look counts it as not read
+export const VERSION_WAIT = 30_000
+
+// How often the Mac looks at the version page, and how long a look may hold the lock before another chat takes over
+export const UPDATE_EVERY = 60 * 60 * 1000
 export const UPDATE_LOOK = 15 * 60 * 1000
 // How long after a chat loads before it looks, so a chat's start is never held up
 export const UPDATE_AFTER = 2 * 60 * 1000
@@ -27,6 +34,29 @@ export const scopeOf = (installed: string, id: string, root: string): string | u
     return scope && /^(user|project|local)$/.test(scope) ? scope : undefined
   } catch {
     return undefined
+  }
+}
+
+// The version the page names, or undefined for anything that is not one
+export const versionOnPage = (text: string): string | undefined => {
+  try {
+    const version = JSON.parse(text)?.version
+    return typeof version === 'string' && /^\d+(\.\d+){1,3}([-+][\w.]+)?$/.test(version) ? version : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// The version installed at the scope this copy was installed at, from installed_plugins.json (a chat that started before an update
+// runs the old folder, but the Mac has the new one); without an entry, the version folder this copy runs from
+export const installedVersionOf = (installed: string, id: string, root: string, scope?: string): string => {
+  const folder = root.replace(/\/$/, '').split('/').at(-1) ?? ''
+  try {
+    const entries: { scope?: string; version?: string }[] = JSON.parse(installed)?.plugins?.[id] ?? []
+    const version = entries.find(one => (scope ? one.scope === scope : true) && typeof one.version === 'string')?.version
+    return version || folder
+  } catch {
+    return folder
   }
 }
 
