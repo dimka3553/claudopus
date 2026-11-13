@@ -118,7 +118,11 @@ const configButton = ($: EngineInterface, ui: Ui) => (
     <ui.Button key={`config-open-${presses}`} label="Config" onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
   </ui.Box>
 )
+// Check for updates as it stands in this chat: under way, and what the last press found, kept until the next press
+const updateCheck = { isChecking: false, said: '', isError: false }
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
+  version: (await versionsOf($).catch(() => ({ version: '' }))).version,
+  check: { ...updateCheck },
   texts: await Promise.all(
     TEXTS.map(async text => {
       const { isOwn, isStale, path, text: body } = await inForce($, $.plugin.root, dir, text.path)
@@ -172,4 +176,18 @@ const configActs = ($: EngineInterface) => ({
       // Automatic updates turned back on look at once when a look is due, not at the next quarter hour
       if (key === 'updates' && value === undefined) void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`))
     }),
+  // A press while a check runs does nothing: the tab shows it checking
+  check: () => {
+    if (updateCheck.isChecking) return
+    presses += 1
+    Object.assign(updateCheck, { isChecking: true, said: '', isError: false })
+    redraw($)
+    void checkForUpdates($)
+      .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true }))
+      .then(said => {
+        Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError })
+        presses += 1
+        redraw($)
+      })
+  },
 })
