@@ -81,25 +81,27 @@ const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[]
     const isLast = i === branches.length - 1 && !isMore
     return [{ one: b.one, depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
   })
-// The lines that join a row to the tree, as text: its first line, then the lines under it. Each level is two letters wide; a
-// row's own helpers hang from the second
-const twigText = (t: Twig, line: number) =>
-  `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${line === 0 ? `${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}` : `${t.isLast ? '  ' : '│ '}${t.hasKids ? '│ ' : '  '}`}`
-// The same lines drawn thin, for a surface that draws: as tall as the row's lines of text
-const TWIG_STEP = 14
-const twigWidth = (t: Twig) => (t.rails.length + 2) * TWIG_STEP
-const twigSvg = (t: Twig, rows: number, line: number) => {
-  const height = rows * line
+// The lines that join a row to the tree, as text. Each level is two letters wide; a row's own helpers hang from the second
+const twigText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`
+// The same lines drawn thin, for a surface that draws, as tall as one line of text: the last row under a parent turns to it in a
+// curve, the line ends in a dot in the colour of how the row stands (a ring for the row of those that ended), and a row's own
+// helpers hang from that dot
+const TWIG_STEP = 18
+const TWIG_ENDED = '#4EBA65'
+const TWIG_FAILED = '#E5484D'
+const twigWidth = (t: Twig) => t.rails.length * TWIG_STEP + 32
+const twigSvg = (t: Twig, line: number, dot: string) => {
   const mid = line / 2
-  const x = (level: number) => level * TWIG_STEP + TWIG_STEP / 2
+  const x = (level: number) => level * TWIG_STEP + 9
   const own = x(t.rails.length)
+  const at = own + TWIG_STEP
   const paths = [
-    ...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${height}`] : [])),
-    `M${own} 0V${t.isLast ? mid : height}`,
-    `M${own} ${mid}H${twigWidth(t)}`,
-    ...(t.hasKids ? [`M${own + TWIG_STEP} ${mid}V${height}`] : []),
+    ...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])),
+    t.isLast ? `M${own} 0V${mid - 5}Q${own} ${mid} ${own + 5} ${mid}H${at - 5}` : `M${own} 0V${line}M${own} ${mid}H${at - 5}`,
+    ...(t.hasKids ? [`M${at} ${mid + 5}V${line}`] : []),
   ]
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${height}" viewBox="0 0 ${twigWidth(t)} ${height}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/></svg>`
+  const mark = dot ? `<circle cx="${at}" cy="${mid}" r="3.5" fill="${dot}"/>` : `<circle cx="${at}" cy="${mid}" r="3" fill="none" stroke="#808080" stroke-width="1.5"/>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`
 }
 
 // Work the chat's own record was already looked through for

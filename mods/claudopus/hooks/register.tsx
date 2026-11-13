@@ -553,25 +553,27 @@ const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[]
     const isLast = i === branches.length - 1 && !isMore
     return [{ one: b.one, depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
   })
-// The lines that join a row to the tree, as text: its first line, then the lines under it. Each level is two letters wide; a
-// row's own helpers hang from the second
-const twigText = (t: Twig, line: number) =>
-  `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${line === 0 ? `${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}` : `${t.isLast ? '  ' : '│ '}${t.hasKids ? '│ ' : '  '}`}`
-// The same lines drawn thin, for a surface that draws: as tall as the row's lines of text
-const TWIG_STEP = 14
-const twigWidth = (t: Twig) => (t.rails.length + 2) * TWIG_STEP
-const twigSvg = (t: Twig, rows: number, line: number) => {
-  const height = rows * line
+// The lines that join a row to the tree, as text. Each level is two letters wide; a row's own helpers hang from the second
+const twigText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`
+// The same lines drawn thin, for a surface that draws, as tall as one line of text: the last row under a parent turns to it in a
+// curve, the line ends in a dot in the colour of how the row stands (a ring for the row of those that ended), and a row's own
+// helpers hang from that dot
+const TWIG_STEP = 18
+const TWIG_ENDED = '#4EBA65'
+const TWIG_FAILED = '#E5484D'
+const twigWidth = (t: Twig) => t.rails.length * TWIG_STEP + 32
+const twigSvg = (t: Twig, line: number, dot: string) => {
   const mid = line / 2
-  const x = (level: number) => level * TWIG_STEP + TWIG_STEP / 2
+  const x = (level: number) => level * TWIG_STEP + 9
   const own = x(t.rails.length)
+  const at = own + TWIG_STEP
   const paths = [
-    ...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${height}`] : [])),
-    `M${own} 0V${t.isLast ? mid : height}`,
-    `M${own} ${mid}H${twigWidth(t)}`,
-    ...(t.hasKids ? [`M${own + TWIG_STEP} ${mid}V${height}`] : []),
+    ...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])),
+    t.isLast ? `M${own} 0V${mid - 5}Q${own} ${mid} ${own + 5} ${mid}H${at - 5}` : `M${own} 0V${line}M${own} ${mid}H${at - 5}`,
+    ...(t.hasKids ? [`M${at} ${mid + 5}V${line}`] : []),
   ]
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${height}" viewBox="0 0 ${twigWidth(t)} ${height}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/></svg>`
+  const mark = dot ? `<circle cx="${at}" cy="${mid}" r="3.5" fill="${dot}"/>` : `<circle cx="${at}" cy="${mid}" r="3" fill="none" stroke="#808080" stroke-width="1.5"/>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`
 }
 
 // Work the chat's own record was already looked through for
@@ -4933,6 +4935,8 @@ const panelHooks = (on: On) => {
     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are
     // narrower than a cell, the terminal's are one each
     const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
+    // How many letters one row of a small card holds, and a bold one: the card's two-row room halved
+    const perRow = Math.max(24, Math.floor(room / 2))
     // Three moving dots: beside the line a small card gives, and beside the to-do being done on the big one
     // A terminal draws no picture, so there the mark is a letter
     const live = (key: string) =>
@@ -4998,6 +5002,7 @@ const panelHooks = (on: On) => {
     const small = (one: Todo) => {
       const kept = one.items.filter(item => item.state !== 'dropped')
       const done = kept.filter(item => item.state === 'done').length
+      const tree = treeUnder(one)
       return (
         <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
           {/* Purple while it works, green once it finished; work stopped or stopped by an error has no mark */}
@@ -5032,68 +5037,61 @@ const panelHooks = (on: On) => {
                 </Box>
               ) : null}
             </Box>
+            {/* Its helpers, inside the card: its coloured edge runs down beside them */}
+            {tree.length ? <Box key={`tree-${one.id}`} flexDirection="column">{tree}</Box> : null}
           </Box>
         </Box>
       )
     }
 
-    // ---- The helpers a piece of work started, under it as a tree: each a slim row joined to its parent by a line ----
-    // A helper is two rows: its name, then its model and time. A helper's own helper is one row: its name and time. Each
-    // opens its own Details. How it stands is its mark: the dots while it works, a tick, a cross or a square once it ended
-    const twigMark = (one: Todo, key: string) => (
-      <Box flexShrink={0} width={3}>
-        {one.status === 'working' ? live(key) : <Text color={one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status === 'stopped'}>{one.status === 'done' ? '✓' : one.status === 'failed' ? '✕' : '■'}</Text>}
-      </Box>
-    )
-    const twigLines = (t: Twig, rows: number, key: string) =>
+    // ---- The helpers a piece of work started, inside its card as a tree: each one slim row joined to its parent by a line ----
+    // A row is a dot at the end of its line, the helper's name, its time, and a mark to open it: a press on the name or the mark
+    // opens its own Details. The dot is purple while it works, green once it finished, red when an error stopped it, grey when it
+    // was stopped; one that ended is dim. The lines are drawn as a card's three dots are, which the app is seen to draw
+    const twigLines = (t: Twig, key: string, status?: Todo['status']) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, rows, LINE)} alt="" width={twigWidth(t)} height={rows * LINE} />
+          <table.Svg
+            key={`${key}-svg`}
+            source={twigSvg(t, LINE, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '')}
+            alt={status ? { working: 'At work', done: 'Finished', failed: 'Stopped by an error', stopped: 'Stopped' }[status] : 'Ended'}
+            width={twigWidth(t)}
+            height={LINE}
+            isInteractive
+          />
         </Box>
       ) : (
-        <Box key={key} flexDirection="column" flexShrink={0}>
-          {Array.from({ length: rows }, (_, line) => (
-            <Text key={`${key}-${line}`} dimColor>{twigText(t, line)}</Text>
-          ))}
+        <Box key={key} flexDirection="row" flexShrink={0}>
+          <Text dimColor>{twigText(t)}</Text>
+          <Text color={status === 'working' ? LIVE : status === 'done' ? DONE : status === 'failed' ? 'error' : undefined} dimColor={!status || status === 'stopped'}>
+            {status === 'working' ? '●' : status === 'done' ? '✓' : status === 'failed' ? '✕' : status === 'stopped' ? '■' : '○'}
+          </Text>
         </Box>
       )
+    // One row of the tree, in the same columns whatever it says: the lines and dot, what a press opens, the time, the mark
+    const twigRowOf = (t: Twig, key: string, label: string, isDim: boolean, time: string, onPress: () => void, status?: Todo['status']) => (
+      <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+        {twigLines(t, `twig-lines-${key}`, status)}
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Button key={`open-${key}-${presses}`} label={label} plain dimColor={isDim} hover={{ scope: `twig-${key}`, underline: true }} onPress={onPress} />
+        </Box>
+        {time ? (
+          <Box flexShrink={0}>
+            <Text dimColor>{time}</Text>
+          </Box>
+        ) : null}
+        <Box flexShrink={0}>
+          <Button key={`go-${key}-${presses}`} label="›" plain dimColor hover={{ scope: `twig-${key}` }} onPress={onPress} />
+        </Box>
+      </Box>
+    )
     const twigRow = (t: Twig, scope: string) => {
       const one = t.one
       if (!one) return null
-      const rows = t.depth === 1 ? 2 : 1
-      const time = took((one.endedAt || at) - one.startedAt)
-      return (
-        <Box key={`twig-${scope}-${one.id}`} flexDirection="row" height={rows} overflow="hidden" flexShrink={0}>
-          {twigLines(t, rows, `twig-lines-${scope}-${one.id}`)}
-          <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} paddingLeft={1}>
-            <Box flexDirection="row" alignItems="flex-start" gap={1} height={1} overflow="hidden">
-              {twigMark(one, `twig-live-${scope}-${one.id}`)}
-              <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text wrap="truncate-end" dimColor={one.status !== 'working'}>{titleOf(one)}</Text>
-              </Box>
-              {rows === 1 ? (
-                <Box flexShrink={0}>
-                  <Text dimColor>{time}</Text>
-                </Box>
-              ) : null}
-              <Box flexShrink={0}>
-                <Button key={`open-${scope}-${one.id}-${presses}`} label="Details" plain dimColor hover={{ scope: `twig-${scope}-${one.id}`, underline: true }} onPress={() => openWork($, one.id)} />
-              </Box>
-            </Box>
-            {rows === 2 ? (
-              <Box flexDirection="row" height={1} overflow="hidden">
-                <Box width={4} flexShrink={0} />
-                <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                  <Text dimColor wrap="truncate-end">{[{ working: '', done: 'Finished', stopped: 'Stopped', failed: 'Error' }[one.status], modelName(one.model ?? ''), time].filter(Boolean).join(' · ')}</Text>
-                </Box>
-              </Box>
-            ) : null}
-          </Box>
-        </Box>
-      )
+      return twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, perRow - 12 - t.depth * 2)), one.status !== 'working', took((one.endedAt || at) - one.startedAt), () => openWork($, one.id), one.status)
     }
-    // Under a small card: the helpers at work now or just ended, and any that one of those runs under; the rest are one closing
-    // row that says how many have ended, which opens the card's Details, where every helper is listed
+    // In a small card: the helpers at work now or just ended, and any that one of those runs under; the rest are one closing
+    // row, laid out as the others, that says how many have ended and opens the card's Details, where every helper is listed
     const treeUnder = (one: Todo) => {
       const under = underOf(all, one.id)
       if (!under.length) return []
@@ -5102,24 +5100,8 @@ const panelHooks = (on: On) => {
       const rest = under.length - twigs.length
       if (!rest) return twigsOf(branches).map(t => twigRow(t, 'list'))
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      return [
-        ...twigs.map(t => twigRow(t, 'list')),
-        <Box key={`twig-rest-${one.id}`} flexDirection="row" height={1} overflow="hidden" flexShrink={0}>
-          {twigLines(closing, 1, `twig-rest-lines-${one.id}`)}
-          <Box paddingLeft={1} flexShrink={1} minWidth={0}>
-            <Button key={`open-rest-${one.id}-${presses}`} label={`${rest} ${rest === 1 ? 'helper' : 'helpers'} ended`} plain dimColor hover={{ scope: `twig-rest-${one.id}`, underline: true }} onPress={() => openWork($, one.id)} />
-          </Box>
-        </Box>,
-      ]
+      return [...twigs.map(t => twigRow(t, 'list')), twigRowOf(closing, `rest-${one.id}`, `${rest} ${rest === 1 ? 'helper' : 'helpers'} ended`, true, '', () => openWork($, one.id))]
     }
-    // A small card with its tree: the rows hang straight under it, with no gap, a little in from its edge
-    const smallWithTree = (one: Todo) => (
-      // The same box with or without helpers, so a card is not drawn afresh as its first helper starts or its last leaves
-      <Box key={`card-${one.id}`} flexDirection="column" flexShrink={0}>
-        {small(one)}
-        <Box flexDirection="column" paddingLeft={1} paddingRight={2}>{treeUnder(one)}</Box>
-      </Box>
-    )
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----
     const flowMine = await sessionName($)
@@ -5129,8 +5111,6 @@ const panelHooks = (on: On) => {
     const endedFlows = flowList.filter(f => f.status !== 'working' && !isLingering(f, at))
     const flowShown = paneId.startsWith(FLOW_PANE) ? flowList.find(f => flowPaneOf(f.id) === paneId) : undefined
     const flowTokens = (f: Flow) => f.agents.reduce((sum, one) => sum + (one.tokens ?? 0), 0)
-    // How many letters one row of a small card holds, and a bold one: the card's two-row room halved
-    const perRow = Math.max(24, Math.floor(room / 2))
     const boldRow = Math.max(20, Math.floor(perRow * 0.88))
     const agentsWord = (n: number) => `${n} ${n === 1 ? 'agent' : 'agents'}`
     // Where it stands, as Claude's own view of a workflow says it: "Workflow", how many agents it has started, its tokens and time,
@@ -5813,7 +5793,7 @@ const panelHooks = (on: On) => {
               // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
               ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...waiting.map(p => promptCard(p, `this-${p.id}`, 'Answer it in this chat')),
-              ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => smallWithTree(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, those that wait on the person first
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))

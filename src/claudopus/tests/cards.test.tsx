@@ -127,14 +127,13 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect(prompts.at(-1)).toBe('search')
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 't', agentId: 'a2', text: 'I am reading how the other model draws outlines.' } as never)
   expect((await pane.find({ type: 'Text', text: /^I am reading/ }))?.text).toBe('I am reading how the other model draws outlines.')
-  // It hangs under that card as a slim row of its own: its name on one line that is cut at the edge, where it stands under it, joined to the card by a line
-  expect((await pane.find({ type: 'Text', text: /Search the docs/ }))?.props.wrap).toBe('truncate-end')
-  expect((await pane.find({ type: 'Text', text: /Search the docs/ }))?.props.bold).toBeUndefined()
-  expect((await pane.findAll({ type: 'Svg' })).filter(svg => String(svg.props.source).includes('M7 0V10M7 10H28'))).toHaveLength(1)
+  // It hangs inside that card as one slim row of its own: its name, which opens it, joined to the card by a line that ends in a purple dot while it works
+  expect((await keyed(pane, 'open-list-a2'))?.props.label).toBe('Search the docs')
+  expect((await pane.findAll({ type: 'Svg' })).filter(svg => String(svg.props.source).includes('M9 0V5Q9 10 14 10H22') && String(svg.props.source).includes('fill="#8A63F0"') && svg.props.alt === 'At work' && svg.props.isInteractive === true)).toHaveLength(1)
   const plain = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   expect((await plain.find({ type: 'Text', text: /^└─/ }))?.text).toBe('└───')
   await plain.unmount()
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label).filter(label => label === 'Details')).toHaveLength(2)
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label).filter(label => label === 'Details')).toHaveLength(1)
   // Pressed, the helper's own Details opens as a tab of its own, which names the work it helps and leads to it
   await pressed(pane, 'open-list-a2')
   expect(await until(async () => opened.includes('work-a2') || undefined)).toBe(true)
@@ -163,8 +162,8 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
-  // Its helper, ended in the same moment, stays under it for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Details', 'Details'])
+  // Its helper, ended in the same moment, stays in its card for the same pause
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Details', 'Search the docs', '›'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeDefined()
   await clock.advance(1_100)
@@ -699,7 +698,7 @@ test('work that ended before the mod kept it is read back from the chat\'s own r
   await pane.unmount()
 })
 
-test('helpers hang under their work as a tree, a helper of a helper slimmer still; ended ones fold into one row, and Details lists every one', async ($, on) => {
+test('helpers hang inside their work\'s card as a tree, one slim row each that opens its Details; ended ones fold into one row laid out the same, and Details lists every one', async ($, on) => {
   const { clock, opened } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -713,15 +712,17 @@ test('helpers hang under their work as a tree, a helper of a helper slimmer stil
   await clock.advance(1_000)
   await helper('Measure the ears', 'a1')
 
-  const pane = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
   const lines = async () => (await pane.findAll({ type: 'Text' })).map(one => one.text).filter(text => /^[│├└┬─ ]{4,}$/.test(text))
-  // Each helper is joined to the row above it; a helper is two rows, its own helper one
-  expect(await lines()).toEqual(['├─┬─', '│ │ ', '│ ├───', '│ └───', '└───', '    '])
+  // Each helper is one row, joined to the row above it
+  expect(await lines()).toEqual(['├─┬─', '│ ├───', '│ └───', '└───'])
   // Only what the chat started is a card
   expect((await pane.findAll({ type: 'Text' })).filter(one => one.props.bold && /nose|ears|manual|appendix/.test(one.text)).map(one => one.text)).toEqual(['Fix the nose'])
-  // A helper says its time under its name; its own helper has its time beside its name, and no row under it
+  // Each says its time beside its name, and nothing else: no model, and no dots
   expect((await pane.findAll({ type: 'Text', text: /^\ds$/ })).map(one => one.text)).toEqual(['3s', '3s', '2s', '1s', '0s'])
-  // Each opens its own Details
+  expect((await keyed(pane, 'open-list-a2'))?.props.label).toBe('Measure the nose')
+  // Each opens its own Details, by its name or the mark at its end
+  expect(await keyed(pane, 'go-list-a2')).toBeDefined()
   await pressed(pane, 'open-list-a4')
   expect(await until(async () => opened.includes('work-a4') || undefined)).toBe(true)
 
@@ -729,15 +730,38 @@ test('helpers hang under their work as a tree, a helper of a helper slimmer stil
   await $.turn.complete({ answer: 'Read.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a3' } as never)
   await $.turn.complete({ answer: 'Measured.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a5' } as never)
   await clock.advance(2_100)
-  expect(await lines()).toEqual(['├─┬─', '│ │ ', '│ └───', '└───'])
+  expect(await lines()).toEqual(['├─┬─', '│ └───', '└───'])
   expect((await keyed(pane, 'open-rest-a1'))?.props.label).toBe('2 helpers ended')
-  expect(await pane.find({ type: 'Text', text: /Measure the ears|Read the manual/ })).toBeUndefined()
+  expect(await keyed(pane, 'go-rest-a1')).toBeDefined()
+  expect(await keyed(pane, 'open-list-a3')).toBeUndefined()
+  expect(await keyed(pane, 'open-list-a5')).toBeUndefined()
   await pane.unmount()
 
+  // Where the surface draws, each row's lines end in a dot in the colour of how it stands, and rows meet: a helper with its own
+  // has a line down from its dot, its last one turns to it in a curve past the line of the level above, and the closing row has a ring
+  const drawn = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  const svgs = (await drawn.findAll({ type: 'Svg' })).map(svg => ({ source: String(svg.props.source), alt: svg.props.alt })).filter(svg => svg.source.includes('stroke-opacity'))
+  expect(svgs.map(svg => svg.alt)).toEqual(['At work', 'At work', 'Ended'])
+  expect(svgs[0]?.source).toContain('d="M9 0V20M9 10H22M27 15V20"')
+  expect(svgs[1]?.source).toContain('d="M9 0V20M27 0V5Q27 10 32 10H40"')
+  expect(svgs[1]?.source).toContain('<circle cx="45" cy="10" r="3.5" fill="#8A63F0"/>')
+  expect(svgs[2]?.source).toContain('d="M9 0V5Q9 10 14 10H22"')
+  expect(svgs[2]?.source).toContain('fill="none" stroke="#808080" stroke-width="1.5"/></svg>')
+  // No row names a model, and none has the three dots: only the card itself does
+  expect((await drawn.findAll({ type: 'Svg' })).filter(svg => svg.props.alt === 'Being done now')).toHaveLength(1)
+  await drawn.unmount()
+  // A name too long for its row is cut at a word in a narrow pane
+  const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 20 }, surface: 'desktop' } as never)
+  expect((await keyed(narrow, 'open-list-a2'))?.props.label).toBe('Measure the …')
+  await narrow.unmount()
+
   // The work's Details lists every helper, ended or not, as the same tree
-  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'terminal' } as never)
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
   expect((await tab.find({ type: 'Text', text: / in all$/ }))?.text).toBe('2 at work · 4 in all')
-  expect((await tab.findAll({ type: 'Text' })).map(one => one.text).filter(text => /manual|appendix|Measure/.test(text))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
+  expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
+  // One at work has a dot at the end of its line, one that finished a tick
+  expect((await tab.findAll({ type: 'Text', text: '●' })).length).toBe(2)
+  expect((await tab.findAll({ type: 'Text', text: '✓' })).length).toBe(2)
   expect(await keyed(tab, 'open-details-a3')).toBeDefined()
   await tab.unmount()
 })
@@ -755,7 +779,8 @@ test('long work keeps only its newest ended helpers, and none of work that was f
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'terminal' } as never)
   // 104 ended, the oldest four forgotten; the one at work is never forgotten
   expect((await tab.find({ type: 'Text', text: / in all$/ }))?.text).toBe('1 at work · 101 in all')
-  expect(await tab.find({ type: 'Text', text: /^Measure 5$/ })).toBeUndefined()
-  expect(await tab.find({ type: 'Text', text: /^Measure 6$/ })).toBeDefined()
+  const names = (await tab.findAll({ type: 'Button' })).map(one => String(one.props.label))
+  expect(names.includes('Measure 5')).toBe(false)
+  expect(names.includes('Measure 6')).toBe(true)
   await tab.unmount()
 })
