@@ -48,6 +48,8 @@ const bandHooks = (on: On) => {
                 </Text>
               </Box>
             </Box>
+            {/* The chat's notice with what it is about went only to the chat that started the work */}
+            {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{cards.includes(first) ? '    What it is about is in the chat above and on its card' : '    What it is about is on its card'}</Text> : null}
             {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
             <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
               {answers.map((choice, n) => (
