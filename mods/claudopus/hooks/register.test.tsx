@@ -32,7 +32,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; unplaced?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[] } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; unplaced?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean}[] } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -145,7 +145,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   })
   // `live`: panes as a surface keeps them, opened and closed as asked; a surface that never says one is shown (a chat the app runs on
   // another Mac over ssh) is told by isShown false on every open
-  on('ui.panes', () => ({ value: options.live ? options.live.map(one => ({ id: one.id, title: one.id, isShown: one.isShown, isFocused: Boolean(one.isFocused), isPlaced: one.isPlaced })) : (options.panes ?? []).map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
+  on('ui.panes', () => ({ value: options.live ? options.live.map(one => ({ id: one.id, title: one.id, isShown: one.isShown, isFocused: false, isPlaced: one.isPlaced })) : (options.panes ?? []).map(id => ({ id, title: id, isShown: true, isFocused: false, isPlaced: true })) }))
   on('ui.close', (_, e) => {
     closed.push(e.id)
     if (options.live) options.live.splice(0, options.live.length, ...options.live.filter(one => one.id !== e.id))
@@ -3521,31 +3521,6 @@ test("where the screen says which tab it shows, a Details tab left behind the li
   await clock.advance(1000)
   expect(opened.filter(id => id === 'work-a1')).toHaveLength(2)
   expect(closed.filter(id => id === 'work-a1')).toHaveLength(1)
-  await pane.unmount()
-})
-
-test("a press inside the list gives it the keyboard, and the engine shows no new tab over one holding it: the list lets go first, then Stats opens in front", async ($, on) => {
-  const live = [{ id: 'claudopus', isShown: true, isPlaced: true, isFocused: true }]
-  const { opened, closed } = world(on, { live })
-  await $.session.start(start)
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await pressed(pane, 'stats-open')
-  expect(await until(async () => opened.includes('stats') || undefined)).toBe(true)
-  // The list was closed and opened again before Stats, and is open still
-  expect(closed).toContain('claudopus')
-  expect(opened.lastIndexOf('claudopus')).toBeLessThan(opened.lastIndexOf('stats'))
-  expect(live.map(one => one.id)).toEqual(['claudopus', 'stats'])
-  await pane.unmount()
-})
-
-test("with no tab holding the keyboard, a press opens its tab and leaves the list alone", async ($, on) => {
-  const live = [{ id: 'claudopus', isShown: true, isPlaced: true }]
-  const { opened, closed } = world(on, { live })
-  await $.session.start(start)
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await pressed(pane, 'stats-open')
-  expect(await until(async () => opened.includes('stats') || undefined)).toBe(true)
-  expect(closed).not.toContain('claudopus')
   await pane.unmount()
 })
 

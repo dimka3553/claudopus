@@ -101,6 +101,57 @@ export const isReloadDue = (
   const at = typeof before?.at === 'number' && Number.isFinite(before.at) ? before.at : undefined
   return !(at !== undefined && before?.version === copy.version && now >= at && now - at < RELOAD_AGAIN)
 }
+// The moment a chat moves to a newer version: the header's version rolls to the new number and says "Updated" in blue for
+// UPDATED_FOR, drawn again each UPDATED_STEP, then settles to the plain number. A panel first drawn later than UPDATED_LATE after
+// the load shows nothing of it
+export const UPDATED_FOR = 8000
+export const UPDATED_STEP = 150
+export const UPDATED_LATE = 10 * 60 * 1000
+const UPDATED_ROLL = 1500
+const UPDATED_SETTLE = 7000
+const UPDATED_WORD = 'Updated'
+
+// The version this chat ran before this load, when the load moved it to a newer one: the version the chat last loaded (kept
+// through a reload), else, for a chat whose last copy kept none, the reload it asked for (reloads/<chat>.json) to this very
+// version, if recent
+export const updatedFrom = (loaded: string, ran: string, mark: { version?: unknown; from?: unknown; at?: unknown } | undefined, now: number) => {
+  const asked =
+    mark?.version === loaded && typeof mark.from === 'string' && typeof mark.at === 'number' && now >= mark.at && now - mark.at < UPDATED_LATE ? mark.from : ''
+  const before = ran || asked
+  return loaded && before && isNewer(loaded, before) ? before : ''
+}
+
+// What the version line shows `t` after the moment began, as pieces in a tone each; nothing once it is over. First the numbers
+// that changed roll like a counter and land one by one, left to right; then "v<to> · Updated" in blue, a glint passing along the
+// word; then both dim for a moment before the plain number comes back
+export type UpdatedPiece = { text: string; tone: 'dim' | 'blue' | 'glint' }
+export const updatedLook = (from: string, to: string, t: number): UpdatedPiece[] | undefined => {
+  if (!(t >= 0 && t < UPDATED_FOR) || !to) return undefined
+  const target = `v${to}`
+  if (t < UPDATED_ROLL) {
+    const old = `v${from}`
+    let same = 0
+    while (same < target.length && target[same] === old[same]) same += 1
+    const changing = [...target.slice(same)]
+    const landed = Math.floor((t / UPDATED_ROLL) * (changing.length + 1))
+    const frame = Math.floor(t / UPDATED_STEP)
+    const rolled = changing.map((ch, i) => (i < landed || !/\d/.test(ch) ? ch : String((Number(ch) + frame + i * 3 + 1) % 10))).join('')
+    return [...(same ? [{ text: target.slice(0, same), tone: 'dim' as const }] : []), { text: rolled, tone: 'blue' }]
+  }
+  if (t >= UPDATED_SETTLE) return [{ text: `${target} · ${UPDATED_WORD}`, tone: 'dim' }]
+  // The glint crosses the word, rests a little, and crosses again
+  const at = Math.floor((t - UPDATED_ROLL) / UPDATED_STEP) % (UPDATED_WORD.length + 5)
+  const word: UpdatedPiece[] =
+    at < UPDATED_WORD.length
+      ? [
+          { text: UPDATED_WORD.slice(0, at), tone: 'blue' },
+          { text: UPDATED_WORD.charAt(at), tone: 'glint' },
+          { text: UPDATED_WORD.slice(at + 1), tone: 'blue' },
+        ]
+      : [{ text: UPDATED_WORD, tone: 'blue' }]
+  const pieces: UpdatedPiece[] = [{ text: target, tone: 'blue' }, { text: ' · ', tone: 'dim' }, ...word]
+  return pieces.filter(piece => piece.text)
+}
 const versionIn = (manifest: string) => {
   try {
     return String(JSON.parse(manifest)?.version ?? '')

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, RELOAD_AGAIN, isUpdateDue, scopeOf, stampOf, UPDATE_EVERY, updatedTo, updateSteps, VERSION_PAGE, versionOnPage } from './update'
+import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, RELOAD_AGAIN, isUpdateDue, scopeOf, stampOf, UPDATE_EVERY, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, VERSION_PAGE, versionOnPage } from './update'
 
 test('only a copy installed from a marketplace is updated, read off its cache folder', async () => {
   expect(installedFrom('/Users/sam/.claude/plugins/cache/claudopus/claudopus/0.2.25')).toEqual({ plugins: '/Users/sam/.claude/plugins', marketplace: 'claudopus', plugin: 'claudopus' })
@@ -107,4 +107,40 @@ test('the copy a chat would load is the install of the folder it runs in, the ne
   expect(copyOf(installed, 'claudopus@m', '/p/cache/m/claudopus/0.2.20', '/elsewhere')?.version).toBe('0.2.30')
   // This very folder's entry wins
   expect(copyOf(installed, 'claudopus@m', '/p/cache/m/claudopus/0.2.40/', '/code/app')?.version).toBe('0.2.40')
+})
+
+test('a chat that moved to a newer version knows the one it ran before; the same, an older one or a fresh chat shows nothing', async () => {
+  expect(updatedFrom('0.2.40', '0.2.39', undefined, 1000)).toBe('0.2.39')
+  expect(updatedFrom('0.2.40', '0.2.40', undefined, 1000)).toBe('')
+  expect(updatedFrom('0.2.39', '0.2.40', undefined, 1000)).toBe('')
+  expect(updatedFrom('0.2.40', '', undefined, 1000)).toBe('')
+  expect(updatedFrom('', '0.2.39', undefined, 1000)).toBe('')
+  // A last copy that kept no version of its own: the reload it asked for, to this very version and recent
+  const mark = { version: '0.2.40', from: '0.2.39', at: 1000 }
+  expect(updatedFrom('0.2.40', '', mark, 1000 + 5000)).toBe('0.2.39')
+  expect(updatedFrom('0.2.40', '', mark, 1000 + UPDATED_LATE)).toBe('')
+  expect(updatedFrom('0.2.41', '', mark, 2000)).toBe('')
+  expect(updatedFrom('0.2.40', '', { version: '0.2.40', at: 1000 }, 2000)).toBe('')
+  // The version kept through the reload wins over the mark
+  expect(updatedFrom('0.2.40', '0.2.40', mark, 2000)).toBe('')
+})
+
+test('the version rolls to the new number, says Updated in blue, settles dim, then is plain again', async () => {
+  const text = (t: number) => updatedLook('0.2.39', '0.2.40', t)?.map(p => p.text).join('')
+  // Only what changed rolls; the same start stays dim
+  const first = updatedLook('0.2.39', '0.2.40', 0)!
+  expect(first[0]).toEqual({ text: 'v0.2.', tone: 'dim' })
+  expect(first[1].tone).toBe('blue')
+  expect(first[1].text).toHaveLength(2)
+  expect(text(1400)).toBe('v0.2.40')
+  const mid = updatedLook('0.2.39', '0.2.40', 3000)!
+  expect(mid.map(p => p.text).join('')).toBe('v0.2.40 · Updated')
+  expect(mid[0]).toEqual({ text: 'v0.2.40', tone: 'blue' })
+  expect(mid.some(p => p.tone === 'glint') || mid.at(-1)?.tone === 'blue').toBe(true)
+  expect(updatedLook('0.2.39', '0.2.40', 7500)).toEqual([{ text: 'v0.2.40 · Updated', tone: 'dim' }])
+  expect(updatedLook('0.2.39', '0.2.40', UPDATED_FOR)).toBeUndefined()
+  expect(updatedLook('0.2.39', '0.2.40', -1)).toBeUndefined()
+  // A longer number, as 0.2.99 to 0.3.0
+  expect(text(1499)).toBe('v0.2.40')
+  expect(updatedLook('0.2.99', '0.3.0', 1499)!.map(p => p.text).join('')).toBe('v0.3.0')
 })

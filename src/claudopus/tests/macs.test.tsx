@@ -260,31 +260,6 @@ test("where the screen says which tab it shows, a Details tab left behind the li
   await pane.unmount()
 })
 
-test("a press inside the list gives it the keyboard, and the engine shows no new tab over one holding it: the list lets go first, then Stats opens in front", async ($, on) => {
-  const live = [{ id: 'claudopus', isShown: true, isPlaced: true, isFocused: true }]
-  const { opened, closed } = world(on, { live })
-  await $.session.start(start)
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await pressed(pane, 'stats-open')
-  expect(await until(async () => opened.includes('stats') || undefined)).toBe(true)
-  // The list was closed and opened again before Stats, and is open still
-  expect(closed).toContain('claudopus')
-  expect(opened.lastIndexOf('claudopus')).toBeLessThan(opened.lastIndexOf('stats'))
-  expect(live.map(one => one.id)).toEqual(['claudopus', 'stats'])
-  await pane.unmount()
-})
-
-test("with no tab holding the keyboard, a press opens its tab and leaves the list alone", async ($, on) => {
-  const live = [{ id: 'claudopus', isShown: true, isPlaced: true }]
-  const { opened, closed } = world(on, { live })
-  await $.session.start(start)
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await pressed(pane, 'stats-open')
-  expect(await until(async () => opened.includes('stats') || undefined)).toBe(true)
-  expect(closed).not.toContain('claudopus')
-  await pane.unmount()
-})
-
 test("an empty tab an earlier version left open, not drawn, closes as the mod loads; the list and drawn tabs stay", async ($, on) => {
   const live = [
     { id: 'claudopus', isShown: true, isPlaced: true },

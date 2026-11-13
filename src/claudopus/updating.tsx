@@ -124,3 +124,60 @@ const reloadToInstalled = async ($: EngineInterface) => {
     reloadAsked = ''
   }
 }
+
+// ---- The moment a chat moves to a newer version ----
+
+// The version this chat loaded last, kept through a reload of this code, so the load after it knows what it moved from
+const ranVersion = atom({ plugin: 'claudopus', key: 'ran' } as const, '', { shape: 'ran-1' })
+// A move to a newer version this load made, from the version it ran before; its moment begins at the panel's first drawing
+let updatedMoment: { from: string; to: string; loadedAt: number; startedAt: number } | undefined
+const noteLoaded = async ($: EngineInterface) => {
+  updatedMoment = undefined
+  const loaded = (await versionsOf($)).version
+  if (!loaded) return
+  const ran = await read($, ranVersion)
+  const mark = await readOr($, `${dir}/reloads/${await $.session.id()}.json`).then(text => {
+    try {
+      return JSON.parse(text) as { version?: unknown; from?: unknown; at?: unknown }
+    } catch {
+      return undefined
+    }
+  })
+  const now = await $.clock.now()
+  const from = updatedFrom(loaded, ran, mark, now)
+  await update($, ranVersion, () => loaded)
+  if (!from) return
+  updatedMoment = { from, to: loaded, loadedAt: now, startedAt: 0 }
+  // A panel drawn while this load was still reading has no moment yet: it is drawn again now
+  await update($, tick, n => n + 1)
+  await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header says Updated`)
+}
+// The header's version as it stands now (blue in Claudopus's workflow blue, the glint in the text's own bright colour): the moment's pieces while it lasts, drawn again each UPDATED_STEP until it is over
+const updatedPieces = async ($: EngineInterface, version: string) => {
+  const moment = updatedMoment
+  if (!moment || moment.to !== version) return undefined
+  const now = await $.clock.now()
+  if (!moment.startedAt) {
+    if (now - moment.loadedAt > UPDATED_LATE) return void (updatedMoment = undefined)
+    moment.startedAt = now
+    let left = Math.ceil(UPDATED_FOR / UPDATED_STEP) + 2
+    const step = () =>
+      void $.clock.after(UPDATED_STEP, () => {
+        void update($, tick, n => n + 1)
+        if ((left -= 1) > 0 && updatedMoment === moment) step()
+      })
+    step()
+  }
+  const look = updatedLook(moment.from, moment.to, now - moment.startedAt)
+  if (!look && updatedMoment === moment) updatedMoment = undefined
+  return look
+}
+const versionLine = (ui: Ui, pieces: ReturnType<typeof updatedLook>) => (
+  <ui.Box key="head-version" flexDirection="row" flexShrink={1} minWidth={0}>
+    {(pieces ?? []).map((piece, i) => (
+      <ui.Text key={`head-version-${i}`} wrap="truncate-end" dimColor={piece.tone === 'dim'} color={piece.tone === 'blue' ? FLOW : undefined} bold={piece.tone !== 'dim'}>
+        {piece.text}
+      </ui.Text>
+    ))}
+  </ui.Box>
+)

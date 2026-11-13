@@ -11,7 +11,7 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
-import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedTo, updateSteps, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
+import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_STEP, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
 // helpers, the log and the chat's saved words
@@ -1480,13 +1480,6 @@ const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
 // shown is opened again
 const front = async ($: EngineInterface, id: string, title: string) => {
   const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown)
-  // A press inside a tab gives that tab the keyboard, and the engine never shows a new tab over the one holding it: it waits on
-  // the screen to honour the open's focus, which a screen with a turn running or text in the box refuses (seen every press in a
-  // chat the app runs on another Mac over ssh). The tab holding the keyboard is closed and opened again first, so it lets go
-  for (const held of (await $.ui.panes()).filter(pane => pane.isFocused && pane.id !== id)) {
-    await $.ui.close({ id: held.id }).catch(() => undefined)
-    await $.ui.open({ id: held.id, title: held.title }).catch(err => log($, `${held.id} not opened again: ${String(err)}`))
-  }
   // A tab open behind another is not shown, and opening it again would leave it behind: it is closed and opened again, which
   // brings it to the front (seen in the app on a press of Results and of one result)
   const was = (await $.ui.panes()).find(pane => pane.id === id)
@@ -2936,6 +2929,63 @@ const reloadToInstalled = async ($: EngineInterface) => {
   }
 }
 
+// ---- The moment a chat moves to a newer version ----
+
+// The version this chat loaded last, kept through a reload of this code, so the load after it knows what it moved from
+const ranVersion = atom({ plugin: 'claudopus', key: 'ran' } as const, '', { shape: 'ran-1' })
+// A move to a newer version this load made, from the version it ran before; its moment begins at the panel's first drawing
+let updatedMoment: { from: string; to: string; loadedAt: number; startedAt: number } | undefined
+const noteLoaded = async ($: EngineInterface) => {
+  updatedMoment = undefined
+  const loaded = (await versionsOf($)).version
+  if (!loaded) return
+  const ran = await read($, ranVersion)
+  const mark = await readOr($, `${dir}/reloads/${await $.session.id()}.json`).then(text => {
+    try {
+      return JSON.parse(text) as { version?: unknown; from?: unknown; at?: unknown }
+    } catch {
+      return undefined
+    }
+  })
+  const now = await $.clock.now()
+  const from = updatedFrom(loaded, ran, mark, now)
+  await update($, ranVersion, () => loaded)
+  if (!from) return
+  updatedMoment = { from, to: loaded, loadedAt: now, startedAt: 0 }
+  // A panel drawn while this load was still reading has no moment yet: it is drawn again now
+  await update($, tick, n => n + 1)
+  await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header says Updated`)
+}
+// The header's version as it stands now (blue in Claudopus's workflow blue, the glint in the text's own bright colour): the moment's pieces while it lasts, drawn again each UPDATED_STEP until it is over
+const updatedPieces = async ($: EngineInterface, version: string) => {
+  const moment = updatedMoment
+  if (!moment || moment.to !== version) return undefined
+  const now = await $.clock.now()
+  if (!moment.startedAt) {
+    if (now - moment.loadedAt > UPDATED_LATE) return void (updatedMoment = undefined)
+    moment.startedAt = now
+    let left = Math.ceil(UPDATED_FOR / UPDATED_STEP) + 2
+    const step = () =>
+      void $.clock.after(UPDATED_STEP, () => {
+        void update($, tick, n => n + 1)
+        if ((left -= 1) > 0 && updatedMoment === moment) step()
+      })
+    step()
+  }
+  const look = updatedLook(moment.from, moment.to, now - moment.startedAt)
+  if (!look && updatedMoment === moment) updatedMoment = undefined
+  return look
+}
+const versionLine = (ui: Ui, pieces: ReturnType<typeof updatedLook>) => (
+  <ui.Box key="head-version" flexDirection="row" flexShrink={1} minWidth={0}>
+    {(pieces ?? []).map((piece, i) => (
+      <ui.Text key={`head-version-${i}`} wrap="truncate-end" dimColor={piece.tone === 'dim'} color={piece.tone === 'blue' ? FLOW : undefined} bold={piece.tone !== 'dim'}>
+        {piece.text}
+      </ui.Text>
+    ))}
+  </ui.Box>
+)
+
 // The asking card: an ask's text to copy, its buttons and reply box, and the answer reaching the work
 
 // An ask's text put on the clipboard; its button says so for two seconds, and a later copy starts its own two seconds
@@ -4005,6 +4055,8 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
+    // A load that moved this chat to a newer version has the header say so
+    await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
       const text = await readOr($, `${$.plugin.root}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
@@ -5553,6 +5605,7 @@ const panelHooks = (on: On) => {
     }
     const mood = headMood(head)
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
+    const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
@@ -5568,7 +5621,8 @@ const panelHooks = (on: On) => {
                   <Box flexShrink={0}>
                     <Text bold>Claudopus</Text>
                   </Box>
-                  {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed` : ''}`}</Text> : null}
+                  {/* Just moved to a newer version: it rolls to the new number and says Updated in blue for a moment */}
+                  {updated ? versionLine(ui, updated) : versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed` : ''}`}</Text> : null}
                 </Box>
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
                 <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>

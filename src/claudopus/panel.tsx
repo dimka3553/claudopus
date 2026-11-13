@@ -817,6 +817,7 @@ const panelHooks = (on: On) => {
     }
     const mood = headMood(head)
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
+    const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
@@ -832,7 +833,8 @@ const panelHooks = (on: On) => {
                   <Box flexShrink={0}>
                     <Text bold>Claudopus</Text>
                   </Box>
-                  {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed` : ''}`}</Text> : null}
+                  {/* Just moved to a newer version: it rolls to the new number and says Updated in blue for a moment */}
+                  {updated ? versionLine(ui, updated) : versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed` : ''}`}</Text> : null}
                 </Box>
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
                 <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>

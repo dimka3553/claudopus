@@ -52,6 +52,8 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
+    // A load that moved this chat to a newer version has the header say so
+    await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
       const text = await readOr($, `${$.plugin.root}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
