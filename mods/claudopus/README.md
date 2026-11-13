@@ -63,7 +63,7 @@ That is all. It is on in every chat from then on, and it keeps itself up to date
 | **Memory** | Your messages, the results and a brief per subject are kept as plain files in `~/.claude/claudopus`, so chats can stay small. |
 | **Working rules** | A short set of principles goes into every chat: ask less, show the result, have a second agent check the work. They leave the rest to you: edit them in the Config tab, and your copy is the one used. |
 | **Models** | Opus for most work, Sonnet for long legwork, Fable only for heavy work. Checks never run on a weaker model than the one that built the work. An agent named an older model or Haiku is refused, and work the app moves to an older model runs on Fable instead; its card says so. |
-| **Passwords and keys** | Asked for once in a box at the top of the panel, in every chat, kept in the macOS keychain, never put in a chat or a file. |
+| **Passwords and keys** | Asked for once in a box at the top of the panel, in every chat, kept in the macOS keychain, never put in a chat or a file. The box words itself and work is kept out of its files: this stops slips and common tricks, and is no wall. |
 | **One release at a time** | Work changes a repo only in its own worktree and branch, and reaches main only through one release command that takes its turn, numbers the version, builds, checks and pushes. A push to main by hand is refused. |
 | **Tabs** | Results, Stats (tokens, cost at API prices, time saved), Config and About; Memory opens the memory folder. `/claudopus` reopens a closed panel, `/servers` lists the local servers your chats started. |
 

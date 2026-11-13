@@ -1,6 +1,32 @@
 // Work starting and running: the chat's own thread kept to handing work over, how full the chat is, each step of work, and new
 // work's card
 
+// A call that writes into the runners' boxes folder or reads their keychain service: a command that names them, a file it runs that
+// does, or a file written or edited there. The runners themselves, the mod's own bin/admin and bin/secret, are what may
+const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<boolean> => {
+  if (!dir) return false
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) {
+    // in small letters, as this Mac's files take any; and a runner of the mod's planted where its copies are let through unread
+    const path = pathOf(String(input.file_path ?? input.notebook_path ?? ''), home, cwd || home).toLowerCase()
+    const boxes = boxesDir().toLowerCase()
+    return path === boxes || path.startsWith(`${boxes}/`) || path.startsWith(`${home.toLowerCase()}/.claude/plugins/cache/claudopus/`)
+  }
+  if (e.tool !== 'Bash') return false
+  const command = String(input.command ?? '')
+  if (touchesBoxes(command)) return true
+  const root = $.plugin.root
+  for (const path of filesRun(command, home, cwd || home)) {
+    const runner = /\/bin\/(admin|secret)$/.exec(path)?.[1]
+    if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret)$`).test(path))) continue
+    const text = (await readOr($, path)).slice(0, 1_000_000)
+    if (runner && text && text === (await readOr($, `${root}/bin/${runner}`))) continue
+    if (touchesBoxes(text)) return true
+  }
+  return false
+}
+
 const workHooks = (on: On) => {
 
   // A chat's own thread starts agents and talks to them; the work runs in the agents, which carry an agent id
@@ -19,6 +45,10 @@ const workHooks = (on: On) => {
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool)
       }
+    }
+    if (await isBoxesTouched($, e)) {
+      await log($, `refused ${e.tool} touching the password and key boxes`)
+      return { deny: NO_BOXES }
     }
     if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that reads the keychain')
