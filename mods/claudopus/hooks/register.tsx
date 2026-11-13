@@ -2390,7 +2390,7 @@ const showPicture = async ($: EngineInterface, path: string, pane: string, row: 
   const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `picture ${path} not opened: ${opened.stderr}`)
 }
-// The picture tab of 0.2.46 to 0.2.50: one still open after an update says how pictures open now
+// The picture tab of 0.2.46 to 0.2.50: one still open after an update says that pictures open in Details now
 const PICTURE_PANE = 'picture'
 const pictureShown = ''
 // The picture each Details tab draws large over its Details, by the tab, and the row it was pressed on, which Back brings into view
@@ -2400,14 +2400,23 @@ const showPictureIn = async ($: EngineInterface, path: string, pane: string, row
   // One that could not be made is tried again on a new press
   for (const [id, one] of larges) if (!one && id.startsWith(`${path}:`)) larges.delete(id)
   $.ui.invalidate('ui.render')
+  // To its top, now and again once the picture is likely drawn in place of the Details
   await $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(() => undefined)
+  $.clock.after(150, () => void $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(() => undefined))
 }
+// Brings a row into view once it is drawn: a redraw over ssh can take a while to reach the app, so a row not drawn yet is tried again
+const scrollTo = ($: EngineInterface, pane: string, key: string, tries: number) =>
+  $.clock.after(150, async () => {
+    if (pictureIn.has(pane)) return
+    const moved = await $.ui.scroll({ in: pane, to: { key }, block: 'center' }).catch(err => ({ deny: String(err) }))
+    if (moved && 'deny' in moved && moved.deny && tries > 1) scrollTo($, pane, key, tries - 1)
+  })
 const pictureBack = ($: EngineInterface, pane: string) => {
   const was = pictureIn.get(pane)
   pictureIn.delete(pane)
   $.ui.invalidate('ui.render')
   // Once the Details are drawn again, the picture's row is brought into view, where the person was
-  if (was?.row) $.clock.after(120, () => void $.ui.scroll({ in: pane, to: { key: was.row }, block: 'center' }).catch(() => undefined))
+  if (was?.row) scrollTo($, pane, was.row, 6)
 }
 // The large copy the tab draws, as wide as a wide sidebar on a sharp screen. An Svg carries at most 131072 characters, too few for
 // a large screenshot to stay readable, so the copy is cut into bands across, each an Svg of its own drawn under the one before.
@@ -2505,7 +2514,7 @@ const largeOf = ($: EngineInterface, path: string, id: string): Large | undefine
 // What the tab draws: the picture as wide as the tab, its name and size, and how to see it larger
 const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], path = pictureShown) => {
   const ui = $.ui.resolve(e)
-  if (!path) return <ui.Text dimColor>No picture is open. Press a picture's row in a work's Details.</ui.Text>
+  if (!path) return <ui.Text dimColor>Pictures now open large in the Details tab they are pressed in. This tab can be closed.</ui.Text>
   const name = fileName(path)
   const stat = await $.fs.stat(path).catch(() => undefined)
   const said = (text: string) => (
