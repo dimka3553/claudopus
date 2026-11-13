@@ -22,7 +22,8 @@ const bandHooks = (on: On) => {
     // numbered. A bare digit typed in an empty prompt presses a band's Button, so the person answers from where they already are.
     // A message may begin with a digit too, so one press only picks the answer and says so; the same digit again sends it
     if (e.surface === 'terminal') {
-      const asking = [...cards.filter(one => !one.parentId && one.ask), ...cardsOf(await read($, others)).filter(one => one.ask && !answeredHere.has(`${one.id}:${one.ask.at}`))]
+      // What waits on the person comes before an ask whose work is acting on their reply, which is drawn in the work's purple
+      const asking = [...cards.filter(one => !one.parentId && one.ask), ...cardsOf(await read($, others)).filter(one => one.ask && !answeredHere.has(`${one.id}:${one.ask.at}`))].sort((a, b) => Number(needsPerson(b)) - Number(needsPerson(a)))
       const [first] = asking
       const ask = first?.ask
       if (first && ask) {
@@ -39,11 +40,11 @@ const bandHooks = (on: On) => {
         return (
           <Box flexDirection="column">
             <Box flexDirection="row" gap={1}>
-              {octopus(ui, 'band-mark', 'asking', BAND_MARK, 'Claudopus, something needs you', $, { surface: e.surface, requestId: e.requestId })}
+              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus at work on your reply', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
                 <Text wrap="wrap">
                   <Text dimColor>{`${titleOf(first)}: `}</Text>
-                  <Text color={NEEDS} bold>{cut(oneLine(ask.text), Math.max(80, e.props.bodyColumns * 3))}</Text>
+                  <Text color={needsPerson(first) ? NEEDS : LIVE} bold>{cut(oneLine(ask.text), Math.max(80, e.props.bodyColumns * 3))}</Text>
                 </Text>
               </Box>
             </Box>
@@ -52,8 +53,8 @@ const bandHooks = (on: On) => {
               {answers.map((choice, n) => (
                 <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
               ))}
-              <Text dimColor={picked < 0} color={picked < 0 ? undefined : NEEDS}>
-                {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.length > 1 ? ` · ${asking.length - 1} more waiting` : ''} · /claudopus to reply in words`}
+              <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
+                {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to reply in words`}
               </Text>
             </Box>
           </Box>

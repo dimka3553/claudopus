@@ -71,6 +71,10 @@ const RELOAD_GRACE = 30_000
 const pauseFrom = (one: { id: string; endedAt: number }) => Math.max(one.endedAt, lateFrom.get(`${one.id}:${one.endedAt}`) ?? 0)
 // Whether ended work is still in that pause at a time: a card that ended in the future, as from another clock, is not
 const isLingering = (one: { id: string; status: string; endedAt: number }, at: number) => one.status !== 'working' && one.endedAt > 0 && at >= pauseFrom(one) && at - pauseFrom(one) < LINGER
+// Work acting on the person's reply in their own words to an ask it keeps open: at work, drawn in the work's purple, with the ask
+// still there to answer. Only once it stops again with the ask open does it wait on the person
+const isActingOnReply = (one: { status: string; ask?: { replied?: unknown } }) => one.status === 'working' && Boolean(one.ask?.replied)
+const needsPerson = (one: { status: string; ask?: { replied?: unknown } }) => Boolean(one.ask) && !isActingOnReply(one)
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set<string>()
 // The engine's list of agents is read again this often, and the minutes move on
