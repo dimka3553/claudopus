@@ -26,6 +26,8 @@ const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', s
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
 // Work that called SubagentHandback in the turn now ending: what it ends that turn with is its report
 const handedBack = new Map<string, string>()
+// Work whose card a handback ended, until it works again: a turn of words alone that what it left running wakes changes nothing
+const endedByHandback = new Set<string>()
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))

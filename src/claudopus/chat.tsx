@@ -328,14 +328,22 @@ const chatHooks = (on: On) => {
       // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
       // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
       const isReport = how === 'done' && isHeld && (handedBack.has(id) || answer.length >= REPORT_LEAST)
+      // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
+      // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
+      const isHandedBack = how === 'done' && handedBack.has(id)
       handedBack.delete(id)
+      if (isHandedBack) endedByHandback.add(id)
       await update($, todos, list => {
-        const isWaiting = how === 'done' && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
+        const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
         // An aborted turn's own text is not kept over the report the work gave before it was stopped
         return list.map(one =>
           one.id !== id
             ? one
-            : isWaiting
+            : // Work that had ended, woken by what it left running, that ends a turn of words alone has not worked again: it stays
+              // as it ended, with its report, and is not announced a second time
+              one.status !== 'working' && how === 'done' && !isHandedBack && endedByHandback.has(id)
+              ? one
+              : isWaiting
               ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt }
               : how === 'stopped'
                 ? one.status === 'working'
@@ -352,7 +360,7 @@ const chatHooks = (on: On) => {
       // held on its own background work leaves it once it ends (keepStoppedReports)
       const card = (await read($, todos)).find(one => one.id === id)
       const report = (e.answer ?? '').trim() || answer
-      if (card && !card.parentId && card.status === 'done' && how === 'done' && report) {
+      if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
       }
       return done

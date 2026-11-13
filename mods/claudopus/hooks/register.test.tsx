@@ -1546,15 +1546,44 @@ test('work that answered while only its own background work held it, then stoppe
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(2_100)
 
-  // A short report given with SubagentHandback is a report: stopped after it, it finished
+  // A report given with SubagentHandback ends the work's run: its card ends done at once, though what it left running in the
+  // background goes on, unstopped, and the chat need not stop it
   await $.agent.spawn({ ...spawn, description: 'Name the octopus', prompt: 'name it' } as never)
   agents.a4 = 'waiting'
   kinds.a4 = 'general-purpose'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a4', message: 'Named it Otto.' } as never)
   // Its turn may end with no text of its own: the handback is its answer
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4s', reason: 'answer', agentId: 'a4' } as never)
+  expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  expect(await drawn(pane)).toEqual(['happy'])
+  // The engine's next looks still list it held: its card stays done
+  await clock.advance(20_000)
+  expect(await drawn(pane)).toEqual(['mark'])
+  // What it left running wakes it for a turn of words alone: it stays as it ended, not announced again, its report kept
+  const otto = () => [...files.keys()].filter(key => /\/reports\/[^/]+-name-the-octopus\/report\.md$/.test(key))
+  const reportsBefore = otto().length
+  await clock.advance(11_000)
+  await $.turn.complete({ answer: 'The watch exited.', durationMs: 1, isAborted: false, turnId: 't4w', reason: 'answer', agentId: 'a4' } as never)
+  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  expect(await drawn(pane)).toEqual(['mark'])
+  await clock.advance(10)
+  expect(otto().length).toBe(reportsBefore)
+  // What it left running wakes it and it takes a step: it is working again
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b4w', agentId: 'a4', command: 'ls' } as never)
+  expect(await drawn(pane)).toEqual(['working'])
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's4', task_id: 'a4' } as never)
-  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeDefined()
+  await clock.advance(2_100)
+
+  // Handed back with a helper of its own still at work, it is done too, and the helper goes on
+  await $.agent.spawn({ ...spawn, description: 'Name the squid', prompt: 'name it', resume: { agentId: 'h1' } } as never)
+  await $.agent.spawn({ ...spawn, description: 'Look up names', prompt: 'look', parentAgentId: 'h1', resume: { agentId: 'h2' } } as never)
+  agents.h1 = 'waiting'
+  agents.h2 = 'running'
+  kinds.h1 = 'general-purpose'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'h1', message: 'Named it Sid.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4t', reason: 'answer', agentId: 'h1' } as never)
+  expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  agents.h2 = 'completed'
   await clock.advance(2_100)
 
   // Sent a message after its report, it works again: stopped before it took a step, it is stopped
