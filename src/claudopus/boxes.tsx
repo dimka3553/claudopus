@@ -11,8 +11,9 @@
 // any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
 // it is no wall against code set on getting round it
 type Asked = { id: string; text: string; at: number; chat?: string }
-const BOX_HOST = /^(?:here|[A-Za-z0-9][A-Za-z0-9._-]{0,62}(?:@[A-Za-z0-9][A-Za-z0-9._-]{0,62})?)$/
-const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+// What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
+const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
+const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/
 const BOX_AGAIN: Record<string, string> = {
   refused: 'That password was refused. ',
   short: 'That was shorter than 4 characters. ',

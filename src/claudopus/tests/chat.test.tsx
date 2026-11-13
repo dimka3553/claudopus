@@ -113,10 +113,24 @@ test('work never writes into the boxes folder or reads the boxes\' keychain serv
   await refused('env FOO=1 python3 /tmp/peek.py')
   await refused('source /repo/plant.sh')
   await refused("/tmp/bin/secret API_KEY here 'true'")
+  files.set('/work/tree/p.sh', 'cp /tmp/req.json ~/.claude/claudopus/boxes/\n')
+  await refused('cd /work/tree && ./p.sh')
+  await refused('cat plant.sh | bash')
+  await refused('bash < /repo/plant.sh')
+  await refused('timeout 5 ./plant.sh')
+  await refused('nice -n 5 bash plant.sh')
+  files.set('/repo/plant.ts', "Bun.write(`${process.env.HOME}/.claude/claudopus/boxes/a.json`, '{}')\n")
+  await refused('bun run plant.ts')
+  // Capitals, which this Mac's files take as the same, brace expansion, and another language's keychain library
+  await refused('cp req.json ~/.Claude/Claudopus/Boxes/')
+  await refused('cp req.json ~/.claude/claudopus/box{e,}s/')
+  files.set('/repo/peek.swift', 'import Security\nlet q = [kSecAttrService: "claudopus-box", kSecReturnData: true] as CFDictionary\n')
+  await refused('swift peek.swift')
+  await refused(`python3 -c "import keyring; print(keyring.get_password('claudopus-box', 'x'))"`)
   // A helper work starts is held to it as the work is
   await refused('bash /repo/plant.sh', 'helper-1')
   // A file written or edited into the folder
-  for (const [tool, path] of [['Write', '/home/sam/.claude/claudopus/boxes/a.json'], ['Edit', '~/.claude/claudopus/boxes/b.json'], ['Write', '/home/sam/.claude/claudopus/./boxes']] as const)
+  for (const [tool, path] of [['Write', '/home/sam/.claude/claudopus/boxes/a.json'], ['Edit', '~/.claude/claudopus/boxes/b.json'], ['Write', '/home/sam/.claude/claudopus/./boxes'], ['Write', '/home/sam/.Claude/claudopus/Boxes/a.json'], ['Write', '/home/sam/.claude/plugins/cache/claudopus/claudopus/9.9.9/bin/secret']] as const)
     expect([tool, path, (await $.tool.call({ tool, tool_use_id: `b${n++}`, agentId: 'w1', file_path: path, content: '{}', old_string: 'a', new_string: 'b' } as never)).deny]).toEqual([tool, path, expect.stringContaining('theirs alone')])
   // The runners themselves, and what only looks near the folder or the service, still run
   files.set('keychain:API_KEY', 'sk-live-123456')
@@ -125,6 +139,12 @@ test('work never writes into the boxes folder or reads the boxes\' keychain serv
   await runs(`bash ${bin}/secret API_KEY here 'true'`)
   await runs('cat src/claudopus/boxes.tsx && rg -n boxes src/claudopus')
   await runs('ls ~/.claude/claudopus/*')
+  // Looks that only read, a commit message naming the folder, and work in a worktree kept under a .claude folder of the repo
+  await runs('ls ~/.claude/claudopus/boxes && rg -n boxes ~/.claude/claudopus/rules')
+  await runs('git commit -qm "Refuse writes into ~/.claude/claudopus/boxes" && gh pr create --body "claudopus-box via security"')
+  await runs("rg -n 'security|claudopus-box' mods/claudopus")
+  await runs('cd /code/claudopus/.claude/worktrees/agent-1 && rg -n boxes src && cat src/claudopus/boxes.tsx')
+  await runs(`${bin}/secret --list`)
   await runs('security find-generic-password -s claudopus-secret -a API_KEY')
   files.set('/repo/build.sh', 'node src/claudopus/build.mjs\n')
   await runs('bash build.sh')

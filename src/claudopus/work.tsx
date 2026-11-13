@@ -8,15 +8,16 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) {
-    const path = pathOf(String(input.file_path ?? input.notebook_path ?? ''), home, cwd || home)
-    return path === boxesDir() || path.startsWith(`${boxesDir()}/`)
+    // in small letters, as this Mac's files take any; and a runner of the mod's planted where its copies are let through unread
+    const path = pathOf(String(input.file_path ?? input.notebook_path ?? ''), home, cwd || home).toLowerCase()
+    const boxes = boxesDir().toLowerCase()
+    return path === boxes || path.startsWith(`${boxes}/`) || path.startsWith(`${home.toLowerCase()}/.claude/plugins/cache/claudopus/`)
   }
   if (e.tool !== 'Bash') return false
   const command = String(input.command ?? '')
   if (touchesBoxes(command)) return true
   const root = $.plugin.root
-  for (const file of filesRun(command)) {
-    const path = pathOf(file, home, cwd || home)
+  for (const path of filesRun(command, home, cwd || home)) {
     const runner = /\/bin\/(admin|secret)$/.exec(path)?.[1]
     if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret)$`).test(path))) continue
     const text = (await readOr($, path)).slice(0, 1_000_000)

@@ -347,52 +347,92 @@ const pushesMain = (command: string): boolean =>
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
 // The boxes of the password and key runners are theirs alone: work never writes into their folder, ~/.claude/claudopus/boxes, nor
-// reads their keychain service, claudopus-box. A command is read as words with its quotes and backslashes dropped, split at any sign
-// a path or a program joins words with, and a word counts when it is the name itself or a pattern (*, ?, [...]) that matches it; a
-// lone * matches nothing, so a folder listed whole is not taken for the boxes. The folder needs all three of .claude (or the
-// setting that moves it), claudopus and boxes; the service needs claudopus-box with security. Setting the runners' own folder by hand
-// counts too. This stops slips and common tricks: a name pieced together as the command runs gets past it, so it is no wall
-const BOX_WORDS = (text: string) => text.replace(/["'\\`]/g, '').split(/[^A-Za-z0-9._*?[\]-]+/).filter(Boolean)
+// reads their keychain service, claudopus-box. A command is read as the shell splits it, in small letters (this Mac's files take any),
+// with each simple {a,b} tried each way, then as words split at any sign a path or a program joins words with; a word counts when it
+// is the name itself or a pattern (*, ?, [...]) that matches it, and a lone * matches nothing, so a folder listed whole is not taken
+// for the boxes. The folder is .claude (or the setting that moves it) followed by claudopus (a cd between them aside), then boxes; the
+// service is claudopus-box with security (or a program's keychain library). A command that only reads and writes nothing (a search, a
+// listing, git and gh, which a commit message naming the folder runs through) counts only for what it sends into a file with >.
+// Setting the runners' own folder by hand counts too. This stops slips and common tricks: a name pieced together as the command runs,
+// a link made to the folder, or a script run some other way gets past it, so it is no wall
+const BOX_READERS = ['rg', 'grep', 'egrep', 'fgrep', 'ls', 'du', 'git', 'gh', 'wc', 'head', 'tail', 'less', 'file', 'stat', 'tree']
+const BOX_WRAPPERS = ['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'nice', 'timeout', 'xargs', 'caffeinate']
+// Where a command's own words start, past settings and what runs a command it is handed
+const commandAt = (words: string[]) => {
+  let i = 0
+  for (;;) {
+    while (i < words.length && /^\w+=/.test(words[i]!)) i++
+    const head = (words[i] ?? '').split('/').pop() ?? ''
+    if (!BOX_WRAPPERS.includes(head)) return i
+    i++
+    // its own flags and numbers: nice's -n 5, timeout's duration
+    while (i < words.length && (words[i]!.startsWith('-') || /^\d[\d.]*[smhd]?$/.test(words[i]!))) i++
+  }
+}
+const BOX_WORDS = (text: string) => text.replace(/["'\\`]/g, '').split(/[^a-z0-9._*?[\]-]+/).filter(Boolean)
 const wordIs = (word: string, name: string) => {
-  if (word === name) return true
-  if (!/[*?[]/.test(word) || /^[*?]+$/.test(word)) return false
+  // A list's brackets around a word, as a program's code writes it, are not part of it
+  const bare = word.replace(/^\[+(?=[^\]]*$)/, '').replace(/(?<=^[^[]*)\]+$/, '')
+  if (word === name || bare === name) return true
+  if (!/[*?[]/.test(bare) || /^[*?]+$/.test(bare)) return false
   try {
-    return new RegExp(`^${word.replace(/[.+^${}()|\\-]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.').replace(/\[!/g, '[^')}$`).test(name)
+    return new RegExp(`^${bare.replace(/[.+^${}()|\\-]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.').replace(/\[!/g, '[^')}$`).test(name)
   } catch {
     return false
   }
 }
+const namesBoxes = (text: string): boolean => {
+  const words = BOX_WORDS(text)
+  const has = (name: string) => words.some(word => wordIs(word, name))
+  const isFolder = words.some((word, i) => {
+    if (!wordIs(word, '.claude') && word !== 'claude_config_dir') return false
+    let j = i + 1
+    while (['.', '..', 'cd', 'pushd'].includes(words[j] ?? '')) j++
+    return wordIs(words[j] ?? '', 'claudopus') && words.slice(j + 1).some(one => wordIs(one, 'boxes'))
+  })
+  return isFolder || (has('claudopus-box') && (has('security') || has('keyring') || has('ksecattrservice')))
+}
 const touchesBoxes = (text: string): boolean => {
   if (/\bCLAUDOPUS_BOX(?:ES|_TAKEN)\b/.test(text)) return true
-  const words = BOX_WORDS(text)
-  // A list's brackets around a word, as a program's code writes it, are not part of it
-  const has = (name: string) => words.some(word => wordIs(word, name) || wordIs(word.replace(/^\[+/, '').replace(/\]+$/, ''), name))
-  return ((has('.claude') || /CLAUDE_CONFIG_DIR/.test(text)) && has('claudopus') && has('boxes')) || (has('claudopus-box') && has('security'))
+  const kept = shellWords(text.toLowerCase())
+    .map(words => {
+      const part = words.join(' ')
+      if (!BOX_READERS.includes((words[commandAt(words)] ?? '').split('/').pop() ?? '')) return part
+      return part.includes('>') ? part.slice(part.indexOf('>')) : ''
+    })
+    .join('\n')
+  return [0, 1, 2, 3].some(k => namesBoxes(k ? kept.replace(/\{([^{}]*,[^{}]*)\}/g, (_, alts: string) => alts.split(',')[k - 1] ?? '') : kept))
 }
-// A file a command runs: the first word of each of its commands (past env, command, sudo, nohup, time, exec and settings) when it is a
-// path, and what a shell, source or another language's program is handed to run. The system's own programs are not read
-const RUNNERS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'source', '.', 'python', 'python3', 'node', 'bun', 'deno', 'perl', 'ruby', 'php', 'osascript', 'swift', 'tsx', 'ts-node']
-const filesRun = (command: string): string[] =>
-  shellWords(command).flatMap(words => {
-    let i = 0
-    for (;;) {
-      while (i < words.length && /^\w+=/.test(words[i]!)) i++
-      const head = (words[i] ?? '').split('/').pop() ?? ''
-      if (['env', 'command', 'sudo', 'nohup', 'time', 'exec'].includes(head)) {
-        i++
-        while (i < words.length && words[i]!.startsWith('-')) i++
-      } else break
-    }
+// A file a command runs, against the folder it runs in (a cd in it moves that): the first word of each of its commands when it is a
+// path, what a shell, source or another language's program is handed to run or reads on its stdin, and a file cat pipes into a
+// shell. The system's own programs are not read
+const RUNNERS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'source', '.', 'python', 'python3', 'node', 'bun', 'deno', 'perl', 'ruby', 'php', 'osascript', 'swift', 'tsx', 'ts-node']
+const filesRun = (command: string, home: string, from: string): string[] => {
+  let folder = from
+  const found: string[] = []
+  const parts = shellWords(command)
+  parts.forEach((words, n) => {
+    const i = commandAt(words)
     const head = words[i] ?? ''
     const name = head.split('/').pop() ?? ''
+    if ((name === 'cd' || name === 'pushd') && words[i + 1]) return void (folder = pathOf(words[i + 1]!, home, folder))
+    const take = (path: string) => found.push(pathOf(path, home, folder))
     if (RUNNERS.includes(name) || /^python3(?:\.\d+)?$/.test(name)) {
-      const rest = words.slice(i + 1)
-      const at = rest.findIndex(word => !word.startsWith('-'))
+      const rest = words.slice(i + 1).filter(word => word !== 'run')
+      const fed = rest.findIndex(word => word.startsWith('<'))
+      if (fed >= 0) take(rest[fed] === '<' ? (rest[fed + 1] ?? '') : rest[fed]!.slice(1))
+      const at = rest.findIndex(word => !word.startsWith('-') && !word.startsWith('<'))
       // A program handed its code inline (-c, -e) is read as part of the command already
-      return at < 0 || rest.slice(0, at).some(flag => /^-[ce]$/.test(flag)) ? [] : [rest[at]!]
+      if (at >= 0 && !rest.slice(0, at).some(flag => /^-[cem]$/.test(flag))) take(rest[at]!)
+      // Nothing to run named: what it reads is what the command before it gives, such as a file cat prints
+      const before = parts[n - 1] ?? []
+      if (at < 0 && fed < 0 && (before[commandAt(before)] ?? '').split('/').pop() === 'cat') for (const one of before.slice(commandAt(before) + 1)) if (!one.startsWith('-')) take(one)
+      return
     }
-    return head.includes('/') && !/^\/(?:usr|bin|sbin|System|Library\/Apple)\//.test(head) ? [head] : []
+    if (head.includes('/') && !/^\/(?:usr|bin|sbin|System|Library\/Apple)\//.test(head)) take(head)
   })
+  return found
+}
 // A path as written, with ~ and $HOME read and . and .. taken out, against the folder given
 const pathOf = (path: string, home: string, folder: string) => {
   const full = path.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, home)
@@ -5151,8 +5191,9 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
 // any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
 // it is no wall against code set on getting round it
 type Asked = { id: string; text: string; at: number; chat?: string }
-const BOX_HOST = /^(?:here|[A-Za-z0-9][A-Za-z0-9._-]{0,62}(?:@[A-Za-z0-9][A-Za-z0-9._-]{0,62})?)$/
-const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/
+// What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
+const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
+const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/
 const BOX_AGAIN: Record<string, string> = {
   refused: 'That password was refused. ',
   short: 'That was shorter than 4 characters. ',
@@ -6059,15 +6100,16 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) {
-    const path = pathOf(String(input.file_path ?? input.notebook_path ?? ''), home, cwd || home)
-    return path === boxesDir() || path.startsWith(`${boxesDir()}/`)
+    // in small letters, as this Mac's files take any; and a runner of the mod's planted where its copies are let through unread
+    const path = pathOf(String(input.file_path ?? input.notebook_path ?? ''), home, cwd || home).toLowerCase()
+    const boxes = boxesDir().toLowerCase()
+    return path === boxes || path.startsWith(`${boxes}/`) || path.startsWith(`${home.toLowerCase()}/.claude/plugins/cache/claudopus/`)
   }
   if (e.tool !== 'Bash') return false
   const command = String(input.command ?? '')
   if (touchesBoxes(command)) return true
   const root = $.plugin.root
-  for (const file of filesRun(command)) {
-    const path = pathOf(file, home, cwd || home)
+  for (const path of filesRun(command, home, cwd || home)) {
     const runner = /\/bin\/(admin|secret)$/.exec(path)?.[1]
     if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret)$`).test(path))) continue
     const text = (await readOr($, path)).slice(0, 1_000_000)
