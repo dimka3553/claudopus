@@ -34,6 +34,7 @@ const workHooks = (on: On) => {
     const next = async (call: typeof e) => {
       const r = await run(call)
       if (woken && !r.deny && !r.isError) await update($, todos, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
+      if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
       return hideKept($, call, r)
     }
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
@@ -109,7 +110,7 @@ const workHooks = (on: On) => {
         await update($, todos, list =>
           list.map(one => {
             if (one.id !== id) return one
-            const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined }
+            const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined }
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
@@ -155,6 +156,7 @@ const workHooks = (on: On) => {
       const stopId = String((e as { task_id?: unknown }).task_id ?? '')
       if (!r.deny && stopId) {
         stoppedHere.add(stopId)
+        await dropBackground($, [stopId])
         const now = await $.clock.now()
         await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
         await keepStoppedReports($, now)
@@ -195,6 +197,18 @@ const workHooks = (on: On) => {
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)
     if (id !== undefined && tokens && dir) await update($, todos, list => list.map(one => (one.id === id ? { ...one, tokens, model: one.chosen ?? (modelName(model ?? '') ? model : one.model) } : one)))
 
+    return r
+  })
+
+  // As a piece of work stops, the engine says what background work is still in flight: what its card kept that is not, has ended
+  on('classic.SubagentStop', async ($, e, next) => {
+    const r = await next(e)
+    const live = e.background_tasks
+    if (dir && Array.isArray(live)) {
+      const ids = new Set(live.map(one => one.id))
+      const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)
+      if (gone.length) await dropBackground($, gone).catch(err => log($, `ended background work not let go: ${String(err)}`))
+    }
     return r
   })
 

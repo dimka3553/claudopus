@@ -228,6 +228,10 @@ const panelHooks = (on: On) => {
             {one.stuckAt && one.status === 'working' && !one.chat ? (
               <Text key={`stuck-${one.id}`} color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
             ) : null}
+            {/* Still at work, waiting for a command of its own it started in the background: which, and how long it has run */}
+            {waitLine(one, at) ? (
+              <Text key={`wait-${one.id}`} dimColor wrap="wrap">{waitLine(one, at)}</Text>
+            ) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden">
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>

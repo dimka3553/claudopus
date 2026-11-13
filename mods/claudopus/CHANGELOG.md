@@ -2,6 +2,17 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.73 · 14 November 2026
+- Work that answers a question while something it started is still running, such as a long copy, and still has that step to finish, now stays shown as running instead of turning green under Finished. Its card says what it is waiting for and how long that has run, and the answer it gave along the way is not kept as its result.
+- A long wait for work's own background command is no longer flagged as maybe stuck.
+- Work that reports with everything done while leaving something of its own running, such as a site it serves for you, still finishes at once and says it left something running.
+
+## 0.2.72 · 13 November 2026
+- Check for updates no longer says you're on the newest version when the place Claude Code installs Claudopus from is behind claudopus.ai: it says which version that place still has.
+
+## 0.2.71 · 13 November 2026
+- Config has a Check for updates button under Automatic updates: it looks for a newer release at once and downloads it, also with automatic updates off. Then it says you're on the newest version, that the new version is downloaded and typing /reload-plugins switches this chat to it, or why it could not check. Two presses, or presses in two chats, never run two updates at once.
+
 ## 0.2.70 · 13 November 2026
 - claudopus.ai shows a third command after the two install lines, `/claudopus`, which opens the panel.
 

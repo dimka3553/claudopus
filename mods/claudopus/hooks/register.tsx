@@ -11,7 +11,8 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
-import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
+import type { LookIo } from './update'
+import { checkSaid, copyOf, folderSaid, installedFrom, isNewer, isReloadDue, isUpdateDue, lookOnce, RELOAD_AGAIN, RELOAD_EVERY, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 
@@ -544,7 +545,11 @@ const configButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
     <ui.Button key={`config-open-${presses}`} label="Config" hotkey={isKeyed ? 'c' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
   </ui.Box>
 )
+// Check for updates as it stands in this chat: under way, and what the last press found, kept until the next press
+const updateCheck = { isChecking: false, said: '', isError: false }
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
+  version: (await versionsOf($).catch(() => ({ version: '' }))).version,
+  check: { ...updateCheck },
   texts: await Promise.all(
     TEXTS.map(async text => {
       const { isOwn, isStale, path, text: body } = await inForce($, $.plugin.root, dir, text.path)
@@ -598,6 +603,20 @@ const configActs = ($: EngineInterface) => ({
       // Automatic updates turned back on look at once when a look is due, not at the next quarter hour
       if (key === 'updates' && value === undefined) void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`))
     }),
+  // A press while a check runs does nothing: the tab shows it checking
+  check: () => {
+    if (updateCheck.isChecking) return
+    presses += 1
+    Object.assign(updateCheck, { isChecking: true, said: '', isError: false })
+    redraw($)
+    void checkForUpdates($)
+      .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true }))
+      .then(said => {
+        Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError })
+        presses += 1
+        redraw($)
+      })
+  },
 })
 
 // The index: one line per subject, and the subject's brief
@@ -661,9 +680,18 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   status: 'working',
 })
 // Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at })
+// What it kept of its own background work goes with it: started again, it keeps what it starts from then
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at, bg: undefined, waitsSince: undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
+// Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
+// a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
+// such command: it may run until stopped
+const goesOn = (list: Todo[], id: string) => {
+  const one = list.find(card => card.id === id)
+  const isRunning = Boolean(one?.bg?.some(b => !b.isWatch)) || list.some(kid => kid.parentId === id && kid.status === 'working')
+  return Boolean(one && isRunning && one.items.some(item => item.state === 'doing'))
+}
 // How work that is stopped ends: done when its turn had already ended with its report and only its own background work held it
 // (the chat stops such work once its report is in), stopped otherwise
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
@@ -1011,7 +1039,7 @@ const loadFinished = async ($: EngineInterface) => {
   if (!Array.isArray(kept) || !kept.length) return
   await update($, todos, list => {
     // What it left running is looked at afresh: the record of how it ended does not outlive the load
-    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined }))
+    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined, bg: undefined, waitsSince: undefined }))
     return fresh.length ? capped(byEnd([...fresh, ...list])) : list
   })
 }
@@ -3588,6 +3616,50 @@ const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask'
 // update steps for the mod, under a lock the other chats see, and
 // keeps what it learnt in update.json; a copy not installed from a marketplace (its maker's folder) is never updated
 let isUpdating = false
+// The lock is one file made only where none is (the shell's noclobber), holding when it was taken and by whom; a lock left by a
+// chat that closed mid-look is moved aside by exactly one chat once it is old (by what it says, else by when it was written).
+// Taken, the act runs and only this chat's own lock is removed after it; held by another chat, nothing runs and 'busy' comes back
+const UPDATE_BUSY = 'busy' as const
+const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): Promise<T | typeof UPDATE_BUSY> => {
+  const lock = `${dir}/update.lock`
+  const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
+  const take = async () =>
+    (await $.process.run(['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
+  if (!(await take())) {
+    const now = await $.clock.now()
+    const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
+    if (now - at < UPDATE_LOOK) return UPDATE_BUSY
+    const aside = `${lock}.${token.split(' ')[1]}`
+    if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
+    await $.process.run(['rm', '-f', aside]).catch(() => undefined)
+    if (!(await take())) return UPDATE_BUSY
+  }
+  try {
+    return await act()
+  } finally {
+    // Only this chat's own lock is removed: one taken over meanwhile is the other chat's
+    if ((await readOr($, lock)) === token) await $.process.run(['rm', '-f', lock]).catch(() => undefined)
+  }
+}
+// The Mac, as one look needs it
+const lookIo = ($: EngineInterface): LookIo => ({
+  read: path => readOr($, path),
+  write: (path, text) => $.fs.write(path, text),
+  run: (argv, timeoutMs) => $.process.run(argv, { timeoutMs }),
+  page: () =>
+    Promise.race([
+      $.http.fetch(VERSION_PAGE).catch(err => ({ ok: false, status: 0, text: String(err) })),
+      new Promise<{ ok: false; status: 0; text: string }>(done => void $.clock.after(VERSION_WAIT, () => done({ ok: false, status: 0, text: 'no answer' }))),
+    ]),
+  now: () => $.clock.now(),
+  log: text => log($, text),
+})
+const lookAt = async ($: EngineInterface, from: NonNullable<ReturnType<typeof installedFrom>>) =>
+  lookOnce(lookIo($), { from, root: $.plugin.root, cwd, engine: (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude', stampPath: `${dir}/update.json` })
+
+// Every hour one chat on this Mac reads the version page and, when it differs from the installed version, runs Claude Code's own two
+// update steps for the mod, under a lock the other chats see, and
+// keeps what it learnt in update.json; a copy not installed from a marketplace (its maker's folder) is never updated
 const selfUpdate = async ($: EngineInterface) => {
   const from = installedFrom($.plugin.root)
   if (!from || isUpdating || !dir) return
@@ -3596,67 +3668,46 @@ const selfUpdate = async ($: EngineInterface) => {
   const stampPath = `${dir}/update.json`
   if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now())) return
   isUpdating = true
-  // The lock is one file made only where none is (the shell's noclobber), holding when it was taken and by whom; a lock left by a
-  // chat that closed mid-look is moved aside by exactly one chat once it is old (by what it says, else by when it was written)
-  const lock = `${dir}/update.lock`
-  const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
-  const take = async () =>
-    (await $.process.run(['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
   try {
-    if (!(await take())) {
-      const now = await $.clock.now()
-      const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
-      if (now - at < UPDATE_LOOK) return
-      const aside = `${lock}.${token.split(' ')[1]}`
-      if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return
-      await $.process.run(['rm', '-f', aside]).catch(() => undefined)
-      if (!(await take())) return
-    }
-    try {
-      // Another chat may have looked between this chat's reading and its lock
-      const before = stampOf(await readOr($, stampPath))
-      const now = await $.clock.now()
-      // and the person may have turned automatic updates off while this chat waited for it
-      if (!isUpdateDue(before, now) || (await readConfig($, dir)).updates === false) return
-      const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
-      const id = `${from.plugin}@${from.marketplace}`
-      const scope = scopeOf(installed, id, $.plugin.root)
-      const have = installedVersionOf(installed, id, $.plugin.root, scope)
-      // The version page on claudopus.ai says which version is current; the same one installed means nothing is run
-      const page = await Promise.race([
-        $.http.fetch(VERSION_PAGE).catch(err => ({ ok: false, status: 0, text: String(err) })),
-        new Promise<{ ok: false; status: 0; text: string }>(done => void $.clock.after(VERSION_WAIT, () => done({ ok: false, status: 0, text: 'no answer' }))),
-      ])
-      const current = page.ok ? versionOnPage(page.text) : undefined
-      if (!current) {
-        const result = `version page not read: ${page.ok ? 'no version on it' : page.status || page.text.slice(0, 120)}`
-        await $.fs.write(stampPath, JSON.stringify({ at: now, version: before?.version || have, result }))
-        await log($, `Claudopus ${result}`)
-        return
-      }
-      if (current === have) {
-        await $.fs.write(stampPath, JSON.stringify({ at: now, version: have, result: 'latest' }))
-        return
-      }
-      await log($, `Claudopus ${current} is on the version page and ${have} is installed: updating`)
-      const engine = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
-      const [refresh, update] = updateSteps(engine, from, scope)
-      const run = (argv: string[], timeoutMs: number) => $.process.run(argv, { timeoutMs }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
-      const refreshed = await run(refresh, 180_000)
-      const updated = refreshed.exitCode === 0 ? await run(update, 300_000) : refreshed
-      const to = refreshed.exitCode === 0 ? updatedTo(`${updated.stdout}\n${updated.stderr}`) : undefined
-      const why = `${updated.stderr || updated.stdout}`.trim().slice(-200)
-      const result = to ? (to.isNew ? 'updated' : 'latest') : `${refreshed.exitCode === 0 ? 'not updated' : 'marketplace not refreshed'}: ${why}`
-      // A look that learnt nothing keeps the version the last one found, so About still says what is installed
-      await $.fs.write(stampPath, JSON.stringify({ at: now, version: to?.version ?? before?.version ?? '', result }))
-      if (to?.isNew) await log($, `Claudopus updated to ${to.version}: chats that start from now on load it`)
-      else if (!to) await log($, `Claudopus ${result}`)
-    } finally {
-      // Only this chat's own lock is removed: one taken over meanwhile is the other chat's
-      if ((await readOr($, lock)) === token) await $.process.run(['rm', '-f', lock]).catch(() => undefined)
-    }
+    await underUpdateLock($, async () => {
+      // Another chat may have looked between this chat's reading and its lock, and the person may have turned automatic updates
+      // off while this chat waited for it
+      if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now()) || (await readConfig($, dir)).updates === false) return
+      await lookAt($, from)
+    })
   } finally {
     isUpdating = false
+  }
+}
+
+// Config's Check for updates: the same look, now, whatever the switch and the hour say. A look already under way here, or another
+// chat's, is waited for (CHECK_STEP at a time, up to UPDATE_LOOK, after which a stale lock is taken over), then this one runs, so
+// two looks never run at once; it is cheap when the other one already downloaded the newest version
+const CHECK_STEP = 3000
+const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
+  const loaded = (await versionsOf($)).version
+  const from = installedFrom($.plugin.root)
+  if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
+  if (!from) {
+    const page = await lookIo($).page()
+    return folderSaid(page.ok ? versionOnPage(page.text) : undefined, loaded)
+  }
+  const until = (await $.clock.now()) + UPDATE_LOOK + CHECK_STEP
+  for (;;) {
+    if (!isUpdating) {
+      isUpdating = true
+      try {
+        const look = await underUpdateLock($, () => lookAt($, from))
+        if (look !== UPDATE_BUSY) {
+          await log($, `Claudopus checked for updates from Config: ${look.kind}${'version' in look && look.version ? ` ${look.version}` : ''}`)
+          return checkSaid(look, loaded, isRunFromAfar || isReloadRefused)
+        }
+      } finally {
+        isUpdating = false
+      }
+    }
+    if ((await $.clock.now()) > until) return { text: "Couldn't check: another chat's check did not finish. Try again later.", isError: true }
+    await new Promise<void>(done => void $.clock.after(CHECK_STEP, done))
   }
 }
 
@@ -5557,14 +5608,22 @@ const chatHooks = (on: On) => {
       const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
       // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
       // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
-      const isReport = how === 'done' && isHeld && (handedBack.has(id) || answer.length >= REPORT_LEAST)
+      // Held on a command or watch of its own that wakes it as it ends, with a to-do of its still being done, it has not finished:
+      // what it hands back on the way (an answer to a question while it waits) is no report, and its card stays at work
+      const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
+      const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || answer.length >= REPORT_LEAST)
       // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
       // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
-      const isHandedBack = how === 'done' && handedBack.has(id)
+      const isHandedBack = how === 'done' && handedBack.has(id) && !isGoingOn
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
+      // Work nothing holds any more has nothing of its own left running in the background
+      if (!isHeld) await update($, todos, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
       await update($, todos, list => {
         const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
+        // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
+        // Work that gave its report waits on nothing it means to finish
+        const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
         // An aborted turn's own text is not kept over the report the work gave before it was stopped
         return list.map(one =>
           one.id !== id
@@ -5574,7 +5633,7 @@ const chatHooks = (on: On) => {
               one.status !== 'working' && how === 'done' && !isHandedBack && endedByHandback.has(id)
               ? one
               : isWaiting
-              ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt }
+              ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt, waitsSince: waitsSince(one) }
               : how === 'stopped'
                 ? one.status === 'working'
                   ? ended(one, stoppedAs(one), now)
@@ -5727,7 +5786,9 @@ const lookStuck = async ($: EngineInterface) => {
     const isPrompted = (one: Todo) => waiting.some(p => p.agent && topOf(list, p.agent) === one.id)
     const next = list.map(one => {
       if (one.parentId || one.chat) return one
-      const isStuck = one.status === 'working' && !one.ask && !one.answeredAt && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
+      // Nor work that waits for a command of its own it started in the background: a long copy is not stuck
+      const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
+      const isStuck = one.status === 'working' && !one.ask && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
       if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
       return one
@@ -5754,6 +5815,45 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
 
 // A row's running call, with its time, once it has run RUNNING_SHOWN
 const runningLine = (one: Todo, at: number) => (one.status === 'working' && one.running && at - one.running.at >= RUNNING_SHOWN ? `${one.running.what} · ${took(at - one.running.at)}` : '')
+
+// ---- What work started in the background itself, which wakes it as it ends ----
+
+const BG_KEPT = 20
+// A command it sent to the background, or a watch it set, is kept by its card with its task id and its own words for it; one it
+// stops goes. A command the engine ends with its final response wakes nothing and is not kept
+const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown }, result: unknown) => {
+  if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')])
+  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown }
+  // A command the engine ends with the work's final response wakes nothing and is not kept (the engine does not always say that
+  // one it keeps wakes its owner, so its silence is no sign)
+  const id = call.tool === 'Bash' ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
+  if (typeof id !== 'string' || !id || r.backgroundEndsWithFinalResponse) return
+  const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
+  const now = await $.clock.now()
+  await update($, todos, list =>
+    list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(call.tool === 'Monitor' ? { isWatch: true } : {}) }].slice(-BG_KEPT) } : one)),
+  )
+}
+// Background work that has ended or was stopped leaves every card that kept it
+const dropBackground = async ($: EngineInterface, ids: string[]) =>
+  update($, todos, list => {
+    const isGone = (id: string) => ids.includes(id)
+    if (!list.some(one => one.bg?.some(b => isGone(b.id)))) return list
+    return list.map(one => {
+      const bg = one.bg?.filter(b => !isGone(b.id))
+      return bg?.length === one.bg?.length ? one : { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined }
+    })
+  })
+
+// What work still at work says on its card while it waits for a command of its own: which, and how long it has run
+const waitLine = (one: Todo, at: number) => {
+  const commands = (one.bg ?? []).filter(b => !b.isWatch)
+  // The newest command it started, the one it is most likely on now
+  const first = commands.at(-1)
+  if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
+  const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
+  return `Still at work: it waits for its background command${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
+}
 
 // What finished work left running says on its card
 const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `It left something running in the background, ${took(at - one.leftSince)}` : '')
@@ -5794,6 +5894,7 @@ const workHooks = (on: On) => {
     const next = async (call: typeof e) => {
       const r = await run(call)
       if (woken && !r.deny && !r.isError) await update($, todos, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
+      if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
       return hideKept($, call, r)
     }
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
@@ -5869,7 +5970,7 @@ const workHooks = (on: On) => {
         await update($, todos, list =>
           list.map(one => {
             if (one.id !== id) return one
-            const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined }
+            const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined }
             if (isKeeping) return { ...base, quiet: 0, owes: isTool(e.tool, 'note') ? undefined : one.owes }
             const owes = one.owes === undefined ? undefined : one.owes + 1
             const quiet = (one.quiet ?? 0) + 1
@@ -5915,6 +6016,7 @@ const workHooks = (on: On) => {
       const stopId = String((e as { task_id?: unknown }).task_id ?? '')
       if (!r.deny && stopId) {
         stoppedHere.add(stopId)
+        await dropBackground($, [stopId])
         const now = await $.clock.now()
         await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
         await keepStoppedReports($, now)
@@ -5955,6 +6057,18 @@ const workHooks = (on: On) => {
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)
     if (id !== undefined && tokens && dir) await update($, todos, list => list.map(one => (one.id === id ? { ...one, tokens, model: one.chosen ?? (modelName(model ?? '') ? model : one.model) } : one)))
 
+    return r
+  })
+
+  // As a piece of work stops, the engine says what background work is still in flight: what its card kept that is not, has ended
+  on('classic.SubagentStop', async ($, e, next) => {
+    const r = await next(e)
+    const live = e.background_tasks
+    if (dir && Array.isArray(live)) {
+      const ids = new Set(live.map(one => one.id))
+      const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)
+      if (gone.length) await dropBackground($, gone).catch(err => log($, `ended background work not let go: ${String(err)}`))
+    }
     return r
   })
 
@@ -6490,6 +6604,10 @@ const panelHooks = (on: On) => {
             {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
             {one.stuckAt && one.status === 'working' && !one.chat ? (
               <Text key={`stuck-${one.id}`} color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
+            ) : null}
+            {/* Still at work, waiting for a command of its own it started in the background: which, and how long it has run */}
+            {waitLine(one, at) ? (
+              <Text key={`wait-${one.id}`} dimColor wrap="wrap">{waitLine(one, at)}</Text>
             ) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden">
               {one.status === 'working' ? live(`live-${one.id}`) : null}

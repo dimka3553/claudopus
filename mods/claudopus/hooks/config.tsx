@@ -87,7 +87,11 @@ export const sectionsOf = (text: string) =>
 // The text being edited in the tab, and what the person has typed so far, so a redraw keeps it
 export const editing = { key: '', draft: '' }
 
-export type ConfigShown = { texts: { text: Text; isOwn: boolean; isStale: boolean; path: string; body: string }[]; config: Config; failed: string }
+export type ConfigShown = {
+  // The version this chat runs, and Check for updates as it stands
+  version: string
+  check: { isChecking: boolean; said: string; isError: boolean }
+  texts: { text: Text; isOwn: boolean; isStale: boolean; path: string; body: string }[]; config: Config; failed: string }
 export type ConfigActs = {
   edit: (text: Text, body: string) => void
   open: (text: Text) => void
@@ -95,6 +99,7 @@ export type ConfigActs = {
   cancel: () => void
   putBack: (text: Text) => void
   set: (key: keyof Config, value: unknown, role?: Role) => void
+  check: () => void
 }
 type Band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => JSX.Element
 const SEGMENT = '#80808050'
@@ -228,11 +233,28 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         'config-updates',
         'Updates',
         '',
-        toggle(
-          'updates',
-          'Automatic updates',
-          'Every few hours Claudopus installs its newest release, and chats you start after that use it. Off, it stays on the version you have until you update it yourself.',
-        ),
+        <Box flexDirection="column" gap={1}>
+          {toggle(
+            'updates',
+            'Automatic updates',
+            'Every few hours Claudopus installs its newest release, and chats you start after that use it. Off, it stays on the version you have until you update it yourself.',
+          )}
+          {item(
+            'config-check',
+            shown.version ? `This chat runs v${shown.version}` : 'Check for updates',
+            'Looks for a newer release now and downloads it, also with automatic updates off.',
+            shown.check.isChecking ? (
+              <Text key="config-check-checking" dimColor>Checking…</Text>
+            ) : (
+              <Button key={`config-check-${presses}`} label="Check for updates" onPress={acts.check} />
+            ),
+            false,
+            () => undefined,
+            shown.check.said ? (
+              <Text key="config-check-said" color={shown.check.isError ? 'error' : undefined} wrap="wrap">{shown.check.said}</Text>
+            ) : null,
+          )}
+        </Box>,
       )}
       {shown.failed ? (
         <Box key="config-failed" paddingX={2} flexShrink={0}>
