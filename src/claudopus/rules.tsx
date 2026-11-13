@@ -3,7 +3,7 @@
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'Answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). A message about work already listed goes to the agent that has that work instead, with SendMessage, in their words.'
+  'Answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). A message that changes or adds to work already listed goes to the agent that has that work instead, with SendMessage, in their words; an ask that can be done on its own gets its own agent, so it never waits behind running work.'
 const REFUSED =
   'This chat\'s own thread does no work itself. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
 const NO_COPY = () =>
