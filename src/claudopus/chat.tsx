@@ -342,7 +342,7 @@ const chatHooks = (on: On) => {
       // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
       // Held on a command or watch of its own that wakes it as it ends, with a to-do of its still being done, it has not finished:
       // what it hands back on the way (an answer to a question while it waits) is no report, and its card stays at work
-      const isGoingOn = how === 'done' && isHeld && goesOn((await read($, todos)).find(one => one.id === id))
+      const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
       const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || answer.length >= REPORT_LEAST)
       // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
       // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
@@ -354,7 +354,8 @@ const chatHooks = (on: On) => {
       await update($, todos, list => {
         const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
         // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
-        const waitsSince = (one: Todo) => (isHeld && one.bg?.length ? (one.waitsSince ?? now) : undefined)
+        // Work that gave its report waits on nothing it means to finish
+        const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
         // An aborted turn's own text is not kept over the report the work gave before it was stopped
         return list.map(one =>
           one.id !== id

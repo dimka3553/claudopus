@@ -631,12 +631,18 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   status: 'working',
 })
 // Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at, waitsSince: undefined })
+// What it kept of its own background work goes with it: started again, it keeps what it starts from then
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at, bg: undefined, waitsSince: undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
 const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
-// Work that ended a turn while what it started in the background itself still runs, and has not finished: a to-do of its is still
-// being done. It is still at work; an answer it handed back on the way is no report
-const goesOn = (one: Todo | undefined) => Boolean(one?.bg?.length && one.items.some(item => item.state === 'doing'))
+// Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
+// a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
+// such command: it may run until stopped
+const goesOn = (list: Todo[], id: string) => {
+  const one = list.find(card => card.id === id)
+  const isRunning = Boolean(one?.bg?.some(b => !b.isWatch)) || list.some(kid => kid.parentId === id && kid.status === 'working')
+  return Boolean(one && isRunning && one.items.some(item => item.state === 'doing'))
+}
 // How work that is stopped ends: done when its turn had already ended with its report and only its own background work held it
 // (the chat stops such work once its report is in), stopped otherwise
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
@@ -984,7 +990,7 @@ const loadFinished = async ($: EngineInterface) => {
   if (!Array.isArray(kept) || !kept.length) return
   await update($, todos, list => {
     // What it left running is looked at afresh: the record of how it ended does not outlive the load
-    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined }))
+    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined, bg: undefined, waitsSince: undefined }))
     return fresh.length ? capped(byEnd([...fresh, ...list])) : list
   })
 }
@@ -5188,7 +5194,7 @@ const chatHooks = (on: On) => {
       // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
       // Held on a command or watch of its own that wakes it as it ends, with a to-do of its still being done, it has not finished:
       // what it hands back on the way (an answer to a question while it waits) is no report, and its card stays at work
-      const isGoingOn = how === 'done' && isHeld && goesOn((await read($, todos)).find(one => one.id === id))
+      const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
       const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || answer.length >= REPORT_LEAST)
       // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
       // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
@@ -5200,7 +5206,8 @@ const chatHooks = (on: On) => {
       await update($, todos, list => {
         const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
         // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
-        const waitsSince = (one: Todo) => (isHeld && one.bg?.length ? (one.waitsSince ?? now) : undefined)
+        // Work that gave its report waits on nothing it means to finish
+        const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
         // An aborted turn's own text is not kept over the report the work gave before it was stopped
         return list.map(one =>
           one.id !== id
@@ -5364,7 +5371,7 @@ const lookStuck = async ($: EngineInterface) => {
     const next = list.map(one => {
       if (one.parentId || one.chat) return one
       // Nor work that waits for a command of its own it started in the background: a long copy is not stuck
-      const isWaitingOwn = Boolean(one.waitsSince && one.bg?.length)
+      const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
       const isStuck = one.status === 'working' && !one.ask && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
       if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
@@ -5400,8 +5407,9 @@ const BG_KEPT = 20
 // stops goes. A command the engine ends with its final response wakes nothing and is not kept
 const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown }, result: unknown) => {
   if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')])
-  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown }
-  const id = call.tool === 'Bash' ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
+  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown; backgroundWakesOwner?: unknown }
+  // A command is kept only when the engine says it wakes the work that owns it as it ends
+  const id = call.tool === 'Bash' && r.backgroundWakesOwner === true ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
   if (typeof id !== 'string' || !id || r.backgroundEndsWithFinalResponse) return
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
   const now = await $.clock.now()
@@ -5416,17 +5424,18 @@ const dropBackground = async ($: EngineInterface, ids: string[]) =>
     if (!list.some(one => one.bg?.some(b => isGone(b.id)))) return list
     return list.map(one => {
       const bg = one.bg?.filter(b => !isGone(b.id))
-      return bg?.length === one.bg?.length ? one : { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.length ? one.waitsSince : undefined }
+      return bg?.length === one.bg?.length ? one : { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined }
     })
   })
 
 // What work still at work says on its card while it waits for a command of its own: which, and how long it has run
 const waitLine = (one: Todo, at: number) => {
   const commands = (one.bg ?? []).filter(b => !b.isWatch)
-  const first = commands[0] ?? one.bg?.[0]
-  if (one.status !== 'working' || !one.waitsSince || !first) return ''
+  // The newest command it started, the one it is most likely on now
+  const first = commands.at(-1)
+  if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
   const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
-  return `Still at work: it waits for its ${first.isWatch ? 'watch' : 'background command'}${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
+  return `Still at work: it waits for its background command${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
 }
 
 // What finished work left running says on its card

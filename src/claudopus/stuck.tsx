@@ -84,7 +84,7 @@ const lookStuck = async ($: EngineInterface) => {
     const next = list.map(one => {
       if (one.parentId || one.chat) return one
       // Nor work that waits for a command of its own it started in the background: a long copy is not stuck
-      const isWaitingOwn = Boolean(one.waitsSince && one.bg?.length)
+      const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
       const isStuck = one.status === 'working' && !one.ask && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
       if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
@@ -120,8 +120,9 @@ const BG_KEPT = 20
 // stops goes. A command the engine ends with its final response wakes nothing and is not kept
 const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown }, result: unknown) => {
   if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')])
-  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown }
-  const id = call.tool === 'Bash' ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
+  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown; backgroundWakesOwner?: unknown }
+  // A command is kept only when the engine says it wakes the work that owns it as it ends
+  const id = call.tool === 'Bash' && r.backgroundWakesOwner === true ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
   if (typeof id !== 'string' || !id || r.backgroundEndsWithFinalResponse) return
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
   const now = await $.clock.now()
@@ -136,17 +137,18 @@ const dropBackground = async ($: EngineInterface, ids: string[]) =>
     if (!list.some(one => one.bg?.some(b => isGone(b.id)))) return list
     return list.map(one => {
       const bg = one.bg?.filter(b => !isGone(b.id))
-      return bg?.length === one.bg?.length ? one : { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.length ? one.waitsSince : undefined }
+      return bg?.length === one.bg?.length ? one : { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined }
     })
   })
 
 // What work still at work says on its card while it waits for a command of its own: which, and how long it has run
 const waitLine = (one: Todo, at: number) => {
   const commands = (one.bg ?? []).filter(b => !b.isWatch)
-  const first = commands[0] ?? one.bg?.[0]
-  if (one.status !== 'working' || !one.waitsSince || !first) return ''
+  // The newest command it started, the one it is most likely on now
+  const first = commands.at(-1)
+  if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
   const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
-  return `Still at work: it waits for its ${first.isWatch ? 'watch' : 'background command'}${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
+  return `Still at work: it waits for its background command${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
 }
 
 // What finished work left running says on its card

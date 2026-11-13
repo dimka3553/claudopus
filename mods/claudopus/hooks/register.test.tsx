@@ -1782,8 +1782,10 @@ test('work that answers a question while a copy of its own still runs, with that
 
   // The copy ends: the engine, as it stops, lists only the watch in flight, and the work's next step brings the card on
   await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'general-purpose', agent_transcript_path: '', stop_hook_active: false, background_tasks: [{ id: 'mon-m1', type: 'monitor', status: 'running', description: 'big data copy to the M4: steps and failures' }] } as never)
-  await call('Bash', 'b2', { command: 'shasum -a 256 -c sums.txt' })
+  // The card lets go of the copy at once, before any step: it no longer says it waits for it
   expect(await wait()).toBeUndefined()
+  expect(await drawn(pane)).toEqual(['working'])
+  await call('Bash', 'b2', { command: 'shasum -a 256 -c sums.txt' })
   // It stops its watch, ticks the to-do and reports: now it has finished, green, with its report kept
   await call('TaskStop', 'k1', { task_id: 'mon-m1' })
   await todo('Send CT fits, CTs, iPhone scans and photogrammetry to the M4', 'done', 't2')
@@ -1819,6 +1821,30 @@ test('work that reports with everything it set out to do done, leaving a server 
   expect(await pane.find({ type: 'Text', text: /^Still at work/ })).toBeUndefined()
   await clock.advance(20_000)
   expect(await pane.find({ type: 'Text', text: /^It left something running in the background, / })).toBeDefined()
+  await pane.unmount()
+})
+
+test('work that answers on the way while a helper of its still works, with its to-do still being done, stays at work', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const { clock } = world(on, { art: true, agents, kinds })
+  await $.session.start(start)
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.prompt.submit({ text: 'index the scans', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Index the scans', prompt: 'index them', resume: { agentId: 'w1' } } as never)
+  await $.agent.spawn({ ...spawn, description: 'Read every scan', prompt: 'read', parentAgentId: 'w1', resume: { agentId: 'w2' } } as never)
+  kinds.w1 = 'general-purpose'
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 't1', agentId: 'w1', item: 'Index every scan', state: 'doing' } as never)
+  agents.w1 = 'waiting'
+  agents.w2 = 'running'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'w1', message: 'Half of the scans are read so far.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'x1', reason: 'answer', agentId: 'w1' } as never)
+  expect(await drawn(pane)).toEqual(['working'])
+  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  await clock.advance(20_000)
+  expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined()
   await pane.unmount()
 })
 
