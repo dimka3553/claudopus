@@ -1114,6 +1114,53 @@ test('the panel shows how full the context of this chat and of each piece of wor
   await slim.unmount()
 })
 
+test("a card's title, its line of facts and every line under them start at one left edge, on a desktop and in a terminal, at work, asking and finished", async ($, on) => {
+  const { clock } = world(on, { model: 'claude-opus-5-5-20261001' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, subagentType: 'fork', fork: true, prompt: 'fix the nose' } as never)
+  for await (const chunk of $.turn.step({ turnId: 'turn-2', index: 0, model: 'm', messageCount: 2, agentId: 'a1' })) void chunk
+  const call = (tool: string, input: object) => $.tool.call({ tool: `mcp__claudopus__${tool}`, tool_use_id: 't', agentId: 'a1', ...input } as never)
+  await call('todo', { item: 'Fit the nostril', state: 'doing' })
+  await call('note', { text: 'I am fitting the nostril.' })
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Measure the nose', prompt: 'go', parentAgentId: 'a1' } as never)
+
+  // How far in a line's first letter is: the padding on the way down its first parts, and a desktop's own around a plain Button
+  type Drawn = { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+  const insetOf = (node: unknown, surface: string): string[] => {
+    if (!node || typeof node !== 'object') return []
+    const { type, props = {}, children = [] } = node as Drawn
+    const own = [props.paddingLeft ?? props.paddingX ?? props.padding].filter(step => step !== undefined && step !== 0).map(String)
+    if (type === 'Button') return [...own, ...(props.plain && surface !== 'terminal' ? ['xs'] : [])]
+    return type === 'Box' ? [...own, ...insetOf(children.find(one => one && typeof one === 'object'), surface)] : own
+  }
+  // Each line of the card's column, the title and its facts as two
+  const edges = async (surface: 'desktop' | 'terminal') => {
+    const pane = await $.ui.mount({ ...LIST, surface } as never)
+    const card = (await pane.find({ type: 'Box', key: 'todo-a1' })) as Drawn | undefined
+    await pane.unmount()
+    const column = (card?.children ?? []).filter(one => one && typeof one === 'object').at(-1) as Drawn
+    const [head, ...rest] = (column.children ?? []).filter(one => one && typeof one === 'object') as Drawn[]
+    return [...(head.children ?? []), ...rest].filter(one => one && typeof one === 'object').map(line => insetOf(line, surface).join('+'))
+  }
+  const expectOneEdge = async (lines: number) => {
+    // A desktop moves every line in by the step a plain Button pads its label with; a terminal draws each at the card's edge
+    expect(await edges('desktop')).toEqual(Array(lines).fill('xs'))
+    expect(await edges('terminal')).toEqual(Array(lines).fill(''))
+  }
+  // At work: the title, the model's name that opens the choice of models, the line beside the dots, the helper tree
+  await expectOneEdge(4)
+  // Asking: the ask comes between the facts and the line it wrote
+  await call('ask', { text: 'May I replace the nose?', choices: ['Approve', 'Not now'] })
+  await expectOneEdge(5)
+  await call('ask', { text: '' })
+  // Finished, in its pause: the facts are plain text, the line says it finished
+  await $.turn.complete({ answer: 'Measured.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
+  await $.turn.complete({ answer: 'Fixed.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(500)
+  await expectOneEdge(4)
+})
+
 test('the model a running work is on is pressed and another chosen: its next step runs on it, its card says so at once, and its chat and the work are told', async ($, on) => {
   const talk: { role: string; text: string; toolUses: never[] }[] = [{ role: 'user', text: 'Fix the nose on head A.', toolUses: [] }]
   const answered: { by?: string } = {}

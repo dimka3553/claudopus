@@ -53,11 +53,19 @@ const panelHooks = (on: On) => {
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
+    // A desktop draws a plain Button's label inside its smallest padding step, so a line a card starts with text is moved in by
+    // that same step: the title, the line of facts and the line under them share one left edge. A terminal draws the label alone
+    const lead = e.surface === 'terminal' ? 0 : 'xs'
     // On a small card the line also counts its to-dos, before the time
     const facts = (one: Todo, isWhole: boolean, count = '') => {
       const name = modelName(one.model ?? '')
       // Another chat's work is moved to another model in that chat
-      if (one.status !== 'working' || !name || one.chat) return <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one, count)}</Text>
+      if (one.status !== 'working' || !name || one.chat)
+        return (
+          <Box paddingLeft={lead}>
+            <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one, count)}</Text>
+          </Box>
+        )
       const scope = `model-${one.id}`
       if (picking === one.id)
         return (
@@ -188,16 +196,25 @@ const panelHooks = (on: On) => {
               </Box>
               {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} done` : '')}
             </Box>
-            {one.ask ? askBlock(one, `ask-${one.id}`) : null}
+            {/* Every part under the title starts at the title's own left edge (lead) */}
+            {one.ask ? (
+              <Box key={`ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
+                {askBlock(one, `ask-${one.id}`)}
+              </Box>
+            ) : null}
             {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
             {one.stuckAt && one.status === 'working' && !one.chat ? (
-              <Text key={`stuck-${one.id}`} color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
+              <Box key={`stuck-${one.id}`} paddingLeft={lead}>
+                <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
+              </Box>
             ) : null}
             {/* Still at work, waiting for a command of its own it started in the background: which, and how long it has run */}
             {waitLine(one, at) ? (
-              <Text key={`wait-${one.id}`} dimColor wrap="wrap">{waitLine(one, at)}</Text>
+              <Box key={`wait-${one.id}`} paddingLeft={lead}>
+                <Text dimColor wrap="wrap">{waitLine(one, at)}</Text>
+              </Box>
             ) : null}
-            <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden">
+            <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
@@ -212,7 +229,7 @@ const panelHooks = (on: On) => {
             </Box>
             {/* Finished, with something it started still running: what, how long, and a way to stop it */}
             {leftLine(one, at) && !one.chat ? (
-              <Box key={`left-${one.id}`} flexDirection="column" gap={1}>
+              <Box key={`left-${one.id}`} flexDirection="column" gap={1} paddingLeft={lead}>
                 <Text color={NEEDS} wrap="wrap">{leftLine(one, at)}</Text>
                 <Box flexDirection="row">
                   <Button key={`left-stop-${one.id}-${presses}`} label="Stop it" onPress={() => void stop($, one.id)} />
@@ -220,7 +237,7 @@ const panelHooks = (on: On) => {
               </Box>
             ) : null}
             {/* Its helpers, inside the card: its coloured edge runs down beside them */}
-            {tree.length ? <Box key={`tree-${one.id}`} flexDirection="column">{tree}</Box> : null}
+            {tree.length ? <Box key={`tree-${one.id}`} flexDirection="column" paddingLeft={lead}>{tree}</Box> : null}
           </Box>
         </Box>
       )
@@ -397,7 +414,7 @@ const panelHooks = (on: On) => {
           {/* Blue while it runs, green only when its last round passed */}
           {f.status === 'working' || (f.status === 'done' && rounds.at(-1)?.pass !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE} /> : <Box width={1} flexShrink={0} />}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-            <Box flexDirection="column">
+            <Box flexDirection="column" paddingLeft={lead}>
               <Box height={1} overflow="hidden">
                 <Text bold>{fitWords(f.title, boldRow)}</Text>
               </Box>
@@ -405,7 +422,7 @@ const panelHooks = (on: On) => {
                 <Text dimColor>{flowGlance(f, perRow)}</Text>
               </Box>
             </Box>
-            <Box flexDirection="column">
+            <Box flexDirection="column" paddingLeft={lead}>
               <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
                 {squaresRow(f, rounds, `flow-squares-${f.id}`)}
                 <Text color={f.status === 'working' ? FLOW : word === 'Passed' ? DONE : undefined} dimColor={f.status !== 'working' && word !== 'Passed'}>
@@ -416,7 +433,7 @@ const panelHooks = (on: On) => {
                 {outcomeRow(f, rounds, perRow)}
               </Box>
             </Box>
-            <Box flexDirection="row" alignItems="center" gap={1}>
+            <Box flexDirection="row" alignItems="center" gap={1} paddingLeft={lead}>
               <Button key={`flow-open-${f.id}-${presses}`} label="Details" onPress={() => openFlow($, f.id)} />
               {f.status === 'working' && f.session === flowMine ? <Button key={`flow-stop-${f.id}`} label="Stop" onPress={() => void stopFlow($, f.id)} /> : null}
               <Box flexGrow={1} />
@@ -698,7 +715,9 @@ const panelHooks = (on: On) => {
             {one.status === 'working' ? <Box width={1} flexShrink={0} backgroundColor={LIVE} /> : null}
             <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
               <Box flexDirection="column">
-                <Text bold wrap="wrap">{titleOf(one)}</Text>
+                <Box paddingLeft={lead}>
+                  <Text bold wrap="wrap">{titleOf(one)}</Text>
+                </Box>
                 {facts(one, true)}
               </Box>
               {parent ? (
@@ -706,7 +725,7 @@ const panelHooks = (on: On) => {
                   <Button key={`open-parent-${one.id}-${presses}`} label={`↑ A helper of: ${cut(titleOf(parent), Math.max(20, room - 16))}`} plain dimColor hover={{ scope: `parent-${one.id}`, underline: true }} onPress={() => openWork($, parent.id)} />
                 </Box>
               ) : null}
-              {one.chat ? <Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat, selfName()) ? `, ${chatSide(one.chat, selfName())}` : ''}`}</Text> : null}
+              {one.chat ? <Box paddingLeft={lead}><Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat, selfName()) ? `, ${chatSide(one.chat, selfName())}` : ''}`}</Text></Box> : null}
               {(one.status === 'working' && !one.chat) || left(one) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
@@ -773,7 +792,7 @@ const panelHooks = (on: On) => {
                   {label}
                 </Button>
               ) : (
-                label
+                <Box paddingLeft={lead}>{label}</Box>
               )}
             </Box>
             {side ? (
