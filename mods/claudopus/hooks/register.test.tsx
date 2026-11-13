@@ -3264,8 +3264,11 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   const toWork = (await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('Where do I do that?')))) ?? ''
   expect(toWork).toContain('Submit it to the plugin directory.')
   expect(toWork).toContain('does not settle your ask, so it stays open')
-  expect(await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' })).toBeDefined()
-  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
+  // At work on the reply, the ask is drawn in the work's purple, not as waiting on the person, its buttons still there
+  expect((await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' }))?.props.color).toBe('#8A63F0')
+  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeUndefined()
+  expect(await ears.find({ type: 'Text', text: 'Acting on your reply; it still asks' })).toBeDefined()
+  expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Submitted')).toBe(true)
   const fresh = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   expect(fresh?.key).toBe(box?.key)
   expect(fresh?.props.value ?? '').toBe('')
@@ -3454,6 +3457,83 @@ test('a reply in words that does not settle an ask keeps it open, and the card a
   await clock.advance(60_000)
   expect(await until(async () => ((await isFinished()) ? true : undefined))).toBe(true)
   await list.unmount()
+})
+
+test('work acting on a reply in words to an ask it keeps open is purple, in the panel and the terminal, with its ask and buttons; stopped again it is amber: the 13 Nov "Explain to me the exact differences first." to "Release PR 54 to production?"', async ($, on) => {
+  const { resumed, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'clip wallet versus affiliate', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Clipify affiliate versus clip wallet', prompt: 'clip wallet versus affiliate' } as never)
+  const ASK = 'Release PR 54 to production?'
+  const AMBER = '#E5A50A'
+  const isPurple = (colour: unknown) => /^#(8A63F0|6E3CFF)/i.test(String(colour))
+  const desk = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  // The edge of the card beside its title, in each drawing: amber, purple or green
+  const edges = async (pane: typeof desk) => (await pane.findAll({ type: 'Box' })).map(b => b.props.backgroundColor).filter(c => c === AMBER || isPurple(c))
+  // The terminal's panel and band are drawn afresh for each look, as a terminal draws them
+  const inTerminal = async <T,>(of: typeof BAND | typeof LIST, read: (pane: typeof desk) => Promise<T>) => {
+    const pane = await $.ui.mount({ ...of, surface: 'terminal' } as never)
+    const got = await read(pane)
+    await pane.unmount()
+    return got
+  }
+  const look = async () => ({
+    desk: (await desk.find({ type: 'Text', text: ASK }))?.props.color,
+    term: await inTerminal(LIST, async pane => (await pane.find({ type: 'Text', text: ASK }))?.props.color),
+    // The band's ask is a line of its own inside the line that names the work
+    band: await inTerminal(BAND, async pane => (await pane.findAll({ type: 'Text' })).find(t => t.text === ASK && t.props.color)?.props.color),
+    deskEdges: await edges(desk),
+    termEdges: await inTerminal(LIST, edges),
+    buttons: [await desk.findAll({ type: 'Button' }), await inTerminal(LIST, pane => pane.findAll({ type: 'Button' })), await inTerminal(BAND, pane => pane.findAll({ type: 'Button' }))].map(all => all.map(b => b.props.label)),
+    heading: (await details.find({ type: 'Text', text: 'Needs you now' })) ? 'needs' : (await details.find({ type: 'Text', text: 'Acting on your reply; it still asks' })) ? 'acting' : 'none',
+  })
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Release it', 'Not now'] } as never)
+  await $.turn.complete({ answer: 'Release PR 54 to production? (Answers: Release it / Not now.)', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(60_000)
+  // Before the reply: it waits on the person, amber everywhere
+  const before = await until(async () => {
+    const l = await look()
+    return l.desk === AMBER && l.term === AMBER && l.band === AMBER && l.heading === 'needs' && l.deskEdges.includes(AMBER) && l.termEdges.includes(AMBER) ? l : undefined
+  })
+  expect(before ?? (await look())).toMatchObject({ desk: AMBER, term: AMBER, band: AMBER, heading: 'needs' })
+  // The reply in words starts it again: purple while it acts on it, its ask and both buttons still there to press
+  const box = (await desk.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await desk.input({ key: box?.key ?? '', text: 'Explain to me the exact differences first.' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('Explain to me the exact differences first.')))).toBeDefined()
+  const acting = await until(async () => {
+    const l = await look()
+    return isPurple(l.desk) && isPurple(l.term) && isPurple(l.band) && l.heading === 'acting' ? l : undefined
+  })
+  expect(acting ?? (await look())).toMatchObject({ heading: 'acting' })
+  const now = await look()
+  expect(now.deskEdges.filter(c => c === AMBER)).toEqual([])
+  expect(now.termEdges.filter(c => c === AMBER)).toEqual([])
+  expect(now.deskEdges.some(isPurple)).toBe(true)
+  expect(now.termEdges.some(isPurple)).toBe(true)
+  for (const labels of now.buttons) expect(labels).toEqual(expect.arrayContaining(['Release it', 'Not now']))
+  // It stops again with the ask still open: amber again
+  await $.turn.complete({ answer: 'Release PR 54 to production? (Answers: Release it / Not now.) The differences are…', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(60_000)
+  const after = await until(async () => {
+    const l = await look()
+    return l.desk === AMBER && l.term === AMBER && l.band === AMBER && l.heading === 'needs' && !l.deskEdges.some(isPurple) && !l.termEdges.some(isPurple) ? l : undefined
+  })
+  expect(after ?? (await look())).toMatchObject({ desk: AMBER, term: AMBER, band: AMBER, heading: 'needs' })
+  // Release it pressed goes back to the work and the ask goes; the card is at work on it, purple, until the work is done
+  await desk.press({ key: (await desk.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()
+  expect(await until(async () => ((await desk.find({ type: 'Text', text: ASK })) ? undefined : true))).toBe(true)
+  const released = await until(async () => {
+    const l = await look()
+    return l.deskEdges.some(isPurple) && !l.deskEdges.includes(AMBER) && l.termEdges.some(isPurple) && !l.termEdges.includes(AMBER) ? l : undefined
+  })
+  expect(released ?? (await look())).toMatchObject({ desk: undefined })
+  expect(released?.heading).toBe('none')
+  await $.turn.complete({ answer: 'Released PR 54.', durationMs: 1, isAborted: false, turnId: 'turn-3', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(60_000)
+  expect(await until(async () => ((await edges(desk)).some(isPurple) ? undefined : true))).toBe(true)
+  for (const pane of [desk, details]) await pane.unmount()
 })
 
 test('every ask also shows in the chat as the mod\'s notice, never as the person\'s message, with its answers and pictures; an answer typed there reaches the work and the card stops asking', async ($, on) => {
