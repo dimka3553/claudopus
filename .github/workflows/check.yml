@@ -1,0 +1,23 @@
+name: Check
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: The shipped hooks file matches its parts
+        run: node src/claudopus/build.mjs --check
+      - name: The manifests are valid JSON
+        run: |
+          for f in .claude-plugin/marketplace.json mods/claudopus/.claude-plugin/plugin.json site/version.json; do
+            jq empty "$f"
+          done
+      - name: The site's version matches the plugin's
+        run: |
+          test "$(jq -r .version mods/claudopus/.claude-plugin/plugin.json)" = "$(jq -r .version site/version.json)"
