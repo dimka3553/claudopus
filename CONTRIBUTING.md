@@ -18,9 +18,9 @@ claude plugin validate --strict mods/claudopus
 claude plugin validate --strict .
 ```
 
-Use the newest Claude Code engine (the desktop app's is usually newer than the `claude` on your PATH). The tests need Claude Code's own test kit, not the desktop app: the public engine from npm runs all of them.
+Use a recent Claude Code engine: the desktop app's, the `claude` on your PATH or the public one from npm all run every test, since the tests need Claude Code's own test kit, not the desktop app.
 
-The GitHub check (`.github/workflows/check.yml`) runs the same build check and every test on each push to `main` and each pull request, with the npm engine pinned to a version that passes them; a failing test fails the check. The release runs them again with the desktop app's engine. A test near the kit's 5-second limit takes `SLOW` (from `src/claudopus/tests/world.tsx`) as its options, since GitHub's runner is about twice as slow as a Mac.
+The GitHub check (`.github/workflows/check.yml`) runs the build check and every test, but not the two strict validations, on each push to `main` and each pull request, with the npm engine pinned to a version that passes them; a failing test fails the check. The release runs them again, and the validations, with the desktop app's engine. A test near the kit's 5-second limit takes `SLOW` (from `src/claudopus/tests/world.tsx`) as its options, since GitHub's runner is about twice as slow as a Mac.
 
 - `README.md` and `mods/claudopus/README.md` are the same text, so change them together.
 - A release raises `version` in `mods/claudopus/.claude-plugin/plugin.json` and then builds. Installs update when that version changes.

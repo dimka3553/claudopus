@@ -1,1 +1,1 @@
-- The public GitHub check now runs all of Claudopus's tests on every change, so a broken test shows there before a release.
+- Every pull request to Claudopus, and every release on main, is now checked on GitHub by running all of its tests, so a broken test shows before it reaches you.
