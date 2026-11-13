@@ -575,6 +575,25 @@ test('every conversation carries the principles the mod ships, word for word and
   // A machine with no instruction file of its own gets them from the mod alone
   const fresh = await $.prompt.context({ blocks: [], instructionFiles: [] })
   expect(fresh.instructionFiles?.map(one => [one.kind, one.content])).toEqual([['user', PRINCIPLES]])
+  expect(told.instructionFiles?.some(one => one.content.includes('device code'))).toBe(false)
+})
+
+test('a chat the app runs on another Mac over ssh tells every conversation that what needs the person is done from their own device', async ($, on) => {
+  world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
+  await $.session.start(start)
+  const home = { path: `${HOME}/.claude/CLAUDE.md`, kind: 'user', content: PRINCIPLES } as const
+  const told = await $.prompt.context({ blocks: [], instructionFiles: [home] })
+  // The same principles loaded from elsewhere are still sent once, now ending with the rule for working from afar
+  expect(told.instructionFiles?.length).toBe(1)
+  const ours = told.instructionFiles?.[0]?.content ?? ''
+  expect(ours.startsWith(PRINCIPLES.trimEnd())).toBe(true)
+  expect(ours).toContain('## This chat runs on another Mac')
+  expect(ours).toContain('a sign-in by device code or a link that works opened on their own device, never a browser, window, dialog or keychain prompt on this Mac')
+  expect(ours).not.toContain('{name}')
+  // A second copy of the mod that already added them, rule and all, does not make them go out twice
+  const twice = await $.prompt.context({ blocks: [], instructionFiles: [{ path: '/other/copy/rules/CLAUDE.md', kind: 'user', content: ours }] })
+  expect(twice.instructionFiles?.length).toBe(1)
 })
 
 // Cards: work becoming a card, its to-dos, its own chat, steers, context and model, Details, stops, its pause, work the engine reports

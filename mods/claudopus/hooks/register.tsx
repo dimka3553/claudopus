@@ -280,6 +280,10 @@ const KEEP_AGENTS = 'Keep the name or id of each background agent with its subje
 // What every piece of background work is told as it starts: it keeps its own to-do in the panel true
 const PANEL_RULE =
   '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, the full paths of any pictures it is about in `pictures`, a command for {name} to type in `command` (the card opens a terminal for it on their press, so open none yourself); clear it with empty `text` once you have seen it done.'
+// What every conversation of a chat the app runs on another Mac over ssh carries after the principles, the chat's, its work's and
+// their helpers' alike: the person cannot see this Mac, so nothing waits on their hands here
+const AFAR_RULE =
+  "## This chat runs on another Mac\n\n- {Name} works from their own device and cannot see this Mac's screen. Anything that needs {name}'s hands is done from their own device: a sign-in by device code or a link that works opened on their own device, never a browser, window, dialog or keychain prompt on this Mac, and nothing that needs seeing its screen."
 // What the chat shows when its work asks the person something: the ask as the mod's own notice in the chat, with its answers and
 // pictures, never a message in the person's place; its model reads the ask in a row of its own, with how to pass an answer on.
 // An answer typed in the chat goes to the work as a press on the card does
@@ -336,7 +340,7 @@ const QUIET_STEPS = 12
 const ASKS_SYSTEM = `You log one exchange of a chat between a user and an AI coding assistant. The user dictates, so messages ramble. Reply in plain lines and nothing else.
 First, one line per distinct thing the user asked for in this message, asides included. Each starts with "- ", has at most 20 words, and uses the user's words where short. A bare approval (yes, continue, push) is not an ask: write no line for it. With no user message there are no such lines.
 Then, when the reply reports a result, a finding or a decision, one line "did: <what was done or found, in at most 25 words, with the names and numbers that matter>". A reply that only acknowledges gets no such line.
-Last, one line "title: <title>". Repeat the current title if it still names what the chat is working on. Otherwise write a new title of 3 to 6 words.`
+Last, one line "title: <title>". Repeat the current title if it still names what the chat is working on. Otherwise write a new title of 3 to 6 words. A title names what is being done, never a model.`
 
 // Config: the texts in force and the settings, kept keys' names, and the Config tab's acts (its drawing is in ../../mods/claudopus/hooks/config.tsx)
 
@@ -4815,16 +4819,20 @@ const chatHooks = (on: On) => {
   })
 
   // The person's principles and working rules ship with the mod: every conversation, a chat's and each piece of work's, carries them
-  // word for word as an instruction file of the person's own, and the same text loaded from elsewhere is not sent twice
+  // word for word as an instruction file of the person's own, and the same text loaded from elsewhere is not sent twice. In a chat
+  // the app runs on another Mac over ssh they end with the rule for what needs the person's hands there
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
     const files = r.instructionFiles ?? e.instructionFiles
     // The person's own copy in the memory folder when there is one, the shipped principles otherwise
     const { path, text: content } = await inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')
     if (!files || !content.trim()) return r
-    const others = files.filter(one => one.content.trim() !== content.trim())
+    // Another copy of the mod loaded beside this one sends the same principles, with the rule for afar after them or not
+    const others = files.filter(one => !one.content.trim().startsWith(content.trim()))
     const at = others.findIndex(one => one.kind !== 'managed')
-    const ours = { path, kind: 'user' as const, content }
+    // Read here, not from the flag the chat's start sets, so a context made before that start ends still carries the rule
+    const isAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
+    const ours = { path, kind: 'user' as const, content: isAfar ? `${content.trimEnd()}\n\n${named(AFAR_RULE)}\n` : content }
 
     return { ...r, instructionFiles: at < 0 ? [...others, ours] : [...others.slice(0, at), ours, ...others.slice(at)] }
   })
