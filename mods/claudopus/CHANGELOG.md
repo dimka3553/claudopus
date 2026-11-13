@@ -18,12 +18,11 @@ What changed in each version of Claudopus, newest first.
 - Stale requests are dropped, and a value for work that has stopped is not kept.
 
 ## 0.2.63 · 13 November 2026
-- Behind-the-scenes fix to a check of work resumed after a rest, which now fails properly without the fix.
+- Behind-the-scenes fix to the mod's own tests; nothing changes for you.
 
 ## 0.2.62 · 13 November 2026
-- Work now reaches the main version only through one release command, so two pieces of work never release at once.
-- It numbers the version, rebuilds the files, refuses stray files, runs the repository's checks and pushes, and says what landed when it refuses.
-- Work changes a repository only in its own copy and branch.
+- Pieces of work that finish at the same time no longer publish over each other: they take turns, and each one's changes are kept.
+- Each piece of work changes your code only in its own copy, never in the folder you work in.
 
 ## 0.2.61 · 13 November 2026
 - In a chat run from another Mac over SSH, every conversation is told that anything needing your hands is done from your own device.
@@ -51,7 +50,7 @@ What changed in each version of Claudopus, newest first.
 - There, the mod no longer sends a reload command the app refuses, and the header tells you to type it.
 
 ## 0.2.55 · 13 November 2026
-- The shipped rules now say to search with rg, and to use rg -a for packed app files.
+- Work is told to use a faster way to search your files.
 
 ## 0.2.54 · 13 November 2026
 - Removed the arrow beside a work's title and at the end of a helper's row; the title, helper name and ended row still open on a press.
@@ -62,7 +61,8 @@ What changed in each version of Claudopus, newest first.
 
 ## 0.2.52 · 13 November 2026
 - In a chat run from another Mac over SSH, one click on a panel button now works.
-- The panel's text no longer changes every second, with times to the minute, tokens to 10k and context to 5%, so the click lands on a button that still exists.
+- The panel's numbers no longer change every second, so a click lands on a button that is still there.
+- The GitHub page, banners and site carry the new pitch, with guides for people who want to contribute.
 
 ## 0.2.51 · 13 November 2026
 - A work's card has no Details button any more: its title opens the Details, and Stop is plain text at the end of that row.
@@ -71,7 +71,6 @@ What changed in each version of Claudopus, newest first.
 
 ## 0.2.50 · 13 November 2026
 - For a chat run from another Mac over SSH, button presses and the way tabs open are now written to the log, to find why a first press did nothing there.
-- The GitHub page, banners and site carry the new pitch, and the repository gains issue and pull request templates, contributing and security notes.
 
 ## 0.2.49 · 13 November 2026
 - In a chat run from another Mac over SSH, one press on Stats, Config, About, Memory, Results or Details now opens that tab in front.
@@ -105,8 +104,8 @@ What changed in each version of Claudopus, newest first.
 - A tab opened by a panel button no longer makes the sidebar slide shut and open again.
 
 ## 0.2.41 · 13 November 2026
-- Brings back the previous release's fix for tabs opening behind, which a mistaken release had overwritten.
-- The header shows when the mod was last updated.
+- Tabs opened from the panel come to the front again; a fix lost in the version before is back.
+- The panel header shows a short moment when Claudopus has just updated.
 
 ## 0.2.40 · 13 November 2026
 - A tab opened by a panel button now comes to the front even when the press left the keyboard in the panel.
@@ -195,7 +194,7 @@ What changed in each version of Claudopus, newest first.
 - Any answer clears the amber at once.
 
 ## 0.2.18 · 12 November 2026
-- With other Macs set up, results are now the same on both: each Mac gets what it lacks, whole, with file locations moved to its own home folder.
+- With another Mac set up, both Macs now keep the same results: each one gets whatever it is missing.
 - Archiving, bringing back and answers travel both ways, and nothing is deleted or overwritten.
 
 ## 0.2.17 · 12 November 2026
@@ -256,7 +255,7 @@ What changed in each version of Claudopus, newest first.
 - Removed the author's own folder and wording from the shipped rules and the first-run script.
 
 ## 0.2.3 · 12 November 2026
-- Fixes another blocking finding from the plugin directory's review.
+- Another fix asked for by the review of the plugin directory.
 - Stats keeps turn times as turns, and old totals are worked out again.
 
 ## 0.2.2 · 12 November 2026

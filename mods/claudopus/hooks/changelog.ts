@@ -58,3 +58,8 @@ export const seenIn = (text: string) => {
 }
 // Whether the update screen shows in a chat running `loaded`: a version newer than the one whose changes were seen last
 export const isScreenDue = (loaded: string, seen: string) => Boolean(loaded && seen && newer(loaded, seen))
+
+// The version a Mac ran before `loaded`: the newest of the mod's other installed copies (Claude Code keeps each version's folder)
+// older than it; nothing on a first install
+export const previousOf = (names: string[], loaded: string) =>
+  names.filter(name => /^\d+\.\d+\.\d+$/.test(name) && newer(loaded, name)).reduce((best, name) => (!best || newer(name, best) ? name : best), '')

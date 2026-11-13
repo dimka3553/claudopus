@@ -2876,7 +2876,7 @@ test('About opens the changelog in a tab of its own, every version newest first,
   const log = await $.ui.mount({ ...LIST, requestId: 'changelog', props: { ...LIST.props, title: 'Changelog', bodyColumns: 60 }, surface: 'desktop' } as never)
   const texts = (await log.findAll({ type: 'Text' })).map(one => one.text)
   expect(texts.filter(one => /^v0\./.test(one))).toEqual(['v0.1.0', 'v0.0.9', 'v0.0.8'])
-  expect(texts).toContain('13 November 2026 · yours')
+  expect(texts).toContain('13 November 2026 · this chat')
   expect(texts).toContain('Pictures open large.')
 })
 

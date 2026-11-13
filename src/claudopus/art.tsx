@@ -46,7 +46,9 @@ let momentCount = 0
 const momentOf = (key: string, art: keyof typeof ART) => {
   const was = moments.get(key)
   const at = Date.now()
-  if (was?.art === art && (at - was.at < MOMENT_GAP || !ONCE.has(art))) return (was.at = at), was.mark
+  // The update screen stays until it is closed: its octopus jumps once as it opens and rests, its drawing kept, so a redraw never
+  // makes a new picture of it (a press over ssh on a panel whose drawings changed reached nothing)
+  if (was?.art === art && (at - was.at < MOMENT_GAP || !ONCE.has(art) || key === 'update-mark')) return (was.at = at), was.mark
   momentCount += 1
   const mark = `${RUN_MARK}-${momentCount}`
   // Each opening of About is a place of its own; the openings before it are gone

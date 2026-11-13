@@ -12,7 +12,7 @@ import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
 import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_STEP, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
-import { changelogOf, fitted, isScreenDue, missedOf, seenIn, TAB_BUDGET } from './changelog'
+import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
@@ -2438,7 +2438,9 @@ let momentCount = 0
 const momentOf = (key: string, art: keyof typeof ART) => {
   const was = moments.get(key)
   const at = Date.now()
-  if (was?.art === art && (at - was.at < MOMENT_GAP || !ONCE.has(art))) return (was.at = at), was.mark
+  // The update screen stays until it is closed: its octopus jumps once as it opens and rests, its drawing kept, so a redraw never
+  // makes a new picture of it (a press over ssh on a panel whose drawings changed reached nothing)
+  if (was?.art === art && (at - was.at < MOMENT_GAP || !ONCE.has(art) || key === 'update-mark')) return (was.at = at), was.mark
   momentCount += 1
   const mark = `${RUN_MARK}-${momentCount}`
   // Each opening of About is a place of its own; the openings before it are gone
@@ -3487,11 +3489,11 @@ const changelogView = async ($: EngineInterface, ui: Ui) => {
         {octopus(ui, 'changelog-mark', 'mark', HEAD_MARK, 'Claudopus')}
         <ui.Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <ui.Text bold>Changelog</ui.Text>
-          <ui.Text dimColor wrap="wrap">{`What changed in each version, newest first.${version ? ` This chat runs v${version}.` : ''}`}</ui.Text>
+          <ui.Text dimColor wrap="wrap">What changed in each version, newest first.</ui.Text>
         </ui.Box>
       </ui.Box>
       {shown.length ? null : <ui.Text dimColor>This copy of Claudopus has no changelog.</ui.Text>}
-      {shown.map(v => versionBand(ui, `changelog-${v.version}`, v, [v.date, v.version === version ? 'yours' : ''].filter(Boolean).join(' · ')))}
+      {shown.map(v => versionBand(ui, `changelog-${v.version}`, v, [v.date, v.version === version ? 'this chat' : ''].filter(Boolean).join(' · ')))}
       {olderLine(ui, 'changelog-older', left)}
     </ui.Box>
   )
@@ -3503,15 +3505,22 @@ const changelogView = async ($: EngineInterface, ui: Ui) => {
 // whole panel until the person closes it there, which writes this version; then no chat on the Mac shows it again
 const seenPath = () => `${dir}/seen.json`
 const writeSeen = ($: EngineInterface, version: string) => $.fs.write(seenPath(), JSON.stringify({ version }))
-// At a load: a Mac with no record yet starts it, from the version this chat just moved from, so this very move shows its
-// changes; else from the version loaded, so a first install shows nothing
+// At a load: a Mac with no record yet starts it from the version it ran before, so the first update to a version with this screen
+// shows it too: the version this chat just moved from, else the newest older copy Claude Code keeps installed beside this one (a
+// chat started fresh on the new version); else from the version loaded, so a first install shows nothing
 const noteSeen = async ($: EngineInterface) => {
   if (!dir || seenIn(await readOr($, seenPath()))) return
   const loaded = (await versionsOf($)).version
-  const start = updatedMoment?.to === loaded ? updatedMoment.from : loaded
-  if (start) await writeSeen($, start)
+  if (!loaded) return
+  const root = $.plugin.root.replace(/\/+$/, '')
+  const copies = installedFrom(root) ? (await $.fs.list(root.slice(0, root.lastIndexOf('/'))).catch(() => [])).map(one => one.name) : []
+  const start = (updatedMoment?.to === loaded && updatedMoment.from) || previousOf(copies, loaded) || loaded
+  await writeSeen($, start)
+  // A panel drawn before the record was written is drawn again, with the screen if it is due
+  if (start !== loaded) await update($, tick, n => n + 1)
 }
 // Closing the screen, at its version or a newer one another chat closed meanwhile
+let screenSounded = ''
 const closeScreen = async ($: EngineInterface, version: string) => {
   presses += 1
   if (!isNewer(seenIn(await readOr($, seenPath())), version)) await writeSeen($, version)
@@ -3524,10 +3533,13 @@ const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: nu
   const seen = seenIn(await readOr($, seenPath()))
   if (!isScreenDue(loaded, seen) || (await read($, ranVersion)) !== loaded) return undefined
   const { shown, left } = missedOf(await versionsLogged($), seen, loaded)
+  // The screen is the moment, bigger: the header's is not played behind it, and the sound plays once for the version on this Mac
+  if (updatedMoment) updatedMoment = undefined
+  if (screenSounded !== loaded) void playUpdated($, (screenSounded = loaded))
   const back = (key: string) => (
     <ui.Box key={key} flexDirection="row" flexWrap="wrap" gap={1} flexShrink={0}>
       <ui.Button key={`${key}-close-${presses}`} label="Back to the panel" onPress={() => void closeScreen($, loaded).catch(err => log($, `update screen not closed: ${String(err)}`))} />
-      <ui.Button key={`${key}-log-${presses}`} label="Changelog" onPress={() => void openChangelog($).catch(err => log($, `changelog not opened: ${String(err)}`))} />
+      <ui.Button key={`${key}-log-${presses}`} label="Changelog" plain onPress={() => void openChangelog($).catch(err => log($, `changelog not opened: ${String(err)}`))} />
     </ui.Box>
   )
   const count = shown.length + left
@@ -6690,10 +6702,10 @@ const panelHooks = (on: On) => {
     }
     const mood = headMood(head)
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
-    const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
-    // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed
+    // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks)
     if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{screen}</Box>
+    const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>

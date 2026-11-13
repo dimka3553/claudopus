@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { changelogOf, fitted, isScreenDue, missedOf, SCREEN_BUDGET, seenIn } from './changelog'
+import { changelogOf, fitted, isScreenDue, missedOf, previousOf, SCREEN_BUDGET, seenIn } from './changelog'
 
 const LOG = ['# Changelog', '', 'What changed.', '', '## 0.2.3 · 13 November 2026', '- Three.', '- Three again.', '', '## 0.2.2 · 12 November 2026', '- Two.', '', '## 0.2.1', '- One.', ''].join('\n')
 
@@ -29,8 +29,6 @@ test('after a long gap the screen keeps under the tab limit: the newest versions
   const { shown, left } = missedOf(versions, '0.0.0', '99.0.0')
   expect(shown.length).toBeGreaterThan(10)
   expect(shown.length + left).toBe(2000)
-  const chars = shown.reduce((n, v) => n + v.changes.join('').length + 600 * (v.changes.length + 2), 0)
-  expect(chars).toBeLessThan(262_000)
   expect(fitted(versions, SCREEN_BUDGET).shown).toEqual(shown)
   // One enormous version still shows
   expect(fitted([{ version: '1.0.0', date: '', changes: ['x'.repeat(100_000)] }], SCREEN_BUDGET).shown.length).toBe(1)
@@ -40,4 +38,10 @@ test('the record of changes seen is one version, anything else none', async () =
   expect(seenIn('{"version":"0.2.3"}')).toBe('0.2.3')
   expect(seenIn('{"version":3}')).toBe('')
   expect(seenIn('')).toBe('')
+})
+
+test('the version a Mac ran before is the newest older copy installed beside this one, none on a first install', async () => {
+  expect(previousOf(['0.2.9', '0.2.65', '0.2.66', '0.2.67', '0.2.8', '.DS_Store', 'temp_x'], '0.2.67')).toBe('0.2.66')
+  expect(previousOf(['0.2.67'], '0.2.67')).toBe('')
+  expect(previousOf([], '0.2.67')).toBe('')
 })

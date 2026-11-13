@@ -173,6 +173,7 @@ declare global {
   export import fitted = M8.fitted
   export import isScreenDue = M8.isScreenDue
   export import missedOf = M8.missedOf
+  export import previousOf = M8.previousOf
   export import seenIn = M8.seenIn
   export import TAB_BUDGET = M8.TAB_BUDGET
   export import Version = M8.Version
