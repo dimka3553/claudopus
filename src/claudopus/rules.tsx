@@ -73,7 +73,7 @@ const PANEL_RULE =
 // What every conversation of a chat the app runs on another Mac over ssh carries after the principles, the chat's, its work's and
 // their helpers' alike: the person cannot see this Mac, so nothing waits on their hands here
 const AFAR_RULE =
-  "## This chat runs on another Mac\n\n- {Name} works from their own device and cannot see this Mac's screen. Anything that needs {name}'s hands is done from their own device: a sign-in by device code or a link that works opened on their own device, never a browser, window, dialog or keychain prompt on this Mac, and nothing that needs seeing its screen."
+  "## This chat runs on another Mac\n\n- I work from my own device and cannot see this Mac's screen. Anything that needs my hands is done from my own device: a sign-in by device code or a link that works opened on my device, never a browser, window, dialog or keychain prompt on this Mac, and nothing that needs seeing its screen."
 // What the chat shows when its work asks the person something: the ask as the mod's own notice in the chat, with its answers and
 // pictures, never a message in the person's place; its model reads the ask in a row of its own, with how to pass an answer on.
 // An answer typed in the chat goes to the work as a press on the card does

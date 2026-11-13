@@ -1,7 +1,7 @@
 #!/bin/bash
 # Runs one admin (sudo) command on this Mac or on a Mac reached over SSH, with that Mac's password
 # from this Mac's keychain. The password is asked once, in a box on this Mac's screen that hides what
-# is typed, checked, then kept in the keychain. It only ever travels through pipes: never in a command
+# is typed (in the panel, in a chat the app runs on another Mac over ssh), checked, then kept in the keychain. It only ever travels through pipes: never in a command
 # line, a file, the output or a log.
 #
 #   admin here '<command>'         on this Mac
@@ -44,9 +44,39 @@ check() {
   return 1
 }
 
+# In a chat the app runs on another Mac over ssh, a box on this Mac's screen is one nobody sees: the panel beside the chat asks
+# instead. The request names what is needed and never holds a value; what is typed in the panel goes into this Mac's keychain
+# under the request's id, and is taken from there and removed at once. 1 when it is cancelled there or nothing comes in 590 s,
+# under the longest a Bash call may run
+box_ask() {
+  local text=$1 boxes=${CLAUDOPUS_BOXES:-$HOME/.claude/claudopus/boxes} id value i status=1
+  id=$(/usr/bin/uuidgen | /usr/bin/tr '[:upper:]' '[:lower:]')
+  [ -n "$id" ] || return 1
+  /bin/mkdir -p "$boxes" || return 1
+  /usr/bin/perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({id => $ARGV[0], text => $ARGV[1], at => time() * 1000}), "\n"' "$id" "$text" >"$boxes/$id.part" &&
+    /bin/mv "$boxes/$id.part" "$boxes/$id.json" || return 1
+  trap '/bin/rm -f "$boxes/$id.json" "$boxes/$id.told"; /usr/bin/security delete-generic-password -s claudopus-box -a "$id" >/dev/null 2>&1' EXIT
+  for ((i = 0; i < 590; i++)); do
+    if value=$(/usr/bin/security find-generic-password -s claudopus-box -a "$id" -w 2>/dev/null); then
+      printf '%s' "$value"
+      unset value
+      status=0
+      break
+    fi
+    # Cancel in the panel removes the request
+    [ -f "$boxes/$id.json" ] || break
+    /bin/sleep 1
+  done
+  /bin/rm -f "$boxes/$id.json" "$boxes/$id.told"
+  /usr/bin/security delete-generic-password -s claudopus-box -a "$id" >/dev/null 2>&1
+  trap - EXIT
+  return "$status"
+}
+
 ask() {
   local label=$mac said=$1
   [ "$mac" = here ] && label="this Mac"
+  if [ -n "${CLAUDE_SSH_DAEMON_CHILD:-}" ]; then box_ask "${said}Claudopus needs the admin password of $label to run an admin command for work on this Mac. It is kept in this Mac's keychain, and later admin commands on $label run without asking again until it is forgotten."; return; fi
   osascript \
     -e 'on run argv' \
     -e 'activate' \
