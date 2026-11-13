@@ -1,0 +1,1 @@
+- claudopus.ai shows a third command after the two install lines, `/claudopus`, which opens the panel.
