@@ -604,8 +604,8 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   const flat = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   expect(await edgeOf(flat)).toEqual(['#8A63F0'])
   await flat.unmount()
-  // The title opens its Details and Stop is plain text on the same row: the card has no filled button
-  expect(await keyed(pane, 'go-a1')).toBeDefined()
+  // The title opens its Details, with no mark beside it, and Stop is plain text on the same row: the card has no filled button
+  expect(await keyed(pane, 'go-a1')).toBeUndefined()
   expect((await keyed(pane, 'open-a1'))?.props.plain).toBe(true)
   expect((await pane.find({ type: 'Button', key: 'stop-a1' }))?.props).toMatchObject({ label: 'Stop', plain: true })
   // A line too long for its two rows is cut at the end of a word
@@ -704,7 +704,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
   // Its helper, ended in the same moment, stays in its card for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', '›', 'Search the docs', '›'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeDefined()
   await clock.advance(1_100)
@@ -1281,8 +1281,8 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   // Each says its time beside its name, after its model and context once those are known, and has no dots
   expect((await pane.findAll({ type: 'Text', text: /^\ds$/ })).map(one => one.text)).toEqual(['3s', '3s', '2s', '1s', '0s'])
   expect((await keyed(pane, 'open-list-a2'))?.props.label).toBe('Measure the nose')
-  // Each opens its own Details, by its name or the mark at its end
-  expect(await keyed(pane, 'go-list-a2')).toBeDefined()
+  // Each opens its own Details by its name, with no mark at its end
+  expect(await keyed(pane, 'go-list-a2')).toBeUndefined()
   await pressed(pane, 'open-list-a4')
   expect(await until(async () => opened.includes('work-a4') || undefined)).toBe(true)
 
@@ -1292,7 +1292,9 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   await clock.advance(2_100)
   expect(await lines()).toEqual(['├─┬─', '│ └───', '└───'])
   expect((await keyed(pane, 'open-rest-a1'))?.props.label).toBe('2 helpers ended')
-  expect(await keyed(pane, 'go-rest-a1')).toBeDefined()
+  expect(await keyed(pane, 'go-rest-a1')).toBeUndefined()
+  await pressed(pane, 'open-rest-a1')
+  expect(await until(async () => opened.includes('work-a1') || undefined)).toBe(true)
   expect(await keyed(pane, 'open-list-a3')).toBeUndefined()
   expect(await keyed(pane, 'open-list-a5')).toBeUndefined()
   await pane.unmount()
@@ -1313,9 +1315,9 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   // No row names a model, and none has the three dots: only the card itself does
   expect((await drawn.findAll({ type: 'Svg' })).filter(svg => svg.props.alt === 'Being done now')).toHaveLength(1)
   await drawn.unmount()
-  // A name too long for its row is cut at a word in a narrow pane
+  // In the narrowest pane a name keeps the room a mark at the row's end once took, so this one is still whole
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 20 }, surface: 'desktop' } as never)
-  expect((await keyed(narrow, 'open-list-a2'))?.props.label).toBe('Measure the …')
+  expect((await keyed(narrow, 'open-list-a2'))?.props.label).toBe('Measure the nose')
   await narrow.unmount()
 
   // The work's Details lists every helper, ended or not, as the same tree

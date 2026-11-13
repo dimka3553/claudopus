@@ -5291,9 +5291,6 @@ const panelHooks = (on: On) => {
                     <Text bold wrap="truncate-end">{titleOf(one)}</Text>
                   </Button>
                 </Box>
-                <Box flexShrink={0}>
-                  <Button key={`go-${one.id}-${presses}`} label="›" plain dimColor hover={{ scope }} onPress={() => openWork($, one.id)} />
-                </Box>
                 <Box flexGrow={1} />
                 {one.status === 'working' && !one.chat ? (
                   <Box flexShrink={0}>
@@ -5347,7 +5344,7 @@ const panelHooks = (on: On) => {
     }
 
     // ---- The helpers a piece of work started, inside its card as a tree: each one slim row joined to its parent by a line ----
-    // A row is a dot at the end of its line, the helper's name, its model, context and time, and a mark to open it: a press on the name or the mark
+    // A row is a dot at the end of its line, the helper's name, its model, context and time, and a press on the name
     // opens its own Details. The dot is purple while it works, green once it finished, red when an error stopped it, grey when it
     // was stopped; one that ended is dim, and one at work has a ring that slowly grows out of its dot and fades.
     // The lines are drawn as a card's three dots are, which the app is seen to draw
@@ -5371,7 +5368,7 @@ const panelHooks = (on: On) => {
           </Text>
         </Box>
       )
-    // One row of the tree, in the same columns whatever it says: the lines and dot, what a press opens, the time, the mark
+    // One row of the tree, in the same columns whatever it says: the lines and dot, what a press opens, the time
     const twigRowOf = (t: Twig, key: string, label: string, isDim: boolean, time: string, onPress: () => void, status?: Todo['status']) => (
       <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
         {twigLines(t, `twig-lines-${key}`, status)}
@@ -5383,9 +5380,6 @@ const panelHooks = (on: On) => {
             <Text dimColor>{time}</Text>
           </Box>
         ) : null}
-        <Box flexShrink={0}>
-          <Button key={`go-${key}-${presses}`} label="›" plain dimColor hover={{ scope: `twig-${key}` }} onPress={onPress} />
-        </Box>
       </Box>
     )
     const twigRow = (t: Twig, scope: string) => {
@@ -5395,7 +5389,7 @@ const panelHooks = (on: On) => {
       // A narrow panel drops the context, then the model, so the name keeps room to be read
       const time = took((one.endedAt || at) - one.startedAt)
       const model = modelName(one.model ?? '')
-      const width = perRow - 6 - t.depth * 2
+      const width = perRow - 4 - t.depth * 2
       const side = [[model, one.tokens ? thousands(one.tokens) : '', time], [model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
       return twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
     }
