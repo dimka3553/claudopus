@@ -74,6 +74,33 @@ test('work uses a kept key without reading it: the keychain is not read, and wha
   expect(JSON.stringify(shown.result)).not.toContain('sk-live-123456')
 })
 
+test('work reaches main only through the release runner: its rules name it, and a push or merge to main by hand is refused', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'ship it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
+  expect(prompts[0]).toMatch(/main is reached through `\/\S*mods\/claudopus\/bin\/release`/)
+  expect(prompts[0]).not.toContain('{release}')
+
+  const refused = [
+    'git push origin main',
+    'cd /repo && git push -q origin HEAD:main',
+    'git -C /repo push origin +main',
+    'git push origin work:refs/heads/master',
+    'git push --force origin main; echo done',
+    'gh pr merge 12 --squash',
+  ]
+  for (const [i, command] of refused.entries()) {
+    const r = await $.tool.call({ tool: 'Bash', tool_use_id: `p${i}`, command, agentId: 'w1' } as never)
+    expect(r.deny).toContain('never pushes or merges to main itself')
+    expect(r.deny).toMatch(/bin\/release\.$/)
+  }
+  const allowed = ['git push origin work/one', 'git push -u origin main-menu-fix', 'git pull origin main', 'git merge origin/main', 'git log origin/main', 'git checkout main']
+  for (const [i, command] of allowed.entries()) {
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `a${i}`, command, agentId: 'w1' } as never)).deny).toBeUndefined()
+  }
+})
+
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
