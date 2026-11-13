@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.81 · 13 November 2026
+- The shipped principles no longer say that your decisions are deliberate or what done means: those are yours to add in Config.
+- If you already made your own copy of the principles, nothing changes for you: an update leaves it as it is.
+
 ## 0.2.80 · 13 November 2026
 - Every pull request to Claudopus, and every release on main, is now checked on GitHub by running all of its tests, so a broken test shows before it reaches you.
 

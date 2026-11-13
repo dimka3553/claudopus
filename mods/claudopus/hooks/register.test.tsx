@@ -31,11 +31,13 @@ const LIST = {
 } as const
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
+// The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n- If it can run in parallel, it runs in parallel. No ask waits behind other work.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n- Titles, notes, to-dos, asks and results name what is being done, never the model doing it.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong, on a model at least as strong as the one that built it.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Search with rg, and use rg -a for packed app files.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -97,7 +99,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const isShipped = !e.path.startsWith(MEMORY)
     if (isShipped && e.path.endsWith('roles/chat.md')) return { value: options.chatRole ?? 'CHAT ROLE' }
     if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
-    if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: PRINCIPLES }
+    if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: options.shipped ? SHIPPED_PRINCIPLES : PRINCIPLES }
     if (isShipped && options.changelog !== undefined && e.path.endsWith('/CHANGELOG.md')) return { value: options.changelog }
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
@@ -3192,6 +3194,41 @@ test('a copy of the principles in the memory folder is the person\'s own: every 
   const told = await $.prompt.context({ blocks: [], instructionFiles: [{ path: '/repo/CLAUDE.md', kind: 'project', content: 'REPO RULES' }] })
   expect(told.instructionFiles?.find(one => one.kind === 'user')).toEqual({ path: `${MEMORY}/rules/CLAUDE.md`, kind: 'user', content: MINE })
   expect(told.instructionFiles?.some(one => one.content === PRINCIPLES)).toBe(false)
+})
+
+// The two lines that were the author's own and no longer ship, as a person may keep them in their own copy
+const DELIBERATE = 'My decisions are deliberate.'
+const DONE_MEANS = 'Done means'
+
+test('a new install with no copy of its own carries the shipped principles, which leave out the author\'s "decisions are deliberate" and "done means" lines', async ($, on) => {
+  const { files } = world(on, { isNew: true, shipped: true })
+  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
+  await $.session.start(start)
+  expect(files.has(`${MEMORY}/rules/CLAUDE.md`)).toBe(false)
+  const told = await $.prompt.context({ blocks: [], instructionFiles: [] })
+  const ours = told.instructionFiles?.find(one => one.kind === 'user')?.content ?? ''
+  expect(ours).toBe(SHIPPED_PRINCIPLES)
+  expect(ours).toContain('# How I work with Claude')
+  expect(ours).toContain('My words are the spec.')
+  expect(ours).not.toContain(DELIBERATE)
+  expect(ours).not.toContain(DONE_MEANS)
+  expect(ours).not.toContain('A concern is raised')
+})
+
+test('a person\'s own copy that keeps both lines carries both, in their words, in place of the shipped principles', async ($, on) => {
+  const { files } = world(on, { shipped: true })
+  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
+  const MINE = '# How I work with Claude\n\n## Principles\n\n1. My decisions are deliberate. No risk, legal or ethics commentary unless it blocks the task; then one line, once.\n2. Done means committed and pushed, or deployed.\n'
+  files.set(`${MEMORY}/rules/CLAUDE.md`, MINE)
+  await $.session.start(start)
+  const told = await $.prompt.context({ blocks: [], instructionFiles: [] })
+  const ours = told.instructionFiles?.find(one => one.kind === 'user')?.content ?? ''
+  expect(ours).toBe(MINE)
+  expect(ours).toContain(DELIBERATE)
+  expect(ours).toContain(DONE_MEANS)
+  expect(told.instructionFiles?.some(one => one.content === SHIPPED_PRINCIPLES)).toBe(false)
+  // Nothing the mod does writes over it
+  expect(files.get(`${MEMORY}/rules/CLAUDE.md`)).toBe(MINE)
 })
 
 test('Config lists each thing a person can set with what is in force, edits a text as their own copy, changes a setting and puts each back', async ($, on) => {
