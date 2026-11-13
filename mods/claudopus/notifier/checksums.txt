@@ -1,5 +1,5 @@
-# SHA-256 of each file of the two apps and of what they are built from, written by build.sh; check.sh compares them.
-# Built with macOS SDK 27.2, read from the program; this first record was made after that build, so the compiler was not recorded.
+# SHA-256 of each file of the two apps and of what they are built from; check.sh compares them. build.sh rewrites this file.
+# Built with macOS SDK 27.2, read from the program: this first record was made by hand from the committed apps, so the compiler is not known.
 # The same compiler and SDK give the same bytes; another gives another program, so a rebuild is compared with that in mind.
 3d53f5cb4df639b33fd314b09afe98342a5bd7247ba4ddec1417b47a0af27301  Claudopus.app/Contents/Info.plist
 bd0d398ae680e4d1338dfa3a8a3ba7029aac0f9e136dabfee5b3f0a64bb550c8  Claudopus.app/Contents/MacOS/Claudopus
