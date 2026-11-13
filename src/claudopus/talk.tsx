@@ -167,7 +167,7 @@ const workPaneOf = (id: string) => `${WORK_PANE}${id.replace(/[^A-Za-z0-9_-]/g, 
 const titleOf = (one: Todo) => one.title || quoted(one.words, 60) || 'Background work'
 const openWork = ($: EngineInterface, id: string) => {
   presses += 1
-  void (async () => {
+  void comingTab((async () => {
     const one = [...(await read($, todos)), ...cardsOf(await read($, others))].find(card => card.id === id)
     if (!one) return
     // A tab opened afresh starts folded; one already open keeps what was unfolded in it
@@ -175,5 +175,5 @@ const openWork = ($: EngineInterface, id: string) => {
     await front($, workPaneOf(id), cut(titleOf(one), 30))
     // The pressed card's button gets a new name, so the app does not hold the list where that button was
     redraw($)
-  })().catch(err => log($, `details of ${id} not opened: ${String(err)}`))
+  })()).catch(err => log($, `details of ${id} not opened: ${String(err)}`))
 }

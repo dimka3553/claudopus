@@ -1,7 +1,12 @@
 // The panel's drawing: the Claudopus pane, a work's Details and a workflow's, every card in them
 
 // Back from a tab to the panel, in the terminal: the tab is closed and the panel, opened again, holds the keys
+// Handed to the press's own hook while one is answered (front), so a narrow terminal draws the panel opened again
 const backToPanel = async ($: EngineInterface, id: string) => {
+  if (isPressing) return handOver({ kind: 'back', id })
+  await backAsked($, id)
+}
+const backAsked = async ($: EngineInterface, id: string) => {
   await $.ui.close({ id }).catch(() => undefined)
   await $.ui.close({ id: LIST }).catch(() => undefined)
   await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS, focus: true })
@@ -9,7 +14,7 @@ const backToPanel = async ($: EngineInterface, id: string) => {
 const panelHooks = (on: On) => {
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
-  // tab of the mod's but the panel has a first row whose key, p, closes it and hands the keys back to the panel
+  // tab of the mod's but the panel has a first row whose Close, pressed or keyed x, closes it and hands the keys back to the panel
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const id = e.requestId ?? ''
     const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start))
@@ -19,9 +24,9 @@ const panelHooks = (on: On) => {
     return (
       <Box flexDirection="column" gap={1}>
         <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
-          <Button key="tab-back" label="Panel" plain hotkey="p" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
+          <Button key="tab-back" label="Close" plain hotkey="x" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
           {id.startsWith('report-') ? <Button key="tab-results" label="Results" plain hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
-          <Text dimColor>{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x Tab for keys'}</Text>
+          <Text dimColor wrap="truncate-end">{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x Tab for keys'}</Text>
         </Box>
         {body}
       </Box>

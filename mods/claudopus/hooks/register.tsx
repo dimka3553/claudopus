@@ -1390,7 +1390,7 @@ const workPaneOf = (id: string) => `${WORK_PANE}${id.replace(/[^A-Za-z0-9_-]/g, 
 const titleOf = (one: Todo) => one.title || quoted(one.words, 60) || 'Background work'
 const openWork = ($: EngineInterface, id: string) => {
   presses += 1
-  void (async () => {
+  void comingTab((async () => {
     const one = [...(await read($, todos)), ...cardsOf(await read($, others))].find(card => card.id === id)
     if (!one) return
     // A tab opened afresh starts folded; one already open keeps what was unfolded in it
@@ -1398,7 +1398,7 @@ const openWork = ($: EngineInterface, id: string) => {
     await front($, workPaneOf(id), cut(titleOf(one), 30))
     // The pressed card's button gets a new name, so the app does not hold the list where that button was
     redraw($)
-  })().catch(err => log($, `details of ${id} not opened: ${String(err)}`))
+  })()).catch(err => log($, `details of ${id} not opened: ${String(err)}`))
 }
 
 // The servers on this Mac: what listens on which port, from which folder, started by which chat, and the Servers tab
@@ -1883,7 +1883,52 @@ const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
 // The tabs as the engine lists them, one word each: id, then s shown, f holding the keyboard, p drawn, for the log
 const rosterOf = (panes: { id: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }[]) =>
   panes.map(pane => `${pane.id}:${pane.isShown ? 's' : ''}${pane.isFocused ? 'f' : ''}${pane.isPlaced ? 'p' : ''}`).join(' ') || 'none'
+// A button's onPress runs with the handle of the drawing it sits in, which the engine never counts as the person asking: a narrow
+// terminal (under 144 columns, a phone over ssh) left every tab a press opened undrawn, and the panel, opened again to take back the
+// keys, vanished with it. So while a press of the mod's in the terminal is answered, a tab move is handed to that press's own
+// `ui.press` hook (tabHooks), whose handle the engine counts as the person's, and done there
+type TabMove = { kind: 'front'; id: string; title: string } | { kind: 'back'; id: string }
+let isPressing = false
+// Opens that read something first (a card's Details, a result) are counted from the press on, so the hook waits for their move
+let tabMovesComing = 0
+let wakeTabMoves: (() => void) | undefined
+const tabMoves: { move: TabMove; done: () => void; failed: (err: unknown) => void }[] = []
+const handOver = (move: TabMove) =>
+  new Promise<void>((done, failed) => {
+    tabMoves.push({ move, done, failed })
+    wakeTabMoves?.()
+  })
+const comingTab = (opening: Promise<void>) => {
+  if (!isPressing) return opening
+  tabMovesComing += 1
+  return opening.finally(() => {
+    tabMovesComing -= 1
+    wakeTabMoves?.()
+  })
+}
 const front = async ($: EngineInterface, id: string, title: string) => {
+  if (isPressing) return handOver({ kind: 'front', id, title })
+  await frontAsked($, id, title)
+}
+// Run in the press's hook: each tab move handed over, as they come, until none is on its way
+const doTabMoves = async ($: EngineInterface) => {
+  while (tabMoves.length || tabMovesComing > 0) {
+    const one = tabMoves.shift()
+    if (!one) {
+      await new Promise<void>(woken => (wakeTabMoves = woken))
+      continue
+    }
+    try {
+      if (one.move.kind === 'front') await frontAsked($, one.move.id, one.move.title)
+      else await backAsked($, one.move.id)
+      one.done()
+    } catch (err) {
+      one.failed(err)
+    }
+  }
+  wakeTabMoves = undefined
+}
+const frontAsked = async ($: EngineInterface, id: string, title: string) => {
   const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown)
   // A press inside a tab gives that tab the keyboard, and the engine never shows a new tab over the one holding it: it waits on
   // the screen to honour the open's focus, which a screen with a turn running or text in the box refuses (seen every press in a
@@ -1962,7 +2007,7 @@ const svgOf = async ($: EngineInterface, path: string): Promise<Thumb> => {
 
 const openReport = ($: EngineInterface, id: string) => {
   presses += 1
-  void (async () => {
+  void comingTab((async () => {
     const r = (await read($, reports)).find(one => one.id === id)
     if (!r) return
     // A report brought in by hand gets its small copies when it is first opened
@@ -1975,7 +2020,7 @@ const openReport = ($: EngineInterface, id: string) => {
     await front($, paneOf(r), kept.some(one => one.id !== r.id && one.title === r.title) ? `${cut(r.title, 22)} · ${time(r.at, now)}` : cut(r.title, 30))
     // The pressed row gets a new name, so the app does not hold the list where that button was
     redraw($)
-  })().catch(err => log($, `report ${id} not opened: ${String(err)}`))
+  })()).catch(err => log($, `report ${id} not opened: ${String(err)}`))
 }
 
 // Puts a result away, or brings it back: its entry, every round of its work, leaves the list and the chat's note, nothing in it
@@ -2037,11 +2082,15 @@ const entriesOf = (list: Report[]) => {
 const newestOf = (list: Report[]) => new Set(entriesOf(list).map(entry => entry[0]?.id))
 // Words that say what a piece of work is about, for telling whether a brief that names a report goes on with that work
 const aboutWords = (text: string) => new Set(slug(text).split('-').filter(word => word.length >= 4 && !['with', 'from', 'that', 'this', 'into', 'your', 'what', 'when', 'work'].includes(word)))
-const openReports = async ($: EngineInterface) => {
+const openReports = ($: EngineInterface) => {
   presses += 1
-  reportsListed = (await read($, reports)).map(r => r.id)
-  redraw($)
-  await front($, REPORTS_PANE, REPORTS_TITLE)
+  return comingTab(
+    (async () => {
+      reportsListed = (await read($, reports)).map(r => r.id)
+      redraw($)
+      await front($, REPORTS_PANE, REPORTS_TITLE)
+    })(),
+  )
 }
 const day = (at: number, now: number) => dated(at, now).split(',')[0] ?? ''
 const time = (at: number, now: number) => (day(at, now) === day(now, now) ? (dated(at, now).split(', ')[1] ?? '') : dated(at, now))
@@ -2347,7 +2396,7 @@ const memoryRead = async ($: EngineInterface, path: string) => {
 // A memory link pressed: a result's own path opens that result's tab, any other file a tab of its own, named after its heading
 const openMemory = ($: EngineInterface, path: string) => {
   presses += 1
-  void (async () => {
+  void comingTab((async () => {
     const report = path.slice(dir.length + 1).match(/^reports\/([^/]+)/)?.[1]
     if (report && (await read($, reports)).some(one => one.id === report)) return openReport($, report)
     const id = memoryPaneOf(path)
@@ -2360,7 +2409,7 @@ const openMemory = ($: EngineInterface, path: string) => {
     // The memory folder itself is named Memory, as its button; else its heading would read 'claudopus' beside the panel's tab
     await front($, id, path === dir ? 'Memory' : cut(heading || fileName(path), 30))
     redraw($)
-  })().catch(err => log($, `memory file ${path} not opened: ${String(err)}`))
+  })()).catch(err => log($, `memory file ${path} not opened: ${String(err)}`))
 }
 
 // Memory: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on
@@ -3532,13 +3581,13 @@ const loadFlows = async ($: EngineInterface) => {
 }
 const openFlow = ($: EngineInterface, id: string) => {
   presses += 1
-  void (async () => {
+  void comingTab((async () => {
     const f = (await read($, flows)).find(one => one.id === id)
     if (!f) return
     if (!(await $.ui.panes()).some(pane => pane.id === flowPaneOf(id))) (flowPicked.delete(id), pictureIn.delete(flowPaneOf(id)))
     await front($, flowPaneOf(id), cut(f.title, 30))
     redraw($)
-  })().catch(err => log($, `workflow ${id} not opened: ${String(err)}`))
+  })()).catch(err => log($, `workflow ${id} not opened: ${String(err)}`))
 }
 // The agent whose chat a workflow's Details tab shows: the one pressed, else the one at work, else the last
 const pickedOf = (f: Flow) => f.agents.find(one => one.id === flowPicked.get(f.id)) ?? [...f.agents].reverse().find(one => one.status === 'working') ?? f.agents.at(-1)
@@ -6712,7 +6761,12 @@ const bandHooks = (on: On) => {
 // The panel's drawing: the Claudopus pane, a work's Details and a workflow's, every card in them
 
 // Back from a tab to the panel, in the terminal: the tab is closed and the panel, opened again, holds the keys
+// Handed to the press's own hook while one is answered (front), so a narrow terminal draws the panel opened again
 const backToPanel = async ($: EngineInterface, id: string) => {
+  if (isPressing) return handOver({ kind: 'back', id })
+  await backAsked($, id)
+}
+const backAsked = async ($: EngineInterface, id: string) => {
   await $.ui.close({ id }).catch(() => undefined)
   await $.ui.close({ id: LIST }).catch(() => undefined)
   await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS, focus: true })
@@ -6720,7 +6774,7 @@ const backToPanel = async ($: EngineInterface, id: string) => {
 const panelHooks = (on: On) => {
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
-  // tab of the mod's but the panel has a first row whose key, p, closes it and hands the keys back to the panel
+  // tab of the mod's but the panel has a first row whose Close, pressed or keyed x, closes it and hands the keys back to the panel
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const id = e.requestId ?? ''
     const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start))
@@ -6730,9 +6784,9 @@ const panelHooks = (on: On) => {
     return (
       <Box flexDirection="column" gap={1}>
         <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
-          <Button key="tab-back" label="Panel" plain hotkey="p" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
+          <Button key="tab-back" label="Close" plain hotkey="x" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
           {id.startsWith('report-') ? <Button key="tab-results" label="Results" plain hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
-          <Text dimColor>{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x Tab for keys'}</Text>
+          <Text dimColor wrap="truncate-end">{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x Tab for keys'}</Text>
         </Box>
         {body}
       </Box>
@@ -7823,7 +7877,16 @@ const tabHooks = (on: On) => {
   // since the panel was last drawn, and the tabs as the engine lists them, so a press that did nothing shows whether it arrived at all
   on('ui.press', async ($, e, next) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
-    const r = await next(e)
+    // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (front)
+    const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
+    if (isTerminal) isPressing = true
+    let r: Awaited<ReturnType<typeof next>>
+    try {
+      r = await next(e)
+      if (isTerminal) await doTabMoves($)
+    } finally {
+      if (isTerminal) isPressing = false
+    }
     // An answer the press gave to work that had ended starts it again from here, inside the press's own hook (sendWakes)
     if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
     return r
