@@ -1,0 +1,3 @@
+- The README and the guide say that work run side by side spends tokens side by side, which multiplies what you pay on metered billing.
+- Stats names what its reply time measures: from your message to the chat's last step before the next message came in, on average, without the background work it started.
+- The two notification apps come with a SHA-256 of each of their files, checked before every release, and the guide says how to rebuild them and compare.

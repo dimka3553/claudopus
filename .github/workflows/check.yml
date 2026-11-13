@@ -21,3 +21,5 @@ jobs:
       - name: The site's version matches the plugin's
         run: |
           test "$(jq -r .version mods/claudopus/.claude-plugin/plugin.json)" = "$(jq -r .version site/version.json)"
+      - name: The committed notification apps match their recorded checksums
+        run: sh mods/claudopus/notifier/check.sh

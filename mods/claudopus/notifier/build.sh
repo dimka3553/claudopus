@@ -4,6 +4,8 @@
 #   ClaudopusAsks.app    the amber octopus and the "needs you" sound (sound.py), for work that needs the person
 # macOS takes a notification's icon from the app that sends it, so each colour is its own app.
 # Needs Xcode or the Command Line Tools; only the author runs it, the built apps are committed so installs need neither.
+# Last it writes checksums.txt: the SHA-256 of each file of both apps and of what they are built from, with the compiler and SDK
+# used; check.sh, run in CI and by the release, fails when a committed file differs from it.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
@@ -35,3 +37,15 @@ build() {
 build Claudopus ai.claudopus.app Claudopus
 # E5A50A is the amber of work that needs the person in the panel
 build ClaudopusAsks ai.claudopus.asks "Claudopus Asks" E5A50A "$work/needs-you.wav"
+
+# record: every file of both apps, then the sources they came from
+{
+  echo "# SHA-256 of each file of the two apps and of what they are built from, written by build.sh; check.sh compares them."
+  echo "# Built with $(swiftc --version 2>&1 | head -1), macOS SDK $(xcrun --show-sdk-version)."
+  echo "# The same compiler and SDK give the same bytes; another gives another program, so a rebuild is compared with that in mind."
+  cd "$here"
+  find Claudopus.app ClaudopusAsks.app -type f | LC_ALL=C sort | while read -r f; do shasum -a 256 "$f"; done
+  for f in main.swift icon.swift sound.py Info.plist ../.claude-plugin/icon.png; do shasum -a 256 "$f"; done
+} > "$work/checksums.txt"
+mv "$work/checksums.txt" "$here/checksums.txt"
+echo "wrote $here/checksums.txt"

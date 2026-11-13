@@ -13,6 +13,7 @@ Thanks for helping. Bugs and ideas go in [Issues](https://github.com/dimka3553/c
 ```sh
 node src/claudopus/build.mjs            # join the parts
 node src/claudopus/build.mjs --check    # fails if the joined files are stale
+sh mods/claudopus/notifier/check.sh     # fails if a notification app differs from its checksums
 claude plugin test mods/claudopus
 claude plugin validate --strict mods/claudopus
 claude plugin validate --strict .
@@ -21,5 +22,6 @@ claude plugin validate --strict .
 Use the newest Claude Code engine (the desktop app's is usually newer than the `claude` on your PATH).
 
 - `README.md` and `mods/claudopus/README.md` are the same text, so change them together.
+- A change under `mods/claudopus/notifier/` is rebuilt with `sh mods/claudopus/notifier/build.sh`, which rewrites `checksums.txt`; commit both.
 - A release raises `version` in `mods/claudopus/.claude-plugin/plugin.json` and then builds. Installs update when that version changes.
 - Everything here is public: no keys, private paths or personal notes.

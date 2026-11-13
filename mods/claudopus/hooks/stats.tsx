@@ -152,7 +152,7 @@ export type Stats = {
   running: number
   flows: number
   todosDone: number
-  // The person's messages to the chat, how long the chat took on average to answer one, and how long a piece of work took
+  // The person's messages to the chat; on average, from one to the chat's last row before the next message (its turn); and how long a piece of work took
   messages: number
   turn: number
   perPiece: number
@@ -592,13 +592,16 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     'stats-work',
     'Work',
     s.running ? `${s.running} still running, not counted` : '',
-    <Box flexDirection="column" flexShrink={0}>
-      {line(ui, 'work-finished', 'Pieces of work done', count(s.finished))}
-      {line(ui, 'work-flows', 'Workflows run', count(s.flows))}
-      {line(ui, 'work-todos', 'To-dos done', count(s.todosDone))}
-      {line(ui, 'talk-count', 'Your messages', count(s.messages))}
-      {line(ui, 'talk-turn', view.scope === 'all' ? 'A chat’s reply, on average' : 'The chat’s reply, on average', s.messages ? shortly(s.turn) : '–')}
-      {line(ui, 'talk-piece', 'A piece of work, on average', s.perPiece ? shortly(s.perPiece) : '–')}
+    <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column" flexShrink={0}>
+        {line(ui, 'work-finished', 'Pieces of work done', count(s.finished))}
+        {line(ui, 'work-flows', 'Workflows run', count(s.flows))}
+        {line(ui, 'work-todos', 'To-dos done', count(s.todosDone))}
+        {line(ui, 'talk-count', 'Your messages', count(s.messages))}
+        {line(ui, 'talk-turn', view.scope === 'all' ? 'From your message to a chat’s last step, on average' : 'From your message to the chat’s last step, on average', s.messages ? shortly(s.turn) : '–')}
+        {line(ui, 'talk-piece', 'A piece of work, on average', s.perPiece ? shortly(s.perPiece) : '–')}
+      </Box>
+      {note(ui, 'talk-how', 'A message is timed from when you sent it to the last thing the chat did before the next message came in; the background work it started is not included.')}
     </Box>,
   )
   const share = Math.round((s.all.read / Math.max(1, s.all.total)) * 100)

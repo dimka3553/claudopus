@@ -41,7 +41,9 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await value('Work added up')).toBe('30m')
   expect(await value('On the clock')).toBe('20m')
   expect(await value('Saved by running side by side')).toBe('10m')
-  expect(await value('The chat’s reply, on average')).toBe('20s')
+  // From the person's message to the chat's last row before the next message: 20 seconds here
+  expect(await value('From your message to the chat’s last step, on average')).toBe('20s')
+  expect(await stats.find({ type: 'Text', text: /^A message is timed from when you sent it/ })).toBeDefined()
   // The sums are kept, so the transcripts are read again only when they change
   expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').folder).toBe(chat)
 })

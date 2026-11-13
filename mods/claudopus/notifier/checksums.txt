@@ -1,0 +1,17 @@
+# SHA-256 of each file of the two apps and of what they are built from, written by build.sh; check.sh compares them.
+# Built with macOS SDK 27.2, read from the program; this first record was made after that build, so the compiler was not recorded.
+# The same compiler and SDK give the same bytes; another gives another program, so a rebuild is compared with that in mind.
+3d53f5cb4df639b33fd314b09afe98342a5bd7247ba4ddec1417b47a0af27301  Claudopus.app/Contents/Info.plist
+bd0d398ae680e4d1338dfa3a8a3ba7029aac0f9e136dabfee5b3f0a64bb550c8  Claudopus.app/Contents/MacOS/Claudopus
+da7174839400fe2298af167e9aec15aee9e42c935fdb15a1e66e638bfed6df65  Claudopus.app/Contents/Resources/Claudopus.icns
+6e6e28f4407603379cfe19739764469ccb1d2c176f06d10f899bda3f0f57156b  Claudopus.app/Contents/_CodeSignature/CodeResources
+10a3f5c0f5a95c60cafd79999997227e16e279b54cb10acfaa85894a4fc61e6d  ClaudopusAsks.app/Contents/Info.plist
+4d47a750ab203659cc4f2316aeebc84d122c5307868d0eafeae498e3d106361e  ClaudopusAsks.app/Contents/MacOS/Claudopus
+20a1dcb4cabf14bf5deab0fd7dd42c9bd4e908d46060f69a220a97c73441dc25  ClaudopusAsks.app/Contents/Resources/Claudopus.icns
+9325203943691bc2b28ab3e869c047bde65df343dc127bb58059073bdd08cef9  ClaudopusAsks.app/Contents/Resources/needs-you.wav
+ac6cf30ced4af1e9ada3f7b7b4a6d04969956561be3982c875e1f898fa28c1c6  ClaudopusAsks.app/Contents/_CodeSignature/CodeResources
+f06aa5c8b81ead3093506f8204c2dc1b3cebb0e83992e17446e49b44542b7add  main.swift
+1cea65ef44ad7bda1bf79c1cc4e03ccf309ca2537f83008a80fb90b5d2d9ee4f  icon.swift
+c34c1a491ac19bccbbb0ce1fa66c1c73d53d891accfeeece56d34212c3935afa  sound.py
+845565057385fa7c67ffef2e2eada8fc0c5edeb8df1e5c4489bb65abb222bb86  Info.plist
+33de1ed9464212512a52dc187a19f9b21f7b86653fa8a8d9f765a455365db39b  ../.claude-plugin/icon.png
