@@ -1,0 +1,1 @@
+- The public GitHub check now runs all of Claudopus's tests on every change, so a broken test shows there before a release.
