@@ -82,7 +82,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     // The texts the mod ships; a copy of one in the memory folder is the person's own, kept in files
     const isShipped = !e.path.startsWith(MEMORY)
     if (isShipped && e.path.endsWith('roles/chat.md')) return { value: options.chatRole ?? 'CHAT ROLE' }
-    if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`' }
+    if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
     if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: PRINCIPLES }
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)

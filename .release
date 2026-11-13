@@ -1,0 +1,7 @@
+# How Claudopus's release (mods/claudopus/bin/release) puts work on main here: the only way to main
+NAME=Claudopus
+VERSION_FILE=mods/claudopus/.claude-plugin/plugin.json
+DERIVED="mods/claudopus/hooks/register.tsx mods/claudopus/hooks/register.test.tsx src/claudopus/globals.d.ts src/claudopus/tests/globals.d.ts site/version.json"
+BUILD="node src/claudopus/build.mjs"
+ENGINE=${CLAUDE_CODE_EXECPATH:-claude}
+CHECK="node src/claudopus/build.mjs --check && '$ENGINE' plugin test mods/claudopus && '$ENGINE' plugin validate --strict mods/claudopus && '$ENGINE' plugin validate --strict ."

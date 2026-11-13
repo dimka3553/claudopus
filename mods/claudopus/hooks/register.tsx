@@ -222,6 +222,53 @@ const NO_COPY = () =>
 // or that would point the runner at another store or another box
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_SECRET_(?:SERVICE|ASK)\b/
 const NO_READ = 'A kept key or password is never read or printed. Use it as an environment variable through the secret runner the work rules name; it hides the value from what the command prints.'
+// A push or merge to main or master by hand: git's own push naming main or master, a push that skips the repo's hooks, the release
+// runner's own pass given by hand, or a pull request merged on GitHub. The command is read as the shell splits it, so words inside
+// quotes, a commit message's, never count
+const shellWords = (command: string) => {
+  const parts: string[][] = [[]]
+  let word: string | undefined
+  let quote = ''
+  const end = () => (word !== undefined && parts[parts.length - 1]!.push(word), (word = undefined))
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]!
+    if (quote) {
+      if (c === quote) quote = ''
+      else if (c === '\\' && quote === '"' && i + 1 < command.length) word += command[++i]
+      else word += c
+    } else if (c === "'" || c === '"') (quote = c), (word ??= '')
+    else if (c === '\\' && i + 1 < command.length) word = (word ?? '') + command[++i]
+    else if (/[;&|\n()`]/.test(c)) end(), parts.push([])
+    else if (/\s/.test(c)) end()
+    else word = (word ?? '') + c
+  }
+  end()
+  return parts.filter(one => one.length)
+}
+const pushesMain = (command: string): boolean =>
+  shellWords(command).some(words => {
+    let i = 0
+    // What runs a command it is handed: env and its settings, command, sudo, nohup, time, exec, and a shell's -c
+    for (;;) {
+      while (i < words.length && /^\w+=/.test(words[i]!)) if (/^RELEASE_PUSH=/.test(words[i++]!)) return true
+      const head = (words[i] ?? '').split('/').pop() ?? ''
+      if (['env', 'command', 'sudo', 'nohup', 'time', 'exec'].includes(head)) {
+        i++
+        while (i < words.length && words[i]!.startsWith('-')) i++
+      } else break
+    }
+    const tool = (words[i] ?? '').split('/').pop()
+    if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && words[i + 1] === '-c') return pushesMain(words[i + 2] ?? '')
+    if (tool === 'gh') return (words[i + 1] === 'pr' && words[i + 2] === 'merge') || (words[i + 1] === 'api' && words.slice(i + 2).some(one => /\/pulls\/\d+\/merge\b/.test(one)))
+    if (tool !== 'git') return false
+    i++
+    while (i < words.length && words[i]!.startsWith('-')) i += /^-[Cc]$/.test(words[i]!) ? 2 : 1
+    if (words[i] !== 'push') return false
+    const args = words.slice(i + 1)
+    if (args.includes('--no-verify')) return true
+    return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
+  })
+const NO_PUSH = 'Work never pushes or merges to main itself, so two pieces of work never release at once: commit on your own branch and run the release runner the work rules name, from your worktree.'
 // How long the names of kept keys are trusted before they are asked again
 const SECRETS_MS = 60_000
 // The first line of what the mod adds to every brief: the work's own rules and where the chat's words are. The panel leaves it out
@@ -4819,6 +4866,11 @@ const workHooks = (on: On) => {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
     }
+    // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
+    if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
+      await log($, 'refused a command that pushes or merges to main itself')
+      return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
+    }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
     const next = async (call: typeof e) => {
@@ -4992,7 +5044,7 @@ const workHooks = (on: On) => {
     const isTold = isOwn && Boolean(dir) && !isOff && !e.resume && !e.workflow && (await read($, me)).isChat
     // and is handed, after its brief, the rules every piece of work follows and where the chat's words are, so the brief stays short
     // and where the runner is that does an admin command with a Mac's kept password
-    const work = isTold ? named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).trim() : ''
+    const work = isTold ? named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).trim() : ''
     const words = isTold ? `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md` : ''
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : e)
     if (!dir || !r.agentId) return r

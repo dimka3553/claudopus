@@ -1,0 +1,185 @@
+#!/bin/bash
+# release [-m "title"] [branch]: the one way work reaches a repo's main branch, so two pieces of work never release at once.
+# Run it from the work's own worktree, its work committed on its own branch. On this Mac one release per repo runs at a time
+# (a lock others wait on); across Macs, git's refusal of a push that is not a fast-forward makes it take main again. It takes
+# main as it is now, merges the branch, numbers the version from main, rebuilds what the build makes, refuses files the build
+# left that the repo does not track, runs the repo's checks on the result, pushes main and the version's tag.
+#   release --status   says who is releasing in this repo now, and since when
+# Exit: 0 released; 2 main and the branch changed the same lines (merge main into the branch, resolve, commit, run again);
+#       3 the build or the checks failed (fix on the branch, run again); 1 anything else. Nothing is pushed unless it exits 0.
+# Settings, all optional, in the repo's committed `.release` (bash): MAIN (main), REMOTE (origin), NAME (put before the version
+# in the title), VERSION_FILE (a JSON file with "version": "x.y.z", or a file holding only x.y.z), DERIVED (files the build
+# makes, never merged), BUILD, CHECK (commands run in the release's own checkout), AFTER (run in the work's worktree once
+# pushed). `release.local` in the repo's git folder, never committed, can set the same for this Mac only, such as AFTER.
+set -uo pipefail
+say() { echo "release: $*" >&2; }
+die() { say "$1"; exit "${2:-1}"; }
+
+top=$(git rev-parse --show-toplevel 2>/dev/null) || die "not in a git repo"
+common=$(cd "$top" && cd "$(git rev-parse --git-common-dir)" && pwd)
+MAIN= REMOTE=origin NAME= VERSION_FILE= DERIVED= BUILD= CHECK= AFTER=
+[ -f "$top/.release" ] && . "$top/.release"
+[ -f "$common/release.local" ] && . "$common/release.local"
+url=$(git -C "$top" remote get-url "$REMOTE" 2>/dev/null) || die "no remote $REMOTE"
+# With no MAIN set, main is the remote's own default branch (main, master or another), else main
+if [ -z "$MAIN" ]; then
+  MAIN=$(git -C "$top" symbolic-ref --short "refs/remotes/$REMOTE/HEAD" 2>/dev/null | sed "s#^$REMOTE/##")
+  [ -n "$MAIN" ] || MAIN=$(git -C "$top" ls-remote --symref "$REMOTE" HEAD 2>/dev/null | sed -n 's#^ref: refs/heads/\([^[:space:]]*\).*#\1#p')
+  [ -n "$MAIN" ] || MAIN=main
+fi
+locks=${RELEASE_LOCKS:-$HOME/.claude/claudopus/locks}
+lock="$locks/$(printf %s "$url" | shasum | cut -c1-12).lock"
+
+if [ "${1:-}" = --status ]; then
+  if [ -d "$lock" ] && kill -0 "$(cat "$lock/pid" 2>/dev/null)" 2>/dev/null; then echo "releasing now: $(cat "$lock/who" 2>/dev/null)"; else echo "no release running for $(basename "$top")"; fi
+  exit 0
+fi
+title=
+if [ "${1:-}" = -m ]; then title=${2:-}; shift 2 || die "-m needs a title"; fi
+branch=${1:-$(git -C "$top" rev-parse --abbrev-ref HEAD)}
+[ "$branch" = HEAD ] && die "you are on no branch: commit your work on a branch of your own"
+[ "$branch" = "$MAIN" ] && die "release a branch of your own, never $MAIN itself"
+git -C "$top" rev-parse -q --verify "refs/heads/$branch" >/dev/null || die "no branch $branch"
+[ -z "$(git -C "$top" status --porcelain --untracked-files=no)" ] || die "uncommitted changes in $top: commit them to $branch or drop them first"
+
+# The guard: in this repo a push of main from inside Claude Code that does not come from release is refused. Put in once,
+# only where the repo has no pre-push hook of its own; a person pushing outside Claude Code is never stopped
+hooks="$common/hooks"
+if [ -n "$(git -C "$top" config core.hooksPath)" ]; then
+  say "git here uses hooks from core.hooksPath, so the guard was not put in; Claude Code still refuses a push of $MAIN by hand"
+elif [ ! -e "$hooks/pre-push" ]; then
+  mkdir -p "$hooks" && cat >"$hooks/pre-push" <<'GUARD' && chmod +x "$hooks/pre-push"
+#!/bin/bash
+# Put here by Claudopus's release: inside Claude Code, main is pushed only by release, so two pieces of work never release at once
+[ -n "${RELEASE_PUSH:-}" ] || [ -z "${CLAUDECODE:-}" ] && exit 0
+while read -r _ _ rref _; do
+  case "$rref" in refs/heads/main | refs/heads/master | refs/heads/"$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')")
+    echo "Work never pushes ${rref#refs/heads/} itself: commit on your own branch and run Claudopus's release from your worktree. (A person outside Claude Code is never stopped; git push --no-verify skips this.)" >&2; exit 1 ;;
+  esac
+done
+exit 0
+GUARD
+elif ! grep -q "Claudopus's release" "$hooks/pre-push" 2>/dev/null; then
+  say "this repo has a pre-push hook of its own, so the guard was not put in"
+fi
+
+# Trials only: wait for a go file so two releases start at the same moment, for two minutes at most
+if [ -n "${RELEASE_BARRIER:-}" ]; then
+  n=0; while [ ! -e "$RELEASE_BARRIER" ] && [ $n -lt 1200 ]; do sleep 0.1; n=$((n + 1)); done
+fi
+
+mkdir -p "$locks"
+waited=0
+# The lock is a folder, which only one release can make. A lock whose release died is cleared by the one waiter that holds the
+# clearing's own lock, after it looks again, so a fresh lock another waiter just took is never cleared
+until mkdir "$lock" 2>/dev/null && echo $$ >"$lock/pid"; do
+  holder=$(cat "$lock/pid" 2>/dev/null || true)
+  if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } || { [ -z "$holder" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
+    [ -n "$(find "$lock.clearing" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$lock.clearing" 2>/dev/null
+    if mkdir "$lock.clearing" 2>/dev/null; then
+      if [ "$(cat "$lock/pid" 2>/dev/null || true)" = "$holder" ]; then rm -rf "$lock"; say "cleared the lock of a release that ended without letting go"; fi
+      rmdir "$lock.clearing"; continue
+    fi
+  fi
+  [ $waited -eq 0 ] && say "waiting: $(cat "$lock/who" 2>/dev/null || echo another release) is releasing"
+  sleep 0.5; waited=$((waited + 1))
+  [ $waited -gt 2400 ] && die "waited 20 minutes for the other release; nothing done"
+done
+echo "$branch from $top, since $(date '+%H:%M:%S')" >"$lock/who"
+[ $waited -gt 0 ] && say "my turn after $((waited / 2)) s"
+
+# A release cut off before it let go left its checkout: holding the lock, every other release checkout of this repo is such a one
+git -C "$top" worktree list --porcelain | sed -n 's#^worktree \(.*/claudopus-release\.[^/]*/release\)$#\1#p' | while read -r old; do
+  git -C "$top" worktree remove --force "$old" >/dev/null 2>&1; rmdir "$(dirname "$old")" 2>/dev/null
+done
+git -C "$top" worktree prune
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/claudopus-release.XXXXXX")/release"
+cleanup() { git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
+trap cleanup EXIT
+trap 'exit 1' INT TERM HUP
+
+derived() { for d in $DERIVED; do [ "$1" = "$d" ] && return 0; done; return 1; }
+getv() { perl -ne 'if (/"version"\s*:\s*"(\d+\.\d+\.\d+)"/ || /^(\d+\.\d+\.\d+)\s*$/) { print $1; exit }' "$1"; }
+setv() { perl -0pi -e 's/("version"\s*:\s*")\d+\.\d+\.\d+"/${1}'"$2"'"/ or s/^\d+\.\d+\.\d+$/'"$2"'/m' "$1"; }
+gained() { [ -n "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN" 2>/dev/null)" ] || return 0; git -C "$top" log --no-merges --format='  %h %s' "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN")..$REMOTE/$MAIN" | cut -c1-150 | head -12; }
+
+for try in 1 2 3 4 5; do
+  if [ -z "$(git -C "$top" ls-remote --heads "$REMOTE" "$MAIN" 2>/dev/null)" ]; then
+    git -C "$top" ls-remote "$REMOTE" >/dev/null 2>&1 || die "could not reach $REMOTE"
+    # A repo with no main yet: the branch becomes its first main as it is
+    out=$(RELEASE_PUSH=1 git -C "$top" push -q "$REMOTE" "refs/heads/$branch:refs/heads/$MAIN" 2>&1) || die "the first push of $MAIN was refused: $out"
+    git -C "$top" fetch -q "$REMOTE" "$MAIN"
+    echo "released $branch as the first $MAIN, $(git -C "$top" rev-parse --short "$branch")"
+    exit 0
+  fi
+  git -C "$top" fetch -q "$REMOTE" "+refs/heads/$MAIN:refs/remotes/$REMOTE/$MAIN" || die "could not fetch $REMOTE/$MAIN"
+  base=$(git -C "$top" rev-parse "$REMOTE/$MAIN")
+  [ -n "$(git -C "$top" rev-list -1 "$base..$branch")" ] || die "$branch has nothing $MAIN lacks"
+  if [ -d "$tmp" ]; then git -C "$tmp" merge --abort >/dev/null 2>&1; git -C "$tmp" reset -q --hard "$base"; git -C "$tmp" clean -qfdx
+  else git -C "$top" worktree add -q --detach "$tmp" "$base" >/dev/null 2>&1 || die "could not make the release's own checkout"; fi
+  cd "$tmp" || die "no checkout"
+  # The checks and build are main's own when main has its settings, so a branch cannot drop them; this Mac's own still apply
+  if git cat-file -e "$base:.release" 2>/dev/null; then
+    keep=$MAIN; BUILD= CHECK= DERIVED= VERSION_FILE= NAME=; . ./.release; MAIN=$keep
+    [ -f "$common/release.local" ] && . "$common/release.local"
+  fi
+  if ! out=$(git merge -q --no-ff --no-commit "$branch" 2>&1); then
+    git rev-parse -q --verify MERGE_HEAD >/dev/null || die "git would not merge $branch onto $MAIN: $out" 1
+    real=""
+    for f in $(git diff --name-only --diff-filter=U); do
+      if derived "$f"; then git checkout -q "$base" -- "$f" 2>/dev/null || git rm -q -- "$f"
+      elif [ "$f" = "$VERSION_FILE" ]; then
+        # Main's number on all three sides, so only the rest of the file merges: an edit beside the version line is no conflict
+        v=$(git show "$base:$f" >"$tmp.m" && getv "$tmp.m"); git show ":1:$f" >"$tmp.b" 2>/dev/null || cp "$tmp.m" "$tmp.b"; git show ":3:$f" >"$tmp.t"
+        for side in "$tmp.m" "$tmp.b" "$tmp.t"; do [ -n "$v" ] && setv "$side" "$v"; done
+        if git merge-file -q "$tmp.m" "$tmp.b" "$tmp.t"; then cp "$tmp.m" "$f" && git add -- "$f"; else real="$real $f"; fi
+        rm -f "$tmp.m" "$tmp.b" "$tmp.t"
+      else real="$real $f"; fi
+    done
+    if [ -n "$real" ]; then
+      say "$branch and $MAIN both changed:$real. Nothing was pushed."
+      say "what $MAIN gained since $branch left it:"; gained >&2
+      die "merge $REMOTE/$MAIN into $branch, keep what both meant, build, test, commit, then run release again" 2
+    fi
+  fi
+  git rev-parse -q --verify MERGE_HEAD >/dev/null || die "git would not merge $branch onto $MAIN" 1
+  # What the build makes is never merged: it starts from main's copy and the build makes it again
+  for f in $DERIVED; do git cat-file -e "$base:$f" 2>/dev/null && git checkout -q "$base" -- "$f"; done
+  ver=""
+  if [ -n "$VERSION_FILE" ]; then
+    # The number is main's plus one, whatever the branch wrote; the rest of the file merges as any file does
+    old=$(git show "$base:$VERSION_FILE" 2>/dev/null > "$tmp.v" && getv "$tmp.v"; rm -f "$tmp.v")
+    [ -n "$old" ] || old=$(getv "$VERSION_FILE")
+    [ -n "$old" ] || die "no version in $VERSION_FILE"
+    ver=$(echo "$old" | awk -F. '{ print $1 "." $2 "." $3 + 1 }')
+    setv "$VERSION_FILE" "$ver"
+  fi
+  if [ -n "$BUILD" ]; then out=$(bash -c "$BUILD" 2>&1) || { echo "$out" | tail -20 >&2; die "the build failed on $MAIN with $branch; nothing pushed" 3; }; fi
+  for f in $DERIVED; do [ -e "$f" ] && git add -- "$f"; done
+  stray=$(git ls-files --others --exclude-standard)
+  [ -n "$stray" ] && die "the build left files the repo does not track: $(echo $stray | cut -c1-300). Nothing pushed." 3
+  git add -u
+  if [ -n "$CHECK" ]; then out=$(bash -c "$CHECK" 2>&1) || { echo "$out" | tail -25 >&2; die "the checks failed on $MAIN with $branch; nothing pushed" 3; }; fi
+  [ -n "$(git ls-files --others --exclude-standard)" ] && die "the checks left files the repo does not track; nothing pushed" 3
+  what=${title:-$(git log --no-merges -1 --format=%s "$base..$branch")}
+  label=${NAME:+$NAME }${ver:+$ver: }
+  git commit -q -m "${label}${what}" -m "Released from $branch by release, on $(git rev-parse --short "$base")." || die "nothing to commit"
+  if pushed=$(RELEASE_PUSH=1 git push -q "$REMOTE" "HEAD:refs/heads/$MAIN" 2>&1); then
+    sha=$(git rev-parse --short HEAD)
+    if [ -n "$ver" ]; then git tag -f "v$ver" >/dev/null && RELEASE_PUSH=1 git push -q "$REMOTE" "v$ver" 2>/dev/null || say "pushed, but tag v$ver was not"; fi
+    git -C "$top" fetch -q "$REMOTE" "$MAIN"
+    echo "released ${label}${what} as $sha"
+    cd "$top" || exit 0
+    if [ -n "$AFTER" ]; then bash -c "$AFTER" || say "released, but the after-step failed"; fi
+    exit 0
+  fi
+  cd "$top" || exit 1
+  git -C "$top" fetch -q "$REMOTE" "+refs/heads/$MAIN:refs/remotes/$REMOTE/$MAIN"
+  if [ "$(git -C "$top" rev-parse "$REMOTE/$MAIN")" = "$base" ]; then
+    echo "$pushed" | tail -8 >&2
+    die "$REMOTE refused the push of $MAIN, and $MAIN had not moved; nothing pushed. If $MAIN takes only pull requests, merging one is for the person to do"
+  fi
+  say "$MAIN moved while I released, from another Mac or a push outside release; what landed:"; gained >&2
+  say "taking it again (try $try)"
+done
+die "$MAIN kept moving; gave up after 5 tries; nothing pushed"

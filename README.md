@@ -62,6 +62,7 @@ That is all. It is on in every chat from then on, and it keeps itself up to date
 | **Working rules** | A short set of principles goes into every chat: ask less, show the result, have a second agent check the work. Edit them in the Config tab. |
 | **Models** | Opus for most work, Sonnet for long legwork, Fable only for heavy work. Checks never run on a weaker model than the one that built the work. |
 | **Passwords and keys** | Asked for once in a hidden box, kept in the macOS keychain, never put in a chat or a file. |
+| **One release at a time** | Work changes a repo only in its own worktree and branch, and reaches main only through one release command that takes its turn, numbers the version, builds, checks and pushes. A push to main by hand is refused. |
 | **Tabs** | Results, Stats (tokens, cost at API prices, time saved), Config and About; Memory opens the memory folder. `/claudopus` reopens a closed panel, `/servers` lists the local servers your chats started. |
 
 Every detail is in the [full guide](mods/claudopus/docs/guide.md#what-you-see).

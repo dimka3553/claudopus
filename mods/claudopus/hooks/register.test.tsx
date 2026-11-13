@@ -87,7 +87,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     // The texts the mod ships; a copy of one in the memory folder is the person's own, kept in files
     const isShipped = !e.path.startsWith(MEMORY)
     if (isShipped && e.path.endsWith('roles/chat.md')) return { value: options.chatRole ?? 'CHAT ROLE' }
-    if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`' }
+    if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
     if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: PRINCIPLES }
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
@@ -399,6 +399,43 @@ test('work uses a kept key without reading it: the keychain is not read, and wha
   const shown = await $.tool.call({ tool: 'Bash', tool_use_id: 'k4', command: 'bin/secret API_KEY here "echo $API_KEY"', agentId: 'w1' } as never)
   expect(JSON.stringify(shown.result)).toContain('token is [hidden API_KEY]')
   expect(JSON.stringify(shown.result)).not.toContain('sk-live-123456')
+})
+
+test('work reaches main only through the release runner: its rules name it, and a push or merge to main by hand is refused', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'ship it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
+  expect(prompts[0]).toMatch(/main is reached through `\/\S*mods\/claudopus\/bin\/release`/)
+  expect(prompts[0]).not.toContain('{release}')
+
+  const refused = [
+    'git push origin main',
+    'cd /repo && git push -q origin HEAD:main',
+    'git -C /repo push origin +main',
+    'git push origin work:refs/heads/master',
+    'git push --force origin main; echo done',
+    'gh pr merge 12 --squash',
+    'git push origin "main"',
+    "git push -u origin HEAD:'main'",
+    'git push --no-verify origin work/one',
+    'RELEASE_PUSH=1 git push origin HEAD',
+    'gh api -X PUT repos/me/it/pulls/3/merge',
+    'echo hi && git -c user.name=x push origin main',
+    'sudo git push origin main',
+    'env FOO=1 git push origin main',
+    "bash -c 'git push origin main'",
+    'git push --repo=origin main',
+  ]
+  for (const [i, command] of refused.entries()) {
+    const r = await $.tool.call({ tool: 'Bash', tool_use_id: `p${i}`, command, agentId: 'w1' } as never)
+    expect(r.deny).toContain('never pushes or merges to main itself')
+    expect(r.deny).toMatch(/bin\/release\.$/)
+  }
+  const allowed = ['git push origin work/one', 'git push -u origin main-menu-fix', 'git pull origin main', 'git merge origin/main', 'git log origin/main', 'git checkout main', 'git commit -qam "git push of main across Macs, merges onto main"', 'echo "never git push origin main"', 'git push', 'grep -n RELEASE_PUSH= bin/release']
+  for (const [i, command] of allowed.entries()) {
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `a${i}`, command, agentId: 'w1' } as never)).deny).toBeUndefined()
+  }
 })
 
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
