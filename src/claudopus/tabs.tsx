@@ -61,6 +61,16 @@ const tabHooks = (on: On) => {
     )
   })
 
+  // The changelog, in a pane of its own
+  on('ui.render', { component: 'Pane', requestId: CHANGELOG_PANE }, async ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+        {await changelogView($, $.ui.resolve(e))}
+      </Box>
+    )
+  })
+
   // A picture opened large, in a chat the app runs on another Mac over ssh
   on('ui.render', { component: 'Pane', requestId: PICTURE_PANE }, async ($, e) => {
     const { Box } = $.ui.resolve(e)
