@@ -257,6 +257,8 @@ const chatHooks = (on: On) => {
     }
     await tidyLog($)
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
+    // A move to a newer version has its moment begin now that the load has started whole
+    await readyUpdated($).catch(() => undefined)
 
     return begun
   })

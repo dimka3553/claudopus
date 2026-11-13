@@ -11,7 +11,7 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
-import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_STEP, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
+import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
 // helpers, the log and the chat's saved words
@@ -3337,8 +3337,10 @@ const reloadToInstalled = async ($: EngineInterface) => {
 
 // The version this chat loaded last, kept through a reload of this code, so the load after it knows what it moved from
 const ranVersion = atom({ plugin: 'claudopus', key: 'ran' } as const, '', { shape: 'ran-1' })
-// A move to a newer version this load made, from the version it ran before; its moment begins at the panel's first drawing
-let updatedMoment: { from: string; to: string; loadedAt: number; startedAt: number } | undefined
+// A move to a newer version this load made, from the version it ran before; its moment begins at the panel's first drawing once
+// the load has started whole (isReady): in a chat run over ssh the start took 6 s, and drawings asked for meanwhile can be dropped
+// as each new change is announced, so a moment begun then could be over before one of its drawings arrived
+let updatedMoment: { from: string; to: string; loadedAt: number; startedAt: number; isReady: boolean } | undefined
 const noteLoaded = async ($: EngineInterface) => {
   updatedMoment = undefined
   const loaded = (await versionsOf($)).version
@@ -3355,10 +3357,16 @@ const noteLoaded = async ($: EngineInterface) => {
   const from = updatedFrom(loaded, ran, mark, now)
   await update($, ranVersion, () => loaded)
   if (!from) return
-  updatedMoment = { from, to: loaded, loadedAt: now, startedAt: 0 }
+  updatedMoment = { from, to: loaded, loadedAt: now, startedAt: 0, isReady: false }
   // A panel drawn while this load was still reading has no moment yet: it is drawn again now
   await update($, tick, n => n + 1)
   await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header's octopus turns blue and says so`)
+}
+// The load has started whole: the moment begins at the next drawing, asked for now
+const readyUpdated = async ($: EngineInterface) => {
+  if (!updatedMoment || updatedMoment.isReady) return
+  updatedMoment.isReady = true
+  await update($, tick, n => n + 1)
 }
 // The sound of the moment, a file of the mod's: three bright rising notes, 0.9 s, made by mockups/claudopus-sound/updated.py
 const UPDATED_SOUND = 'sounds/updated.wav'
@@ -3384,47 +3392,36 @@ const playUpdated = async ($: EngineInterface, version: string) => {
     await log($, `updated sound not played: ${String(err)}`)
   })
 }
-// The moment as it stands now, while it lasts, drawn again each UPDATED_STEP until it is over: the name line's pieces (blue in
-// Claudopus's workflow blue, the glint in a light blue); the words are pieces of their own, a space between each; the panel draws the blue octopus beside them
+// The moment as it stands now, while it lasts: the name line's pieces in Claudopus's workflow blue, the panel drawing the blue
+// octopus beside them. The panel is drawn again only where the look changes, at UPDATED_SAYS and at its end (see UPDATED_SAYS)
 const updatedPieces = async ($: EngineInterface, version: string) => {
   const moment = updatedMoment
   if (!moment || moment.to !== version) return undefined
   const now = await $.clock.now()
+  // Drawn while the load is still starting: its first look, with its time not yet running
+  if (!moment.isReady) return updatedLook(moment.to, 0)
   if (!moment.startedAt) {
     if (now - moment.loadedAt > UPDATED_LATE) return void (updatedMoment = undefined)
     moment.startedAt = now
     void playUpdated($, moment.to)
-    let left = Math.ceil(UPDATED_FOR / UPDATED_STEP) + 2
-    const step = () =>
-      void $.clock.after(UPDATED_STEP, () => {
-        void update($, tick, n => n + 1)
-        if ((left -= 1) > 0 && updatedMoment === moment) step()
-      })
-    step()
+    for (const at of [UPDATED_SAYS, UPDATED_FOR]) $.clock.after(at + 20, () => void (updatedMoment === moment && update($, tick, n => n + 1)))
   }
   const look = updatedLook(moment.to, now - moment.startedAt)
   if (!look && updatedMoment === moment) updatedMoment = undefined
   return look
 }
-// The glint: a light blue letter passing along the blue word, bright in either theme
-const GLINT = '#A9CDFF'
-const nameLine = (ui: Ui, pieces: NonNullable<ReturnType<typeof updatedLook>>) => {
-  // "Claudopus" first, then the word or version beside it, its pieces together
-  const words = [pieces.slice(0, 1), pieces.slice(1)].filter(word => word.length)
-  return (
-    <ui.Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
-      {words.map((word, w) => (
-        <ui.Box key={`head-name-${w}`} flexDirection="row" flexShrink={w ? 1 : 0} minWidth={0}>
-          {word.map((piece, i) => (
-            <ui.Text key={`head-name-${w}-${i}`} wrap="truncate-end" color={piece.tone === 'glint' ? GLINT : FLOW} bold>
-              {piece.text}
-            </ui.Text>
-          ))}
-        </ui.Box>
-      ))}
-    </ui.Box>
-  )
-}
+const nameLine = (ui: Ui, pieces: NonNullable<ReturnType<typeof updatedLook>>) => (
+  // "Claudopus" first, then the word or version beside it
+  <ui.Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
+    {pieces.map((piece, i) => (
+      <ui.Box key={`head-name-${i}`} flexDirection="row" flexShrink={i ? 1 : 0} minWidth={0}>
+        <ui.Text key={`head-name-${i}-0`} wrap="truncate-end" color={FLOW} bold>
+          {piece.text}
+        </ui.Text>
+      </ui.Box>
+    ))}
+  </ui.Box>
+)
 
 // The asking card: an ask's text to copy, its buttons and reply box, and the answer reaching the work
 
@@ -4880,6 +4877,8 @@ const chatHooks = (on: On) => {
     }
     await tidyLog($)
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
+    // A move to a newer version has its moment begin now that the load has started whole
+    await readyUpdated($).catch(() => undefined)
 
     return begun
   })
