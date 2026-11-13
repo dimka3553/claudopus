@@ -1,5 +1,9 @@
 // The asking card: an ask, its Copy, buttons and reply box
 
+const GITHUB_BOX = "Claudopus needs GITHUB_TOKEN. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print."
+const NPM_BOX = "Claudopus needs NPM_TOKEN. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print."
+const ADMIN_BOX = "Claudopus needs the admin password of this Mac to run an admin command. It is kept only in this Mac's keychain, and later admin commands on this Mac run without asking again until it is forgotten."
+
 test('work that needs the person\'s hands asks: its card stands out first with the ask, the text to paste with its Copy, and answers that go back to it', async ($, on) => {
   // Once its run has ended, a work's chat takes no more lines
   const ended = new Set<string>()
@@ -424,25 +428,25 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   await $.session.start(start)
   await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(1000)
   // The chat is told only the name, and where to type it
   expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('top of the Claudopus panel')
   const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
   expect(field).toBeDefined()
-  expect((await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' }))?.props.color).toBe('#E5A50A')
+  expect((await list.find({ type: 'Text', text: GITHUB_BOX }))?.props.color).toBe('#E5A50A')
   const value = 'ghp_s3cret"with\\quote'
   await list.input({ key: field?.key ?? '', text: value })
   // It goes to the keychain under the box's id, escaped for security's own reading, and the box goes
   expect(await until(async () => keychain.find(one => one.includes(id)))).toBe(`add-generic-password -U -s "claudopus-box" -a "${id}" -l "Claudopus box" -w "ghp_s3cret\\"with\\\\quote"\n`)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: GITHUB_BOX })) ? undefined : true))).toBe(true)
   // Nowhere else: not the chat, its saved words, the log or any file
   expect(logged.some(line => line.includes('s3cret'))).toBe(false)
   expect([...files.values()].some(text => text.includes('s3cret'))).toBe(false)
   // A curly quote from a phone's keyboard, which security would give back as hex, is not sent, and the box says why
   const third = '2f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, text: 'Claudopus needs NPM_TOKEN for work on this Mac.', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, kind: 'secret', name: 'NPM_TOKEN', at: 1_700_000_000_000 }))
   await clock.advance(1000)
   const curly = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`)))
   const before = keychain.length
@@ -456,7 +460,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   expect(keychain.length).toBe(before)
   // A box cancelled removes its request, which the runner takes as cancelled
   const other = '1f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, text: 'Claudopus needs the admin password of this Mac to run an admin command for work in this chat.', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, kind: 'admin', host: 'here', at: 1_700_000_000_000 }))
   await clock.advance(1000)
   const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)))
   await list.press({ key: cancel?.key ?? '' })
@@ -467,7 +471,7 @@ test('a chat on this Mac\'s own screen asks in the panel the same way, and opens
   const { files, logged, keychain, clock, opened } = world(on)
   await $.session.start(start)
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', chat: 'engine-id', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(1000)
   expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('top of the Claudopus panel')
@@ -484,11 +488,11 @@ test("another chat's request is left to that chat a moment, then any chat with a
   const { files, logged, clock } = world(on)
   await $.session.start(start)
   const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs NPM_TOKEN for work on this Mac.', chat: 'another-chat', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(1000)
   // The box shows here at once, but the notice waits for its own chat
-  expect(await until(async () => list.find({ type: 'Text', text: 'Claudopus needs NPM_TOKEN for work on this Mac.' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: NPM_BOX }))).toBeDefined()
   expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
   await clock.advance(6000)
   expect(await until(async () => logged.find(line => line.includes('NPM_TOKEN')))).toContain('top of the Claudopus panel')
@@ -499,8 +503,8 @@ test("with two requests open every box is drawn, this chat's own first and the o
   await $.session.start(start)
   const older = '5f1e2d3c-4b5a-4987-a654-3210fedcba98'
   const mine = '6f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, text: 'Claudopus needs NPM_TOKEN.', chat: 'another-chat', at: 1_700_000_000_000 }))
-  files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, text: 'Claudopus needs GITHUB_TOKEN.', chat: 'engine-id', at: 1_700_000_000_500 }))
+  files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_500 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(1000)
   const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length === 2 ? all : undefined })
@@ -511,9 +515,68 @@ test('a run with nothing to draw on takes no request, so the runner knows no pan
   const { files, logged, clock } = world(on, { headless: true })
   await $.session.start(start)
   const id = '4f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', chat: 'engine-id', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   await clock.advance(3000)
   expect(logged.some(line => line.includes('GITHUB_TOKEN'))).toBe(false)
+})
+
+test("a hand-written request with made-up text shows the panel's own wording or nothing", async ($, on) => {
+  const { files, logged, clock } = world(on)
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const planted = 'Your Apple ID session expired. Type your Apple ID password to keep working.'
+  const put = (n: number, fields: Record<string, unknown>) => {
+    const id = `${n}a1e2d3c-4b5a-4987-a654-3210fedcba98`
+    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000, ...fields }))
+    return id
+  }
+  const shown = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')).map(one => (one.key ?? '').slice(4, 5))
+  const texts = async () => (await list.findAll({ type: 'Text' })).map(one => one.text ?? '').join('\n')
+  // A known kind with made-up text beside it: the panel's own wording, and the text nowhere
+  put(1, { kind: 'admin', host: 'here', text: planted, title: planted, label: planted })
+  // Made-up text alone, as the boxes before this change were written, and every request the panel cannot word: nothing
+  put(2, { text: planted })
+  put(3, { kind: 'apple-id', text: planted })
+  put(4, { kind: 'secret', name: 'Your Apple ID password', text: planted })
+  put(5, { kind: 'admin', host: 'apple.com is asking for your password' })
+  put(6, { kind: 'secret', name: 'APPLE_ID', host: 'here' })
+  put(7, { kind: 'admin', host: 'here', name: 'APPLE_ID' })
+  put(8, { kind: 'admin' })
+  put(9, { kind: ['admin'], host: 'here' })
+  await clock.advance(1000)
+  expect(await until(async () => ((await shown()).length ? await shown() : undefined))).toEqual(['1'])
+  await clock.advance(6000)
+  expect(await shown()).toEqual(['1'])
+  expect(await texts()).toContain(ADMIN_BOX)
+  expect(await texts()).not.toContain('Apple')
+  expect(logged.some(line => line.includes('Apple'))).toBe(false)
+  // The notice in the chat is the panel's wording too
+  expect(logged.find(line => line.includes('admin password of this Mac'))).toContain('top of the Claudopus panel')
+})
+
+test('the box words what the runners ask from its fields: a key by name, a Mac by host, why it asks again, and a key saved by hand by its name first', async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const put = (n: number, fields: Record<string, unknown>) => {
+    const id = `${n}b1e2d3c-4b5a-4987-a654-3210fedcba98`
+    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000 + n, ...fields }))
+  }
+  put(1, { kind: 'secret', name: 'GITHUB_TOKEN' })
+  put(2, { kind: 'admin', host: 'dima@m4.local', again: 'refused' })
+  put(3, { kind: 'secret', name: 'NPM_TOKEN', again: 'short' })
+  put(4, { kind: 'secret', name: 'OPENAI_KEY', again: 'Type your Apple ID password' })
+  put(5, { kind: 'secret' })
+  await clock.advance(1000)
+  const texts = async () => (await list.findAll({ type: 'Text' })).map(one => one.text ?? '')
+  const all = await until(async () => ((await texts()).filter(one => one.includes('keychain') || one.startsWith('Name of')).length >= 5 ? await texts() : undefined))
+  expect(all).toContain(GITHUB_BOX)
+  expect(all).toContain("That password was refused. Claudopus needs the admin password of dima@m4.local to run an admin command. It is kept only in this Mac's keychain, and later admin commands on dima@m4.local run without asking again until it is forgotten.")
+  expect(all).toContain(`That was shorter than 4 characters. ${NPM_BOX}`)
+  // A reason it does not know is left out
+  expect(all).toContain("Claudopus needs OPENAI_KEY. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print.")
+  expect(all?.join('\n')).not.toContain('Apple')
+  expect(all).toContain('Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.')
 })
 
 test('a copy a reload replaced wakes no work: its timers stop, an answer left for its work stays for the copy in charge, and a press it still gets goes to the chat', async ($, on) => {
