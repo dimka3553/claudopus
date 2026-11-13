@@ -101,7 +101,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   const told = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a2', text: 'Sign in to GitHub.', command: "gh auth login --hostname 'github.com'", cwd: '/repo/site' } as never)
   expect(told.result).not.toContain('mcp__terminal__open_terminal_tab')
   expect(told.result).toContain('Do not open a terminal for it')
-  expect((await list.find({ type: 'Text', text: "gh auth login --hostname 'github.com'" }))?.props.mono).toBe(true)
+  expect((await list.find({ type: 'Text', text: "cd '/repo/site' && gh auth login --hostname 'github.com'" }))?.props.mono).toBe(true)
   expect(terminals).toEqual([])
   const openedBefore = shown.length
   const openIn = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Open in Terminal')
@@ -111,7 +111,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await list.press({ key: openIn?.key ?? '' })
   const opened = await until(async () => shown.slice(openedBefore).find(argv => String(argv[1]).endsWith('/open.command')))
   const home = String(opened?.[1]).replace(/\/open\.command$/, '')
-  expect(files.get(`${home}/command.txt`)).toBe("gh auth login --hostname 'github.com'")
+  expect(files.get(`${home}/command.txt`)).toBe("cd '/repo/site' && gh auth login --hostname 'github.com'")
   expect(files.get(`${home}/.zshrc`)).toContain('print -rz -- "$(<"$_claudopus_here/command.txt")"')
   expect(files.get(`${home}/.zshrc`)).toContain("cd '/repo/site'")
   expect(files.get(`${home}/open.command`)).toContain('exec /bin/zsh -i')
@@ -220,7 +220,7 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   await $.prompt.submit({ text: 'B, but make it bluer', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 't1', to: 'a1', message: 'Their answer: “B, but make it bluer”' } as never)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Which logo do you want?' })) ? undefined : true))).toBe(true)
-  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes("the person's reply, typed in the chat, to your ask: \"Which logo do you want?\"")))).toBeDefined()
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes("the person's own reply, typed by them in the chat, to your ask: \"Which logo do you want?\"")))).toBeDefined()
   expect(appended.some(line => line.includes('Decide which of three it is'))).toBe(false)
   // A press on the card no longer counts for that ask
   expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'B')).toBeUndefined()
@@ -310,4 +310,26 @@ test('a chat on this Mac\'s own screen draws no box: there the runners show thei
   await clock.advance(2000)
   expect(await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' })).toBeUndefined()
   expect(logged.some(line => line.includes('GITHUB_TOKEN'))).toBe(false)
+})
+
+test('in a chat run from another Mac a command for the person is given whole, with its folder, and nothing offers to open a terminal here', async ($, on) => {
+  const { terminals, shown } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'sign me in', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Sign in', prompt: 'sign me in' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // A relative path with no folder named is not shown: it would be typed somewhere else, where it does not exist
+  const bare = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Run the release.', command: 'mods/claudopus/bin/release' } as never)
+  expect(String(bare.result)).toContain('Not shown')
+  expect(await list.find({ type: 'Text', text: 'Run the release.' })).toBeUndefined()
+  // With its folder it is shown starting there, with a Copy button and no Open in Terminal
+  const told = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Sign in to GitHub.', command: 'gh auth login', cwd: '/repo/site' } as never)
+  expect(String(told.result)).toContain("cd '/repo/site' && gh auth login")
+  expect(String(told.result)).not.toContain('Open in Terminal')
+  expect(String(told.result)).toContain('nothing opens a terminal here')
+  expect((await list.find({ type: 'Text', text: "cd '/repo/site' && gh auth login" }))?.props.mono).toBe(true)
+  expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Open in Terminal')).toBeUndefined()
+  expect(terminals).toEqual([])
+  expect(shown.some(argv => String(argv[1]).endsWith('/open.command'))).toBe(false)
+  await list.unmount()
 })
