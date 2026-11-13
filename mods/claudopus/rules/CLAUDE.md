@@ -27,7 +27,7 @@ These are my principles. Every chat and every piece of work carries them.
 
 - Set the bar with what already exists, and show each new attempt beside it on the same input.
 - Judge a result by looking at it, not by a number.
-- Before showing me a result, have a second agent that didn't build it look for what is wrong.
+- Before showing me a result, have a second agent that didn't build it look for what is wrong, on a model at least as strong as the one that built it.
 - Show the first result early. After two or three failed fixes, question the approach.
 - A surprising number means checking our own code first.
 - Explore with mockups and tests. Build for real once I say the decision is final.

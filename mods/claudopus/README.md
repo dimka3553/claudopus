@@ -60,7 +60,7 @@ Claudopus keeps itself up to date. Every hour one chat reads the version page on
 
 The mod also adds a short set of working principles ([rules/CLAUDE.md](rules/CLAUDE.md)) to every chat. They shape how Claude answers; change them to fit you in the Config tab.
 
-The chat picks a model for each piece of work: Opus for most, Sonnet for long legwork, Fable only for heavy work. Your account needs access to the model it picks.
+The chat picks a model for each piece of work: Opus for most, Sonnet for long legwork, Fable only for heavy work. A check of finished work runs on Opus, or on Fable for work built on Fable, never on Sonnet. Your account needs access to the model it picks.
 
 ## Needs
 
@@ -95,7 +95,7 @@ The settings are `~/.claude/claudopus/config.json`. Every key is optional:
 | `sound` | `false` silences the short chime played when work is ready, and the "needs you" sound of a notification that work needs you. |
 | `notifications` | `false` stops the notification that names work when it is ready, stopped or failed. |
 | `updates` | `false` stops Claudopus updating itself; it stays on the version you have until you update it with `/plugin`. |
-| `models` | Which model runs most work, long legwork and helpers, and heavy work (`opus`, `sonnet`, `fable` or `haiku`). |
+| `models` | Which model runs most work, long legwork and helpers, and heavy work (`opus`, `sonnet`, `fable` or `haiku`). Checks of finished work run on the most-work or heavy-work model, never on legwork's. |
 | `macs` | Up to four other Macs, as `user@host` or a `Host` of `~/.ssh/config`, that this Mac's panel lists the chats of. It uses your own SSH, which must log in without asking; each Mac needs Claudopus of this version or newer. That Mac's panels list this Mac's chats in turn, with nothing to set there: each visit hands it this Mac's chats and brings back the answers pressed there for them. Results are kept the same on both, about every two minutes: each Mac gets the results it lacks, with paths moved onto its own home, and what you did to a result (archived, brought back, answered) reaches the other; nothing is deleted or overwritten. |
 
 `name`, `agents` and `macs` are read when a chat starts; `sound` and `notifications` each time work ends or needs you; `updates` before each look for a new version.

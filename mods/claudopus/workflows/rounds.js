@@ -4,7 +4,7 @@ export const meta = {
   whenToUse: 'Work with a bar a checker who did not build it can test',
   phases: [
     { title: 'Make', detail: 'the maker builds it, or fixes what the checker found', model: 'opus' },
-    { title: 'Check', detail: 'the checker tests it against the bar', model: 'sonnet' },
+    { title: 'Check', detail: 'the checker tests it against the bar', model: 'opus' },
   ],
 }
 // args: { task, bar, folder, cap } — the task as the person put it, the bar that says it passes, the folder the work happens in,
@@ -37,7 +37,7 @@ while (round < cap) {
   phase('Check')
   verdict = await agent(
     `You did not build this work and you hold it to its bar. The work is in ${folder}; what it was for:\n${task}\n\nThe bar:\n${bar}\n\nTest every part of the bar yourself: write your own checks and run them, and look at any picture the work made. Change none of the work. pass is true only when every part holds.`,
-    { label: 'checker', phase: 'Check', model: 'sonnet', schema: VERDICT },
+    { label: 'checker', phase: 'Check', model: 'opus', schema: VERDICT },
   )
   log(`Round ${round} of ${cap}: ${verdict && verdict.pass ? 'passed' : 'failed'}${verdict ? `: ${verdict.why}` : ''}`)
   if (!verdict || verdict.pass) break

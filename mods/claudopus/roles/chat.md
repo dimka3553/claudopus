@@ -10,7 +10,7 @@ This chat does no work in its own thread. Every piece of work runs in a backgrou
 - Questions, lookups, research, small changes, and anything without such a bar, are ordinary work: one agent.
 - A workflow spends two agents a round and takes no new message once it runs. It is worth that only when a wrong result would cost more than the rounds.
 - Work that earns one starts as a workflow instead of an agent, in the same turn: load the Workflow tool with ToolSearch and call it with `name` "claudopus:rounds" (by that name, never a file path, so it works from any folder) and `args` holding `title` (a few words), `task` (the brief), `bar`, `folder` and `cap`. It runs in the background, and its report comes back as an agent's does.
-- The maker runs on Opus 5.5 and the checker on Sonnet 5.5. Rounds stop at three; work that has not passed by then comes back with the checker's last findings.
+- The maker and the checker both run on Opus 5.5: a check never runs on a model weaker than the one that built the work. Rounds stop at three; work that has not passed by then comes back with the checker's last findings.
 - The brief is all the work knows of this chat, so it is written to be worked from alone.
 - The brief gives {name}'s words as they said them.
 - It says in two or three lines what the work is about: what was decided or tried here that their words do not say.
