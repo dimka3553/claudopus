@@ -92,11 +92,9 @@ const tabHooks = (on: On) => {
     const at = Math.min(Math.max(0, pictureAt.get(paneOf(r)) ?? 0), Math.max(0, r.files.length - 1))
     const file = r.files[at] ?? ''
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
-    // The terminal draws it as cells, as wide as the band it is in
-    const cells = e.surface === 'terminal' && (RASTER.test(file) || /\.svg$/i.test(file)) ? await termPictureOf($, `${reportPath(r)}/${file}`, Math.max(8, Math.min(160, e.props.bodyColumns - 4)), zoomOf(e.requestId ?? '')) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, cells, e.requestId)}
+        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture)}
       </Box>
     )
   })

@@ -318,7 +318,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
 // A report opened in its own pane: what it is and when; the question it waits on, with its answers; what it found; its pictures,
 // with the one press that opens them all; the report itself; then how to carry on from it, and the other rounds of its work
 type Thumb = { source: string; width: number; height: number } | null
-const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, cells?: Cells | null, paneId = '') => {
+const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb) => {
   const { Box, Button, Markdown, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   // The other rounds of its work first, as the list shows them as one row; then what it started from or started, and the subject's others
@@ -377,21 +377,32 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
             ui,
             'report-pictures',
             'Pictures',
-            pictures.length > 1 ? `${at + 1} of ${pictures.length}` : '',
+            'isTerminal' in ui ? `${pictures.length}` : pictures.length > 1 ? `${at + 1} of ${pictures.length}` : '',
+            'isTerminal' in ui ? (
+              // The terminal draws no picture: each is a row, numbered, whose press opens it where the person is
+              <Box flexDirection="column">
+                {pictures.map((one, n) => (
+                  <Box key={`report-pic-${n}`} flexDirection="column">
+                    <Button key={`report-pic-open-${n}`} label={one.file} plain hotkey={n < 9 ? String(n + 1) : undefined} onPress={press => void showPicture($, one.path, '', '', press.surface)} />
+                    {pictureSaidRow($, ui, `report-pic-said-${n}`, one.path)}
+                  </Box>
+                ))}
+                <Text dimColor wrap="wrap">{termFrom ? 'A press sends the picture to the device you are at' : 'A press opens the picture'}</Text>
+              </Box>
+            ) : (
             <Box flexDirection="column" gap={1}>
               {thumb && table.Svg ? <table.Svg key={`report-picture-${r.id}-${at}`} source={thumb.source} alt={pictures[at]?.file ?? 'Picture'} /> : null}
-              {cells ? termPicture(ui, `report-cells-${r.id}-${at}`, cells, pictures[at]?.file ?? 'Picture') : null}
-              {cells !== null && 'isTerminal' in ui && paneId ? termZoomKeys(ui, $, paneId) : null}
               {/* Shown here, never handed to another app: that would take the person out of Claude and switch their desktop. Where the
                   picture cannot be drawn, its path is given as text */}
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
               {pictures.length > 1 ? (
                 <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-                  <Button key={`report-prev-${presses}`} label={'isTerminal' in ui ? 'Previous' : '‹ Previous'} plain={'isTerminal' in ui ? true : undefined} hotkey={'isTerminal' in ui ? 'b' : undefined} onPress={() => show((at + pictures.length - 1) % pictures.length)} />
-                  <Button key={`report-next-${presses}`} label={'isTerminal' in ui ? 'Next' : 'Next ›'} plain={'isTerminal' in ui ? true : undefined} hotkey={'isTerminal' in ui ? 'n' : undefined} onPress={() => show((at + 1) % pictures.length)} />
+                  <Button key={`report-prev-${presses}`} label="‹ Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
+                  <Button key={`report-next-${presses}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)} />
                 </Box>
               ) : null}
-            </Box>,
+            </Box>
+            ),
           )
         : null}
       {band(

@@ -53,6 +53,7 @@ const chatHooks = (on: On) => {
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
     termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
+    ;[termFrom = '', , termHere = ''] = ((await $.env.get('SSH_CONNECTION')) ?? '').trim().split(/\s+/)
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
       const text = await readOr($, `${$.plugin.root}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))

@@ -609,10 +609,7 @@ const panelHooks = (on: On) => {
           <Box key={`pics-${at}`} flexDirection="column" alignItems="flex-start" gap={1} width="100%">
             {made.map((pic, n) => (
               <Box key={`pic-${at}-${n}`} flexDirection="column" alignItems="flex-start" width="100%">
-                {pic.thumb && pic.path && e.surface === 'terminal' ? (
-                  // The terminal's small copy: cells as wide as the tab, at most forty
-                  termPicture(drawing, `pic-cells-${at}-${n}`, termPictureNow($, pic.path, Math.min(40, Math.max(8, e.props.bodyColumns - 4)), String(pic.thumb.source.length)), `Picture: ${pic.name}`)
-                ) : pic.thumb && 'Svg' in drawing ? (
+                {pic.thumb && e.surface !== 'terminal' && 'Svg' in drawing ? (
                   <drawing.Svg
                     key={`pic-svg-${at}-${n}`}
                     source={pic.thumb.source}
@@ -627,9 +624,10 @@ const panelHooks = (on: On) => {
                     key={`pic-open-${at}-${n}-${presses}`}
                     label={`⤢ ${pic.thumb && e.surface !== 'terminal' ? 'Open large' : 'Open'}: ${cut(pic.name, Math.max(12, room - 14))}`}
                     plain
-                    onPress={() => ((presses += 1), redraw($), void showPicture($, pic.path, paneId, `pic-${at}-${n}`))}
+                    onPress={press => ((presses += 1), redraw($), void showPicture($, pic.path, paneId, `pic-${at}-${n}`, press.surface))}
                   />
                 )}
+                {e.surface === 'terminal' && !pic.isGone ? pictureSaidRow($, drawing, `pic-said-${at}-${n}`, pic.path) : null}
               </Box>
             ))}
           </Box>
