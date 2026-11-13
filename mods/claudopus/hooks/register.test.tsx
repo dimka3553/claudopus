@@ -3537,7 +3537,8 @@ test('an ask carries what it is about, whole, on the small card, in Details and 
   // The chat's notice carries it whole, before the answers, and so does the row the chat's model reads
   await clock.advance(10)
   const notice = (await until(async () => logged.find(line => line.includes('Release PR 54 to production?') && line.includes('What it is about')))) ?? ''
-  expect(notice).toContain(`Release PR 54 to production?\nWhat it is about:\n${differences}\nAnswers: Release it · Not now`)
+  // Plain text there, so the marks for bold are left out
+  expect(notice).toContain(`Release PR 54 to production?\nWhat it is about:\n${differences.replaceAll('**', '')}\nAnswers: Release it · Not now`)
   const relay = [...appended].reverse().find(line => line.startsWith('undefined: The background work "Fix the wallet" asked the person') && line.includes('Release PR 54 to production?')) ?? ''
   expect(relay).toContain(`what it is about, shown to the person with it on the card and in the notice: ${differences}`)
   // A question too long for one line is cut at a word on the card and kept whole at the top of its details

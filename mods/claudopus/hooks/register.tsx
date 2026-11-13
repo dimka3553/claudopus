@@ -368,7 +368,8 @@ const AFAR_RULE =
 const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
   [
     `The work "${title}" needs {name}: ${ask.text}`,
-    ask.details ? `What it is about:\n${ask.details}` : '',
+    // The chat's notice is plain text: Markdown's marks for bold would show as they are
+    ask.details ? `What it is about:\n${ask.details.replace(/\*\*|__/g, '')}` : '',
     `Answers: ${answers.join(' · ')}, or a reply in {name}'s own words, here or on its card.`,
     ask.copy ? `${ask.isCommand ? 'The command to type' : 'The text to paste'}: ${ask.copy}` : '',
     ask.pictures?.length ? `Pictures: ${ask.pictures.join(', ')}` : '',
@@ -5516,7 +5517,7 @@ const chatHooks = (on: On) => {
         type: 'object',
         properties: {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
-          details: { type: 'string', description: 'What the ask is about, in full, in Markdown: everything needed to decide it, shown with it on the card and in the chat. Never "as explained in the chat" or "in my report": they see the ask first' },
+          details: { type: 'string', description: 'What the ask is about, in full: everything needed to decide it, shown with it on the card and in the chat. Short plain lines and "- " lists, no tables or bold: the card is narrow and the chat shows it as plain text. Never "as explained in the chat" or "in my report": they see the ask first' },
           copy: { type: 'string', description: 'Only text they must paste somewhere else, such as a one-time code or a link; leave it out when they only read or press something' },
           choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now (Done and Not now when left out); the one pressed comes back to you as a message' },
           command: { type: 'string', description: 'A command only they can run, never one you can run yourself, one line, whole: shown with a Copy button, and on this Mac a button that opens a terminal with it typed, never run' },
