@@ -265,17 +265,13 @@ const panelHooks = (on: On) => {
       ]
     }
     // A small card with its tree: the rows hang straight under it, with no gap, a little in from its edge
-    const smallWithTree = (one: Todo) => {
-      const rows = treeUnder(one)
-      return rows.length ? (
-        <Box key={`tree-${one.id}`} flexDirection="column" flexShrink={0}>
-          {small(one)}
-          <Box flexDirection="column" paddingLeft={1} paddingRight={2}>{rows}</Box>
-        </Box>
-      ) : (
-        small(one)
-      )
-    }
+    const smallWithTree = (one: Todo) => (
+      // The same box with or without helpers, so a card is not drawn afresh as its first helper starts or its last leaves
+      <Box key={`card-${one.id}`} flexDirection="column" flexShrink={0}>
+        {small(one)}
+        <Box flexDirection="column" paddingLeft={1} paddingRight={2}>{treeUnder(one)}</Box>
+      </Box>
+    )
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----
     const flowMine = await sessionName($)

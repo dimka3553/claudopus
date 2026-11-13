@@ -1270,6 +1270,24 @@ test('helpers hang under their work as a tree, a helper of a helper slimmer stil
   await tab.unmount()
 })
 
+test('long work keeps only its newest ended helpers, and none of work that was forgotten', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  for (let n = 2; n <= 106; n += 1) {
+    await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: `Measure ${n}`, prompt: 'go', parentAgentId: 'a1' } as never)
+    await clock.advance(10)
+    if (n <= 105) await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: `t${n}`, reason: 'answer', agentId: `a${n}` } as never)
+  }
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'terminal' } as never)
+  // 104 ended, the oldest four forgotten; the one at work is never forgotten
+  expect((await tab.find({ type: 'Text', text: / in all$/ }))?.text).toBe('1 at work · 101 in all')
+  expect(await tab.find({ type: 'Text', text: /^Measure 5$/ })).toBeUndefined()
+  expect(await tab.find({ type: 'Text', text: /^Measure 6$/ })).toBeDefined()
+  await tab.unmount()
+})
+
 // Finished work: the happy green octopus and its pause
 
 test('the octopus turns happy and green when work finishes, for its pause, then goes back to work or to rest; stopped work, a closed panel and a reload leave none behind', async ($, on) => {

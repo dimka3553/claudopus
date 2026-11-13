@@ -512,8 +512,12 @@ const capped = (list: Todo[]) => {
   let over = list.filter(one => !one.parentId).length - KEPT
   const kept = over > 0 ? list.filter(one => Boolean(one.parentId) || one.status === 'working' || Boolean(one.ask) || (over -= 1) < 0) : list
   const tops = new Set(kept.filter(one => !one.parentId).map(one => one.id))
-  return kept.some(one => one.parentId && one.status !== 'working' && !tops.has(topOf(kept, one.id))) ? kept.filter(one => !one.parentId || one.status === 'working' || tops.has(topOf(kept, one.id))) : kept
+  const held = kept.some(one => one.parentId && one.status !== 'working' && !tops.has(topOf(kept, one.id))) ? kept.filter(one => !one.parentId || one.status === 'working' || tops.has(topOf(kept, one.id))) : kept
+  // Long work that keeps starting helpers keeps only its newest ended ones; one that still has a helper at work under it stays
+  const spent = held.filter(one => one.parentId && one.status !== 'working' && !held.some(kid => kid.parentId === one.id && kid.status === 'working')).sort((a, b) => b.endedAt - a.endedAt).slice(HELPERS_KEPT)
+  return spent.length ? held.filter(one => !spent.includes(one)) : held
 }
+const HELPERS_KEPT = 100
 
 // Stands for the work that started a helper when the engine does not say which it was
 const HELPER = 'helper'
@@ -5106,17 +5110,13 @@ const panelHooks = (on: On) => {
       ]
     }
     // A small card with its tree: the rows hang straight under it, with no gap, a little in from its edge
-    const smallWithTree = (one: Todo) => {
-      const rows = treeUnder(one)
-      return rows.length ? (
-        <Box key={`tree-${one.id}`} flexDirection="column" flexShrink={0}>
-          {small(one)}
-          <Box flexDirection="column" paddingLeft={1} paddingRight={2}>{rows}</Box>
-        </Box>
-      ) : (
-        small(one)
-      )
-    }
+    const smallWithTree = (one: Todo) => (
+      // The same box with or without helpers, so a card is not drawn afresh as its first helper starts or its last leaves
+      <Box key={`card-${one.id}`} flexDirection="column" flexShrink={0}>
+        {small(one)}
+        <Box flexDirection="column" paddingLeft={1} paddingRight={2}>{treeUnder(one)}</Box>
+      </Box>
+    )
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----
     const flowMine = await sessionName($)

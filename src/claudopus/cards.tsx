@@ -40,8 +40,12 @@ const capped = (list: Todo[]) => {
   let over = list.filter(one => !one.parentId).length - KEPT
   const kept = over > 0 ? list.filter(one => Boolean(one.parentId) || one.status === 'working' || Boolean(one.ask) || (over -= 1) < 0) : list
   const tops = new Set(kept.filter(one => !one.parentId).map(one => one.id))
-  return kept.some(one => one.parentId && one.status !== 'working' && !tops.has(topOf(kept, one.id))) ? kept.filter(one => !one.parentId || one.status === 'working' || tops.has(topOf(kept, one.id))) : kept
+  const held = kept.some(one => one.parentId && one.status !== 'working' && !tops.has(topOf(kept, one.id))) ? kept.filter(one => !one.parentId || one.status === 'working' || tops.has(topOf(kept, one.id))) : kept
+  // Long work that keeps starting helpers keeps only its newest ended ones; one that still has a helper at work under it stays
+  const spent = held.filter(one => one.parentId && one.status !== 'working' && !held.some(kid => kid.parentId === one.id && kid.status === 'working')).sort((a, b) => b.endedAt - a.endedAt).slice(HELPERS_KEPT)
+  return spent.length ? held.filter(one => !spent.includes(one)) : held
 }
+const HELPERS_KEPT = 100
 
 // Stands for the work that started a helper when the engine does not say which it was
 const HELPER = 'helper'
