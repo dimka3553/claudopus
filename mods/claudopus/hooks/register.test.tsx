@@ -4735,3 +4735,49 @@ test('the Stats timeline in cells: a row a lane, each run of cells in its model,
   expect(from).not.toBe('')
   expect(to).not.toBe('')
 })
+
+test('in the terminal an ask is above the prompt with its answers numbered, and the number answers it; the app keeps its band', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Release it', prompt: 'release it' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] } as never)
+
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  expect(await band.find({ type: 'Text', text: 'Release it?' })).toBeDefined()
+  const answers = (await band.findAll({ type: 'Button' })).map(one => [one.props.label, one.props.hotkey, one.props.plain])
+  expect(answers).toEqual([['Approve', '1', true], ['Not now', '2', true]])
+  // The number pressed answers the ask, which then leaves the band
+  await band.press({ key: String((await band.findAll({ type: 'Button' }))[0]?.key) })
+  await until(async () => ((await band.find({ type: 'Text', text: 'Release it?' })) ? undefined : true))
+  await band.unmount()
+
+  const app = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect((await app.findAll({ type: 'Button' })).filter(one => one.props.hotkey)).toEqual([])
+  await app.unmount()
+})
+
+test('in the terminal each card has a number that opens it, Finished has f, and every tab has p back to the panel', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose.' } as never)
+
+  const pane = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  const card = await keyed(pane, 'open-a1')
+  expect([card?.props.hotkey, card?.props.plain]).toEqual(['1', true])
+  await pane.unmount()
+
+  // A tab of the mod's in the terminal: its first row goes back to the panel on p
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'terminal' } as never)
+  const back = (await tab.findAll({ type: 'Button' })).find(one => one.key === 'tab-back')
+  expect([back?.props.label, back?.props.hotkey]).toEqual(['Panel', 'p'])
+  await tab.unmount()
+
+  // The app has its own pointer: no numbers, no row back
+  const app = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await keyed(app, 'open-a1'))?.props.hotkey).toBeUndefined()
+  await app.unmount()
+  const appTab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  expect((await appTab.findAll({ type: 'Button' })).find(one => one.key === 'tab-back')).toBeUndefined()
+  await appTab.unmount()
+})
