@@ -103,7 +103,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(next.context?.join('\n')).toContain('Results kept')
   expect(next.context?.join('\n')).toContain(`${folder}/report.md`)
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: `${folder}/report.md` } as never)).deny).toBeUndefined()
-  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r2', file_path: '/repo/secrets.md' } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'r2', command: `cat ${folder}/report.md` } as never)).deny).toContain('Start a fresh agent')
 })
 
 test('work started from a report keeps its own report linked to it, beside the older one on the same subject', async ($, on) => {

@@ -17,6 +17,8 @@ const RARE_TOOLS = ['ReportFindings', 'SuggestPluginInstall', 'SuggestSkills', '
 const RARE_SERVERS = ['mcp__Claude_Browser__', 'mcp__Claude_Code_iOS_Simulator__', 'mcp__visualize__']
 // What a chat's own thread may call: it starts agents and workflows, and talks to them. An agent may call anything
 const OWN = ['Agent', 'Workflow', 'SendMessage', 'ListAgents', 'TaskStop', 'ToolSearch', 'AskUserQuestion', 'SendUserFile', 'ReadNotifications', 'Skill']
+// And what it reads with, to answer a question a few files answer: none of them changes a file or runs a command
+const READS = ['Read', 'Grep', 'Glob']
 // The mod's own tools, as the chat names them; work recorded before the rename called them by the old name
 const TOOLS = 'mcp__claudopus__'
 const OLD_TOOLS = 'mcp__progress__'
