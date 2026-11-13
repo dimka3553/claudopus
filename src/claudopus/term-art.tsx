@@ -61,6 +61,40 @@ const halfBlocks = (pixels: ArrayLike<number>, width: number, height: number): C
     }
   return { columns: width, rows, cells: packed(words) }
 }
+// A picture's pixels four to a cell, two across and two down: a cell has two colours, so its four pixels are split into the two
+// groups that lose least (▘▝▖▗ and their joins in one group's colour over the other's), each group its pixels' mean. Twice as
+// sharp across as halves, edges kept where a cell holds one
+const quarterBlocks = (pixels: ArrayLike<number>, width: number, height: number): Cells => {
+  const columns = Math.floor(width / 2)
+  const rows = Math.floor(height / 2)
+  const words: number[] = []
+  const part = (n: number, shift: number) => (n >> shift) & 255
+  for (let r = 0; r < rows; r += 1)
+    for (let c = 0; c < columns; c += 1) {
+      const four = [pixels[2 * r * width + 2 * c] ?? -1, pixels[2 * r * width + 2 * c + 1] ?? -1, pixels[(2 * r + 1) * width + 2 * c] ?? -1, pixels[(2 * r + 1) * width + 2 * c + 1] ?? -1]
+      if (four.every(one => one < 0)) {
+        words.push(0x20, TERM_DEFAULT, TERM_DEFAULT)
+        continue
+      }
+      const px = four.map(one => (one < 0 ? 0xffffff : one))
+      let best = { mask: 15, cost: Infinity, on: 0, off: 0 }
+      // Each way to split four pixels in two groups, the first pixel always in the lit one; 15 is all four in one colour
+      for (const mask of [15, 1, 3, 5, 7, 9, 11, 13]) {
+        const mean = (lit: boolean) => {
+          const mine = px.filter((_, i) => Boolean((mask >> i) & 1) === lit)
+          if (!mine.length) return { color: 0, cost: 0 }
+          const avg = [16, 8, 0].map(shift => Math.round(mine.reduce((sum, one) => sum + part(one, shift), 0) / mine.length))
+          const cost = mine.reduce((sum, one) => sum + [16, 8, 0].reduce((d, shift, i) => d + (part(one, shift) - (avg[i] ?? 0)) ** 2, 0), 0)
+          return { color: ((avg[0] ?? 0) << 16) | ((avg[1] ?? 0) << 8) | (avg[2] ?? 0), cost }
+        }
+        const on = mean(true)
+        const off = mean(false)
+        if (on.cost + off.cost < best.cost) best = { mask, cost: on.cost + off.cost, on: on.color, off: off.color }
+      }
+      words.push(QUADS.codePointAt(best.mask) ?? 0x2588, best.on, best.mask === 15 ? TERM_DEFAULT : best.off)
+    }
+  return { columns, rows, cells: packed(words) }
+}
 // One glyph per cell in one colour, on the terminal's own
 const glyphCells = (glyphs: string, color: number): Cells => ({
   columns: [...glyphs].length,
@@ -255,12 +289,50 @@ const brailleOf = (rows: string[]) => {
   }
   return out
 }
-// How big the octopus is in each place, in pixels (two to a cell, upright): the header's and About's fit the waving octopus,
-// whose arms reach wider than the others', so the words beside it never move; the update screen's is the big jumping one
-const TERM_HEAD = { width: 18, height: 18 }
-const TERM_UPDATE = { width: 24, height: 22 }
-// Which drawing the terminal draws in a place: the header's are the small octopus (the computers of the working one need more
-// cells than a header has), the update screen's the big one; the band's is the tiny one
+// The terminal's octopus: 14 by 6 pixels, each cell four of them (▘▝▖▗ and their joins) in one colour on the terminal's own, so it
+// is three rows tall, the size of Claude Code's own mark beside its three lines. Each picture of it, and how each state plays them
+const TERM_OCTO_HEAD = ['...########...', '..##########..', '..##..##..##..', '..##########..']
+const TERM_OCTO: Record<string, string[]> = {
+  rest: [...TERM_OCTO_HEAD, '..#.#.##.#.#..', '.#..#....#..#.'],
+  paddle: [...TERM_OCTO_HEAD, '..#.#.##.#.#..', '..#.#....#.#..'],
+  hand: ['...########.#.', '..##########.#', '..##..##..###.', '..##########..', '..#.#.##.#....', '.#..#....#....'],
+  cheer: [...TERM_OCTO_HEAD, '.#.#..##..#.#.', '#..#......#..#'],
+  wave: ['...########...', '..##########.#', '..##..##..####', '..##########..', '..#.#.##.#....', '.#..#....#....'],
+  jump: ['..............', '...########...', '..##########..', '..##..##..##..', '..##########..', '.#.#.#..#.#.#.'],
+}
+// At work it paddles on; something waiting raises a hand in amber; finished, it cheers in green four times; About waves; just
+// updated, it jumps in blue
+const TERM_PLAYS: Partial<Record<keyof typeof ART, { frames: string[]; color: string; frameMs: number; loops: number }>> = {
+  mark: { frames: ['rest'], color: 'live', frameMs: 0, loops: 1 },
+  working: { frames: ['rest', 'paddle'], color: 'live', frameMs: 400, loops: Infinity },
+  workingSmall: { frames: ['rest', 'paddle'], color: 'live', frameMs: 400, loops: Infinity },
+  asking: { frames: ['hand', 'rest'], color: NEEDS, frameMs: 600, loops: Infinity },
+  happy: { frames: ['cheer', 'rest'], color: '#4EBA65', frameMs: 250, loops: 4 },
+  happySmall: { frames: ['cheer', 'rest'], color: '#4EBA65', frameMs: 250, loops: 4 },
+  wave: { frames: ['wave', 'rest'], color: 'live', frameMs: 400, loops: 4 },
+  updated: { frames: ['jump', 'rest'], color: '#4E93EF', frameMs: 300, loops: 6 },
+}
+const QUADS = ' ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█'
+const quadCells = (rows: string[], color: number): Cells => {
+  const width = Math.ceil((rows[0]?.length ?? 0) / 2)
+  const height = Math.ceil(rows.length / 2)
+  const on = (x: number, y: number) => (rows[y]?.[x] === '#' ? 1 : 0)
+  const words: number[] = []
+  for (let r = 0; r < height; r += 1)
+    for (let c = 0; c < width; c += 1) {
+      const n = on(2 * c, 2 * r) | (on(2 * c + 1, 2 * r) << 1) | (on(2 * c, 2 * r + 1) << 2) | (on(2 * c + 1, 2 * r + 1) << 3)
+      words.push(n ? (QUADS.codePointAt(n) ?? 0x20) : 0x20, n ? color : TERM_DEFAULT, TERM_DEFAULT)
+    }
+  return { columns: width, rows: height, cells: packed(words) }
+}
+// Twice as large: each pixel two cells wide and one tall, which is square on a terminal
+const doubledCells = (rows: string[], color: number): Cells => {
+  const width = (rows[0]?.length ?? 0) * 2
+  const words: number[] = []
+  for (const row of rows) for (const ch of row) for (let i = 0; i < 2; i += 1) words.push(ch === '#' ? 0x2588 : 0x20, ch === '#' ? color : TERM_DEFAULT, TERM_DEFAULT)
+  return { columns: width, rows: rows.length, cells: packed(words) }
+}
+// Which drawing the terminal draws in a place: the band's is the tiny one, every other the small one above
 const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, alt: string, $?: EngineInterface, requestId?: string) => {
   if (!('Raster' in ui)) return null
   const { Box } = ui
@@ -273,7 +345,7 @@ const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, a
   const elapsed = now - (momentStarts.get(mark) ?? now)
   if (size <= BAND_MARK) {
     const tiny = art === 'happySmall' || art === 'happy' ? TINY.happy : TINY.working
-    const color = art === 'happySmall' || art === 'happy' ? colorOf('#4EBA65') : colorOf(LIVE)
+    const color = art === 'happySmall' || art === 'happy' ? colorOf('#4EBA65') : colorOf(art === 'asking' ? NEEDS : termLive || LIVE)
     const frames = tiny.map(rows => glyphCells(brailleOf(rows), color))
     // Happy lifts its arms four times over the finish's two seconds, then rests; at work it paddles on
     const loops = tiny === TINY.happy ? 4 : Infinity
@@ -283,24 +355,14 @@ const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, a
       </Box>
     )
   }
-  const small: Partial<Record<keyof typeof ART, string>> = {
-    mark: ART.mark,
-    working: ART.workingSmall,
-    workingSmall: ART.workingSmall,
-    happy: ART.happySmall,
-    happySmall: ART.happySmall,
-    wave: ART.wave,
-    asking: ART.asking,
-    updated: ART.happySmall ? updatedArt(ART.happySmall, FLOW) : '',
-  }
-  const isBig = size > HEAD_MARK
-  const source = isBig ? ART[art] : small[art] || ART[art]
-  const sprite = source ? spriteOf(source) : null
-  if (!sprite) return null
-  const frames = framesOf(source, isBig ? TERM_UPDATE : TERM_HEAD)
+  // Everywhere else the small octopus, three rows tall beside the header's three lines, as big as Claude Code's own mark; on the
+  // update screen the same drawing twice as large
+  const play = TERM_PLAYS[art] ?? { frames: ['rest'], color: 'live', frameMs: 0, loops: 1 }
+  const color = colorOf(play.color === 'live' ? termLive || LIVE : play.color)
+  const frames = play.frames.map(name => (size > HEAD_MARK ? doubledCells : quadCells)(TERM_OCTO[name] ?? TERM_OCTO_HEAD, color))
   return (
     <Box key={key} flexShrink={0}>
-      {liveRaster(ui, $, requestId, `${key}-${art}-${mark}`, frames, sprite.frameMs, sprite.loops, elapsed)}
+      {liveRaster(ui, $, requestId, `${key}-${art}-${mark}`, frames, play.frameMs, play.loops, elapsed)}
     </Box>
   )
 }
@@ -381,10 +443,13 @@ const makeTermPicture = async ($: EngineInterface, path: string, columns: number
   const width = Number(/pixelWidth:\s*(\d+)/.exec(said)?.[1] ?? 0)
   const height = Number(/pixelHeight:\s*(\d+)/.exec(said)?.[1] ?? 0)
   if (!width || !height) return null
-  // Pixels as wide as the cells, as many down as keep its shape (a cell is two pixels tall), a tall one narrowed to fit
-  let w = Math.max(1, Math.min(columns, width))
-  let h = Math.max(1, Math.round((w * height) / width))
-  if (h > TERM_PIC_ROWS * 2) (h = TERM_PIC_ROWS * 2), (w = Math.max(1, Math.round((h * width) / height)))
+  // Four pixels to a cell, two across and two down, so twice as many across as cells and as many down as keep its shape (a cell
+  // is twice as tall as wide); a tall one narrowed to fit
+  let w = Math.max(2, Math.min(columns, width) * 2)
+  let h = Math.max(2, Math.round((w * height) / width / 2))
+  if (h > TERM_PIC_ROWS * 2) (h = TERM_PIC_ROWS * 2), (w = Math.max(2, Math.round((h * 2 * width) / height)))
+  w += w % 2
+  h += h % 2
   const out = `${dir}/thumbs/term-${Math.random().toString(36).slice(2, 10)}.bmp`
   try {
     await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
@@ -392,7 +457,7 @@ const makeTermPicture = async ($: EngineInterface, path: string, columns: number
     if (made.exitCode !== 0) return null
     const read = (await $.fs.read(out, { as: 'bytes' })) as { base64: string }
     const pic = bmpPixels(fromBase64(read.base64))
-    return pic ? halfBlocks(pic.px, pic.width, pic.height) : null
+    return pic ? quarterBlocks(pic.px, pic.width, pic.height) : null
   } finally {
     await $.process.run(['rm', '-f', out]).catch(() => undefined)
   }

@@ -456,7 +456,19 @@ const note = (ui: Ui, key: string, text: string) => (
 
 // A switch of two or more: the chosen one filled, the others plain and dim; each the same width, so nothing moves on a press
 const SEGMENT = '#80808050'
-const segments = (ui: Ui, key: string, items: { label: string; isOn: boolean; onPress: () => void }[], width: number) => (
+const segments = (ui: Ui, key: string, items: { label: string; isOn: boolean; onPress: () => void }[], width: number) =>
+  // The terminal has no fill to mark the chosen one: there it is a filled dot before it, an empty one before each other
+  'isTerminal' in ui ? (
+    <ui.Box key={key} flexDirection="row" flexShrink={0} gap={2} height={1}>
+      {items.map(item =>
+        item.isOn ? (
+          <ui.Text key={`${key}-${item.label}`} bold>{`● ${item.label}`}</ui.Text>
+        ) : (
+          <ui.Button key={`${key}-${item.label}-${view.presses}`} label={`○ ${item.label}`} plain dimColor onPress={item.onPress} />
+        ),
+      )}
+    </ui.Box>
+  ) : (
   <ui.Box key={key} flexDirection="row" flexShrink={0} backgroundColor={FILL} height={1}>
     {items.map(item => (
       <ui.Box key={`${key}-${item.label}`} width={width} height={1} justifyContent="center" alignItems="center" flexShrink={0} backgroundColor={item.isOn ? SEGMENT : undefined}>
@@ -464,7 +476,7 @@ const segments = (ui: Ui, key: string, items: { label: string; isOn: boolean; on
       </ui.Box>
     ))}
   </ui.Box>
-)
+  )
 // One of the headline figures: the number large in weight, what it is under it
 const tile = (ui: Ui, key: string, value: string, label: string, wraps = false) => (
   <ui.Box key={key} flexDirection="column" flexGrow={1} flexShrink={1} width="30%" minWidth={0} backgroundColor={FILL} paddingX={2} paddingY={1}>

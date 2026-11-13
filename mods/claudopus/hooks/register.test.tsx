@@ -4616,10 +4616,10 @@ test('in the terminal the octopus and the marks of work are cells that move in p
   await $.agent.spawn({ ...spawn, prompt: 'Fix the nose.' } as never)
 
   const pane = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
-  // The header's octopus at work: the small one, in the middle of a box the waving one fits, two pixels to a cell
+  // The header's octopus at work: three rows tall beside the header's three lines, four pixels to a cell
   const head = (await pane.findAll({ type: 'Raster' })).find(one => String(one.key).startsWith('head-mark-working-'))
-  expect(head?.props.columns).toBe(18)
-  expect(head?.props.rows).toBe(9)
+  expect(head?.props.columns).toBe(7)
+  expect(head?.props.rows).toBe(3)
   // The card's three dots, a bright one passing along them
   const dots = (await pane.findAll({ type: 'Raster' })).find(one => String(one.key) === 'live-a1')
   expect(dots?.props.columns).toBe(3)
@@ -4666,11 +4666,12 @@ test("in the terminal a picture a work made is drawn as cells in its colours, ma
   await until(async () => (await tab.find({ type: 'Button', text: /chart\.svg/ })) ?? (await keyed(tab, 'pic-open-1-0')))
   // Made from a timer once the tab is drawn, then drawn again
   const cells = await until(async () => (await clock.advance(10), (await tab.findAll({ type: 'Raster' })).find(one => String(one.key) === 'pic-cells-1-0')))
-  // Two pixels wide, so two cells, one row: red over blue, then green over white
-  expect([cells?.props.columns, cells?.props.rows]).toEqual([2, 1])
+  // Four pixels to a cell, two across and two down: the bitmap's four pixels are one cell
+  expect([cells?.props.columns, cells?.props.rows]).toEqual([1, 1])
   expect(asked.some(argv => argv.includes('-z') && argv.includes('bmp'))).toBe(true)
-  // ▀ (0x2580) in red on blue: the first cell's three little-endian words
-  expect(String(cells?.props.cells).slice(0, 16)).toBe('gCUAAAAA/wD/AAAA')
+  // One cell of three little-endian words: a block glyph (0x2580 to 0x259F) in one group's colour over the other's
+  expect(String(cells?.props.cells).length).toBe(16)
+  expect(/^[g-n]CUA/.test(String(cells?.props.cells))).toBe(true)
   await tab.unmount()
   await pane.unmount()
 })
@@ -4712,7 +4713,7 @@ test('in the terminal each header button has a key, and a line says how to reach
   await idle.unmount()
 
   const held = await $.ui.mount({ ...LIST, props: { ...LIST.props, isFocused: true }, surface: 'terminal' } as never)
-  expect(await textOf(held as never)).toContain('Esc back to the chat')
+  expect(await textOf(held as never)).toContain('Esc chat')
   await held.unmount()
 
   // The app has its own pointer and keys: no such line there

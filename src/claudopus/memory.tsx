@@ -89,7 +89,7 @@ const showMemory = async ($: EngineInterface, surface: RenderSurface) => {
 }
 const memoryButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="memory-button" flexShrink={0}>
-    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey={isKeyed ? 'm' : undefined} onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
+    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey={isKeyed ? 'm' : undefined} plain={isKeyed ? true : undefined} onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
   </ui.Box>
 )
 

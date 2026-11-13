@@ -1,6 +1,31 @@
 // The panel's drawing: the Claudopus pane, a work's Details and a workflow's, every card in them
 
+// Back from a tab to the panel, in the terminal: the tab is closed and the panel, opened again, holds the keys
+const backToPanel = async ($: EngineInterface, id: string) => {
+  await $.ui.close({ id }).catch(() => undefined)
+  await $.ui.close({ id: LIST }).catch(() => undefined)
+  await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS, focus: true })
+}
 const panelHooks = (on: On) => {
+
+  // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
+  // tab of the mod's but the panel has a first row whose key, p, closes it and hands the keys back to the panel
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    const id = e.requestId ?? ''
+    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start))
+    if (e.surface !== 'terminal' || !isTab) return next(e)
+    const { Box, Button, Text } = uiOf($, e)
+    const body = await next({ ...e, props: { ...e.props, scroll: { ...e.props.scroll, bodyRows: Math.max(1, e.props.scroll.bodyRows - 2) } } } as typeof e)
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
+          <Button key="tab-back" label="Panel" plain hotkey="p" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
+          <Text dimColor>{e.props.isFocused ? 'Tab Enter press · arrows scroll · Esc chat' : 'ctrl+x Tab for keys'}</Text>
+        </Box>
+        {body}
+      </Box>
+    )
+  })
 
   // Beside the chat: one small card per piece of work under way, as wide as the panel, every card the same height whatever the work
   // writes. Work that has ended leaves the panel. A card's Details is a tab of its own, drawn here too: all its to-dos, then its own chat
@@ -163,7 +188,12 @@ const panelHooks = (on: On) => {
     // The small card: its title, which opens its Details, with Stop at the far end of that row; where it stands and how many
     // to-dos are done; the line the work last wrote beside the three dots; its helpers. Each part has a fixed number of rows
     // and is clipped to them, so a card never changes height as the work goes
+    let cardNo = 0
+    let keyed = false
     const small = (one: Todo) => {
+      // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
+      cardNo += 1
+      const digit = keyed && cardNo <= 9 ? String(cardNo) : undefined
       const kept = one.items.filter(item => item.state !== 'dropped')
       const done = kept.filter(item => item.state === 'done').length
       const tree = treeUnder(one)
@@ -175,7 +205,7 @@ const panelHooks = (on: On) => {
             <Box flexDirection="column">
               <Box flexDirection="row" gap={1} height={1} overflow="hidden">
                 <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
-                  <Button key={`open-${one.id}-${presses}`} plain hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
+                  <Button key={`open-${one.id}-${presses}`} plain hotkey={digit} hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
                     <Text bold wrap="truncate-end">{titleOf(one)}</Text>
                   </Button>
                 </Box>
@@ -807,6 +837,7 @@ const panelHooks = (on: On) => {
                 key={`finished-fold-${presses}`}
                 label={`${isOpen ? '▾' : '▸'} Finished ${finished.length + endedFlows.length}`}
                 plain
+                hotkey={keyed ? 'f' : undefined}
                 onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
               />
             </Box>
@@ -965,6 +996,7 @@ const panelHooks = (on: On) => {
     // A letter for each header button, in the terminal alone, and only while the panel has no box to type in (an ask's reply, a
     // password): there the letters are the person's words, never a press
     const isKeyed = e.surface === 'terminal' && !head.asks
+    keyed = isKeyed
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
@@ -1010,7 +1042,7 @@ const panelHooks = (on: On) => {
                 button above answers its first letter */}
             {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
               <Text key="head-keys" dimColor wrap="wrap">
-                {e.props.isFocused ? `${isKeyed ? 'Keys: r s m c a open a tab · ' : ''}Tab and Enter press · arrows scroll · Esc back to the chat` : 'ctrl+x Tab: use the panel from the keys'}
+                {e.props.isFocused ? 'Press a key shown · Tab Enter press · Esc chat' : 'ctrl+x Tab for keys'}
               </Text>
             ) : null}
           </Box>

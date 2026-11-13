@@ -262,10 +262,11 @@ const termBox = (Box: Ui['Box']) => (props: BoxArgs) => {
   const framed = isFrame ? {} : { paddingY, paddingTop, paddingBottom }
   return Box({ ...rest, ...framed, ...(isFrame ? {} : { backgroundColor: TERM_SOLID }) } as BoxArgs)
 }
-// The element table a drawing uses: the surface's own, with the terminal's Box taking the app's tints as above
+// The element table a drawing uses: the surface's own, with the terminal's Box taking the app's tints as above and a mark
+// (isTerminal) the views in other files read, which are handed the table alone
 const uiOf = <E extends Parameters<EngineInterface['ui']['resolve']>[0]>($: EngineInterface, e: E): Ui => {
   const ui = $.ui.resolve(e) as Ui
-  return e.surface === 'terminal' ? ({ ...ui, Box: termBox(ui.Box) } as Ui) : ui
+  return e.surface === 'terminal' ? ({ ...ui, Box: termBox(ui.Box), isTerminal: true } as Ui) : ui
 }
 // One part of a report's view or of the list: a filled block with a bold heading and, at its right, a dim count
 const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => (
@@ -540,7 +541,7 @@ const openConfig = async ($: EngineInterface) => {
 }
 const configButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="config-button" flexShrink={0}>
-    <ui.Button key={`config-open-${presses}`} label="Config" hotkey={isKeyed ? 'c' : undefined} onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
+    <ui.Button key={`config-open-${presses}`} label="Config" hotkey={isKeyed ? 'c' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
   </ui.Box>
 )
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
@@ -1892,7 +1893,7 @@ const reportsButton = ($: EngineInterface, ui: Ui, all: Report[], isKeyed = fals
   if (!list.length) return null
   return (
     <Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey={isKeyed ? 'r' : undefined} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
+      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey={isKeyed ? 'r' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
     </Box>
   )
 }
@@ -1924,16 +1925,20 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
     </Box>
   )
   // One row, one line: the title pressed opens it; when and Archive sit at the right, the same width on every row
+  let rowNo = 0
   const row = (entry: Report[]) => {
     const r = entry[0]
     if (!r) return null
+    // In the terminal the first nine rows are numbered, and the number opens the result
+    rowNo += 1
+    const digit = 'isTerminal' in ui && rowNo <= 9 ? String(rowNo) : undefined
     return (
       <Box key={`entry-${r.id}`} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
         <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
           {/* In the column the folded rows' labels start in */}
           <Box width={1} flexShrink={0} />
           <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
-            <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - 22)} plain onPress={() => openReport($, r.id)} />
+            <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - (digit ? 25 : 22))} plain hotkey={digit} onPress={() => openReport($, r.id)} />
           </Box>
         </Box>
         <Box width={6} flexShrink={0} justifyContent="flex-end">
@@ -2060,8 +2065,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
               {pictures.length > 1 ? (
                 <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-                  <Button key={`report-prev-${presses}`} label="‹ Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
-                  <Button key={`report-next-${presses}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)} />
+                  <Button key={`report-prev-${presses}`} label={'isTerminal' in ui ? 'Previous' : '‹ Previous'} plain={'isTerminal' in ui ? true : undefined} hotkey={'isTerminal' in ui ? 'b' : undefined} onPress={() => show((at + pictures.length - 1) % pictures.length)} />
+                  <Button key={`report-next-${presses}`} label={'isTerminal' in ui ? 'Next' : 'Next ›'} plain={'isTerminal' in ui ? true : undefined} hotkey={'isTerminal' in ui ? 'n' : undefined} onPress={() => show((at + 1) % pictures.length)} />
                 </Box>
               ) : null}
             </Box>,
@@ -2194,7 +2199,7 @@ const showMemory = async ($: EngineInterface, surface: RenderSurface) => {
 }
 const memoryButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="memory-button" flexShrink={0}>
-    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey={isKeyed ? 'm' : undefined} onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
+    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey={isKeyed ? 'm' : undefined} plain={isKeyed ? true : undefined} onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
   </ui.Box>
 )
 
@@ -2392,7 +2397,7 @@ const openStats = async ($: EngineInterface) => {
 }
 const statsButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="stats-button" flexShrink={0}>
-    <ui.Button key={`stats-open-${presses}`} label="Stats" hotkey={isKeyed ? 's' : undefined} onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
+    <ui.Button key={`stats-open-${presses}`} label="Stats" hotkey={isKeyed ? 's' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
   </ui.Box>
 )
 
@@ -2412,7 +2417,7 @@ const openAbout = async ($: EngineInterface) => {
 }
 const aboutButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="about-button" flexShrink={0}>
-    <ui.Button key={`about-open-${presses}`} label="About" hotkey={isKeyed ? 'a' : undefined} onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
+    <ui.Button key={`about-open-${presses}`} label="About" hotkey={isKeyed ? 'a' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
   </ui.Box>
 )
 // The version this chat loaded, read once from its own copy, so a chat on an older copy shows its own number; and a newer one the
@@ -2629,6 +2634,40 @@ const halfBlocks = (pixels: ArrayLike<number>, width: number, height: number): C
     }
   return { columns: width, rows, cells: packed(words) }
 }
+// A picture's pixels four to a cell, two across and two down: a cell has two colours, so its four pixels are split into the two
+// groups that lose least (▘▝▖▗ and their joins in one group's colour over the other's), each group its pixels' mean. Twice as
+// sharp across as halves, edges kept where a cell holds one
+const quarterBlocks = (pixels: ArrayLike<number>, width: number, height: number): Cells => {
+  const columns = Math.floor(width / 2)
+  const rows = Math.floor(height / 2)
+  const words: number[] = []
+  const part = (n: number, shift: number) => (n >> shift) & 255
+  for (let r = 0; r < rows; r += 1)
+    for (let c = 0; c < columns; c += 1) {
+      const four = [pixels[2 * r * width + 2 * c] ?? -1, pixels[2 * r * width + 2 * c + 1] ?? -1, pixels[(2 * r + 1) * width + 2 * c] ?? -1, pixels[(2 * r + 1) * width + 2 * c + 1] ?? -1]
+      if (four.every(one => one < 0)) {
+        words.push(0x20, TERM_DEFAULT, TERM_DEFAULT)
+        continue
+      }
+      const px = four.map(one => (one < 0 ? 0xffffff : one))
+      let best = { mask: 15, cost: Infinity, on: 0, off: 0 }
+      // Each way to split four pixels in two groups, the first pixel always in the lit one; 15 is all four in one colour
+      for (const mask of [15, 1, 3, 5, 7, 9, 11, 13]) {
+        const mean = (lit: boolean) => {
+          const mine = px.filter((_, i) => Boolean((mask >> i) & 1) === lit)
+          if (!mine.length) return { color: 0, cost: 0 }
+          const avg = [16, 8, 0].map(shift => Math.round(mine.reduce((sum, one) => sum + part(one, shift), 0) / mine.length))
+          const cost = mine.reduce((sum, one) => sum + [16, 8, 0].reduce((d, shift, i) => d + (part(one, shift) - (avg[i] ?? 0)) ** 2, 0), 0)
+          return { color: ((avg[0] ?? 0) << 16) | ((avg[1] ?? 0) << 8) | (avg[2] ?? 0), cost }
+        }
+        const on = mean(true)
+        const off = mean(false)
+        if (on.cost + off.cost < best.cost) best = { mask, cost: on.cost + off.cost, on: on.color, off: off.color }
+      }
+      words.push(QUADS.codePointAt(best.mask) ?? 0x2588, best.on, best.mask === 15 ? TERM_DEFAULT : best.off)
+    }
+  return { columns, rows, cells: packed(words) }
+}
 // One glyph per cell in one colour, on the terminal's own
 const glyphCells = (glyphs: string, color: number): Cells => ({
   columns: [...glyphs].length,
@@ -2823,12 +2862,50 @@ const brailleOf = (rows: string[]) => {
   }
   return out
 }
-// How big the octopus is in each place, in pixels (two to a cell, upright): the header's and About's fit the waving octopus,
-// whose arms reach wider than the others', so the words beside it never move; the update screen's is the big jumping one
-const TERM_HEAD = { width: 18, height: 18 }
-const TERM_UPDATE = { width: 24, height: 22 }
-// Which drawing the terminal draws in a place: the header's are the small octopus (the computers of the working one need more
-// cells than a header has), the update screen's the big one; the band's is the tiny one
+// The terminal's octopus: 14 by 6 pixels, each cell four of them (▘▝▖▗ and their joins) in one colour on the terminal's own, so it
+// is three rows tall, the size of Claude Code's own mark beside its three lines. Each picture of it, and how each state plays them
+const TERM_OCTO_HEAD = ['...########...', '..##########..', '..##..##..##..', '..##########..']
+const TERM_OCTO: Record<string, string[]> = {
+  rest: [...TERM_OCTO_HEAD, '..#.#.##.#.#..', '.#..#....#..#.'],
+  paddle: [...TERM_OCTO_HEAD, '..#.#.##.#.#..', '..#.#....#.#..'],
+  hand: ['...########.#.', '..##########.#', '..##..##..###.', '..##########..', '..#.#.##.#....', '.#..#....#....'],
+  cheer: [...TERM_OCTO_HEAD, '.#.#..##..#.#.', '#..#......#..#'],
+  wave: ['...########...', '..##########.#', '..##..##..####', '..##########..', '..#.#.##.#....', '.#..#....#....'],
+  jump: ['..............', '...########...', '..##########..', '..##..##..##..', '..##########..', '.#.#.#..#.#.#.'],
+}
+// At work it paddles on; something waiting raises a hand in amber; finished, it cheers in green four times; About waves; just
+// updated, it jumps in blue
+const TERM_PLAYS: Partial<Record<keyof typeof ART, { frames: string[]; color: string; frameMs: number; loops: number }>> = {
+  mark: { frames: ['rest'], color: 'live', frameMs: 0, loops: 1 },
+  working: { frames: ['rest', 'paddle'], color: 'live', frameMs: 400, loops: Infinity },
+  workingSmall: { frames: ['rest', 'paddle'], color: 'live', frameMs: 400, loops: Infinity },
+  asking: { frames: ['hand', 'rest'], color: NEEDS, frameMs: 600, loops: Infinity },
+  happy: { frames: ['cheer', 'rest'], color: '#4EBA65', frameMs: 250, loops: 4 },
+  happySmall: { frames: ['cheer', 'rest'], color: '#4EBA65', frameMs: 250, loops: 4 },
+  wave: { frames: ['wave', 'rest'], color: 'live', frameMs: 400, loops: 4 },
+  updated: { frames: ['jump', 'rest'], color: '#4E93EF', frameMs: 300, loops: 6 },
+}
+const QUADS = ' ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█'
+const quadCells = (rows: string[], color: number): Cells => {
+  const width = Math.ceil((rows[0]?.length ?? 0) / 2)
+  const height = Math.ceil(rows.length / 2)
+  const on = (x: number, y: number) => (rows[y]?.[x] === '#' ? 1 : 0)
+  const words: number[] = []
+  for (let r = 0; r < height; r += 1)
+    for (let c = 0; c < width; c += 1) {
+      const n = on(2 * c, 2 * r) | (on(2 * c + 1, 2 * r) << 1) | (on(2 * c, 2 * r + 1) << 2) | (on(2 * c + 1, 2 * r + 1) << 3)
+      words.push(n ? (QUADS.codePointAt(n) ?? 0x20) : 0x20, n ? color : TERM_DEFAULT, TERM_DEFAULT)
+    }
+  return { columns: width, rows: height, cells: packed(words) }
+}
+// Twice as large: each pixel two cells wide and one tall, which is square on a terminal
+const doubledCells = (rows: string[], color: number): Cells => {
+  const width = (rows[0]?.length ?? 0) * 2
+  const words: number[] = []
+  for (const row of rows) for (const ch of row) for (let i = 0; i < 2; i += 1) words.push(ch === '#' ? 0x2588 : 0x20, ch === '#' ? color : TERM_DEFAULT, TERM_DEFAULT)
+  return { columns: width, rows: rows.length, cells: packed(words) }
+}
+// Which drawing the terminal draws in a place: the band's is the tiny one, every other the small one above
 const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, alt: string, $?: EngineInterface, requestId?: string) => {
   if (!('Raster' in ui)) return null
   const { Box } = ui
@@ -2841,7 +2918,7 @@ const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, a
   const elapsed = now - (momentStarts.get(mark) ?? now)
   if (size <= BAND_MARK) {
     const tiny = art === 'happySmall' || art === 'happy' ? TINY.happy : TINY.working
-    const color = art === 'happySmall' || art === 'happy' ? colorOf('#4EBA65') : colorOf(LIVE)
+    const color = art === 'happySmall' || art === 'happy' ? colorOf('#4EBA65') : colorOf(art === 'asking' ? NEEDS : termLive || LIVE)
     const frames = tiny.map(rows => glyphCells(brailleOf(rows), color))
     // Happy lifts its arms four times over the finish's two seconds, then rests; at work it paddles on
     const loops = tiny === TINY.happy ? 4 : Infinity
@@ -2851,24 +2928,14 @@ const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, a
       </Box>
     )
   }
-  const small: Partial<Record<keyof typeof ART, string>> = {
-    mark: ART.mark,
-    working: ART.workingSmall,
-    workingSmall: ART.workingSmall,
-    happy: ART.happySmall,
-    happySmall: ART.happySmall,
-    wave: ART.wave,
-    asking: ART.asking,
-    updated: ART.happySmall ? updatedArt(ART.happySmall, FLOW) : '',
-  }
-  const isBig = size > HEAD_MARK
-  const source = isBig ? ART[art] : small[art] || ART[art]
-  const sprite = source ? spriteOf(source) : null
-  if (!sprite) return null
-  const frames = framesOf(source, isBig ? TERM_UPDATE : TERM_HEAD)
+  // Everywhere else the small octopus, three rows tall beside the header's three lines, as big as Claude Code's own mark; on the
+  // update screen the same drawing twice as large
+  const play = TERM_PLAYS[art] ?? { frames: ['rest'], color: 'live', frameMs: 0, loops: 1 }
+  const color = colorOf(play.color === 'live' ? termLive || LIVE : play.color)
+  const frames = play.frames.map(name => (size > HEAD_MARK ? doubledCells : quadCells)(TERM_OCTO[name] ?? TERM_OCTO_HEAD, color))
   return (
     <Box key={key} flexShrink={0}>
-      {liveRaster(ui, $, requestId, `${key}-${art}-${mark}`, frames, sprite.frameMs, sprite.loops, elapsed)}
+      {liveRaster(ui, $, requestId, `${key}-${art}-${mark}`, frames, play.frameMs, play.loops, elapsed)}
     </Box>
   )
 }
@@ -2949,10 +3016,13 @@ const makeTermPicture = async ($: EngineInterface, path: string, columns: number
   const width = Number(/pixelWidth:\s*(\d+)/.exec(said)?.[1] ?? 0)
   const height = Number(/pixelHeight:\s*(\d+)/.exec(said)?.[1] ?? 0)
   if (!width || !height) return null
-  // Pixels as wide as the cells, as many down as keep its shape (a cell is two pixels tall), a tall one narrowed to fit
-  let w = Math.max(1, Math.min(columns, width))
-  let h = Math.max(1, Math.round((w * height) / width))
-  if (h > TERM_PIC_ROWS * 2) (h = TERM_PIC_ROWS * 2), (w = Math.max(1, Math.round((h * width) / height)))
+  // Four pixels to a cell, two across and two down, so twice as many across as cells and as many down as keep its shape (a cell
+  // is twice as tall as wide); a tall one narrowed to fit
+  let w = Math.max(2, Math.min(columns, width) * 2)
+  let h = Math.max(2, Math.round((w * height) / width / 2))
+  if (h > TERM_PIC_ROWS * 2) (h = TERM_PIC_ROWS * 2), (w = Math.max(2, Math.round((h * 2 * width) / height)))
+  w += w % 2
+  h += h % 2
   const out = `${dir}/thumbs/term-${Math.random().toString(36).slice(2, 10)}.bmp`
   try {
     await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
@@ -2960,7 +3030,7 @@ const makeTermPicture = async ($: EngineInterface, path: string, columns: number
     if (made.exitCode !== 0) return null
     const read = (await $.fs.read(out, { as: 'bytes' })) as { base64: string }
     const pic = bmpPixels(fromBase64(read.base64))
-    return pic ? halfBlocks(pic.px, pic.width, pic.height) : null
+    return pic ? quarterBlocks(pic.px, pic.width, pic.height) : null
   } finally {
     await $.process.run(['rm', '-f', out]).catch(() => undefined)
   }
@@ -6325,17 +6395,47 @@ const bandHooks = (on: On) => {
     // the redraw set for the pause's end is read so the band leaves or goes back to work then
     const happy = isHappy(cards, await $.clock.now())
     if (happy) await read($, tick)
-    if (!working.length && !happy) return next(e)
-
     const ui = uiOf($, e)
-    const { Box, Text } = ui
+    const { Box, Button, Text } = ui
+
+    // In the terminal the panel is out of the keys' reach until ctrl+x Tab, and a narrow one seats no panel until it is asked for:
+    // there what needs the person is said here, every chat's, with its answers numbered. A bare digit typed in an empty prompt
+    // presses a band's Button, so one key answers it from where the person already is
+    if (e.surface === 'terminal') {
+      const asking = [...cards.filter(one => !one.parentId && one.ask), ...cardsOf(await read($, others)).filter(one => one.ask && !answeredHere.has(`${one.id}:${one.ask.at}`))]
+      const [first] = asking
+      const ask = first?.ask
+      if (first && ask) {
+        const answers = (ask.choices?.length ? ask.choices : DEFAULT_ANSWERS).slice(0, 9)
+        return (
+          <Box flexDirection="column">
+            <Box flexDirection="row" gap={1} height={1} overflow="hidden">
+              {octopus(ui, 'band-mark', 'asking', BAND_MARK, 'Claudopus, something needs you', $, { surface: e.surface, requestId: e.requestId })}
+              <Box flexShrink={1} minWidth={0}>
+                <Text color={NEEDS} bold wrap="truncate-end">{oneLine(ask.text)}</Text>
+              </Box>
+            </Box>
+            {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
+            <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
+              {answers.map((choice, n) => (
+                <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))} />
+              ))}
+              <Text dimColor>{`type the number${asking.length > 1 ? ` · ${asking.length - 1} more waiting` : ''} · /claudopus to reply in words`}</Text>
+            </Box>
+          </Box>
+        )
+      }
+    }
+    if (!working.length && !happy) return next(e)
+    // A narrow terminal seats no panel until it is asked for: the band says how
+    const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
     // What the work that last said something is doing, in a few whole words: the to-do it is on (a to-do is written in a few
     // words), else its title. Never cut with an ellipsis: the band is one line
     const latest = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')
     const [lead] = [...working].sort((a, b) => (latest(b)?.at ?? b.startedAt) - (latest(a)?.at ?? a.startedAt))
     const doing = lead ? lead.items.find(item => item.state === 'doing')?.text || lead.title || 'Working' : '✓ Finished'
-    const others = working.length - 1
+    const more = working.length - 1
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
@@ -6343,9 +6443,14 @@ const bandHooks = (on: On) => {
         <Box flexShrink={1} minWidth={0}>
           <Text dimColor wrap="truncate-end">{oneLine(doing)}</Text>
         </Box>
-        {others > 0 ? (
+        {more > 0 ? (
           <Box flexShrink={0}>
-            <Text dimColor>{`· +${others} more`}</Text>
+            <Text dimColor>{`· +${more} more`}</Text>
+          </Box>
+        ) : null}
+        {isPanelAway ? (
+          <Box flexShrink={0}>
+            <Text dimColor>· /claudopus shows the panel</Text>
           </Box>
         ) : null}
       </Box>
@@ -6356,7 +6461,32 @@ const bandHooks = (on: On) => {
 
 // The panel's drawing: the Claudopus pane, a work's Details and a workflow's, every card in them
 
+// Back from a tab to the panel, in the terminal: the tab is closed and the panel, opened again, holds the keys
+const backToPanel = async ($: EngineInterface, id: string) => {
+  await $.ui.close({ id }).catch(() => undefined)
+  await $.ui.close({ id: LIST }).catch(() => undefined)
+  await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS, focus: true })
+}
 const panelHooks = (on: On) => {
+
+  // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
+  // tab of the mod's but the panel has a first row whose key, p, closes it and hands the keys back to the panel
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    const id = e.requestId ?? ''
+    const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start))
+    if (e.surface !== 'terminal' || !isTab) return next(e)
+    const { Box, Button, Text } = uiOf($, e)
+    const body = await next({ ...e, props: { ...e.props, scroll: { ...e.props.scroll, bodyRows: Math.max(1, e.props.scroll.bodyRows - 2) } } } as typeof e)
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
+          <Button key="tab-back" label="Panel" plain hotkey="p" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
+          <Text dimColor>{e.props.isFocused ? 'Tab Enter press · arrows scroll · Esc chat' : 'ctrl+x Tab for keys'}</Text>
+        </Box>
+        {body}
+      </Box>
+    )
+  })
 
   // Beside the chat: one small card per piece of work under way, as wide as the panel, every card the same height whatever the work
   // writes. Work that has ended leaves the panel. A card's Details is a tab of its own, drawn here too: all its to-dos, then its own chat
@@ -6519,7 +6649,12 @@ const panelHooks = (on: On) => {
     // The small card: its title, which opens its Details, with Stop at the far end of that row; where it stands and how many
     // to-dos are done; the line the work last wrote beside the three dots; its helpers. Each part has a fixed number of rows
     // and is clipped to them, so a card never changes height as the work goes
+    let cardNo = 0
+    let keyed = false
     const small = (one: Todo) => {
+      // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
+      cardNo += 1
+      const digit = keyed && cardNo <= 9 ? String(cardNo) : undefined
       const kept = one.items.filter(item => item.state !== 'dropped')
       const done = kept.filter(item => item.state === 'done').length
       const tree = treeUnder(one)
@@ -6531,7 +6666,7 @@ const panelHooks = (on: On) => {
             <Box flexDirection="column">
               <Box flexDirection="row" gap={1} height={1} overflow="hidden">
                 <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
-                  <Button key={`open-${one.id}-${presses}`} plain hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
+                  <Button key={`open-${one.id}-${presses}`} plain hotkey={digit} hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
                     <Text bold wrap="truncate-end">{titleOf(one)}</Text>
                   </Button>
                 </Box>
@@ -7163,6 +7298,7 @@ const panelHooks = (on: On) => {
                 key={`finished-fold-${presses}`}
                 label={`${isOpen ? '▾' : '▸'} Finished ${finished.length + endedFlows.length}`}
                 plain
+                hotkey={keyed ? 'f' : undefined}
                 onPress={() => void ((presses += 1), update($, view, v => ({ ...v, isFinishedOpen: !v.isFinishedOpen })))}
               />
             </Box>
@@ -7321,6 +7457,7 @@ const panelHooks = (on: On) => {
     // A letter for each header button, in the terminal alone, and only while the panel has no box to type in (an ask's reply, a
     // password): there the letters are the person's words, never a press
     const isKeyed = e.surface === 'terminal' && !head.asks
+    keyed = isKeyed
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
@@ -7366,7 +7503,7 @@ const panelHooks = (on: On) => {
                 button above answers its first letter */}
             {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
               <Text key="head-keys" dimColor wrap="wrap">
-                {e.props.isFocused ? `${isKeyed ? 'Keys: r s m c a open a tab · ' : ''}Tab and Enter press · arrows scroll · Esc back to the chat` : 'ctrl+x Tab: use the panel from the keys'}
+                {e.props.isFocused ? 'Press a key shown · Tab Enter press · Esc chat' : 'ctrl+x Tab for keys'}
               </Text>
             ) : null}
           </Box>
@@ -7496,7 +7633,7 @@ const tabHooks = (on: On) => {
     const file = r.files[at] ?? ''
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
     // The terminal draws it as cells, as wide as the band it is in
-    const cells = e.surface === 'terminal' && (RASTER.test(file) || /\.svg$/i.test(file)) ? await termPictureOf($, `${reportPath(r)}/${file}`, Math.max(8, Math.min(60, e.props.bodyColumns - 6))) : null
+    const cells = e.surface === 'terminal' && (RASTER.test(file) || /\.svg$/i.test(file)) ? await termPictureOf($, `${reportPath(r)}/${file}`, Math.max(8, Math.min(160, e.props.bodyColumns - 4))) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
         {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, cells)}

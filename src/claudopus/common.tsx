@@ -245,10 +245,11 @@ const termBox = (Box: Ui['Box']) => (props: BoxArgs) => {
   const framed = isFrame ? {} : { paddingY, paddingTop, paddingBottom }
   return Box({ ...rest, ...framed, ...(isFrame ? {} : { backgroundColor: TERM_SOLID }) } as BoxArgs)
 }
-// The element table a drawing uses: the surface's own, with the terminal's Box taking the app's tints as above
+// The element table a drawing uses: the surface's own, with the terminal's Box taking the app's tints as above and a mark
+// (isTerminal) the views in other files read, which are handed the table alone
 const uiOf = <E extends Parameters<EngineInterface['ui']['resolve']>[0]>($: EngineInterface, e: E): Ui => {
   const ui = $.ui.resolve(e) as Ui
-  return e.surface === 'terminal' ? ({ ...ui, Box: termBox(ui.Box) } as Ui) : ui
+  return e.surface === 'terminal' ? ({ ...ui, Box: termBox(ui.Box), isTerminal: true } as Ui) : ui
 }
 // One part of a report's view or of the list: a filled block with a bold heading and, at its right, a dim count
 const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => (

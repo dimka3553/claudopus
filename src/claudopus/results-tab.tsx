@@ -214,7 +214,7 @@ const reportsButton = ($: EngineInterface, ui: Ui, all: Report[], isKeyed = fals
   if (!list.length) return null
   return (
     <Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey={isKeyed ? 'r' : undefined} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
+      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey={isKeyed ? 'r' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
     </Box>
   )
 }
@@ -246,16 +246,20 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
     </Box>
   )
   // One row, one line: the title pressed opens it; when and Archive sit at the right, the same width on every row
+  let rowNo = 0
   const row = (entry: Report[]) => {
     const r = entry[0]
     if (!r) return null
+    // In the terminal the first nine rows are numbered, and the number opens the result
+    rowNo += 1
+    const digit = 'isTerminal' in ui && rowNo <= 9 ? String(rowNo) : undefined
     return (
       <Box key={`entry-${r.id}`} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
         <Box flexDirection="row" alignItems="center" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
           {/* In the column the folded rows' labels start in */}
           <Box width={1} flexShrink={0} />
           <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
-            <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - 22)} plain onPress={() => openReport($, r.id)} />
+            <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - (digit ? 25 : 22))} plain hotkey={digit} onPress={() => openReport($, r.id)} />
           </Box>
         </Box>
         <Box width={6} flexShrink={0} justifyContent="flex-end">
@@ -382,8 +386,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
               {pictures.length > 1 ? (
                 <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-                  <Button key={`report-prev-${presses}`} label="‹ Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
-                  <Button key={`report-next-${presses}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)} />
+                  <Button key={`report-prev-${presses}`} label={'isTerminal' in ui ? 'Previous' : '‹ Previous'} plain={'isTerminal' in ui ? true : undefined} hotkey={'isTerminal' in ui ? 'b' : undefined} onPress={() => show((at + pictures.length - 1) % pictures.length)} />
+                  <Button key={`report-next-${presses}`} label={'isTerminal' in ui ? 'Next' : 'Next ›'} plain={'isTerminal' in ui ? true : undefined} hotkey={'isTerminal' in ui ? 'n' : undefined} onPress={() => show((at + 1) % pictures.length)} />
                 </Box>
               ) : null}
             </Box>,

@@ -35,7 +35,7 @@ test('in the terminal each header button has a key, and a line says how to reach
   await idle.unmount()
 
   const held = await $.ui.mount({ ...LIST, props: { ...LIST.props, isFocused: true }, surface: 'terminal' } as never)
-  expect(await textOf(held as never)).toContain('Esc back to the chat')
+  expect(await textOf(held as never)).toContain('Esc chat')
   await held.unmount()
 
   // The app has its own pointer and keys: no such line there
