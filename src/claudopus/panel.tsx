@@ -113,6 +113,12 @@ const panelHooks = (on: On) => {
               <Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} />
             </Box>
           ) : null}
+          {/* A command to type: Terminal opens with it typed, not run, only on this press */}
+          {canOpenTerminal(one) ? (
+            <Box flexDirection="row">
+              <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Opened in Terminal, typed, not run' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
+            </Box>
+          ) : null}
           <Box flexDirection="row" flexWrap="wrap" gap={1}>
             {answers.map((choice, n) => (
               <Button key={`${key}-choice-${n}-${presses}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />

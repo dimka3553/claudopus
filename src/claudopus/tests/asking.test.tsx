@@ -3,7 +3,7 @@
 test('work that needs the person\'s hands asks: its card stands out first with the ask, the text to paste with its Copy, and answers that go back to it', async ($, on) => {
   // Once its run has ended, a work's chat takes no more lines
   const ended = new Set<string>()
-  const { played, notified, appended, terminals, submitted } = world(on, { ended })
+  const { played, notified, appended, terminals, submitted, shown, files } = world(on, { ended })
   const clip: string[] = []
   on('ui.copy', (_, e) => (clip.push(e.text), { value: { isCopied: true } }) as never)
   await $.session.start(start)
@@ -95,12 +95,36 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect(await hrefs(list)).toContain('https://github.com/dimka3553/claudopus')
   expect(await until(async () => ((await hrefs(ears)).includes('https://claude.ai/directory/manage') ? true : undefined))).toBe(true)
 
-  // A command for the person to type is shown with its Copy, and the work is told to open a terminal for it (the app opens one
-  // only for Claude, never for a plugin's own code)
-  const told = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a2', text: 'Sign in to GitHub in the terminal that opened.', command: 'gh auth login', cwd: '/repo/site' } as never)
-  expect(told.result).toContain('mcp__terminal__open_terminal_tab with cwd "/repo/site"')
-  expect((await list.find({ type: 'Text', text: 'gh auth login' }))?.props.mono).toBe(true)
+  // A command for the person to type is shown with its Copy and an Open in Terminal button; nothing opens by itself, and the work
+  // is told to open none
+  const told = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a2', text: 'Sign in to GitHub.', command: "gh auth login --hostname 'github.com'", cwd: '/repo/site' } as never)
+  expect(told.result).not.toContain('mcp__terminal__open_terminal_tab')
+  expect(told.result).toContain('Do not open a terminal for it')
+  expect((await list.find({ type: 'Text', text: "gh auth login --hostname 'github.com'" }))?.props.mono).toBe(true)
   expect(terminals).toEqual([])
+  const openedBefore = shown.length
+  const openIn = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Open in Terminal')
+  expect(openIn).toBeDefined()
+  expect(shown.length).toBe(openedBefore)
+  // Its press opens Terminal with the command typed at a prompt in its folder, not run, and the button says so
+  await list.press({ key: openIn?.key ?? '' })
+  const opened = await until(async () => shown.slice(openedBefore).find(argv => String(argv[1]).endsWith('/open.command')))
+  const home = String(opened?.[1]).replace(/\/open\.command$/, '')
+  expect(files.get(`${home}/command.txt`)).toBe("gh auth login --hostname 'github.com'")
+  expect(files.get(`${home}/.zshrc`)).toContain('print -rz -- "$(<"$_claudopus_here/command.txt")"')
+  expect(files.get(`${home}/.zshrc`)).toContain("cd '/repo/site'")
+  expect(files.get(`${home}/open.command`)).toContain('exec /bin/zsh -i')
+  // Their own history file, and their own start files where their .zshenv moves them
+  expect(files.get(`${home}/.zshrc`)).toContain('HISTFILE="${ZDOTDIR:-$HOME}/.zsh_history"')
+  expect(files.get(`${home}/.zshenv`)).toContain('_CLAUDOPUS_DOT="$ZDOTDIR"')
+  expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === '✓ Opened in Terminal, typed, not run'))).toBeDefined()
+  expect(terminals).toEqual([])
+  // A folder with a quote in its name is quoted whole
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4b', agentId: 'a2', text: 'Run it here.', command: 'make', cwd: "/repo/it's here" } as never)
+  const before2 = shown.length
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Open in Terminal')?.key ?? '' })
+  const second = await until(async () => shown.slice(before2).find(argv => String(argv[1]).endsWith('/open.command')))
+  expect(files.get(String(second?.[1]))).toContain("cd '/repo/it'\\''s here'")
 
   // A reply written into work that then ends without another step was never read: the chat gets it, and the box says so
   ended.delete('a2')
@@ -133,5 +157,27 @@ test("while the person types into a card's reply box the list's running times st
   await clock.advance(31_000)
   expect(await until(async () => ((await time()) !== before ? true : undefined))).toBe(true)
   expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('The le')
+  await list.unmount()
+})
+
+test('an ask outlives the work that made it: amber after the work ends, with or without buttons of its own, until the person answers', async ($, on) => {
+  const { submitted, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'restart the old chat', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Restart the old chat', prompt: 'restart the old chat' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Run this to restart that chat yourself.', command: 'ssh m4 tmux respawn-pane -k -t claude' } as never)
+  await $.turn.complete({ answer: 'I could not restart it; the command is on your card.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  // Long after it finished, the ask is still there, amber, with its Done and Not now and its button for Terminal
+  await clock.advance(10 * 60_000)
+  expect((await until(async () => list.find({ type: 'Text', text: 'Run this to restart that chat yourself.' })))?.props.color).toBe('#E5A50A')
+  const labels = (await list.findAll({ type: 'Button' })).map(b => b.props.label)
+  expect(labels).toContain('Done')
+  expect(labels).toContain('Not now')
+  expect(labels).toContain('Open in Terminal')
+  // Done goes to the chat, which carries the finished work on, and the ask goes at once
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? '' })
+  expect(await until(async () => submitted.find(line => line.includes('pressed "Done"') && line.includes('Run this to restart that chat yourself.')))).toBeDefined()
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Run this to restart that chat yourself.' })) ? undefined : true))).toBe(true)
   await list.unmount()
 })

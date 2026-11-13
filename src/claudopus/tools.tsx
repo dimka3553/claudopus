@@ -62,7 +62,7 @@ const toolHooks = (on: On) => {
     return { result: items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing waits on ${who()}.` }
   })
 
-  // Work that needs the person's hands now: its card stands out with the ask and its Copy, until it is cleared or the work ends
+  // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
     const input = e as unknown as { text?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown }
     if (e.agentId === undefined) return { result: `Only background work asks through the panel; a chat's own thread asks ${who()} in its reply.` }
@@ -83,11 +83,10 @@ const toolHooks = (on: On) => {
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     // The same ask said again is not told again
     if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
-    // A command for the person gets a terminal at once, so they type it there without looking for one. The app runs its terminal
-    // tools only for Claude, never for a plugin's own code, so the work opens it
-    const terminal = command ? ` Now open a terminal for it yourself, at once: mcp__terminal__open_terminal_tab with cwd "${folder}" and a short title; never type or run the command in it.` : ''
-    const shown = [command ? 'the command with a Copy button' : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
-    return { result: `Shown on your card with ${shown}, and ${who()} was told. Any answer clears the ask and comes back to you as a message; ask again if it leaves something waiting. Clear it with empty text once it is done.${terminal}` }
+    // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
+    const terminal = command ? ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.` : ''
+    const shown = [command ? 'the command, a Copy button and an Open in Terminal button' : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
+    return { result: `Shown on your card with ${shown}, and ${who()} was told. It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, or to the chat once you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides

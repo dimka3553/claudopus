@@ -16,6 +16,58 @@ const copyAsk = ($: EngineInterface, id: string, text: string, surface: RenderSu
     })
     .catch(err => log($, `copy not made: ${String(err)}`))
 
+// A command to type opens in Terminal only when the person presses its button, typed at the prompt in the folder it is for and never
+// run: Return runs it. The app opens its own terminal tabs only for Claude, never for a plugin's own code, so it is the Mac's Terminal.
+// A small zsh start folder of its own reads the person's own start files, then types the command with `print -z`; folders an hour
+// old are cleared as the next one is made. A chat drawn on another Mac, or work on another Mac, has no button: this Mac is not theirs
+let openedKey = ''
+let opens = 0
+const zshQuoted = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`
+const canOpenTerminal = (one: Todo) => Boolean(one.ask?.isCommand && one.ask.copy) && !one.chat?.host && !isRunFromAfar
+const terminalFiles = (folder: string, home: string) => ({
+  // Their own .zshenv runs first; one that moves ZDOTDIR to their own folder is followed there afterwards, not before ours runs
+  '.zshenv': [
+    '[[ -f "${_CLAUDOPUS_DOT:-$HOME}/.zshenv" ]] && source "${_CLAUDOPUS_DOT:-$HOME}/.zshenv"',
+    `if [[ "$ZDOTDIR" != ${zshQuoted(home)} ]]; then _CLAUDOPUS_DOT="$ZDOTDIR"; ZDOTDIR=${zshQuoted(home)}; fi`,
+    '',
+  ].join('\n'),
+  // Then their own .zshrc, from their own folder, with the history file theirs again (the Mac's /etc/zshrc set it from ours)
+  '.zshrc': [
+    `_claudopus_here=${zshQuoted(home)}`,
+    'if [[ -n "$_CLAUDOPUS_DOT" ]]; then ZDOTDIR="$_CLAUDOPUS_DOT"; else unset ZDOTDIR; fi',
+    'unset _CLAUDOPUS_DOT',
+    '[[ "$HISTFILE" == "$_claudopus_here"/* ]] && HISTFILE="${ZDOTDIR:-$HOME}/.zsh_history"',
+    '[[ -f "${ZDOTDIR:-$HOME}/.zshrc" ]] && source "${ZDOTDIR:-$HOME}/.zshrc"',
+    `if cd ${zshQuoted(folder)} 2>/dev/null; then`,
+    "  print -P '%F{3}Claudopus typed the command below. Press Return to run it.%f'",
+    'else',
+    `  print -r -- $'\\e[33mClaudopus typed the command below, but its folder was not found:\\e[0m '${zshQuoted(folder)}`,
+    'fi',
+    'print -rz -- "$(<"$_claudopus_here/command.txt")"',
+    'unset _claudopus_here',
+    '',
+  ].join('\n'),
+  // Terminal's own saved sessions are left out of this one window, so its history stays the person's own file
+  'open.command': ['#!/bin/zsh', `cd ${zshQuoted(folder)} 2>/dev/null`, 'export _CLAUDOPUS_DOT="${ZDOTDIR-}" SHELL_SESSIONS_DISABLE=1', `ZDOTDIR=${zshQuoted(home)} exec /bin/zsh -i`, ''].join('\n'),
+})
+const openTerminal = async ($: EngineInterface, one: Todo) => {
+  const ask = one.ask
+  if (!ask?.copy || !canOpenTerminal(one)) return
+  const at = await $.clock.now()
+  const made = (opens += 1)
+  const base = `${dir}/terminal`
+  const home = `${base}/${slug(one.id) || 'work'}-${at}`
+  await $.fs.write(`${home}/command.txt`, ask.copy)
+  for (const [name, text] of Object.entries(terminalFiles(ask.cwd || cwd, home))) await $.fs.write(`${home}/${name}`, text)
+  const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
+  presses += 1
+  openedKey = r.exitCode === 0 ? `${one.id}:${ask.at}:${ask.copy}` : ''
+  if (r.exitCode !== 0) void log($, `terminal not opened: ${r.stderr.trim().slice(0, 160)}`)
+  redraw($)
+  $.clock.after(3000, () => void (opens === made && ((openedKey = ''), redraw($))))
+}
+
 // The person's answer to an ask, a button pressed or a reply in their own words: to work under way, a message it reads at its next
 // step; to work that has ended, a message to the chat, which carries the work on. Either way the ask goes at once, and the card
 // says briefly what was answered; the work turns amber again only by asking again

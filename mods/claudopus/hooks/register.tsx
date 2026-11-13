@@ -219,7 +219,7 @@ const KEEP =
 const KEEP_AGENTS = 'Keep the name or id of each background agent with its subject and where it stands.'
 // What every piece of background work is told as it starts: it keeps its own to-do in the panel true
 const PANEL_RULE =
-  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, a command for {name} to type in `command`, then open a terminal for it with mcp__terminal__open_terminal_tab; clear it with empty `text` once it is done.'
+  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, a command for {name} to type in `command` (the card opens a terminal for it on their press, so open none yourself); clear it with empty `text` once you have seen it done.'
 // What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
 // own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
 const STEER =
@@ -489,8 +489,8 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   endedAt: 0,
   status: 'working',
 })
-// Work that ends needs nothing more of the person's hands: its ask goes with it, unless it waits on an answer from its buttons
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at, ask: one.ask?.choices?.length ? one.ask : undefined })
+// Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
 const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined })
 // How work that is stopped ends: done when its turn had already ended with its report and only its own background work held it
@@ -506,10 +506,10 @@ const keepStoppedReports = async ($: EngineInterface, now: number) => {
 
 // Work that has ended, the oldest first, then work under way: what `capped` forgets first comes first
 const byEnd = (list: Todo[]) => [...list].sort((a, b) => (a.status === 'working' ? Infinity : a.endedAt) - (b.status === 'working' ? Infinity : b.endedAt) || 0)
-// The list is kept short by forgetting work that has ended, the oldest first; work under way is never forgotten
+// The list is kept short by forgetting work that has ended, the oldest first; work under way, and work still asking, is never forgotten
 const capped = (list: Todo[]) => {
   let over = list.length - KEPT
-  return over > 0 ? list.filter(one => one.status === 'working' || (over -= 1) < 0) : list
+  return over > 0 ? list.filter(one => one.status === 'working' || Boolean(one.ask) || (over -= 1) < 0) : list
 }
 
 // Stands for the work that started a helper when the engine does not say which it was
@@ -2947,6 +2947,58 @@ const copyAsk = ($: EngineInterface, id: string, text: string, surface: RenderSu
     })
     .catch(err => log($, `copy not made: ${String(err)}`))
 
+// A command to type opens in Terminal only when the person presses its button, typed at the prompt in the folder it is for and never
+// run: Return runs it. The app opens its own terminal tabs only for Claude, never for a plugin's own code, so it is the Mac's Terminal.
+// A small zsh start folder of its own reads the person's own start files, then types the command with `print -z`; folders an hour
+// old are cleared as the next one is made. A chat drawn on another Mac, or work on another Mac, has no button: this Mac is not theirs
+let openedKey = ''
+let opens = 0
+const zshQuoted = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`
+const canOpenTerminal = (one: Todo) => Boolean(one.ask?.isCommand && one.ask.copy) && !one.chat?.host && !isRunFromAfar
+const terminalFiles = (folder: string, home: string) => ({
+  // Their own .zshenv runs first; one that moves ZDOTDIR to their own folder is followed there afterwards, not before ours runs
+  '.zshenv': [
+    '[[ -f "${_CLAUDOPUS_DOT:-$HOME}/.zshenv" ]] && source "${_CLAUDOPUS_DOT:-$HOME}/.zshenv"',
+    `if [[ "$ZDOTDIR" != ${zshQuoted(home)} ]]; then _CLAUDOPUS_DOT="$ZDOTDIR"; ZDOTDIR=${zshQuoted(home)}; fi`,
+    '',
+  ].join('\n'),
+  // Then their own .zshrc, from their own folder, with the history file theirs again (the Mac's /etc/zshrc set it from ours)
+  '.zshrc': [
+    `_claudopus_here=${zshQuoted(home)}`,
+    'if [[ -n "$_CLAUDOPUS_DOT" ]]; then ZDOTDIR="$_CLAUDOPUS_DOT"; else unset ZDOTDIR; fi',
+    'unset _CLAUDOPUS_DOT',
+    '[[ "$HISTFILE" == "$_claudopus_here"/* ]] && HISTFILE="${ZDOTDIR:-$HOME}/.zsh_history"',
+    '[[ -f "${ZDOTDIR:-$HOME}/.zshrc" ]] && source "${ZDOTDIR:-$HOME}/.zshrc"',
+    `if cd ${zshQuoted(folder)} 2>/dev/null; then`,
+    "  print -P '%F{3}Claudopus typed the command below. Press Return to run it.%f'",
+    'else',
+    `  print -r -- $'\\e[33mClaudopus typed the command below, but its folder was not found:\\e[0m '${zshQuoted(folder)}`,
+    'fi',
+    'print -rz -- "$(<"$_claudopus_here/command.txt")"',
+    'unset _claudopus_here',
+    '',
+  ].join('\n'),
+  // Terminal's own saved sessions are left out of this one window, so its history stays the person's own file
+  'open.command': ['#!/bin/zsh', `cd ${zshQuoted(folder)} 2>/dev/null`, 'export _CLAUDOPUS_DOT="${ZDOTDIR-}" SHELL_SESSIONS_DISABLE=1', `ZDOTDIR=${zshQuoted(home)} exec /bin/zsh -i`, ''].join('\n'),
+})
+const openTerminal = async ($: EngineInterface, one: Todo) => {
+  const ask = one.ask
+  if (!ask?.copy || !canOpenTerminal(one)) return
+  const at = await $.clock.now()
+  const made = (opens += 1)
+  const base = `${dir}/terminal`
+  const home = `${base}/${slug(one.id) || 'work'}-${at}`
+  await $.fs.write(`${home}/command.txt`, ask.copy)
+  for (const [name, text] of Object.entries(terminalFiles(ask.cwd || cwd, home))) await $.fs.write(`${home}/${name}`, text)
+  const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/open.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
+  presses += 1
+  openedKey = r.exitCode === 0 ? `${one.id}:${ask.at}:${ask.copy}` : ''
+  if (r.exitCode !== 0) void log($, `terminal not opened: ${r.stderr.trim().slice(0, 160)}`)
+  redraw($)
+  $.clock.after(3000, () => void (opens === made && ((openedKey = ''), redraw($))))
+}
+
 // The person's answer to an ask, a button pressed or a reply in their own words: to work under way, a message it reads at its next
 // step; to work that has ended, a message to the chat, which carries the work on. Either way the ask goes at once, and the card
 // says briefly what was answered; the work turns amber again only by asking again
@@ -3231,6 +3283,7 @@ const readOthers = async ($: EngineInterface) => {
     }
     lastRunning.delete(key)
     const s = present.get(was.chat)
+    // A card gone from its chat's list went with that chat, which is closed: nothing reads an answer left for it, so its ask goes too
     if (!s?.cards.some(card => remoteId(s, card.id) === key) && !vanished.has(key)) vanished.set(key, { chat: was.chat, card: { ...was.card, status: 'done', endedAt: now, ask: undefined }, at: now, of: was.of })
   }
   for (const s of found) for (const card of s.cards.filter(one => one.status === 'working')) lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card, at: now, of: { ...s, cards: [], prompts: undefined } })
@@ -4023,7 +4076,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and tells {name}. `text` says what to do, in one plain line; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need (without them the card offers Done and Not now); {name} can always reply in their own words instead; `command` is a command {name} types themselves: the answer tells you to open a terminal for it with the terminal tools. Any answer clears the ask and arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Ask again if the answer leaves something waiting. Call it again with empty `text` once it is done; without choices it also goes when you finish.",
+        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and tells {name}. `text` says what to do, in one plain line; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need (without them the card offers Done and Not now); {name} can always reply in their own words instead; `command` is a command {name} types themselves, shown with a button that opens a terminal with it typed when they press it: open none yourself. The ask stays until {name} answers, even after you finish. An answer clears it and arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Ask again if the answer leaves something waiting. Call it again with empty `text` only once you have seen it done.",
       ),
       inputSchema: {
         type: 'object',
@@ -4031,7 +4084,7 @@ const chatHooks = (on: On) => {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
           copy: { type: 'string', description: 'Only text they must paste somewhere else, such as a one-time code or a link; leave it out when they only read or press something' },
           choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now (Done and Not now when left out); the one pressed comes back to you as a message' },
-          command: { type: 'string', description: 'A command for them to type themselves, one line, shown with a Copy button; then open a terminal for it with mcp__terminal__open_terminal_tab' },
+          command: { type: 'string', description: 'A command for them to type themselves, one line, shown with a Copy button and a button that opens a terminal with it typed, never run' },
           cwd: { type: 'string', description: 'The folder the command runs in, a full path; the chat\'s folder when left out' },
         },
         required: ['text'],
@@ -4581,7 +4634,7 @@ const toolHooks = (on: On) => {
     return { result: items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing waits on ${who()}.` }
   })
 
-  // Work that needs the person's hands now: its card stands out with the ask and its Copy, until it is cleared or the work ends
+  // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
     const input = e as unknown as { text?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown }
     if (e.agentId === undefined) return { result: `Only background work asks through the panel; a chat's own thread asks ${who()} in its reply.` }
@@ -4602,11 +4655,10 @@ const toolHooks = (on: On) => {
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     // The same ask said again is not told again
     if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
-    // A command for the person gets a terminal at once, so they type it there without looking for one. The app runs its terminal
-    // tools only for Claude, never for a plugin's own code, so the work opens it
-    const terminal = command ? ` Now open a terminal for it yourself, at once: mcp__terminal__open_terminal_tab with cwd "${folder}" and a short title; never type or run the command in it.` : ''
-    const shown = [command ? 'the command with a Copy button' : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
-    return { result: `Shown on your card with ${shown}, and ${who()} was told. Any answer clears the ask and comes back to you as a message; ask again if it leaves something waiting. Clear it with empty text once it is done.${terminal}` }
+    // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
+    const terminal = command ? ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.` : ''
+    const shown = [command ? 'the command, a Copy button and an Open in Terminal button' : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
+    return { result: `Shown on your card with ${shown}, and ${who()} was told. It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, or to the chat once you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides
@@ -4788,6 +4840,12 @@ const panelHooks = (on: On) => {
                 <Text mono wrap="wrap">{withLinks(table.Link, ask.copy, `${key}-copy`)}</Text>
               </Box>
               <Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} />
+            </Box>
+          ) : null}
+          {/* A command to type: Terminal opens with it typed, not run, only on this press */}
+          {canOpenTerminal(one) ? (
+            <Box flexDirection="row">
+              <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Opened in Terminal, typed, not run' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
             </Box>
           ) : null}
           <Box flexDirection="row" flexWrap="wrap" gap={1}>

@@ -17,8 +17,8 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   endedAt: 0,
   status: 'working',
 })
-// Work that ends needs nothing more of the person's hands: its ask goes with it, unless it waits on an answer from its buttons
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at, ask: one.ask?.choices?.length ? one.ask : undefined })
+// Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
 const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined })
 // How work that is stopped ends: done when its turn had already ended with its report and only its own background work held it
@@ -34,10 +34,10 @@ const keepStoppedReports = async ($: EngineInterface, now: number) => {
 
 // Work that has ended, the oldest first, then work under way: what `capped` forgets first comes first
 const byEnd = (list: Todo[]) => [...list].sort((a, b) => (a.status === 'working' ? Infinity : a.endedAt) - (b.status === 'working' ? Infinity : b.endedAt) || 0)
-// The list is kept short by forgetting work that has ended, the oldest first; work under way is never forgotten
+// The list is kept short by forgetting work that has ended, the oldest first; work under way, and work still asking, is never forgotten
 const capped = (list: Todo[]) => {
   let over = list.length - KEPT
-  return over > 0 ? list.filter(one => one.status === 'working' || (over -= 1) < 0) : list
+  return over > 0 ? list.filter(one => one.status === 'working' || Boolean(one.ask) || (over -= 1) < 0) : list
 }
 
 // Stands for the work that started a helper when the engine does not say which it was
