@@ -23,6 +23,7 @@ const LIST = {
   requestId: 'claudopus',
   props: { title: 'Claudopus', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
 } as const
+declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
@@ -72,6 +73,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const sshed: string[][] = []
   prompts.length = 0
   let spawned = 0
+  let gateKeys = 0
+  const sleepers: (() => void)[] = []
+  const wake = () => void sleepers.splice(0).forEach(one => one())
+  // What each Bash call that ran the admin runner found waiting for it: the grants, as bin/admin would read them
+  const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
   mock.env(on, { HOME, ...options.env })
   const clock = mock.clock(on, { now: 1_700_000_000_000 })
   // What the engine draws where the mod draws nothing
@@ -167,6 +173,19 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   // What the Mac answers: a dev server on 3100 started by a chat, and the system's own listener, which is not the person's
   on('process.run', (_, e) => {
     const [tool, ...rest] = e.argv
+    const ok = (stdout = '', exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    // The admin gate's wait between two looks at what was pressed: it lasts until the test lets it go with wake(), as a second passing
+    if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
+    // The admin gate's seals: one for each message, under the key the keychain holds as keychain:gate; "make" makes a key where
+    // there is none and "new" always, as the Mac's own shell does
+    if (tool === '/bin/sh' && String(rest[1]).includes('claudopus-admin-gate')) {
+      const [, , , mode, ...messages] = rest
+      if (mode === 'new' || (mode === 'make' && !files.has('keychain:gate'))) files.set('keychain:gate', `key-${(gateKeys += 1)}`)
+      const key = files.get('keychain:gate')
+      return key ? ok(messages.map(one => `${fakeSeal(key, String(one))}\n`).join('')) : ok('', 3)
+    }
+    // Every kept admin password taken out of the keychain
+    if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
     // A line added to the end of a file, as the log is written
     if (tool === 'sh' && rest[1] === 'printf %s "$2" >> "$1"' && rest[3] !== undefined) {
       files.set(rest[3], `${files.get(rest[3]) ?? ''}${rest[4] ?? ''}`)
@@ -291,6 +310,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('tool.call', async (_, e) => {
     const command = String((e as { command?: string }).command ?? '')
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
+    if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
     if (e.tool === 'SendMessage') sent.push(String((e as { message?: string }).message))
     // A command that prints the key, as one could print it by mistake
@@ -336,15 +356,17 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake }
 }
 
+// A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
+const fakeSeal = (key: string, message: string) =>
+  Array.from({ length: 8 }, (_, n) => [...`${n}${key}\n${message}`].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261 + n).toString(16).padStart(8, '0')).join('')
 // A button of the open card by its key less the count of presses the card adds to it
 const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; props: Record<string, unknown> }[]> }, base: string) =>
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
-declare const setTimeout: (run: () => void, ms: number) => unknown
 // What the panel shows after work that is not awaited, such as a look at the servers
 const until = async <T,>(look: () => Promise<T | undefined>) => {
   for (let tries = 0; tries < 100; tries += 1) {
