@@ -492,3 +492,21 @@ test('the look for chats without Claudopus is read whole, each chat once, and wh
   expect(OFF_LOOK).not.toContain("'")
   expect(trip('sams-m5', [])).toContain(OFF_LOOK)
 })
+
+test("in a chat over ssh the panel's text stays the same from second to second while work runs, so a click does not name a button a redraw let go: times to the minute, tokens to 10k, context to 5%", async ($, on) => {
+  const { clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'Fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose' } as never)
+  for await (const _ of $.turn.step({ turnId: 'turn-2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' } as never)) void _
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const texts = async () => (await pane.findAll({ type: 'Text' })).map(t => t.text).join('|')
+  const first = await texts()
+  expect(first).toContain('<1m')
+  expect(first).toMatch(/context \d*[05]% \(310k\)|context 310k/)
+  await clock.advance(20_000)
+  expect(await texts()).toBe(first)
+  await clock.advance(41_000)
+  expect(await texts()).toContain('1m')
+  await pane.unmount()
+})

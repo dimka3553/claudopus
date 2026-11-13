@@ -125,19 +125,26 @@ const clip = (text: string, half: number) =>
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').replaceAll(' | ', ' / ').trim()
 const textOf = (r: McpToolResult) => r.content.map(b => ('text' in b && typeof b.text === 'string' ? b.text : '')).join('')
-// How long work has run, to the second: "42s", "12m 08s", "1h 04m 31s"
+// How long work has run, to the second: "42s", "12m 08s", "1h 04m 31s". In a chat the app runs on another Mac over ssh, to the
+// minute: "<1m", "12m", "1h 04m", and tokens to 10k and context to 5%. There every drawing that changes anything gives each button a
+// new handle and lets the old ones go, while the app shows a drawing some time after the engine made it: a click on what it shows
+// named a handle already let go, and nothing ran (Claude Code: "no Button of claudopus is held under handle"). A drawing that
+// changes nothing keeps its handles. With the panel's text moving each second, about every other click was lost so
 const took = (ms: number) => {
   const all = Math.max(0, Math.floor(ms / 1000))
   const [hrs, m, sec] = [Math.floor(all / 3600), Math.floor(all / 60) % 60, all % 60]
   const two = (n: number) => String(n).padStart(2, '0')
+  if (isRunFromAfar) return hrs ? `${hrs}h ${two(m)}m` : m ? `${m}m` : '<1m'
   return hrs ? `${hrs}h ${two(m)}m ${two(sec)}s` : m ? `${m}m ${two(sec)}s` : `${sec}s`
 }
 // A count of tokens as the app writes it
-const thousands = (tokens: number) => `${(tokens / 1000).toFixed(tokens < 100_000 ? 1 : 0)}k`
+const thousands = (tokens: number) =>
+  isRunFromAfar ? (tokens < 10_000 ? '<10k' : `${Math.round(tokens / 10_000) * 10}k`) : `${(tokens / 1000).toFixed(tokens < 100_000 ? 1 : 0)}k`
 // How full a context window is: the share when the window is known, and the tokens
-const fill = (tokens: number, window: number) => (window ? `${Math.round((tokens / window) * 100)}% · ${thousands(tokens)} of ${thousands(window)}` : thousands(tokens))
+const fill = (tokens: number, window: number) => (window ? `${percent(tokens, window)}% · ${thousands(tokens)} of ${thousands(window)}` : thousands(tokens))
 // The same for a piece of work, short enough for its status line
-const share = (tokens: number, window: number) => (window ? `context ${Math.round((tokens / window) * 100)}% (${thousands(tokens)})` : `context ${thousands(tokens)}`)
+const percent = (tokens: number, window: number) => (isRunFromAfar ? Math.floor((tokens / window) * 20) * 5 : Math.round((tokens / window) * 100))
+const share = (tokens: number, window: number) => (window ? `context ${percent(tokens, window)}% (${thousands(tokens)})` : `context ${thousands(tokens)}`)
 
 // A model's name as the app writes it, from its id or alias: "Opus 5.5". Nothing for a name it cannot read
 const modelName = (id: string) => {
