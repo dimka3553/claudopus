@@ -120,6 +120,8 @@ code.long{white-space:normal;overflow-wrap:anywhere}
 .cmd .pr{color:var(--purple);user-select:none}
 .cmd code{font:inherit;overflow-wrap:anywhere}
 .cmd code b{font-weight:inherit;color:var(--screen-purple)}
+.cmd code .cmt{margin-left:var(--s3);user-select:none;color:var(--screen-soft);font-weight:400}
+.cmd code .cmt::before{content:"# "}
 .copy{min-width:96px;min-height:44px;padding:0 var(--s3);border:0;background:var(--screen-key);color:var(--screen-ink);font:600 var(--t-note)/1 var(--mono);cursor:pointer}
 .copy:focus-visible{outline-offset:-4px}
 .copy:hover{background:var(--purple);color:var(--on-purple)}
@@ -416,7 +418,7 @@ figure .note{margin-top:var(--s4)}
 
 <section class="sec install notch big" id="install">
   <div class="body">
-    <h2>Install it with two lines.</h2>
+    <h2>Install it with two lines, open it with a third.</h2>
     <p class="lead">Type them at the Claude Code prompt, in a terminal.</p>
     <p class="before-line soft">It needs <a href="#know">a recent Claude Code</a>, and it <a href="#before">adds its author's working principles</a> to every chat.</p>
     <div class="block perch">
@@ -425,12 +427,13 @@ figure .note{margin-top:var(--s4)}
         <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i></div>
         <div class="cmd"><span class="pr" aria-hidden="true">&gt;</span><code>/plugin marketplace add <b>dimka3553/claudopus</b></code><button class="copy notch" type="button" data-copy="/plugin marketplace add dimka3553/claudopus" aria-label="Copy: /plugin marketplace add dimka3553/claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
         <div class="cmd"><span class="pr" aria-hidden="true">&gt;</span><code>/plugin install <b>claudopus@claudopus</b></code><button class="copy notch" type="button" data-copy="/plugin install claudopus@claudopus" aria-label="Copy: /plugin install claudopus@claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
+        <div class="cmd"><span class="pr" aria-hidden="true">&gt;</span><code>/claudopus<span class="cmt">opens the panel</span></code><button class="copy notch" type="button" data-copy="/claudopus" aria-label="Copy: /claudopus"><span class="say">Copy</span><span class="said"><svg class="px" viewBox="0 0 7 5" width="14" height="10" aria-hidden="true"><rect x="6" y="0" width="1" height="1"/><rect x="5" y="1" width="1" height="1"/><rect x="0" y="2" width="1" height="1"/><rect x="4" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="3" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg>Copied</span><span class="fail">Selected</span></button></div>
       </div>
     </div>
 
     <div class="two block">
     <div>
-    <p class="after-term">Answer <code>y</code> to add the marketplace, then press Enter to pick the first choice, the user scope. That is all. Nothing has to be typed in each chat.</p>
+    <p class="after-term">Answer <code>y</code> to add the marketplace, then press Enter to pick the first choice, the user scope. Then <code>/claudopus</code> opens the panel. Nothing has to be typed in each chat.</p>
     <div class="ways">
       <details open>
         <summary><svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="2" y="0" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="5" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><svg class="px" viewBox="0 0 5 5" width="10" height="10" aria-hidden="true"><rect x="0" y="2" width="5" height="1"/></svg>In the Claude desktop app</summary>

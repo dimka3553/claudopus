@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.70 · 13 November 2026
+- claudopus.ai shows a third command after the two install lines, `/claudopus`, which opens the panel.
+
 ## 0.2.69 · 13 November 2026
 - The header's update moment now shows in a chat the app runs on another Mac over ssh: before, the app dropped each of its drawings because the next was asked for before it arrived, so the moment was never seen there. It now changes only twice, so each drawing has time to arrive.
 - The moment starts once the chat has finished loading, then runs its full 5 seconds: the blue octopus jumps, "Claudopus updated" turns into the new version after 2.5 seconds. The light shine across "updated" is gone.
