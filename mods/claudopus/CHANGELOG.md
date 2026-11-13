@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.68 · 13 November 2026
+- Work you answer on its card after it finished now keeps its notes, asks and to-dos when it starts again. Before, all of them failed, so a new question from it never reached its card.
+- An answer that arrives while nothing else runs in the chat still starts the work again; if its panel does not answer, the work puts its question in its report, and the chat asks you.
+
 ## 0.2.67 · 13 November 2026
 - About has a Changelog link: it opens what changed in every version in a tab of the panel. The same list is on claudopus.ai.
 - When Claudopus updates, the whole panel greets you with the blue happy octopus, the new version and what changed in every version you did not have yet.

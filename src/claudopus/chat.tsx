@@ -188,8 +188,8 @@ const chatHooks = (on: On) => {
     // Someone whose panel was open before chats shared it (as when this version is installed, which reloads every chat) has it
     // open in every chat from now on
     if (!choice && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)) await choosePanel($, true)
-    $.clock.every(PANEL_EVERY, () => followPanel($).catch(err => log($, `panel not followed: ${String(err)}`)))
-    $.clock.every(FOLLOW_EVERY, () => follow($).catch(err => log($, `work not followed: ${String(err)}`)))
+    everyLoad($, PANEL_EVERY, () => followPanel($).catch(err => log($, `panel not followed: ${String(err)}`)))
+    everyLoad($, FOLLOW_EVERY, () => follow($).catch(err => log($, `work not followed: ${String(err)}`)))
     // Each second the running times on the small cards move on, while any work runs. A Details tab does not read the tick: it is
     // drawn again only when its work moves, since its chat is too long to draw every second and a press must not wait behind a drawing.
     // The redraws set for pauses before this start are forgotten, as their timers went with the session that set them
@@ -204,7 +204,7 @@ const chatHooks = (on: On) => {
         if (one.status !== 'working' && one.endedAt > last && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, Infinity)
     }
     let seconds = 0
-    $.clock.every(1000, async () => {
+    everyLoad($, 1000, async () => {
       if (drawnNow > (await read($, lastDrawn))) await update($, lastDrawn, () => drawnNow)
       await shareMine($).catch(err => log($, `work not shared: ${String(err)}`))
       if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
@@ -224,7 +224,7 @@ const chatHooks = (on: On) => {
         $.clock.after(pauseFrom(one) + LINGER - now + 20, () => void ((lingerSet.delete(key), update($, tick, n => n + 1))))
       }
     })
-    $.clock.every(TICK, () => refresh($).catch(err => log($, `servers not looked at again: ${String(err)}`)))
+    everyLoad($, TICK, () => refresh($).catch(err => log($, `servers not looked at again: ${String(err)}`)))
     // Every chat's work in every panel: this chat's file is kept true each second (written only when it changed or its beat is due),
     // the other chats' files and the answers left for this one are read every few seconds, the other Macs fetched now and then
     sharedSign = ''
@@ -234,31 +234,33 @@ const chatHooks = (on: On) => {
     waiting = []
     asked = []
     await unshare($, true).catch(() => undefined)
-    if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
+    if (macs.length) everyLoad($, FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
     // There the hidden boxes of the admin and secret runners are drawn in the panel
-    if (isRunFromAfar) $.clock.every(BOX_EVERY, () => lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`)))
-    if (macs.length) $.clock.every(OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
-    if (macs.length) $.clock.every(FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
+    if (isRunFromAfar) everyLoad($, BOX_EVERY, () => lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`)))
+    if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
+    if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
     await readAnswers($).catch(() => undefined)
     await readOthers($).catch(() => undefined)
     // The workflows kept, read back, and followed while they run
     await knowSession($)
     await loadFlows($).catch(err => log($, `workflows not read back: ${String(err)}`))
-    $.clock.every(FLOW_EVERY, () => followFlows($).catch(err => log($, `workflows not followed: ${String(err)}`)))
+    everyLoad($, FLOW_EVERY, () => followFlows($).catch(err => log($, `workflows not followed: ${String(err)}`)))
     // Claudopus updates itself: a look a little after the chat starts, then whenever one is due
-    $.clock.after(UPDATE_AFTER, () => void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
-    $.clock.every(UPDATE_LOOK, () => selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
+    afterLoad($, UPDATE_AFTER, () => void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
+    everyLoad($, UPDATE_LOOK, () => selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
     // and an open chat moves to a newer copy installed while it runs, by itself, once it is idle
     reloadAsked = ''
-    $.clock.every(RELOAD_EVERY, () => reloadToInstalled($).catch(err => log($, `reload not looked for: ${String(err)}`)))
+    everyLoad($, RELOAD_EVERY, () => reloadToInstalled($).catch(err => log($, `reload not looked for: ${String(err)}`)))
     if (isRunFromAfar) {
       await holdOldCopies($).catch(() => undefined)
-      $.clock.every(HOLD_EVERY, () => holdOldCopies($).catch(err => log($, `old copies not held: ${String(err)}`)))
+      everyLoad($, HOLD_EVERY, () => holdOldCopies($).catch(err => log($, `old copies not held: ${String(err)}`)))
     }
     await tidyLog($)
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
+    // This load takes charge in this chat once all it runs is started: the copies before it see the mark change and stop
+    await takeCharge($)
     // A move to a newer version has its moment begin now that the load has started whole
     await readyUpdated($).catch(() => undefined)
 
@@ -273,6 +275,7 @@ const chatHooks = (on: On) => {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
     // The notice that a workflow ended ends its card
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))
     if (e.isMeta || e.command || !dir) return next(e)
@@ -323,6 +326,8 @@ const chatHooks = (on: On) => {
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    // An answer waiting to start ended work again goes from inside this hook, at the end of any turn, the chat's own too (sendWakes)
+    if (wakes.length && e.agentId === undefined) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
     if (!dir) return done
     // A piece of work ended its turn: it has ended and leaves the panel, since the chat passes its answer on.
     // One that only waits for its helpers goes on working
@@ -364,6 +369,7 @@ const chatHooks = (on: On) => {
       await lookEnds($)
       // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
+      if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
       // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
       // held on its own background work leaves it once it ends (keepStoppedReports)
       const card = (await read($, todos)).find(one => one.id === id)
