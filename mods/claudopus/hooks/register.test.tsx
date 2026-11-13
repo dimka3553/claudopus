@@ -32,7 +32,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; unplaced?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[] } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[] } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -243,7 +243,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     tabs.push(`${e.id}: ${e.title}`)
     // A screen with nowhere to draw a pane, as a Remote Control chat seen from another device
     if (options.unplaced) return { value: { isPlaced: false, reason: 'no-surface' } } as never
-    if (options.live && !options.live.some(one => one.id === e.id)) options.live.push({ id: e.id, isShown: false, isPlaced: true })
+    // `blind`: an engine with no surface to ask (a chat the app runs on another Mac over ssh) says nothing of any tab, drawn or not
+    if (options.live && !options.live.some(one => one.id === e.id)) options.live.push({ id: e.id, isShown: false, isPlaced: !options.blind })
     return { value: { isPlaced: true } }
   })
   on('session.append', (_, e, next) => {
@@ -3726,6 +3727,38 @@ test("a press inside the list gives it the keyboard, and the engine shows no new
   // Stats opened behind before the list closed, so the sidebar never stood empty
   expect(opened.indexOf('stats')).toBeLessThan(opened.lastIndexOf('claudopus'))
   expect(live.map(one => one.id)).toEqual(['claudopus', 'stats'])
+  await pane.unmount()
+})
+
+test("where the engine says of no tab that it is shown or holds the keyboard (a chat over ssh), every other tab lets go first, in its place, then Stats opens in front", async ($, on) => {
+  const live = [
+    { id: 'claudopus', isShown: false, isPlaced: false },
+    { id: 'reports', isShown: false, isPlaced: false },
+  ]
+  const { opened, closed } = world(on, { live, blind: true, env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'stats-open')
+  expect(await until(async () => opened.includes('stats') || undefined)).toBe(true)
+  expect(closed).toEqual(expect.arrayContaining(['claudopus', 'reports']))
+  // Stats opened behind first, so the sidebar never stood empty, and last with the keyboard
+  expect(opened.indexOf('stats')).toBeLessThan(opened.lastIndexOf('claudopus'))
+  expect(opened.lastIndexOf('claudopus')).toBeLessThan(opened.lastIndexOf('stats'))
+  expect(opened.lastIndexOf('reports')).toBeLessThan(opened.lastIndexOf('stats'))
+  // The tabs stand as they stood, Stats after them
+  expect(live.map(one => one.id)).toEqual(['claudopus', 'reports', 'stats'])
+  expect(closed.filter(id => id !== 'agents').sort()).toEqual(['claudopus', 'reports', 'stats'])
+  await pane.unmount()
+})
+
+test("a roster that says nothing in a chat on this Mac (nothing drawn) leaves the other tabs alone on a press", async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: false, isPlaced: false }]
+  const { opened, closed } = world(on, { live, blind: true })
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'stats-open')
+  expect(await until(async () => opened.includes('stats') || undefined)).toBe(true)
+  expect(closed).not.toContain('claudopus')
   await pane.unmount()
 })
 

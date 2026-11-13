@@ -1558,7 +1558,14 @@ const front = async ($: EngineInterface, id: string, title: string) => {
   // the screen to honour the open's focus, which a screen with a turn running or text in the box refuses (seen every press in a
   // chat the app runs on another Mac over ssh). The tab holding the keyboard is closed and opened again first, so it lets go.
   // The new tab opens behind it before that, so the sidebar always holds a tab: with none open it slid shut and open again
-  const holding = (await $.ui.panes()).filter(pane => pane.isFocused && pane.id !== id)
+  // In a chat the app runs on another Mac over ssh the engine has no surface to ask ("no-surface"): it lists the open tabs but
+  // says of none that it is shown, drawn or holding the keyboard, though the app draws them and one does hold it. There every
+  // other tab of the mod may be the one pressed in, so each is closed and opened again, in the order they stand. Elsewhere a
+  // roster that says nothing has nothing drawn, and is left alone
+  const before = await $.ui.panes()
+  const isBlind = isRunFromAfar && before.length > 0 && !before.some(pane => pane.isPlaced || pane.isShown || pane.isFocused)
+  const holding = before.filter(pane => (isBlind || pane.isFocused) && pane.id !== id)
+  if (isBlind) await log($, `front ${id}: the engine says no tab is shown or holding the keyboard; ${holding.length} other tabs closed and opened again first`)
   if (holding.length && !(await $.ui.panes()).some(pane => pane.id === id)) await $.ui.open({ id, title })
   for (const held of holding) {
     await $.ui.close({ id: held.id }).catch(() => undefined)

@@ -276,6 +276,38 @@ test("a press inside the list gives it the keyboard, and the engine shows no new
   await pane.unmount()
 })
 
+test("where the engine says of no tab that it is shown or holds the keyboard (a chat over ssh), every other tab lets go first, in its place, then Stats opens in front", async ($, on) => {
+  const live = [
+    { id: 'claudopus', isShown: false, isPlaced: false },
+    { id: 'reports', isShown: false, isPlaced: false },
+  ]
+  const { opened, closed } = world(on, { live, blind: true, env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'stats-open')
+  expect(await until(async () => opened.includes('stats') || undefined)).toBe(true)
+  expect(closed).toEqual(expect.arrayContaining(['claudopus', 'reports']))
+  // Stats opened behind first, so the sidebar never stood empty, and last with the keyboard
+  expect(opened.indexOf('stats')).toBeLessThan(opened.lastIndexOf('claudopus'))
+  expect(opened.lastIndexOf('claudopus')).toBeLessThan(opened.lastIndexOf('stats'))
+  expect(opened.lastIndexOf('reports')).toBeLessThan(opened.lastIndexOf('stats'))
+  // The tabs stand as they stood, Stats after them
+  expect(live.map(one => one.id)).toEqual(['claudopus', 'reports', 'stats'])
+  expect(closed.filter(id => id !== 'agents').sort()).toEqual(['claudopus', 'reports', 'stats'])
+  await pane.unmount()
+})
+
+test("a roster that says nothing in a chat on this Mac (nothing drawn) leaves the other tabs alone on a press", async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: false, isPlaced: false }]
+  const { opened, closed } = world(on, { live, blind: true })
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'stats-open')
+  expect(await until(async () => opened.includes('stats') || undefined)).toBe(true)
+  expect(closed).not.toContain('claudopus')
+  await pane.unmount()
+})
+
 test("with no tab holding the keyboard, a press opens its tab and leaves the list alone", async ($, on) => {
   const live = [{ id: 'claudopus', isShown: true, isPlaced: true }]
   const { opened, closed } = world(on, { live })
