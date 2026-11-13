@@ -3368,6 +3368,19 @@ test("another chat's request is left to that chat a moment, then any chat with a
   expect(await until(async () => logged.find(line => line.includes('NPM_TOKEN')))).toContain('top of the Claudopus panel')
 })
 
+test("with two requests open every box is drawn, this chat's own first and the only one with the keys", async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  const older = '5f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  const mine = '6f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, text: 'Claudopus needs NPM_TOKEN.', chat: 'another-chat', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, text: 'Claudopus needs GITHUB_TOKEN.', chat: 'engine-id', at: 1_700_000_000_500 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length === 2 ? all : undefined })
+  expect(fields?.map(one => [(one.key ?? '').slice(4, 6), one.props.autoFocus])).toEqual([['6f', true], ['5f', undefined]])
+})
+
 test('a run with nothing to draw on takes no request, so the runner knows no panel asks', async ($, on) => {
   const { files, logged, clock } = world(on, { headless: true })
   await $.session.start(start)

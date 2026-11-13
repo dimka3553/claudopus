@@ -47,7 +47,7 @@ const lookBoxes = async ($: EngineInterface) => {
     if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
     try {
       const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Partial<Asked>
-      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at, chat: typeof one.chat === 'string' ? one.chat : undefined })
+      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) {
@@ -139,7 +139,7 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
           placeholder="Type or paste it here"
           value={boxDrafts.get(one.id) ?? ''}
           submitLabel="send"
-          autoFocus={n === 0}
+          autoFocus={n === 0 ? true : undefined}
           onInput={value => void boxDrafts.set(one.id, value)}
           onSubmit={value => void sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`))}
         />
