@@ -72,6 +72,11 @@ test('work uses a kept key without reading it: the keychain is not read, and wha
   const shown = await $.tool.call({ tool: 'Bash', tool_use_id: 'k4', command: 'bin/secret API_KEY here "echo $API_KEY"', agentId: 'w1' } as never)
   expect(JSON.stringify(shown.result)).toContain('token is [hidden API_KEY]')
   expect(JSON.stringify(shown.result)).not.toContain('sk-live-123456')
+  // What the chat reads in its own thread comes back with the key hidden too
+  const read2 = await $.tool.call({ tool: 'Read', tool_use_id: 'k8', file_path: '/repo/.env' } as never)
+  expect(read2.deny).toBeUndefined()
+  expect(JSON.stringify(read2.result)).toContain('API_KEY=[hidden API_KEY]')
+  expect(JSON.stringify(read2.result)).not.toContain('sk-live-123456')
 })
 
 test('work reaches main only through the release runner: its rules name it, and a push or merge to main by hand is refused', async ($, on) => {
@@ -121,6 +126,10 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
   expect(r.text).toContain('were saved to')
   const saved = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/pastes/`))
   expect(saved?.[1]).toBe(paste)
+  // and the chat does not read it back in: the agent that needs it reads it
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p1', file_path: saved?.[0] } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'p2', pattern: 'end', path: `${MEMORY}/pastes` } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p3', file_path: saved?.[0], agentId: 'w1' } as never)).deny).toBeUndefined()
 })
 
 test("a chat's own thread may only read, start agents and talk to them; an agent may do the work", async ($, on) => {

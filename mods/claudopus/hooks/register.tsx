@@ -33,7 +33,7 @@ const OLD_PANE = 'agents'
 // Rarely used tools wait behind ToolSearch instead of loading into every chat
 const RARE_TOOLS = ['ReportFindings', 'SuggestPluginInstall', 'SuggestSkills', 'SearchPlugins', 'ScheduleWakeup', 'Workflow']
 const RARE_SERVERS = ['mcp__Claude_Browser__', 'mcp__Claude_Code_iOS_Simulator__', 'mcp__visualize__']
-// What a chat's own thread may call: it starts agents and workflows, and talks to them. An agent may call anything
+// What a chat's own thread may call to hand work over: it starts agents and workflows, and talks to them. An agent may call anything
 const OWN = ['Agent', 'Workflow', 'SendMessage', 'ListAgents', 'TaskStop', 'ToolSearch', 'AskUserQuestion', 'SendUserFile', 'ReadNotifications', 'Skill']
 // And what it reads with, to answer a question a few files answer: none of them changes a file or runs a command
 const READS = ['Read', 'Grep', 'Glob']
@@ -293,7 +293,7 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'A question answered by reading a few files is answered directly: read them yourself with Read, Grep and Glob. Anything that changes a file, runs a command or takes more than a few reads goes to an agent: answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). Only a message that steers what listed work is already doing (a change to what it builds, an answer it waits for, a stop) goes to that work instead, with SendMessage, in their words. A fault, a question or a new ask gets its own agent even when it is about the same area, code or card as running work, so it never waits behind it; when in doubt, its own agent.'
+  'A question answered by reading a few files is answered directly: read them yourself with Read, Grep and Glob. Anything that changes a file, runs a command or takes more than a few reads goes to an agent: answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). Only a message that steers what listed work is already doing (a change to what it builds, an answer it waits for, a stop) goes to that work instead, with SendMessage, in their words. A fault, a question or a new ask gets its own agent even when it is about the same area, code or card as running work, so it never waits behind it; when in doubt, its own agent. A question a few reads answer is still answered directly.'
 const REFUSED =
   'This chat\'s own thread only reads (Read, Grep, Glob); it changes no file and runs no command. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
 const NO_COPY = () =>
@@ -6130,8 +6130,11 @@ const workHooks = (on: On) => {
       return r
     }
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
-    // The chat reads for itself: a kept report to answer from, or the few files a question needs
-    if (READS.includes(e.tool)) return next(e)
+    // The chat reads for itself: a kept report to answer from, or the few files a question needs. A saved paste stays out of it:
+    // the agent that needs it reads it
+    const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
+    const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
+    if (READS.includes(e.tool) && !isPaste) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
 
     return { deny: REFUSED }

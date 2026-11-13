@@ -167,8 +167,11 @@ const workHooks = (on: On) => {
       return r
     }
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
-    // The chat reads for itself: a kept report to answer from, or the few files a question needs
-    if (READS.includes(e.tool)) return next(e)
+    // The chat reads for itself: a kept report to answer from, or the few files a question needs. A saved paste stays out of it:
+    // the agent that needs it reads it
+    const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
+    const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
+    if (READS.includes(e.tool) && !isPaste) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
 
     return { deny: REFUSED }

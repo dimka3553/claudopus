@@ -297,6 +297,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.tool === 'SendMessage') sent.push(String((e as { message?: string }).message))
     // A command that prints the key, as one could print it by mistake
     if (e.tool === 'Bash' && String((e as { command?: string }).command).includes('echo $API_KEY')) return { result: { stdout: `token is ${files.get('keychain:API_KEY') ?? 'none'}`, stderr: '', interrupted: false } } as never
+    // A file that holds the key, as a .env does
+    if (e.tool === 'Read' && String((e as { file_path?: string }).file_path).endsWith('/.env')) return { result: { type: 'text', file: { content: `API_KEY=${files.get('keychain:API_KEY') ?? 'none'}` } } } as never
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
     if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
@@ -429,6 +431,11 @@ test('work uses a kept key without reading it: the keychain is not read, and wha
   const shown = await $.tool.call({ tool: 'Bash', tool_use_id: 'k4', command: 'bin/secret API_KEY here "echo $API_KEY"', agentId: 'w1' } as never)
   expect(JSON.stringify(shown.result)).toContain('token is [hidden API_KEY]')
   expect(JSON.stringify(shown.result)).not.toContain('sk-live-123456')
+  // What the chat reads in its own thread comes back with the key hidden too
+  const read2 = await $.tool.call({ tool: 'Read', tool_use_id: 'k8', file_path: '/repo/.env' } as never)
+  expect(read2.deny).toBeUndefined()
+  expect(JSON.stringify(read2.result)).toContain('API_KEY=[hidden API_KEY]')
+  expect(JSON.stringify(read2.result)).not.toContain('sk-live-123456')
 })
 
 test('work reaches main only through the release runner: its rules name it, and a push or merge to main by hand is refused', async ($, on) => {
@@ -478,6 +485,10 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
   expect(r.text).toContain('were saved to')
   const saved = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/pastes/`))
   expect(saved?.[1]).toBe(paste)
+  // and the chat does not read it back in: the agent that needs it reads it
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p1', file_path: saved?.[0] } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'p2', pattern: 'end', path: `${MEMORY}/pastes` } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p3', file_path: saved?.[0], agentId: 'w1' } as never)).deny).toBeUndefined()
 })
 
 test("a chat's own thread may only read, start agents and talk to them; an agent may do the work", async ($, on) => {

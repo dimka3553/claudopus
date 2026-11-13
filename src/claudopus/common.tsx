@@ -15,7 +15,7 @@ const OLD_PANE = 'agents'
 // Rarely used tools wait behind ToolSearch instead of loading into every chat
 const RARE_TOOLS = ['ReportFindings', 'SuggestPluginInstall', 'SuggestSkills', 'SearchPlugins', 'ScheduleWakeup', 'Workflow']
 const RARE_SERVERS = ['mcp__Claude_Browser__', 'mcp__Claude_Code_iOS_Simulator__', 'mcp__visualize__']
-// What a chat's own thread may call: it starts agents and workflows, and talks to them. An agent may call anything
+// What a chat's own thread may call to hand work over: it starts agents and workflows, and talks to them. An agent may call anything
 const OWN = ['Agent', 'Workflow', 'SendMessage', 'ListAgents', 'TaskStop', 'ToolSearch', 'AskUserQuestion', 'SendUserFile', 'ReadNotifications', 'Skill']
 // And what it reads with, to answer a question a few files answer: none of them changes a file or runs a command
 const READS = ['Read', 'Grep', 'Glob']

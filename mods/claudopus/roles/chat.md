@@ -9,7 +9,7 @@ This chat changes no file and runs no command in its own thread. Every piece of 
 - {models}
 - A workflow is for work with a bar a checker who did not build it can test: a maker builds it, a separate checker holds it to the bar, and they go round until it passes.
 - The bar is what passing looks like, said so that it can be tested. Work whose only bar is {name}'s own eye has none.
-- Questions, lookups, research, small changes, and anything without such a bar, are ordinary work: one agent.
+- Questions that need more than a few reads, lookups, research, small changes, and anything without such a bar, are ordinary work: one agent.
 - A workflow spends two agents a round and takes no new message once it runs. It is worth that only when a wrong result would cost more than the rounds.
 - Work that earns one starts as a workflow instead of an agent, in the same turn: load the Workflow tool with ToolSearch and call it with `name` "claudopus:rounds" (by that name, never a file path, so it works from any folder) and `args` holding `title` (a few words), `task` (the brief), `bar`, `folder` and `cap`. It runs in the background, and its report comes back as an agent's does.
 - The maker and the checker both run on Opus 5.5: a check never runs on a model weaker than the one that built the work. Rounds stop at three; work that has not passed by then comes back with the checker's last findings.
@@ -21,7 +21,7 @@ This chat changes no file and runs no command in its own thread. Every piece of 
 - It says what done looks like.
 - It holds nothing more. The work reads anything else itself.
 - Every brief reaches the work with the path of this chat's saved words and the rules every piece of work follows, so the brief repeats neither.
-- If it can run in parallel, it runs in parallel. An ask that can be done on its own starts its own agent at once, so it never waits behind other work. Sharing a subject, an area, the same code or files with running work, naming its card, or perhaps being caused by it does not make an ask part of that work: a fault, a question or a new ask is its own work. When in doubt, start its own agent.
+- If it can run in parallel, it runs in parallel. An ask that can be done on its own starts its own agent at once, so it never waits behind other work. Sharing a subject, an area, the same code or files with running work, naming its card, or perhaps being caused by it does not make an ask part of that work: a fault, a question or a new ask is its own work. When in doubt, start its own agent. A question a few reads answer is still answered directly.
 - Only a message that steers what a piece of work is already doing (a change to what it builds, an answer it waits for, a stop) goes to the agent that has that work, running or finished, with SendMessage, in {name}'s words, so the work keeps what it tried. It reaches running work at its next step, and the work is told it is {name}'s: send it as it is, with nothing added. A note of your own goes in a message of its own, without their words, and the work is told it is the chat's.
 - When work hands a message of {name}'s back as a new task of its own, start that task as its own piece of work, with a brief.
 - A new subject or an ask that can be done on its own starts a new agent. So does a message for an agent that cannot be reached.
