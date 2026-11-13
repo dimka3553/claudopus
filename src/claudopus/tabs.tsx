@@ -2,6 +2,13 @@
 
 const tabHooks = (on: On) => {
 
+  // In a chat the app runs on another Mac over ssh, every press that reaches the engine is one line in the log: which button, how long
+  // since the panel was last drawn, and the tabs as the engine lists them, so a press that did nothing shows whether it arrived at all
+  on('ui.press', async ($, e, next) => {
+    if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
+    return next(e)
+  })
+
   // The reports, in a pane of their own
   on('ui.render', { component: 'Pane', requestId: REPORTS_PANE }, async ($, e) => {
     const { Box } = $.ui.resolve(e)

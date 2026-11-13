@@ -40,6 +40,9 @@ const pictureAt = new Map<string, number>()
 const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
 // Opens a pane from a press, in front: the app leaves a pane already open where it is, behind another tab, so one open but not
 // shown is opened again
+// The tabs as the engine lists them, one word each: id, then s shown, f holding the keyboard, p drawn, for the log
+const rosterOf = (panes: { id: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }[]) =>
+  panes.map(pane => `${pane.id}:${pane.isShown ? 's' : ''}${pane.isFocused ? 'f' : ''}${pane.isPlaced ? 'p' : ''}`).join(' ') || 'none'
 const front = async ($: EngineInterface, id: string, title: string) => {
   const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown)
   // A press inside a tab gives that tab the keyboard, and the engine never shows a new tab over the one holding it: it waits on
@@ -63,7 +66,8 @@ const front = async ($: EngineInterface, id: string, title: string) => {
   // brings it to the front (seen in the app on a press of Results and of one result)
   const was = (await $.ui.panes()).find(pane => pane.id === id)
   if (was && !was.isShown) await $.ui.close({ id }).catch(() => undefined)
-  await $.ui.open({ id, title, focus: true })
+  const opened = await $.ui.open({ id, title, focus: true })
+  if (isRunFromAfar) await log($, `front ${id}: ${holding.length} let go first; opened ${opened.isPlaced ? 'drawn' : `undrawn (${opened.reason})`}; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
   // The pane pressed in stays in front while its press runs: once it has run, the new pane is opened again, which brings it forward
   // Only where the surface says which pane it shows: a chat the app runs on another Mac over ssh says none is shown, ever, and there
   // this open from a timer, which no press asked for, left a tab the mod never drew in place of the one drawn (seen on the M4)
