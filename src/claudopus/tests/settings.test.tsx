@@ -11,6 +11,41 @@ test('a copy of the principles in the memory folder is the person\'s own: every 
   expect(told.instructionFiles?.some(one => one.content === PRINCIPLES)).toBe(false)
 })
 
+// The two lines that were the author's own and no longer ship, as a person may keep them in their own copy
+const DELIBERATE = 'My decisions are deliberate.'
+const DONE_MEANS = 'Done means'
+
+test('a new install with no copy of its own carries the shipped principles, which leave out the author\'s "decisions are deliberate" and "done means" lines', async ($, on) => {
+  const { files } = world(on, { isNew: true, shipped: true })
+  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
+  await $.session.start(start)
+  expect(files.has(`${MEMORY}/rules/CLAUDE.md`)).toBe(false)
+  const told = await $.prompt.context({ blocks: [], instructionFiles: [] })
+  const ours = told.instructionFiles?.find(one => one.kind === 'user')?.content ?? ''
+  expect(ours).toBe(SHIPPED_PRINCIPLES)
+  expect(ours).toContain('# How I work with Claude')
+  expect(ours).toContain('My words are the spec.')
+  expect(ours).not.toContain(DELIBERATE)
+  expect(ours).not.toContain(DONE_MEANS)
+  expect(ours).not.toContain('A concern is raised')
+})
+
+test('a person\'s own copy that keeps both lines carries both, in their words, in place of the shipped principles', async ($, on) => {
+  const { files } = world(on, { shipped: true })
+  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
+  const MINE = '# How I work with Claude\n\n## Principles\n\n1. My decisions are deliberate. No risk, legal or ethics commentary unless it blocks the task; then one line, once.\n2. Done means committed and pushed, or deployed.\n'
+  files.set(`${MEMORY}/rules/CLAUDE.md`, MINE)
+  await $.session.start(start)
+  const told = await $.prompt.context({ blocks: [], instructionFiles: [] })
+  const ours = told.instructionFiles?.find(one => one.kind === 'user')?.content ?? ''
+  expect(ours).toBe(MINE)
+  expect(ours).toContain(DELIBERATE)
+  expect(ours).toContain(DONE_MEANS)
+  expect(told.instructionFiles?.some(one => one.content === SHIPPED_PRINCIPLES)).toBe(false)
+  // Nothing the mod does writes over it
+  expect(files.get(`${MEMORY}/rules/CLAUDE.md`)).toBe(MINE)
+})
+
 test('Config lists each thing a person can set with what is in force, edits a text as their own copy, changes a setting and puts each back', async ($, on) => {
   const { files, shown, tabs } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', other: 1 }))

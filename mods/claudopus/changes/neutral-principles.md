@@ -1,0 +1,2 @@
+- The shipped principles no longer say that your decisions are deliberate or what done means: those are yours to add in Config.
+- A copy of the principles you already made is kept as it is, and your chats carry it word for word.
