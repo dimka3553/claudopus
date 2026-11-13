@@ -47,3 +47,32 @@ test("the pictures a work made are in its chat where it made them: drawn small w
   }
   expect(logged).toEqual([])
 })
+
+test("in a chat the app runs on another Mac over ssh, a picture's row opens it large in a tab of the app's own, never in that Mac's viewer", async ($, on) => {
+  const svg = '/tmp/work/chart.svg'
+  const talk = [
+    { role: 'user', text: 'Draw the chart.', toolUses: [] },
+    { role: 'assistant', text: 'Drawing it.', toolUses: [{ tool_use_id: 'u1', tool: 'Write', input: { file_path: svg, content: '<svg/>' } }] },
+  ]
+  const { files, logged, shown, opened } = world(on, { talk, env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  files.set(svg, '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600"/>')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'draw the chart', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Draw the chart.' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'open-a1')
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  shown.length = 0
+  await pressed(tab, 'pic-open-1-0')
+  expect(shown.filter(one => one[0] === 'open')).toEqual([])
+  expect(opened).toContain('picture')
+  const big = await $.ui.mount({ ...LIST, requestId: 'picture', surface: 'desktop' } as never)
+  const svgs = await big.findAll({ type: 'Svg' })
+  expect(svgs.map(one => String(one.props.alt))).toEqual(['Picture: chart.svg'])
+  expect(String(svgs[0]?.props.source)).toContain('width="1200"')
+  expect(String(svgs[0]?.props.source).startsWith('<svg')).toBe(true)
+  await big.unmount()
+  await tab.unmount()
+  await pane.unmount()
+  expect(logged).toEqual([])
+})

@@ -2340,10 +2340,146 @@ const PIC_TALL = 200
 const SVG_CHARS = 100_000
 type Pic = { name: string; path: string; thumb: Thumb; isGone?: boolean }
 // A press opens the picture whole in the Mac's own viewer (Preview for a photo or screenshot), a window of its own as large as the
-// screen allows, which can go full screen and closes as any window does: the panel is only a sidebar wide
+// screen allows, which can go full screen and closes as any window does: the panel is only a sidebar wide. A chat the app runs on
+// another Mac over ssh has its engine, and so `open`, on this Mac, where nobody looks: Preview opened on its screen (seen on the
+// M4). There the picture opens in a tab of the app's own instead, which the app draws on the screen the person is at
 const showPicture = async ($: EngineInterface, path: string) => {
+  if (isRunFromAfar) return showPictureTab($, path)
   const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `picture ${path} not opened: ${opened.stderr}`)
+}
+// The picture tab: one at a time, the newest picture pressed
+const PICTURE_PANE = 'picture'
+let pictureShown = ''
+const showPictureTab = async ($: EngineInterface, path: string) => {
+  pictureShown = path
+  // One that could not be made is tried again on a new press
+  for (const [id, one] of larges) if (!one && id.startsWith(`${path}:`)) larges.delete(id)
+  await front($, PICTURE_PANE, cut(fileName(path), 30))
+  $.ui.invalidate('ui.render')
+}
+// The large copy the tab draws, as wide as a wide sidebar on a sharp screen. An Svg carries at most 131072 characters, too few for
+// a large screenshot to stay readable, so the copy is cut into bands across, each an Svg of its own drawn under the one before.
+// A width that needs too many bands gives way to a narrower one. A picture with see-through parts keeps them as PNG, else JPEG
+const LARGE_WIDTHS = [2000, 1400, 1000]
+const LARGE_CHARS = 130_000
+const LARGE_TOTAL = 600_000
+type Large = { bands: string[]; width: number; height: number } | null
+const larges = new Map<string, Large>()
+const making = new Map<string, Promise<Large>>()
+let largeMade = 0
+const makeLarge = async ($: EngineInterface, path: string, size: number): Promise<Large> => {
+  if (/\.svg$/i.test(path)) {
+    if (size > LARGE_CHARS * 2) return null
+    const text = await readOr($, path)
+    const from = text.indexOf('<svg')
+    return from >= 0 && text.length - from <= LARGE_CHARS ? { bands: [text.slice(from)], width: 0, height: 0 } : null
+  }
+  if (!RASTER.test(path)) return null
+  const got = await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'hasAlpha', path]).catch(() => ({ exitCode: 1, stdout: '' }))
+  const width = Number(/pixelWidth:\s*(\d+)/.exec(got.stdout)?.[1] ?? 0)
+  const height = Number(/pixelHeight:\s*(\d+)/.exec(got.stdout)?.[1] ?? 0)
+  if (!width || !height) return null
+  // A picture with see-through parts is tried as PNG first, which keeps them, then as JPEG, which a window screenshot's shadow
+  // edges need to fit
+  const formats = /hasAlpha:\s*yes/.test(got.stdout) ? (['png', 'jpeg'] as const) : (['jpeg'] as const)
+  largeMade += 1
+  const base = `${dir}/thumbs/large-${Math.round(await $.clock.now())}-${largeMade}`
+  await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+  try {
+    for (const format of formats)
+    for (const most of [...new Set(LARGE_WIDTHS.map(w => Math.min(w, width)))]) {
+      // The picture at this width, then cut into bands down it, each as tall as fits
+      const wide = `${base}-${most}.png`
+      const sized = await $.process.run(['sips', '--resampleWidth', String(most), '-s', 'format', 'png', path, '--out', wide]).catch(() => ({ exitCode: 1 }))
+      if (sized.exitCode !== 0) continue
+      const tall = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run(['sips', '-g', 'pixelHeight', wide]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
+      if (!tall) continue
+      // sips crops only a band that neither starts at the top nor reaches the bottom (one that does comes out centred, or whole),
+      // so the picture is given a row above and below first, and each band is cut one row down
+      const padded = await $.process.run(['sips', '--padToHeightWidth', String(tall + 2), String(most), wide]).catch(() => ({ exitCode: 1 }))
+      if (padded.exitCode !== 0) continue
+      const bands: string[] = []
+      let band = Math.min(tall, 400)
+      let isTooMany = false
+      for (let y = 0; y < tall; ) {
+        const rows = Math.min(band, tall - y)
+        const out = `${base}-band.${format === 'png' ? 'png' : 'jpg'}`
+        await $.process.run(['sips', '-c', String(rows), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', '70'] : []), wide, '--out', out])
+        const cutTo = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run(['sips', '-g', 'pixelHeight', out]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
+        const read = cutTo === rows ? ((await $.fs.read(out, { as: 'bytes' }).catch(() => undefined)) as { base64: string } | undefined) : undefined
+        const source = read ? `<svg xmlns="http://www.w3.org/2000/svg" width="${most}" height="${rows}" viewBox="0 0 ${most} ${rows}"><image href="data:image/${format};base64,${read.base64}" width="${most}" height="${rows}"/></svg>` : ''
+        if (!source) break
+        if (source.length > LARGE_CHARS) {
+          if (rows <= 16) break
+          band = Math.max(16, Math.floor((rows * LARGE_CHARS * 0.9) / source.length))
+          continue
+        }
+        bands.push(source)
+        y += rows
+        if (bands.reduce((sum, one) => sum + one.length, 0) > LARGE_TOTAL && y < tall) {
+          isTooMany = true
+          break
+        }
+      }
+      if (!isTooMany && bands.length) {
+        const whole = bands.reduce((sum, one) => sum + Number(/height="(\d+)"/.exec(one)?.[1] ?? 0), 0)
+        if (whole >= tall) return { bands, width, height }
+      }
+    }
+    return null
+  } finally {
+    await $.process.run(['sh', '-c', 'rm -f "$1"-*', 'sh', base]).catch(() => undefined)
+  }
+}
+// The large copy as made, else nothing yet: it is made once, out of the drawing, which is drawn again when it is ready. One that
+// cannot be made is kept as such, so it is not tried again at every drawing, only at the next press of its row
+const largeOf = ($: EngineInterface, path: string, id: string): Large | undefined => {
+  if (larges.has(id)) return larges.get(id) ?? null
+  if (!making.has(id))
+    making.set(
+      id,
+      makeLarge($, path, Number(id.split(':').pop()) || 0)
+        .catch(err => (void log($, `large copy of ${path} not made: ${String(err)}`), null))
+        .then(one => {
+          if (larges.size >= 6) larges.delete(larges.keys().next().value ?? '')
+          larges.set(id, one)
+          making.delete(id)
+          $.ui.invalidate('ui.render')
+          return one
+        }),
+    )
+  return undefined
+}
+// What the tab draws: the picture as wide as the tab, its name and size, and how to see it larger
+const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0]) => {
+  const ui = $.ui.resolve(e)
+  const path = pictureShown
+  if (!path) return <ui.Text dimColor>No picture is open. Press a picture's row in a work's Details.</ui.Text>
+  const name = fileName(path)
+  const stat = await $.fs.stat(path).catch(() => undefined)
+  const said = (text: string) => (
+    <ui.Box flexDirection="column" gap={1} width="100%">
+      <ui.Text bold wrap="wrap">{name}</ui.Text>
+      <ui.Text dimColor wrap="wrap">{text}</ui.Text>
+    </ui.Box>
+  )
+  if (!stat || stat.kind !== 'file') return said('This picture is no longer kept.')
+  if (!('Svg' in ui)) return said(`This screen cannot draw pictures. It is at ${path}`)
+  const large = largeOf($, path, `${path}:${stat.mtimeMs}:${stat.size}`)
+  if (large === undefined) return said('Making a large copy…')
+  if (!large) return said(`This picture could not be drawn here. Press its row again to try again. It is at ${path}`)
+  return (
+    <ui.Box flexDirection="column" gap={1} width="100%">
+      <ui.Text bold wrap="wrap">{name}</ui.Text>
+      <ui.Box flexDirection="column" width="100%">
+        {large.bands.map((band, n) => (
+          <ui.Svg key={`large-${n}`} source={band} alt={`Picture: ${name}${large.bands.length > 1 ? `, part ${n + 1} of ${large.bands.length}` : ''}`} />
+        ))}
+      </ui.Box>
+      <ui.Text dimColor wrap="wrap">{`${large.width ? `${large.width} × ${large.height} · ` : ''}drag the sidebar's edge to make it wider`}</ui.Text>
+    </ui.Box>
+  )
 }
 const pics = new Map<string, Pic | null>()
 const PICS_HELD = 60
@@ -5860,6 +5996,16 @@ const tabHooks = (on: On) => {
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
         {await aboutView($, $.ui.resolve(e))}
+      </Box>
+    )
+  })
+
+  // A picture opened large, in a chat the app runs on another Mac over ssh
+  on('ui.render', { component: 'Pane', requestId: PICTURE_PANE }, async ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+        {await pictureView($, e)}
       </Box>
     )
   })

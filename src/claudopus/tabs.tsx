@@ -45,6 +45,16 @@ const tabHooks = (on: On) => {
     )
   })
 
+  // A picture opened large, in a chat the app runs on another Mac over ssh
+  on('ui.render', { component: 'Pane', requestId: PICTURE_PANE }, async ($, e) => {
+    const { Box } = $.ui.resolve(e)
+    return (
+      <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+        {await pictureView($, e)}
+      </Box>
+    )
+  })
+
   // A report opened as a pane of its own, named after it
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (!e.requestId?.startsWith('report-')) return next(e)
