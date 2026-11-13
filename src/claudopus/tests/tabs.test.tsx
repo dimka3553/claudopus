@@ -70,11 +70,12 @@ test('the header names the version this chat loaded beside Claudopus, and a newe
   expect(shown?.props.dimColor).toBe(true)
   // The header keeps its three lines: the name, what runs, this chat's size
   expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
-  // A newer copy the Mac updated itself to is named after it; one the same or older is not
+  // The installed version is Claude Code's own record, not the last look's: a copy run from a folder of its code has none, so a
+  // newer version in update.json names nothing (an installed copy's is read from installed_plugins.json, tested in update.test)
   await pane.unmount()
   files.set(`${MEMORY}/update.json`, JSON.stringify({ at: 1, version: '0.1.1', result: 'updated' }))
   const later = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
-  expect((await version(later))?.text).toBe('v0.1.0 · v0.1.1 installed')
+  expect((await version(later))?.text).toBe('v0.1.0')
   await later.unmount()
   // In a narrow pane the name stays whole; only the version shortens
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 24 }, surface: 'desktop' } as never)

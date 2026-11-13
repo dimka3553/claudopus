@@ -31,7 +31,8 @@ const versionsOf = async ($: EngineInterface) => {
   const version = await loadedVersion
   // A read that failed is tried again on the next drawing
   if (!version) loadedVersion = undefined
-  const installed = dir ? (stampOf(await readOr($, `${dir}/update.json`))?.version ?? '') : ''
+  // The Mac's installed version is Claude Code's own record, read each time: update.json says only what the last look found
+  const installed = await installedNow($).catch(() => '')
   return { version, installed, isWaiting: Boolean(version && installed && isNewer(installed, version)) }
 }
 const aboutView = async ($: EngineInterface, ui: Ui) => {

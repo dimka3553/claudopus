@@ -242,6 +242,9 @@ const chatHooks = (on: On) => {
     // Claudopus updates itself: a look a little after the chat starts, then whenever one is due
     $.clock.after(UPDATE_AFTER, () => void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
     $.clock.every(UPDATE_LOOK, () => selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
+    // and an open chat moves to a newer copy installed while it runs, by itself, once it is idle
+    reloadAsked = ''
+    $.clock.every(RELOAD_EVERY, () => reloadToInstalled($).catch(err => log($, `reload not looked for: ${String(err)}`)))
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
 
     return begun

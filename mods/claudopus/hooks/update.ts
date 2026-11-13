@@ -63,6 +63,52 @@ export const installedVersionOf = (installed: string, id: string, root: string, 
   }
 }
 
+// The installed copy this chat would load if it started now, with the folder Claude Code put it in: this very folder's entry, else the
+// project or local install of the folder the chat runs in (the nearest one), else the user's
+export const copyOf = (installed: string, id: string, root: string, cwd = ''): { version: string; installPath?: string } | undefined => {
+  try {
+    const entries: { scope?: string; version?: string; installPath?: string; projectPath?: string }[] = (JSON.parse(installed)?.plugins?.[id] ?? []).filter(
+      (one: { version?: unknown }) => typeof one?.version === 'string' && one.version,
+    )
+    const trim = (path = '') => path.replace(/\/$/, '')
+    const own = entries.find(one => trim(one.installPath) === trim(root))
+    const inFolder = entries
+      .filter(one => one.scope !== 'user' && one.projectPath && (trim(cwd) === trim(one.projectPath) || trim(cwd).startsWith(`${trim(one.projectPath)}/`)))
+      .sort((x, y) => trim(y.projectPath).length - trim(x.projectPath).length)[0]
+    const one = own ?? inFolder ?? entries.find(one => one.scope === 'user')
+    return one?.version ? { version: one.version, installPath: one.installPath ? trim(one.installPath) : undefined } : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// How often an open chat looks whether a newer copy is installed, and how long before a chat asks again for a reload to the same
+// version (one that brought back the old copy, or was refused)
+export const RELOAD_EVERY = 20_000
+export const RELOAD_AGAIN = 10 * 60 * 1000
+
+// Whether a chat running `loaded` reloads to the installed copy: a newer one, whole on disk (its manifest names that version), and
+// not already asked for in this chat within RELOAD_AGAIN
+export const isReloadDue = (
+  loaded: string,
+  copy: { version: string; installPath?: string } | undefined,
+  manifest: string,
+  before: { version?: unknown; at?: unknown } | undefined,
+  now: number,
+) => {
+  if (!loaded || !copy?.version || !isNewer(copy.version, loaded)) return false
+  if (copy.installPath && versionIn(manifest) !== copy.version) return false
+  const at = typeof before?.at === 'number' && Number.isFinite(before.at) ? before.at : undefined
+  return !(at !== undefined && before?.version === copy.version && now >= at && now - at < RELOAD_AGAIN)
+}
+const versionIn = (manifest: string) => {
+  try {
+    return String(JSON.parse(manifest)?.version ?? '')
+  } catch {
+    return ''
+  }
+}
+
 // The two commands, in order: refresh the marketplace's copy (`plugin update` alone does not, and reports the old version as the
 // latest), then update the mod from it, at the scope it was installed at
 export const updateSteps = (engine: string, from: { marketplace: string; plugin: string }, scope?: string): [string[], string[]] => [

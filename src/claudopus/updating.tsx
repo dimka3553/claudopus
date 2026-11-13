@@ -77,3 +77,50 @@ const selfUpdate = async ($: EngineInterface) => {
     isUpdating = false
   }
 }
+
+// ---- Moving an open chat to the version installed ----
+
+// The version the Mac has installed now, from Claude Code's own record (installed_plugins.json), with the folder it is in; nothing
+// for a copy run from a folder of its code, which has nothing installed to move to
+const installedNow = async ($: EngineInterface) => (await installedCopy($))?.version ?? ''
+const installedCopy = async ($: EngineInterface) => {
+  const from = installedFrom($.plugin.root)
+  if (!from) return undefined
+  const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
+  const id = `${from.plugin}@${from.marketplace}`
+  return copyOf(installed, id, $.plugin.root, cwd)
+}
+
+// A chat whose copy is older than the one installed loads the new one itself, with Claude Code's own /reload-plugins: the run waits
+// until the chat is idle (no turn of its own running), and background work carries on through it. The reload starts this code
+// afresh; each ask is kept in reloads/<chat>.json, so a reload that brought back the old copy, or was refused, is not asked again
+// for the same version for RELOAD_AGAIN, and a chat never reloads over and over
+let reloadAsked = ''
+const reloadToInstalled = async ($: EngineInterface) => {
+  if (!dir || reloadAsked) return
+  const loaded = (await versionsOf($)).version
+  const copy = await installedCopy($)
+  if (!loaded || !copy?.version || !isNewer(copy.version, loaded)) return
+  const manifest = copy.installPath ? await readOr($, `${copy.installPath}/.claude-plugin/plugin.json`) : ''
+  const mark = `${dir}/reloads/${await $.session.id()}.json`
+  const before = await readOr($, mark).then(text => {
+    try {
+      return JSON.parse(text) as { version?: string; at?: number }
+    } catch {
+      return undefined
+    }
+  })
+  const now = await $.clock.now()
+  if (!isReloadDue(loaded, copy, manifest, before, now)) return
+  reloadAsked = copy.version
+  try {
+    await $.fs.write(mark, JSON.stringify({ version: copy.version, from: loaded, at: now }))
+    await log($, `Claudopus ${copy.version} is installed and this chat runs ${loaded}: reloading it`)
+    await $.command.run({ command: 'reload-plugins' })
+  } catch (err) {
+    await log($, `Claudopus not reloaded to ${copy.version}: ${String(err)}`)
+  } finally {
+    // Settled without this code being replaced (refused, or the old copy came back): the mark decides when to ask again
+    reloadAsked = ''
+  }
+}

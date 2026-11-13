@@ -145,10 +145,14 @@ declare global {
   export import ConfigShown = M6.ConfigShown
   export import Models = M6.Models
   export import Role = M6.Role
+  export import copyOf = M7.copyOf
   export import installedFrom = M7.installedFrom
   export import installedVersionOf = M7.installedVersionOf
   export import isNewer = M7.isNewer
+  export import isReloadDue = M7.isReloadDue
   export import isUpdateDue = M7.isUpdateDue
+  export import RELOAD_AGAIN = M7.RELOAD_AGAIN
+  export import RELOAD_EVERY = M7.RELOAD_EVERY
   export import scopeOf = M7.scopeOf
   export import stampOf = M7.stampOf
   export import UPDATE_AFTER = M7.UPDATE_AFTER

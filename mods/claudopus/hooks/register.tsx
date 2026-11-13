@@ -11,7 +11,7 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
-import { installedFrom, installedVersionOf, isNewer, isUpdateDue, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedTo, updateSteps, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
+import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedTo, updateSteps, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
 // helpers, the log and the chat's saved words
@@ -2132,7 +2132,8 @@ const versionsOf = async ($: EngineInterface) => {
   const version = await loadedVersion
   // A read that failed is tried again on the next drawing
   if (!version) loadedVersion = undefined
-  const installed = dir ? (stampOf(await readOr($, `${dir}/update.json`))?.version ?? '') : ''
+  // The Mac's installed version is Claude Code's own record, read each time: update.json says only what the last look found
+  const installed = await installedNow($).catch(() => '')
   return { version, installed, isWaiting: Boolean(version && installed && isNewer(installed, version)) }
 }
 const aboutView = async ($: EngineInterface, ui: Ui) => {
@@ -2878,6 +2879,53 @@ const selfUpdate = async ($: EngineInterface) => {
     }
   } finally {
     isUpdating = false
+  }
+}
+
+// ---- Moving an open chat to the version installed ----
+
+// The version the Mac has installed now, from Claude Code's own record (installed_plugins.json), with the folder it is in; nothing
+// for a copy run from a folder of its code, which has nothing installed to move to
+const installedNow = async ($: EngineInterface) => (await installedCopy($))?.version ?? ''
+const installedCopy = async ($: EngineInterface) => {
+  const from = installedFrom($.plugin.root)
+  if (!from) return undefined
+  const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
+  const id = `${from.plugin}@${from.marketplace}`
+  return copyOf(installed, id, $.plugin.root, cwd)
+}
+
+// A chat whose copy is older than the one installed loads the new one itself, with Claude Code's own /reload-plugins: the run waits
+// until the chat is idle (no turn of its own running), and background work carries on through it. The reload starts this code
+// afresh; each ask is kept in reloads/<chat>.json, so a reload that brought back the old copy, or was refused, is not asked again
+// for the same version for RELOAD_AGAIN, and a chat never reloads over and over
+let reloadAsked = ''
+const reloadToInstalled = async ($: EngineInterface) => {
+  if (!dir || reloadAsked) return
+  const loaded = (await versionsOf($)).version
+  const copy = await installedCopy($)
+  if (!loaded || !copy?.version || !isNewer(copy.version, loaded)) return
+  const manifest = copy.installPath ? await readOr($, `${copy.installPath}/.claude-plugin/plugin.json`) : ''
+  const mark = `${dir}/reloads/${await $.session.id()}.json`
+  const before = await readOr($, mark).then(text => {
+    try {
+      return JSON.parse(text) as { version?: string; at?: number }
+    } catch {
+      return undefined
+    }
+  })
+  const now = await $.clock.now()
+  if (!isReloadDue(loaded, copy, manifest, before, now)) return
+  reloadAsked = copy.version
+  try {
+    await $.fs.write(mark, JSON.stringify({ version: copy.version, from: loaded, at: now }))
+    await log($, `Claudopus ${copy.version} is installed and this chat runs ${loaded}: reloading it`)
+    await $.command.run({ command: 'reload-plugins' })
+  } catch (err) {
+    await log($, `Claudopus not reloaded to ${copy.version}: ${String(err)}`)
+  } finally {
+    // Settled without this code being replaced (refused, or the old copy came back): the mark decides when to ask again
+    reloadAsked = ''
   }
 }
 
@@ -4087,6 +4135,9 @@ const chatHooks = (on: On) => {
     // Claudopus updates itself: a look a little after the chat starts, then whenever one is due
     $.clock.after(UPDATE_AFTER, () => void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
     $.clock.every(UPDATE_LOOK, () => selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
+    // and an open chat moves to a newer copy installed while it runs, by itself, once it is idle
+    reloadAsked = ''
+    $.clock.every(RELOAD_EVERY, () => reloadToInstalled($).catch(err => log($, `reload not looked for: ${String(err)}`)))
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
 
     return begun
