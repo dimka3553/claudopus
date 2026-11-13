@@ -8,6 +8,9 @@
 #   admin <ssh host> '<command>'   on that Mac, over SSH
 #   admin <mac> --forget           removes the kept password
 set -u
+# The runner uses only the system's own programs, so nothing earlier on the PATH is handed the password
+user_path=$PATH
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
 mac=${1:-}
 command=${2:-}
 if [ -z "$mac" ] || [ -z "$command" ] || [ "${mac#-}" != "$mac" ]; then
@@ -86,7 +89,7 @@ ask() {
   status=$?
   [ "$status" = 2 ] || return "$status"
   # Only where no chat draws a panel on this Mac: a box on its screen, when someone can see it
-  if afar; then echo "No Claudopus panel is open on this Mac to ask in: open a chat here and run it again." >&2; return 1; fi
+  if afar; then echo "No Claudopus panel on this Mac took the request: open the panel with /claudopus in a chat here and run it again." >&2; return 1; fi
   osascript \
     -e 'on run argv' \
     -e 'activate' \
@@ -94,6 +97,10 @@ ask() {
     -e 'end run' \
     "$text" 2>/dev/null
 }
+
+# On this Mac the command keeps the PATH it was given; over SSH, that Mac's own
+with_path=''
+[ "$mac" = here ] && with_path="PATH=$(printf '%q' "$user_path"); export PATH; "
 
 if [ "$mac" != here ] && ! ssh_to true </dev/null 2>/dev/null; then
   echo "$mac could not be reached over SSH." >&2
@@ -111,7 +118,7 @@ if ! kept >/dev/null; then
       printf '%s\n%s\n' "$pw" "$pw" | security add-generic-password -U -s "$service" -a "$mac" -l "Claudopus admin: $mac" -w >/dev/null 2>&1 ||
         echo "The password for $mac was right but could not be kept in the keychain; it will be asked again next time." >&2
       # The first run uses the password just typed, kept or not
-      printf '%s\n' "$pw" | sudo_on /bin/sh -c "exec </dev/null; $command"
+      printf '%s\n' "$pw" | sudo_on /bin/sh -c "exec </dev/null; ${with_path}$command"
       status=$?
       unset pw
       exit "$status"
@@ -134,4 +141,4 @@ elif [ "$status" != 0 ]; then
   echo "The kept password for $mac was refused; it is forgotten and will be asked again." >&2
   exit 4
 fi
-kept | sudo_on /bin/sh -c "exec </dev/null; $command"
+kept | sudo_on /bin/sh -c "exec </dev/null; ${with_path}$command"
