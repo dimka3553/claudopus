@@ -11,44 +11,12 @@ const CHAT_THUMB_SIZES = ['360', '280']
 const PIC_TALL = 200
 // The most characters a picture drawn as it is, an SVG of the work's own, may have
 const SVG_CHARS = 100_000
-type Pic = { name: string; path: string; thumb: Thumb; isGone?: boolean; big?: Thumb }
-// The pictures pressed to be seen large, by path, and the large copies made
-const bigPics = new Set<string>()
-const bigs = new Map<string, Thumb>()
-// A large copy: the panel's width at most, kept under what one drawing part takes
-const BIG_SIZES = ['1200', '960', '720', '540']
-const BIG_CHARS = 120_000
-const bigOf = async ($: EngineInterface, path: string): Promise<Thumb> => {
-  const stat = await $.fs.stat(path).catch(() => undefined)
-  if (!stat) return null
-  const id = `${path}:${stat.mtimeMs}`
-  if (bigs.has(id)) return bigs.get(id) ?? null
-  let big: Thumb = null
-  if (/\.svg$/i.test(path)) {
-    const text = stat.size <= SVG_CHARS ? await readOr($, path) : ''
-    const from = text.indexOf('<svg')
-    big = from >= 0 ? { source: text.slice(from), width: 0, height: 0 } : null
-  } else if (RASTER.test(path)) {
-    const to = `${dir}/thumbs/${slug(path).slice(-60)}-${mark(path).replace(':', '-')}-${Math.round(stat.mtimeMs)}-big.jpg`
-    await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
-    for (const size of BIG_SIZES) {
-      if (!(await $.fs.exists(to)) || ((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) * 1.37 > BIG_CHARS)
-        await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '70', path, '--out', to])
-      else break
-    }
-    try {
-      const bytes = (await $.fs.read(to, { as: 'bytes' })) as { base64: string }
-      const sized = (await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', to])).stdout
-      const width = Number(/pixelWidth:\s*(\d+)/.exec(sized)?.[1] ?? 0)
-      const height = Number(/pixelHeight:\s*(\d+)/.exec(sized)?.[1] ?? 0)
-      if (width && height && bytes.base64.length < BIG_CHARS)
-        big = { source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="data:image/jpeg;base64,${bytes.base64}" width="${width}" height="${height}"/></svg>`, width, height }
-    } catch {
-      big = null
-    }
-  }
-  bigs.set(id, big)
-  return big
+type Pic = { name: string; path: string; thumb: Thumb; isGone?: boolean }
+// A press opens the picture whole in the Mac's own viewer (Preview for a photo or screenshot), a window of its own as large as the
+// screen allows, which can go full screen and closes as any window does: the panel is only a sidebar wide
+const showPicture = async ($: EngineInterface, path: string) => {
+  const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  if (opened.exitCode !== 0) await log($, `picture ${path} not opened: ${opened.stderr}`)
 }
 const pics = new Map<string, Pic | null>()
 const PICS_HELD = 60

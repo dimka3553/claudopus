@@ -1436,11 +1436,6 @@ const welcomeCard = ($: EngineInterface, ui: Ui) => (
   </ui.Box>
 )
 
-const showFile = async ($: EngineInterface, path: string) => {
-  const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  if (opened.exitCode !== 0) await log($, `picture not opened: ${opened.stderr}`)
-}
-
 // The Results tab and each result's own tab: the list, a result drawn whole, put away and brought back
 
 // Puts a line naming the report in the chat's box, for the person to finish and send; where there is no box, nothing is sent for them
@@ -2277,44 +2272,12 @@ const CHAT_THUMB_SIZES = ['360', '280']
 const PIC_TALL = 200
 // The most characters a picture drawn as it is, an SVG of the work's own, may have
 const SVG_CHARS = 100_000
-type Pic = { name: string; path: string; thumb: Thumb; isGone?: boolean; big?: Thumb }
-// The pictures pressed to be seen large, by path, and the large copies made
-const bigPics = new Set<string>()
-const bigs = new Map<string, Thumb>()
-// A large copy: the panel's width at most, kept under what one drawing part takes
-const BIG_SIZES = ['1200', '960', '720', '540']
-const BIG_CHARS = 120_000
-const bigOf = async ($: EngineInterface, path: string): Promise<Thumb> => {
-  const stat = await $.fs.stat(path).catch(() => undefined)
-  if (!stat) return null
-  const id = `${path}:${stat.mtimeMs}`
-  if (bigs.has(id)) return bigs.get(id) ?? null
-  let big: Thumb = null
-  if (/\.svg$/i.test(path)) {
-    const text = stat.size <= SVG_CHARS ? await readOr($, path) : ''
-    const from = text.indexOf('<svg')
-    big = from >= 0 ? { source: text.slice(from), width: 0, height: 0 } : null
-  } else if (RASTER.test(path)) {
-    const to = `${dir}/thumbs/${slug(path).slice(-60)}-${mark(path).replace(':', '-')}-${Math.round(stat.mtimeMs)}-big.jpg`
-    await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
-    for (const size of BIG_SIZES) {
-      if (!(await $.fs.exists(to)) || ((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) * 1.37 > BIG_CHARS)
-        await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '70', path, '--out', to])
-      else break
-    }
-    try {
-      const bytes = (await $.fs.read(to, { as: 'bytes' })) as { base64: string }
-      const sized = (await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', to])).stdout
-      const width = Number(/pixelWidth:\s*(\d+)/.exec(sized)?.[1] ?? 0)
-      const height = Number(/pixelHeight:\s*(\d+)/.exec(sized)?.[1] ?? 0)
-      if (width && height && bytes.base64.length < BIG_CHARS)
-        big = { source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="data:image/jpeg;base64,${bytes.base64}" width="${width}" height="${height}"/></svg>`, width, height }
-    } catch {
-      big = null
-    }
-  }
-  bigs.set(id, big)
-  return big
+type Pic = { name: string; path: string; thumb: Thumb; isGone?: boolean }
+// A press opens the picture whole in the Mac's own viewer (Preview for a photo or screenshot), a window of its own as large as the
+// screen allows, which can go full screen and closes as any window does: the panel is only a sidebar wide
+const showPicture = async ($: EngineInterface, path: string) => {
+  const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  if (opened.exitCode !== 0) await log($, `picture ${path} not opened: ${opened.stderr}`)
 }
 const pics = new Map<string, Pic | null>()
 const PICS_HELD = 60
@@ -5089,8 +5052,7 @@ const panelHooks = (on: On) => {
     // text, and each run of tool steps folded into one quiet row that opens on a press. A long message to it is folded too
     const talk = (one: Todo, lines: Line[] | undefined, shots: Map<number, Pic[]>) => {
       // The pictures a run of steps made, under its row whether it is open or not: each drawn small where the panel can, with
-      // a row under it that shows it large in place, with where it is; one that is gone is named. Nothing leaves the app
-      const isBig = (pic: Pic) => bigPics.has(pic.path)
+      // a row under it that opens it whole in a window of its own, large enough to look at; one that is gone is named
       const drawing = $.ui.resolve(e)
       const picturesOfRun = (block: Line[], at: number) => {
         const made = block.flatMap(line => shots.get(line.at ?? -1) ?? [])
@@ -5099,9 +5061,7 @@ const panelHooks = (on: On) => {
           <Box key={`pics-${at}`} flexDirection="column" alignItems="flex-start" gap={1} width="100%">
             {made.map((pic, n) => (
               <Box key={`pic-${at}-${n}`} flexDirection="column" alignItems="flex-start" width="100%">
-                {isBig(pic) && pic.big && 'Svg' in drawing ? (
-                  <drawing.Svg key={`pic-big-${at}-${n}`} source={pic.big.source} alt={`Picture: ${pic.name}`} />
-                ) : pic.thumb && 'Svg' in drawing ? (
+                {pic.thumb && 'Svg' in drawing ? (
                   <drawing.Svg
                     key={`pic-svg-${at}-${n}`}
                     source={pic.thumb.source}
@@ -5114,21 +5074,11 @@ const panelHooks = (on: On) => {
                 ) : (
                   <Button
                     key={`pic-open-${at}-${n}-${presses}`}
-                    label={`${isBig(pic) ? '▾' : '▸'} Picture: ${cut(pic.name, Math.max(12, room - 11))}`}
+                    label={`⤢ ${pic.thumb && e.surface !== 'terminal' ? 'Open large' : 'Open'}: ${cut(pic.name, Math.max(12, room - 14))}`}
                     plain
-                    onPress={() => {
-                      presses += 1
-                      if (!bigPics.delete(pic.path)) bigPics.add(pic.path)
-                      // Its large copy is made after the press, never while drawing, and drawn once made
-                      if (isBig(pic) && !pic.big && e.surface !== 'terminal')
-                        void bigOf($, pic.path)
-                          .then(made => ((pic.big = made), redraw($)))
-                          .catch(() => undefined)
-                      void update($, view, v => ({ ...v }))
-                    }}
+                    onPress={() => ((presses += 1), redraw($), void showPicture($, pic.path))}
                   />
                 )}
-                {isBig(pic) ? <Text dimColor wrap="wrap">{pic.path}</Text> : null}
               </Box>
             ))}
           </Box>

@@ -56,7 +56,3 @@ const welcomeCard = ($: EngineInterface, ui: Ui) => (
   </ui.Box>
 )
 
-const showFile = async ($: EngineInterface, path: string) => {
-  const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  if (opened.exitCode !== 0) await log($, `picture not opened: ${opened.stderr}`)
-}

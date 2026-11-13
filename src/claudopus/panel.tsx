@@ -426,8 +426,7 @@ const panelHooks = (on: On) => {
     // text, and each run of tool steps folded into one quiet row that opens on a press. A long message to it is folded too
     const talk = (one: Todo, lines: Line[] | undefined, shots: Map<number, Pic[]>) => {
       // The pictures a run of steps made, under its row whether it is open or not: each drawn small where the panel can, with
-      // a row under it that shows it large in place, with where it is; one that is gone is named. Nothing leaves the app
-      const isBig = (pic: Pic) => bigPics.has(pic.path)
+      // a row under it that opens it whole in a window of its own, large enough to look at; one that is gone is named
       const drawing = $.ui.resolve(e)
       const picturesOfRun = (block: Line[], at: number) => {
         const made = block.flatMap(line => shots.get(line.at ?? -1) ?? [])
@@ -436,9 +435,7 @@ const panelHooks = (on: On) => {
           <Box key={`pics-${at}`} flexDirection="column" alignItems="flex-start" gap={1} width="100%">
             {made.map((pic, n) => (
               <Box key={`pic-${at}-${n}`} flexDirection="column" alignItems="flex-start" width="100%">
-                {isBig(pic) && pic.big && 'Svg' in drawing ? (
-                  <drawing.Svg key={`pic-big-${at}-${n}`} source={pic.big.source} alt={`Picture: ${pic.name}`} />
-                ) : pic.thumb && 'Svg' in drawing ? (
+                {pic.thumb && 'Svg' in drawing ? (
                   <drawing.Svg
                     key={`pic-svg-${at}-${n}`}
                     source={pic.thumb.source}
@@ -451,21 +448,11 @@ const panelHooks = (on: On) => {
                 ) : (
                   <Button
                     key={`pic-open-${at}-${n}-${presses}`}
-                    label={`${isBig(pic) ? '▾' : '▸'} Picture: ${cut(pic.name, Math.max(12, room - 11))}`}
+                    label={`⤢ ${pic.thumb && e.surface !== 'terminal' ? 'Open large' : 'Open'}: ${cut(pic.name, Math.max(12, room - 14))}`}
                     plain
-                    onPress={() => {
-                      presses += 1
-                      if (!bigPics.delete(pic.path)) bigPics.add(pic.path)
-                      // Its large copy is made after the press, never while drawing, and drawn once made
-                      if (isBig(pic) && !pic.big && e.surface !== 'terminal')
-                        void bigOf($, pic.path)
-                          .then(made => ((pic.big = made), redraw($)))
-                          .catch(() => undefined)
-                      void update($, view, v => ({ ...v }))
-                    }}
+                    onPress={() => ((presses += 1), redraw($), void showPicture($, pic.path))}
                   />
                 )}
-                {isBig(pic) ? <Text dimColor wrap="wrap">{pic.path}</Text> : null}
               </Box>
             ))}
           </Box>
