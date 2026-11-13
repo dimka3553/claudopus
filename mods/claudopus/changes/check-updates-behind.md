@@ -1,0 +1,1 @@
+- Check for updates no longer says you're on the newest version when the place Claude Code installs Claudopus from is behind claudopus.ai: it says which version that place still has.

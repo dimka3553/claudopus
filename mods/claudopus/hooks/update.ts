@@ -158,7 +158,7 @@ export const updatedTo = (out: string): { version: string; isNew: boolean } | un
 // ---- One look: the version page, then the two steps when it names another version ----
 
 // What a look found: this Mac already has the version the page names, it downloaded it now, or it could not tell or download
-export type Look = { kind: 'latest'; version: string } | { kind: 'updated'; version: string } | { kind: 'failed'; why: string; version?: string }
+export type Look = { kind: 'latest'; version: string } | { kind: 'updated'; version: string } | { kind: 'failed'; why: string; version?: string; next?: string }
 // What a look needs of the Mac, so the hourly look and Config's Check for updates run the very same steps, and tests can give them
 export type LookIo = {
   read: (path: string) => Promise<string>
@@ -206,6 +206,9 @@ export const lookOnce = async (io: LookIo, at: { from: { plugins: string; market
   await io.write(stampPath, JSON.stringify({ at: now, version: to?.version ?? before?.version ?? '', result }))
   if (to?.isNew) await io.log(`Claudopus updated to ${to.version}: chats that start from now on load it`)
   else if (!to) await io.log(`Claudopus ${result}`)
+  // Both steps ran, yet where Claude Code installs it from still has an older version than the page (a folder of its code not brought
+  // up to date): the newest is not here, and that is said rather than "newest"
+  if (to && isNewer(current, to.version)) return { kind: 'failed', version: current, why: `where Claude Code installs it from still has v${to.version}`, next: 'Bring that up to date, then check again.' }
   if (to) return { kind: to.isNew ? 'updated' : 'latest', version: to.version }
   const said = why.split('\n').at(-1)?.trim() ?? ''
   return { kind: 'failed', version: current, why: `${refreshed.exitCode === 0 ? 'Claude Code did not update it' : 'Claude Code could not refresh where it comes from'}${said ? ` (${said.slice(0, 120)})` : ''}` }
@@ -215,7 +218,7 @@ export const lookOnce = async (io: LookIo, at: { from: { plugins: string; market
 // /reload-plugins in this chat, or why not. A chat on this Mac also switches by itself once it is idle; one run from another Mac
 // cannot (the engine refuses a reload it was not typed in there), so there it is only typed
 export const checkSaid = (look: Look, loaded: string, isTypedOnly = false): { text: string; isError: boolean } => {
-  if (look.kind === 'failed') return { text: `Couldn't ${look.version ? `download v${look.version}` : 'check'}: ${look.why}. Try again later.`, isError: true }
+  if (look.kind === 'failed') return { text: `Couldn't ${look.version ? `download v${look.version}` : 'check'}: ${look.why}. ${look.next ?? 'Try again later.'}`, isError: true }
   if (loaded && isNewer(look.version, loaded))
     return { text: `v${look.version} downloaded. Type /reload-plugins to switch this chat to it${isTypedOnly ? '.' : ', or it switches by itself in a moment.'}`, isError: false }
   return { text: `You're on the newest version (v${look.version}).`, isError: false }
