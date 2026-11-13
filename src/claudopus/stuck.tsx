@@ -83,7 +83,9 @@ const lookStuck = async ($: EngineInterface) => {
     const isPrompted = (one: Todo) => waiting.some(p => p.agent && topOf(list, p.agent) === one.id)
     const next = list.map(one => {
       if (one.parentId || one.chat) return one
-      const isStuck = one.status === 'working' && !one.ask && !one.answeredAt && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
+      // Nor work that waits for a command of its own it started in the background: a long copy is not stuck
+      const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
+      const isStuck = one.status === 'working' && !one.ask && !one.answeredAt && !isWaitingOwn && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
       if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
       if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
       return one
@@ -110,6 +112,45 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
 
 // A row's running call, with its time, once it has run RUNNING_SHOWN
 const runningLine = (one: Todo, at: number) => (one.status === 'working' && one.running && at - one.running.at >= RUNNING_SHOWN ? `${one.running.what} · ${took(at - one.running.at)}` : '')
+
+// ---- What work started in the background itself, which wakes it as it ends ----
+
+const BG_KEPT = 20
+// A command it sent to the background, or a watch it set, is kept by its card with its task id and its own words for it; one it
+// stops goes. A command the engine ends with its final response wakes nothing and is not kept
+const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown }, result: unknown) => {
+  if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')])
+  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown }
+  // A command the engine ends with the work's final response wakes nothing and is not kept (the engine does not always say that
+  // one it keeps wakes its owner, so its silence is no sign)
+  const id = call.tool === 'Bash' ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
+  if (typeof id !== 'string' || !id || r.backgroundEndsWithFinalResponse) return
+  const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
+  const now = await $.clock.now()
+  await update($, todos, list =>
+    list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(call.tool === 'Monitor' ? { isWatch: true } : {}) }].slice(-BG_KEPT) } : one)),
+  )
+}
+// Background work that has ended or was stopped leaves every card that kept it
+const dropBackground = async ($: EngineInterface, ids: string[]) =>
+  update($, todos, list => {
+    const isGone = (id: string) => ids.includes(id)
+    if (!list.some(one => one.bg?.some(b => isGone(b.id)))) return list
+    return list.map(one => {
+      const bg = one.bg?.filter(b => !isGone(b.id))
+      return bg?.length === one.bg?.length ? one : { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined }
+    })
+  })
+
+// What work still at work says on its card while it waits for a command of its own: which, and how long it has run
+const waitLine = (one: Todo, at: number) => {
+  const commands = (one.bg ?? []).filter(b => !b.isWatch)
+  // The newest command it started, the one it is most likely on now
+  const first = commands.at(-1)
+  if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
+  const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
+  return `Still at work: it waits for its background command${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
+}
 
 // What finished work left running says on its card
 const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `It left something running in the background, ${took(at - one.leftSince)}` : '')
