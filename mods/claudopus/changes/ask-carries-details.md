@@ -1,0 +1,3 @@
+- An ask now carries what it is about, in full, right under its question, on the card and in the chat's notice: a "Release it?" shows what goes out with it, instead of pointing at an explanation that only arrived with the work's report after it.
+- A question too long for one line is cut at a word on the card, with the whole of it shown underneath, instead of cut off mid-word.
+- Work that asks "as explained in the chat" without the explanation is told at once to ask again with it.

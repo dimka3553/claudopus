@@ -64,9 +64,15 @@ const toolHooks = (on: On) => {
 
   // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
-    const input = e as unknown as { text?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown }
+    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown }
     if (e.agentId === undefined) return { result: `Only background work asks through the panel; a chat's own thread asks ${who()} in its reply.` }
-    const text = oneLine(typeof input.text === 'string' ? input.text : '').slice(0, 300)
+    // The question is one line; what it is about goes with it, whole, so the person never answers an ask whose reason has not reached
+    // them yet (a report reaches the chat only after the work ends). A question too long for one line is cut at a word on the card and
+    // kept whole at the top of its details
+    const asked = oneLine(typeof input.text === 'string' ? input.text : '')
+    const text = asked.length > ASK_TEXT ? cut(asked, ASK_TEXT) : asked
+    const given1 = (typeof input.details === 'string' ? input.details : '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+    const details = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n').slice(0, ASK_DETAILS)
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
     const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
     // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and one that starts with a
@@ -88,7 +94,7 @@ const toolHooks = (on: On) => {
     const at = await $.clock.now()
     const before = await read($, todos)
     const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
-    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined }))
+    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined }))
     const list = await read($, todos)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     if (!text) {
@@ -102,9 +108,12 @@ const toolHooks = (on: On) => {
     const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
     const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
     const lost = givenPics.length - pictures.length
+    // An ask that points at an explanation it does not carry: the person sees the ask before the work's report, so it is said back
+    const pointsAway = !given1 && POINTS_AWAY.test(asked) ? ` It points at an explanation it does not carry: ${who()} sees this ask before your report, which reaches them only after you finish. Ask it again now with that explanation in \`details\`.` : ''
+    const long = text === asked ? '' : ` The question was longer than one line: the card shows it cut at a word, and it is whole at the top of its details.`
     const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} named with it, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
-    return { result: `Shown on your card with ${shown}, and shown in the chat as a notice from the panel, where ${who()} can answer it too.${seen}${missing} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, and starts you again if you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
+    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${pointsAway} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, and starts you again if you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides

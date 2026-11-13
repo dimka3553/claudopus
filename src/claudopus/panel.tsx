@@ -160,6 +160,12 @@ const panelHooks = (on: On) => {
         <Box key={key} flexDirection="column" gap={1}>
           {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
           <Text wrap="wrap" color={NEEDS} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
+          {/* What the ask is about, whole on the small card as in Details: the person decides with it in front of them */}
+          {ask.details ? (
+            <Box key={`${key}-details`} flexDirection="column" minWidth={0}>
+              <Markdown text={ask.details} />
+            </Box>
+          ) : null}
           {ask.copy ? (
             <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
