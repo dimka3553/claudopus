@@ -151,7 +151,7 @@ test("a Mac handed another Mac's chats lists them by name and Mac with its own, 
   expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
   expect((await list.findAll({ type: 'Text' })).filter(one => one.text === 'Robot arm')).toHaveLength(1)
   // Its running time is told on this Mac's clock
-  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · \d+s$|^Opus 5\.5 · 1m \d\ds$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ done · )?(\d+s|1m \d\ds)$/ })).toBeDefined()
   // An answer pressed here waits in the outbox for that Mac
   const send = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Send')
   await list.press({ key: send?.key ?? '' })
