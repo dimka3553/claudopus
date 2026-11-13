@@ -12,8 +12,10 @@ export type Msg = [id: string, model: string, at: number, fast: number, long: nu
 // One call of the to-do tool: when, the item, its state, the wording it had before
 export type TodoCall = [at: number, item: string, state: string, was: string]
 // What jq makes of one transcript: the stretches it was busy (rows less than GAP apart), its responses, its to-do calls
-// and, in a chat's own transcript, each turn that began with the person's message: from it to the chat's last row before the next
-// turn began
+// and, in a chat's own transcript, each turn that began with the person's message: from it to the chat's last response or tool
+// result before the next message of any kind (the person's, or a background agent's notice); bookkeeping rows such as the queue's,
+// which Claude Code writes as the next message arrives, and meta rows (the mod's notices, a command's caveat, a compaction's
+// summary) never end a turn
 export type FileSum = { s: Span[]; u: Msg[]; d: TodoCall[]; turns?: Span[] }
 // One transcript, and what it was: a piece of work the chat started, a helper a piece of work started, an agent of a workflow,
 // or the chat's own thread
@@ -152,7 +154,7 @@ export type Stats = {
   running: number
   flows: number
   todosDone: number
-  // The person's messages to the chat, how long the chat took on average to answer one, and how long a piece of work took
+  // The person's messages to the chat; on average, from one to the chat's last row before the next message (its turn); and how long a piece of work took
   messages: number
   turn: number
   perPiece: number
@@ -219,7 +221,8 @@ reduce (inputs | fromjson? | select(type == "object" and (.timestamp | type) == 
   ({r: [], u: {}, d: []};
    ($o.timestamp | ms) as $s
    | (if $o.type == "user" and ($o.isMeta | not) and (($o.message.content | type) == "string" or ([$o.message.content[]? | select(type == "object" and .type == "tool_result")] | length) == 0)
-      then (if ($o.origin | type) == "object" and $o.origin.kind == "human" then "h" else "o" end) else "r" end) as $k
+      then (if ($o.origin | type) == "object" and $o.origin.kind == "human" then "h" else "o" end)
+      elif $o.type == "assistant" or ($o.type == "user" and ($o.isMeta | not)) then "a" else "r" end) as $k
    | .r += [[$s, $k]]
    | if $o.type == "assistant" and ($o.message.usage | type) == "object" then
        $o.message.usage as $u
@@ -232,7 +235,7 @@ reduce (inputs | fromjson? | select(type == "object" and (.timestamp | type) == 
 | (.r | sort_by(.[0])) as $r
 | ($r | map(.[0])) as $t
 | {s: (if ($t | length) == 0 then [] else reduce $t[1:][] as $x ([[$t[0], $t[0]]]; if $x - .[length - 1][1] > $gap then . + [[$x, $x]] else .[length - 1][1] = $x end) end),
-   turns: (reduce $r[] as $x ({cur: null, out: []}; if $x[1] != "r" then (if .cur then .out += [.cur] else . end) | .cur = [$x[0], $x[0], ($x[1] == "h")] elif .cur then .cur[1] = $x[0] else . end)
+   turns: (reduce $r[] as $x ({cur: null, out: []}; if $x[1] == "h" or $x[1] == "o" then (if .cur then .out += [.cur] else . end) | .cur = [$x[0], $x[0], ($x[1] == "h")] elif $x[1] == "a" and .cur then .cur[1] = $x[0] else . end)
        | (if .cur then .out + [.cur] else .out end) | map(select(.[2]) | [.[0], .[1]])),
    u: [.u | to_entries[] | [.key] + .value], d: .d}`
 
@@ -246,7 +249,7 @@ export const parsed = <T,>(text: string, or: T): T => {
     return or
   }
 }
-export const CACHE_V = 4
+export const CACHE_V = 5
 
 // ---- Drawing ----
 
@@ -592,13 +595,16 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     'stats-work',
     'Work',
     s.running ? `${s.running} still running, not counted` : '',
-    <Box flexDirection="column" flexShrink={0}>
-      {line(ui, 'work-finished', 'Pieces of work done', count(s.finished))}
-      {line(ui, 'work-flows', 'Workflows run', count(s.flows))}
-      {line(ui, 'work-todos', 'To-dos done', count(s.todosDone))}
-      {line(ui, 'talk-count', 'Your messages', count(s.messages))}
-      {line(ui, 'talk-turn', view.scope === 'all' ? 'A chat’s reply, on average' : 'The chat’s reply, on average', s.messages ? shortly(s.turn) : '–')}
-      {line(ui, 'talk-piece', 'A piece of work, on average', s.perPiece ? shortly(s.perPiece) : '–')}
+    <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column" flexShrink={0}>
+        {line(ui, 'work-finished', 'Pieces of work done', count(s.finished))}
+        {line(ui, 'work-flows', 'Workflows run', count(s.flows))}
+        {line(ui, 'work-todos', 'To-dos done', count(s.todosDone))}
+        {line(ui, 'talk-count', 'Your messages', count(s.messages))}
+        {line(ui, 'talk-turn', view.scope === 'all' ? 'From your message to a chat’s last step, on average' : 'From your message to the chat’s last step, on average', s.messages ? shortly(s.turn) : '–')}
+        {line(ui, 'talk-piece', 'A piece of work, on average', s.perPiece ? shortly(s.perPiece) : '–')}
+      </Box>
+      {note(ui, 'talk-how', 'Each of your messages is timed from when the chat takes it up to the chat’s last step before the next message; the background work it started is not counted.')}
     </Box>,
   )
   const share = Math.round((s.all.read / Math.max(1, s.all.total)) * 100)
