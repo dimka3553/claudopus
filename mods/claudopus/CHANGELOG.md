@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.86 · 13 November 2026
+- An ask now carries what it is about right under its question, on the card and in the chat's notice: a "Release it?" shows what goes out with it, instead of pointing at an explanation that only arrived with the work's report after it. Above the prompt, such an ask says the rest is in the chat and on its card.
+- Work that asks "as explained in the chat" without the explanation is refused and asks again with it.
+- A question longer than 300 letters is cut at a word, with the whole of it shown underneath, instead of cut off mid-word.
+
 ## 0.2.85 · 13 November 2026
 - A card whose work is acting on your reply to its ask turns purple, as work under way, from the moment you reply until it stops again; its ask and answers stay there to press, and it turns amber again only once the work stops with the ask still open.
 - The header counts that card as at work rather than as waiting on you, and the line above the terminal prompt shows the ask in purple with the working octopus while it acts.

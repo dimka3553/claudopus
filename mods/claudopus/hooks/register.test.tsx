@@ -3889,6 +3889,76 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   await list.unmount()
 })
 
+test('an ask carries what it is about, whole, on the small card, in Details and in the chat: the 13 Nov "Release PR 54, with the exact differences as explained in the chat?" asked before its explanation arrived', async ($, on) => {
+  const { appended, logged, clock, notified } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the wallet', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fix the wallet', prompt: 'fix the wallet' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // What happened: the ask pointed at an explanation that reached the person only with the report, after the work ended. Now it is
+  // not shown at all: no card, no sound, no notice
+  const away = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release PR 54 to production, with the exact differences as explained in the chat?', choices: ['Release it', 'Not now'] } as never)
+  expect(String(away.result)).toContain('Not shown: the ask points at an explanation it does not carry')
+  expect(await list.find({ type: 'Text', text: /Release PR 54/ })).toBeUndefined()
+  expect(notified.some(line => line.includes('Release PR 54'))).toBe(false)
+  for (const text of ['Release it, as I explained?', 'Release it with the differences above?', 'Release it (see above)?', 'Release it, as described in my report?', 'Release it as agreed?', 'Release it, see above?']) {
+    expect(String((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${text}`, agentId: 'a1', text, choices: ['Release it', 'Not now'] } as never)).result)).toContain('Not shown')
+  }
+  // Asks about something shown, such as a code on a page or a picture, are not taken for one
+  for (const text of ['Paste the code shown in your terminal.', 'Pick the logo shown in the pictures.', 'Should I post the summary in the chat?', 'Move the summary above the chart?', 'Add these numbers in the report?']) {
+    expect(String((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${text}`, agentId: 'a1', text } as never)).result)).toContain('Shown on your card')
+  }
+  // A go-ahead with nothing under it is shown, and said back to the work
+  const bare = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1b', agentId: 'a1', text: 'Release the demo change?', choices: ['Release it', 'Not now'] } as never)
+  expect(String(bare.result)).toContain('It carries no details')
+  // Asked again with its explanation: shown whole under the question on the small card and in Details
+  const differences = '**Refunds**\n\n- Today: a refund blocks every payout.\n- After: it is taken off the balance.\n\n**Screens**\n\n- "Compensation credits" becomes "Referral earnings".'
+  const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Release PR 54 to production?', details: differences, choices: ['Release it', 'Not now'] } as never)
+  expect(String(asked.result)).toContain('what it is about under it')
+  expect(String(asked.result)).not.toContain('carries no details')
+  expect(await list.find({ type: 'Markdown', text: differences })).toBeDefined()
+  const big = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  expect(await big.find({ type: 'Markdown', text: differences })).toBeDefined()
+  // Above the prompt in the terminal, where its numbers answer it, it says there is more
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  expect(await band.find({ type: 'Text', text: /What it is about is in the chat above and on its card/ })).toBeDefined()
+  await band.unmount()
+  // The chat's notice carries it whole, before the answers, plain (no marks for bold), and so does the row the chat's model reads
+  await clock.advance(10)
+  const notice = (await until(async () => logged.find(line => line.includes('Release PR 54 to production?') && line.includes('What it is about')))) ?? ''
+  expect(notice).toContain(`Release PR 54 to production?\nWhat it is about:\n${differences.replaceAll('**', '')}\nAnswers: Release it · Not now`)
+  const relay = [...appended].reverse().find(line => line.startsWith('undefined: The background work "Fix the wallet" asked the person') && line.includes('Release PR 54 to production?')) ?? ''
+  expect(relay).toContain(`what it is about, shown to the person whole with it on the card and in the notice: ${differences}`)
+  // The chat is told not to say it again: the person has just read it
+  expect(relay).toContain('do not repeat what it is about')
+  // A pressed answer still matches the ask that carries details
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' })
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Release it"') && line.includes('Release PR 54 to production?')))).toBeDefined()
+  expect(await list.find({ type: 'Markdown', text: differences })).toBeUndefined()
+
+  // A question longer than one line is cut at a word, with the whole of it at the top of its details
+  const long = `Release it? ${'The refund rule changes how a paid commission is taken back from the balance. '.repeat(6)}`.trim()
+  const cutShort = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: long, choices: ['Release it', 'Not now'] } as never)
+  expect(String(cutShort.result)).toContain('whole at the top of its details')
+  expect(await big.find({ type: 'Markdown', text: long })).toBeDefined()
+  const question = (await big.findAll({ type: 'Text' })).find(one => one.props.bold && String(one.text).startsWith('Release it? The refund rule'))
+  expect(question).toBeDefined()
+  expect(String(question?.text).length).toBeLessThanOrEqual(302)
+  expect(String(question?.text)).toMatch(/[a-z.] …$/)
+  // Long details: whole in Details and in the notice, cut on the small card with where the rest is, and cut in the model's row
+  const many = Array.from({ length: 120 }, (_, n) => `- Line ${n + 1} of what changes on the payout screens.`).join('\n')
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a1', text: 'Release the payout screens?', details: many, choices: ['Release it', 'Not now'] } as never)
+  expect(await big.find({ type: 'Markdown', text: many })).toBeDefined()
+  expect(await list.find({ type: 'Markdown', text: /The rest is in its Details\.$/ })).toBeDefined()
+  await clock.advance(10)
+  expect(await until(async () => logged.find(line => line.includes('Line 120 of what changes')))).toBeDefined()
+  const longRelay = (await until(async () => [...appended].reverse().find(line => line.includes('Release the payout screens?') && line.includes('asked the person')))) ?? ''
+  expect(longRelay).toContain('(the rest is on the card)')
+  expect(longRelay).not.toContain('Line 120 of what changes')
+  await big.unmount()
+  await list.unmount()
+})
+
 test('an answer to ended work that cannot be started again is left in the chat as the mod\'s notice and a row its model reads, never in the person\'s place', async ($, on) => {
   const { submitted, logged, appended } = world(on, { unresumable: new Set(['a1']) })
   await $.session.start(start)

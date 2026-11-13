@@ -97,6 +97,16 @@ const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(ent
 const ANSWER_SHOWN = 60_000
 // The answers every ask offers when the work gave none of its own
 const DEFAULT_ANSWERS = ['Done', 'Not now']
+// An ask's question is one line of at most ASK_TEXT letters; what it is about, its details, is kept whole up to ASK_DETAILS
+const ASK_TEXT = 300
+const ASK_DETAILS = 12_000
+// Words by which an ask points at an explanation somewhere else (the chat, a report, a message still to come), never at something
+// shown, such as a code on a page or a picture
+const POINTS_AWAY = /\b(?:as (?:i |we )?(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out|outlined|noted|agreed|said)|(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out|outlined|noted|said|wrote) (?:in (?:the|my|this) (?:chat|report|message|result|explanation)|above|below|earlier|before)|(?:see|per) (?:my|the) (?:report|last message|explanation|message above)|in my (?:report|last message)|(?:the )?(?:differences|changes) (?:above|below|i listed)|see (?:above|below)\b)|\(see (?:above|below)\)/i
+// How much of what an ask is about the small card shows; Details shows it whole, as does the chat's notice
+const DETAILS_ON_CARD = 1500
+// How much of it the row the chat's model reads carries: the person has it whole, and the chat stays small
+const DETAILS_IN_RELAY = 2000
 const sentReplies = new Map<string, Sent>()
 // An answer on its way, by the work it was written into: that work's next step reads it, and the card it belongs to says so
 const pending = new Map<string, string>()
@@ -253,7 +263,7 @@ const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes
 // shows it to the person, and an answer they type there goes to the work as a press on the card does. Kept by card, so an ask
 // answered or withdrawn on the card is said in the chat too, and the same ask is never sent twice
 const inChat = new Map<string, string>()
-const askKey = (ask: NonNullable<Todo['ask']>) => JSON.stringify([ask.text, ask.choices ?? [], ask.pictures ?? [], ask.copy ?? ''])
+const askKey = (ask: NonNullable<Todo['ask']>) => JSON.stringify([ask.text, ask.details ?? '', ask.choices ?? [], ask.pictures ?? [], ask.copy ?? ''])
 const askInChat = async ($: EngineInterface, one: Todo) => {
   const ask = one.ask
   if (!ask || isOff || !dir || inChat.get(one.id) === askKey(ask)) return
@@ -265,7 +275,7 @@ const askInChat = async ($: EngineInterface, one: Todo) => {
   // The terminal draws a notice as one line and a line break in it as a broken character: there each line is a notice of its own
   const notice = named(ASK_IN_CHAT(titleOf(one), ask, answers))
   const surfaces = await $.session.surfaces().catch(() => [])
-  for (const line of surfaces.length && surfaces.every(s => s === 'terminal') ? notice.split('\n') : [notice]) $.ui.log(line)
+  for (const line of surfaces.length && surfaces.every(s => s === 'terminal') ? notice.split('\n').filter(line => line.trim()) : [notice]) $.ui.log(line)
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, titleOf(one), ask, answers)) }] } }).catch(err => (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, `chat not told of an ask: ${String(err)}`)))
 }
 // A line in the chat the person sees (the mod's notice, which the model never reads) and its model reads (a row the person does not

@@ -167,6 +167,12 @@ const panelHooks = (on: On) => {
         <Box key={key} flexDirection="column" gap={1}>
           {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
           <Text wrap="wrap" color={needsPerson(one) ? NEEDS : LIVE} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
+          {/* What the ask is about, under its question: whole in Details, and on the small card up to DETAILS_ON_CARD */}
+          {ask.details ? (
+            <Box key={`${key}-details`} flexDirection="column" minWidth={0}>
+              <Markdown text={isWhole || ask.details.length <= DETAILS_ON_CARD ? ask.details : `${cut(ask.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`} />
+            </Box>
+          ) : null}
           {ask.copy ? (
             <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
