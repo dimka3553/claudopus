@@ -422,13 +422,17 @@ test('work reaches main only through the release runner: its rules name it, and 
     'RELEASE_PUSH=1 git push origin HEAD',
     'gh api -X PUT repos/me/it/pulls/3/merge',
     'echo hi && git -c user.name=x push origin main',
+    'sudo git push origin main',
+    'env FOO=1 git push origin main',
+    "bash -c 'git push origin main'",
+    'git push --repo=origin main',
   ]
   for (const [i, command] of refused.entries()) {
     const r = await $.tool.call({ tool: 'Bash', tool_use_id: `p${i}`, command, agentId: 'w1' } as never)
     expect(r.deny).toContain('never pushes or merges to main itself')
     expect(r.deny).toMatch(/bin\/release\.$/)
   }
-  const allowed = ['git push origin work/one', 'git push -u origin main-menu-fix', 'git pull origin main', 'git merge origin/main', 'git log origin/main', 'git checkout main', 'git commit -qam "git push of main across Macs, merges onto main"', 'echo "never git push origin main"', 'git push']
+  const allowed = ['git push origin work/one', 'git push -u origin main-menu-fix', 'git pull origin main', 'git merge origin/main', 'git log origin/main', 'git checkout main', 'git commit -qam "git push of main across Macs, merges onto main"', 'echo "never git push origin main"', 'git push', 'grep -n RELEASE_PUSH= bin/release']
   for (const [i, command] of allowed.entries()) {
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `a${i}`, command, agentId: 'w1' } as never)).deny).toBeUndefined()
   }

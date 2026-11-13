@@ -31,7 +31,7 @@ locks=${RELEASE_LOCKS:-$HOME/.claude/claudopus/locks}
 lock="$locks/$(printf %s "$url" | shasum | cut -c1-12).lock"
 
 if [ "${1:-}" = --status ]; then
-  if [ -d "$lock" ]; then echo "releasing now: $(cat "$lock/who" 2>/dev/null)"; else echo "no release running for $(basename "$top")"; fi
+  if [ -d "$lock" ] && kill -0 "$(cat "$lock/pid" 2>/dev/null)" 2>/dev/null; then echo "releasing now: $(cat "$lock/who" 2>/dev/null)"; else echo "no release running for $(basename "$top")"; fi
   exit 0
 fi
 title=
@@ -70,18 +70,21 @@ fi
 
 mkdir -p "$locks"
 waited=0
-until mkdir "$lock" 2>/dev/null; do
+# The lock is a folder, which only one release can make. A lock whose release died is cleared by the one waiter that holds the
+# clearing's own lock, after it looks again, so a fresh lock another waiter just took is never cleared
+until mkdir "$lock" 2>/dev/null && echo $$ >"$lock/pid"; do
   holder=$(cat "$lock/pid" 2>/dev/null || true)
-  dead=""
-  if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then dead=1; fi
-  if [ -z "$holder" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then dead=1; fi
-  # Only the waiter whose move takes the dead lock clears it, so two waiters never both take it
-  if [ -n "$dead" ] && mv "$lock" "$lock.dead.$$" 2>/dev/null; then rm -rf "$lock.dead.$$"; say "cleared the lock of a release that ended without letting go"; continue; fi
+  if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } || { [ -z "$holder" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
+    [ -n "$(find "$lock.clearing" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$lock.clearing" 2>/dev/null
+    if mkdir "$lock.clearing" 2>/dev/null; then
+      if [ "$(cat "$lock/pid" 2>/dev/null || true)" = "$holder" ]; then rm -rf "$lock"; say "cleared the lock of a release that ended without letting go"; fi
+      rmdir "$lock.clearing"; continue
+    fi
+  fi
   [ $waited -eq 0 ] && say "waiting: $(cat "$lock/who" 2>/dev/null || echo another release) is releasing"
   sleep 0.5; waited=$((waited + 1))
   [ $waited -gt 2400 ] && die "waited 20 minutes for the other release; nothing done"
 done
-echo $$ >"$lock/pid"
 echo "$branch from $top, since $(date '+%H:%M:%S')" >"$lock/who"
 [ $waited -gt 0 ] && say "my turn after $((waited / 2)) s"
 
@@ -125,7 +128,12 @@ for try in 1 2 3 4 5; do
     real=""
     for f in $(git diff --name-only --diff-filter=U); do
       if derived "$f"; then git checkout -q "$base" -- "$f" 2>/dev/null || git rm -q -- "$f"
-      elif [ "$f" = "$VERSION_FILE" ]; then git checkout -q --theirs -- "$f" && git add -- "$f"
+      elif [ "$f" = "$VERSION_FILE" ]; then
+        # Main's number on all three sides, so only the rest of the file merges: an edit beside the version line is no conflict
+        v=$(git show "$base:$f" >"$tmp.m" && getv "$tmp.m"); git show ":1:$f" >"$tmp.b" 2>/dev/null || cp "$tmp.m" "$tmp.b"; git show ":3:$f" >"$tmp.t"
+        for side in "$tmp.m" "$tmp.b" "$tmp.t"; do [ -n "$v" ] && setv "$side" "$v"; done
+        if git merge-file -q "$tmp.m" "$tmp.b" "$tmp.t"; then cp "$tmp.m" "$f" && git add -- "$f"; else real="$real $f"; fi
+        rm -f "$tmp.m" "$tmp.b" "$tmp.t"
       else real="$real $f"; fi
     done
     if [ -n "$real" ]; then

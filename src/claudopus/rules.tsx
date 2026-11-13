@@ -35,12 +35,20 @@ const shellWords = (command: string) => {
   end()
   return parts.filter(one => one.length)
 }
-const pushesMain = (command: string) =>
+const pushesMain = (command: string): boolean =>
   shellWords(command).some(words => {
-    if (words.some(one => /^RELEASE_PUSH=/.test(one))) return true
     let i = 0
-    while (i < words.length && /^\w+=/.test(words[i]!)) i++
+    // What runs a command it is handed: env and its settings, command, sudo, nohup, time, exec, and a shell's -c
+    for (;;) {
+      while (i < words.length && /^\w+=/.test(words[i]!)) if (/^RELEASE_PUSH=/.test(words[i++]!)) return true
+      const head = (words[i] ?? '').split('/').pop() ?? ''
+      if (['env', 'command', 'sudo', 'nohup', 'time', 'exec'].includes(head)) {
+        i++
+        while (i < words.length && words[i]!.startsWith('-')) i++
+      } else break
+    }
     const tool = (words[i] ?? '').split('/').pop()
+    if ((tool === 'bash' || tool === 'sh' || tool === 'zsh') && words[i + 1] === '-c') return pushesMain(words[i + 2] ?? '')
     if (tool === 'gh') return (words[i + 1] === 'pr' && words[i + 2] === 'merge') || (words[i + 1] === 'api' && words.slice(i + 2).some(one => /\/pulls\/\d+\/merge\b/.test(one)))
     if (tool !== 'git') return false
     i++
@@ -48,7 +56,7 @@ const pushesMain = (command: string) =>
     if (words[i] !== 'push') return false
     const args = words.slice(i + 1)
     if (args.includes('--no-verify')) return true
-    return args.filter(one => !one.startsWith('-')).slice(1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
+    return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
 const NO_PUSH = 'Work never pushes or merges to main itself, so two pieces of work never release at once: commit on your own branch and run the release runner the work rules name, from your worktree.'
 // How long the names of kept keys are trusted before they are asked again
