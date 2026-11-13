@@ -167,6 +167,18 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
       const said = command.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/") ? opens : command.startsWith("sh -c 'L=") ? files.get('ssh:fetch') : command.startsWith("sh -c 'echo $HOME;") ? files.get('ssh:results') : files.has('ssh:down') ? undefined : ''
       return { value: { exitCode: said === undefined ? 255 : 0, stdout: said ?? '', stderr: said === undefined ? 'ssh: connect to host m4: timed out' : '', isStdoutTruncated: command.startsWith("sh -c 'echo $HOME;") && files.has('ssh:cut'), isStderrTruncated: false } }
     }
+    // The looks for chats running without Claudopus here and for what the app's log says: what the test lays as sh:off and sh:applog.
+    // A notification told once makes its folder under live/macs/told, which a second try finds there
+    if (tool === 'sh' && (String(rest[1]).includes('custom-title.json') || String(rest[1]).includes('Starting app'))) {
+      const said = files.get(String(rest[1]).includes('Starting app') ? 'sh:applog' : 'sh:off') ?? ''
+      return { value: { exitCode: 0, stdout: said, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (tool === 'sh' && String(rest[1]).startsWith('mkdir -p "$1" && mkdir "$2"')) {
+      const told = `told:${String(rest[4])}`
+      const isNew = !files.has(told)
+      files.set(told, '')
+      return { value: { exitCode: isNew ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     // A shell run here: bringing results from another Mac lays there what the test laid as remote:<folder>/<file>, and a folder moved
     // into place goes only where none has its name
     if (tool === 'sh' || tool === 'bash') {

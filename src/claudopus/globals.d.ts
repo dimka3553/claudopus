@@ -128,7 +128,12 @@ declare global {
   export import STALE = M5.STALE
   export import trip = M5.trip
   export import tripOf = M5.tripOf
+  export import OFF_LOOK = M5.OFF_LOOK
+  export import offOf = M5.offOf
+  export import APP_LOG_LOOK = M5.APP_LOG_LOOK
+  export import stuckOf = M5.stuckOf
   export import Answer = M5.Answer
+  export import Off = M5.Off
   export import configView = M6.configView
   export import editing = M6.editing
   export import fillModels = M6.fillModels

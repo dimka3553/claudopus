@@ -169,12 +169,46 @@ export const pushHead = (text: string): { from: string; you: string } | undefine
   }
 }
 // The command of one trip, run there by sh: leave what this Mac hands over, put away the answers the last trip carried and any
-// older than an hour, then its clock in seconds, then every chat file there written in the last three minutes, followed by the answers waiting for this Mac
+// older than an hour, then its clock in seconds and the chats there running without Claudopus, then every chat file there written
+// in the last three minutes, followed by the answers waiting for this Mac
 export const trip = (from: string, acks: readonly string[]) => {
   const out = `$L/${OUTBOX}/${from}`
   const put = acks.filter(isAnswerName)
-  return `sh -c 'L=$HOME/.claude/claudopus/${LIVE_DIR}; mkdir -p $L/${PUSHED} ${out}; cat > $L/${PUSHED}/${from}.$$.part && mv -f $L/${PUSHED}/${from}.$$.part $L/${PUSHED}/${from}.json; cd ${out} && { ${put.length ? `rm -f ${put.join(' ')}; ` : ''}find . -name "*.json" -mmin +60 -exec rm -f {} +; }; cd; date +%s; for f in $(find $L -maxdepth 1 -name "*.json" -mmin -3 2>/dev/null); do echo ${MARK}; tr -d "\\n" < "$f"; echo; done; for f in $(find ${out} -maxdepth 1 -name "*.json" 2>/dev/null); do echo ${ANSWER_MARK}; basename "$f"; tr -d "\\n" < "$f"; echo; done'`
+  return `sh -c 'L=$HOME/.claude/claudopus/${LIVE_DIR}; mkdir -p $L/${PUSHED} ${out}; cat > $L/${PUSHED}/${from}.$$.part && mv -f $L/${PUSHED}/${from}.$$.part $L/${PUSHED}/${from}.json; cd ${out} && { ${put.length ? `rm -f ${put.join(' ')}; ` : ''}find . -name "*.json" -mmin +60 -exec rm -f {} +; }; cd; date +%s; ${OFF_LOOK} for f in $(find $L -maxdepth 1 -name "*.json" -mmin -3 2>/dev/null); do echo ${MARK}; tr -d "\\n" < "$f"; echo; done; for f in $(find ${out} -maxdepth 1 -name "*.json" 2>/dev/null); do echo ${ANSWER_MARK}; basename "$f"; tr -d "\\n" < "$f"; echo; done'`
 }
+// ---- Chats running without Claudopus. The Claude app runs a chat on another Mac over SSH with that Mac's own install, unless it
+// decided once that the install "didn't load there": from then until the app quits it hands every new chat there its own copy,
+// which leaves out the hooks folder, so in that chat no Claudopus code runs at all (no panel, tools, rules or shared file) ----
+// The look, run by sh, with no single quote so a trip can carry it: each engine on this Mac started with a --plugin-dir that is a
+// Claudopus with no hooks/hooks.json, as `off <chat id> <its title file>`; `new` for an engine that names no chat
+export const OFF_LOOK = `set -f; ps -axww -o args= 2>/dev/null | grep -e "--plugin-dir" | sed "s/--plugin-dir /--plugin-dir=/g" | while read -r a; do for w in $a; do case $w in --plugin-dir=/*) d=\${w#--plugin-dir=}; if grep -qs "\\"name\\": *\\"claudopus\\"" "$d/.claude-plugin/plugin.json" && [ ! -e "$d/hooks/hooks.json" ]; then s=new; for v in $a; do case $v in --resume=*) s=\${v#--resume=};; --session-id=*) s=\${v#--session-id=};; esac; done; set +f; t=$(cat $HOME/.claude/projects/*/"$s"/custom-title.json 2>/dev/null | head -c 400 | tr -d "\\n"); set -f; echo "off $s $t"; fi;; esac; done; done; set +f;`
+// A chat running without Claudopus: its id (or `new`) and its title, as its Mac has it
+export type Off = { chat: string; title: string }
+export const offOf = (text: string): Off[] => {
+  const [head = ''] = text.split(`${MARK}\n`)
+  const found = head.split('\n').flatMap(line => {
+    const m = /^off ([A-Za-z0-9_-]{1,80}) ?(.*)$/.exec(line.trim())
+    if (!m) return []
+    let title = ''
+    try {
+      const t = (JSON.parse(m[2] || '{}') as { customTitle?: unknown }).customTitle
+      title = typeof t === 'string' ? plain(t).slice(0, 120) : ''
+    } catch {
+      title = ''
+    }
+    return [{ chat: m[1] ?? '', title }]
+  })
+  return found.filter((one, i) => found.findIndex(other => other.chat === one.chat) === i)
+}
+// The app's own log on this Mac: the last time it started, or decided a Mac's own install didn't load there. The decision holds,
+// in the app's memory only, until the app is quit, so the last of the two says whether it holds now
+export const APP_LOG_LOOK = `cd "$HOME/Library/Logs/Claude" 2>/dev/null && cat main1.log main.log 2>/dev/null | grep -a -E "\\[info\\] Starting app|own install did not load there" | tail -1`
+// When the app decided it, by its log's own clock, or '' while it does not hold
+export const stuckOf = (text: string) => {
+  const line = text.trim().split('\n').at(-1) ?? ''
+  return /did not load there/.test(line) ? (/^(\d{4}-\d\d-\d\d \d\d:\d\d)/.exec(line)?.[1] ?? 'earlier') : ''
+}
+
 // One answer waiting there, with the chat here it is for
 export type Carried = { name: string; chat: string; answer: Answer }
 // What a trip answers: the fetch, as fetchedOf reads it, and the answers it carried back

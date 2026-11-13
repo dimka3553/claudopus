@@ -7,8 +7,8 @@ import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
-import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf } from './shared'
-import type { Answer } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
+import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
 import { installedFrom, isNewer, isUpdateDue, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedTo, updateSteps } from './update'
@@ -2777,16 +2777,17 @@ const clickOf = async ($: EngineInterface) => {
 // One notification, through the app, else as Claudopus in this Mac's Notification Centre, with its icon, a click opening the
 // chat; else, where Claudopus may not notify, macOS's plain one. `what` names it in the log. Work that needs the person (`asks`)
 // goes as Claudopus Asks, the amber octopus, and with `chime` its notification carries the "needs you" sound, which macOS plays
-// as the person set it for that app and as a Focus allows. Says whether the sound went with the notification
-const alertPerson = async ($: EngineInterface, what: string, title: string, text: string, key: string, asks?: { chime: boolean }) => {
-  const sent = await $.ui.notify(text, { title, key: key.slice(0, 200) }).catch(err => ({ isSent: false as const, reason: String(err) }))
+// as the person set it for that app and as a Focus allows. Says whether the sound went with the notification. `opens`, a link to
+// another chat, is what a click opens instead of this chat; the app's own notification, which opens this chat, is then passed over
+const alertPerson = async ($: EngineInterface, what: string, title: string, text: string, key: string, asks?: { chime: boolean }, opens?: string) => {
+  const sent = opens !== undefined ? { isSent: false as const, reason: 'another chat' } : await $.ui.notify(text, { title, key: key.slice(0, 200) }).catch(err => ({ isSent: false as const, reason: String(err) }))
   if (sent.isSent || sent.reason === 'disabled' || sent.reason === 'refused') {
     void log($, `${what}: ${title} — ${sent.isSent ? `notified through ${sent.channel}` : `not notified (${sent.reason})`}`)
     return false
   }
   // The desktop app takes no notification from a mod yet (no-surface): Claudopus.app raises it. 0 shown, 5 macOS is asking the
   // person to allow Claudopus and it is shown once they do
-  const click = [...(await clickOf($)), '--key', key.slice(0, 200)]
+  const click = [...(opens ? ['--open', opens] : opens === undefined ? await clickOf($) : []), '--key', key.slice(0, 200)]
   const run = (lead: string[]) => $.process.run([`${$.plugin.root}/bin/notify`, ...lead, '--title', title, '--text', text, ...click]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   const amber = asks ? await run(['--asks', ...(asks.chime ? ['--chime'] : [])]) : undefined
   if (amber && (amber.exitCode === 0 || amber.exitCode === 5)) {
@@ -2816,7 +2817,7 @@ let lastChime = -Infinity
 // Work that needs the person's hands says so at once: the panel comes up with its card standing out, and a notification with the
 // "needs you" sound. config.json's sound off makes it silent; its notifications off leaves only the mod's own chime. The chime
 // plays apart from the notification only where the notification could not carry the sound, so one ask is heard once
-const aloud = async ($: EngineInterface, what: string, title: string, text: string, key: string) => {
+const aloud = async ($: EngineInterface, what: string, title: string, text: string, key: string, opens?: string) => {
   let config: { sound?: unknown; notifications?: unknown } = {}
   try {
     config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
@@ -2824,7 +2825,7 @@ const aloud = async ($: EngineInterface, what: string, title: string, text: stri
     // A config.json being edited leaves both on
   }
   const chime = config.sound !== false
-  const isHeard = config.notifications !== false && (await alertPerson($, what, title, text, key, { chime }))
+  const isHeard = config.notifications !== false && (await alertPerson($, what, title, text, key, { chime }, opens))
   const now = await $.clock.now()
   if (!chime || isHeard || now - lastChime < QUIET_CHIME) return
   lastChime = now
@@ -3165,14 +3166,18 @@ const readOthers = async ($: EngineInterface) => {
     // Only a chat with something going on is read as one: work running or ended lately, or a prompt open
     if (one && one.chat !== id) found.push(one)
   }
+  // The chats of the Macs this one reaches, whose asks and finishes are told here
+  const fromMacs: Shared[] = []
   for (const mac of macs) {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
     // A copy not fetched again for STALE says nothing of that Mac now
     if (!f.text || now - (f.fetchedAt ?? 0) > STALE) continue
     for (const one of fetchedOpen(f.text, mac)) open.add(one)
     // A Mac named that is this one shows its chats once, as this Mac's
-    for (const one of fetchedOf(f.text, mac, f.fetchedAt)) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
+    for (const one of fetchedOf(f.text, mac, f.fetchedAt)) if (!here.has(one.chat)) (here.add(one.chat), found.push(one), fromMacs.push(one))
   }
+  await tellAfar($, fromMacs, now).catch(err => log($, `other Macs' asks not told: ${String(err)}`))
+  const isOffChanged = await lookAfar($, now).catch(() => false)
   // A chat both fetched and handed over, as when two Macs each name the other, is listed once, as fetched
   for (const one of pushed) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
   // Work gone from a chat still open, with no word of its end: finished, for its pause. A chat with nothing left going on is not
@@ -3215,7 +3220,7 @@ const readOthers = async ($: EngineInterface) => {
   const isAppChanged = found.some(s => s.host) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
   const next = ordered(found)
   if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
-  else if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged) redraw($)
+  else if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) redraw($)
 }
 
 // The chats this Mac's Claude app holds: its session files, one per chat, under
@@ -3226,6 +3231,8 @@ const readOthers = async ($: EngineInterface) => {
 const appIds = new Set<string>()
 const appOfChat = new Map<string, string>()
 const appFiles = new Map<string, string>()
+// The title the app gives each chat it holds, by the chat's id, as read with its file
+const appTitles = new Map<string, string>()
 let appIdsAt = 0
 // The app's own id for a chat this Mac's app holds, or ''
 const heldApp = (c: Shared) => (c.link?.app && appIds.has(c.link.app) ? c.link.app : (appOfChat.get(c.chat) ?? ''))
@@ -3250,6 +3257,15 @@ const readAppIds = async ($: EngineInterface, now: number) => {
             }
           })()
           if (text) appFiles.set(app, /^[A-Za-z0-9_-]{1,80}$/.test(chat) ? chat : '')
+          const title = (() => {
+            try {
+              const t = (JSON.parse(text) as { title?: unknown }).title
+              return typeof t === 'string' ? t.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, 120) : ''
+            } catch {
+              return ''
+            }
+          })()
+          if (text && title && appFiles.get(app)) appTitles.set(appFiles.get(app) ?? '', title)
         }
         found.set(app, appFiles.get(app) ?? '')
       }
@@ -3611,6 +3627,97 @@ const syncWith = async ($: EngineInterface, mac: string, was: Synced, now: numbe
 // The Macs that handed this one their chats lately, by the name each gave, and what the freshest called this Mac: its name here once
 // other Macs' chats are listed beside its own
 const pushedFrom = new Set<string>()
+
+// What happens in chats this panel cannot see into: chats running without Claudopus, and the asks and finishes of another Mac's chats
+
+// ---- Chats running without Claudopus, on this Mac or a Mac it reaches, and the Claude app's decision that starts new ones so ----
+
+// What was found: the chats by Mac ('' for this one), and when this Mac's app decided a Mac's own install didn't load there ('' when
+// it holds no such decision). Looked at every AFAR_EVERY by each chat, as the look is a ps and a grep of one log
+let offChats: (Off & { host: string })[] = []
+let stuckAt = ''
+let afarAt = -Infinity
+const AFAR_EVERY = 30_000
+// Says whether what was found changed, so the panel is drawn again
+const lookAfar = async ($: EngineInterface, now: number) => {
+  if (now - afarAt < AFAR_EVERY) return false
+  afarAt = now
+  const failed = { exitCode: -1, stdout: '' }
+  const here = await $.process.run(['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+  const app = await $.process.run(['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed)
+  const found = here.exitCode === 0 ? offOf(here.stdout).map(one => ({ ...one, host: '' })) : []
+  for (const mac of macs) {
+    const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
+    if (f.text && now - (f.fetchedAt ?? 0) <= STALE) found.push(...offOf(f.text).map(one => ({ ...one, host: mac })))
+  }
+  if (found.some(one => one.host)) await readAppIds($, now).catch(() => false)
+  const stuck = stuckOf(app.stdout)
+  const isChanged = JSON.stringify([found, stuck]) !== JSON.stringify([offChats, stuckAt])
+  offChats = found
+  stuckAt = stuck
+  return isChanged
+}
+// A chat's name for the panel: its own title, else the one this Mac's app gives it, else a word
+const offName = (one: Off) => one.title || appTitles.get(one.chat) || (one.chat === 'new' ? 'A chat just started' : 'A chat')
+
+// The warning the panel shows under its header while any of it holds: in those chats nothing of Claudopus runs, so this is the only
+// place they are seen, and what cures it
+const afarPart = (ui: Ui) => {
+  if (!stuckAt && !offChats.length) return null
+  const there = macs.length === 1 ? macName(macs[0] ?? '') : 'the Mac it runs chats on over SSH'
+  const lines = [
+    ...(stuckAt ? [`New chats on ${there} start without Claudopus. This Mac's Claude app decided at ${stuckAt} that Claudopus didn't load there, and since then it gives every new chat there its own copy, which has no Claudopus code: no panel, tools or rules. The app forgets this only when it is quit and opened again.`] : []),
+    ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ' on this Mac'} runs without Claudopus: its work, asks and results do not reach any panel. A chat started after the app is reopened has it.`),
+  ]
+  return (
+    <ui.Box key="afar" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+      <ui.Text bold color={NEEDS} wrap="wrap">{offChats.length === 1 && !stuckAt ? 'Claudopus is off in a chat' : 'Claudopus is off in some chats'}</ui.Text>
+      {lines.map((line, i) => (
+        <ui.Text key={`afar-${i}`} wrap="wrap">
+          {line}
+        </ui.Text>
+      ))}
+    </ui.Box>
+  )
+}
+
+// ---- Another Mac's chats, told here: their asks, prompts and finishes as a notification on this Mac, where the person is, as that
+// Mac's own notifications show only on its own screen. Only for the Macs this one reaches (config.json `macs`); each once, whichever
+// chat here sees it first, and only when it is fresh, so a chat that starts tells nothing old ----
+const AFAR_FRESH = 3 * 60_000
+const toldDir = () => `${liveDir()}/${MACS}/told`
+const tellOnce = async ($: EngineInterface, key: string, tell: () => Promise<unknown>) => {
+  const path = `${toldDir()}/${key.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 150)}`
+  const r = await $.process.run(['sh', '-c', 'mkdir -p "$1" && mkdir "$2" 2>/dev/null', 'sh', toldDir(), path]).catch(() => ({ exitCode: -1 }))
+  if (r.exitCode === 0) await tell().catch(err => log($, `${key} not told: ${String(err)}`))
+}
+let toldSwept = -Infinity
+const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number) => {
+  if (!list.length) return
+  if (now - toldSwept > 3_600_000) {
+    toldSwept = now
+    await $.process.run(['find', toldDir(), '-mindepth', '1', '-maxdepth', '1', '-mmin', '+120', '-exec', 'rmdir', '{}', '+']).catch(() => undefined)
+  }
+  let config: { notifications?: unknown } = {}
+  try {
+    config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
+  } catch {
+    // A config.json being edited leaves them on
+  }
+  for (const s of list) {
+    const opens = openUrl(s, heldApp(s))
+    const where = `${chatName(s)} on ${macName(s.host)}`
+    for (const card of s.cards) {
+      const id = remoteId(s, card.id)
+      if (card.ask && Math.abs(now - card.ask.at) < AFAR_FRESH) await tellOnce($, `ask-${id}-${card.ask.at}`, () => aloud($, 'ask', `${titleOf(card)} needs you`, `${card.ask?.text ?? ''} · ${where}`, `ask-${id}`, opens))
+      if (card.status !== 'working' && card.endedAt && now - card.endedAt < AFAR_FRESH && config.notifications !== false) {
+        const item = readyOf({ id: card.id }, [card], [])
+        if (item) await tellOnce($, `end-${id}`, () => alertPerson($, 'ready', item.title, `${item.what} · ${where}`, `ready-${id}`, undefined, opens))
+      }
+    }
+    for (const p of s.prompts ?? []) if (Math.abs(now - p.at) < AFAR_FRESH) await tellOnce($, `prompt-${s.host}-${s.chat}-${p.id}`, () => aloud($, 'prompt', `${p.title ?? chatName(s)} needs your OK`, `${p.text} · ${where}`, `prompt-${s.chat}-${p.id}`, opens))
+  }
+}
 
 // The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel
 
@@ -5381,6 +5488,7 @@ const panelHooks = (on: On) => {
             </Box>
           </Box>
         ) : null}
+        {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
           ? big(alone, talked?.lines)

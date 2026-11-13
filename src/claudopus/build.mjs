@@ -16,7 +16,7 @@ const hooks = join(here, '../../mods/claudopus/hooks')
 const PARTS = [
   'common.tsx', 'rules.tsx', 'settings.tsx', 'subjects.tsx', 'cards.tsx', 'talk.tsx', 'servers.tsx', 'reports.tsx', 'welcome.tsx',
   'results-tab.tsx', 'memory.tsx', 'stats-tab.tsx', 'about.tsx', 'art.tsx', 'pictures.tsx', 'workflows.tsx', 'notify.tsx',
-  'updating.tsx', 'asking.tsx', 'sharing.tsx', 'macs.tsx', 'prompts.tsx', 'chat.tsx', 'work.tsx', 'commands.tsx', 'tools.tsx', 'band.tsx',
+  'updating.tsx', 'asking.tsx', 'sharing.tsx', 'macs.tsx', 'afar.tsx', 'prompts.tsx', 'chat.tsx', 'work.tsx', 'commands.tsx', 'tools.tsx', 'band.tsx',
   'panel.tsx', 'tabs.tsx', 'register.tsx',
 ]
 const TEST_PARTS = [

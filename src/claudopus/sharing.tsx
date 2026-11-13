@@ -149,14 +149,18 @@ const readOthers = async ($: EngineInterface) => {
     // Only a chat with something going on is read as one: work running or ended lately, or a prompt open
     if (one && one.chat !== id) found.push(one)
   }
+  // The chats of the Macs this one reaches, whose asks and finishes are told here
+  const fromMacs: Shared[] = []
   for (const mac of macs) {
     const f = JSON.parse((await readOr($, macPath(mac))) || '{}') as Partial<Fetched>
     // A copy not fetched again for STALE says nothing of that Mac now
     if (!f.text || now - (f.fetchedAt ?? 0) > STALE) continue
     for (const one of fetchedOpen(f.text, mac)) open.add(one)
     // A Mac named that is this one shows its chats once, as this Mac's
-    for (const one of fetchedOf(f.text, mac, f.fetchedAt)) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
+    for (const one of fetchedOf(f.text, mac, f.fetchedAt)) if (!here.has(one.chat)) (here.add(one.chat), found.push(one), fromMacs.push(one))
   }
+  await tellAfar($, fromMacs, now).catch(err => log($, `other Macs' asks not told: ${String(err)}`))
+  const isOffChanged = await lookAfar($, now).catch(() => false)
   // A chat both fetched and handed over, as when two Macs each name the other, is listed once, as fetched
   for (const one of pushed) if (!here.has(one.chat)) (here.add(one.chat), found.push(one))
   // Work gone from a chat still open, with no word of its end: finished, for its pause. A chat with nothing left going on is not
@@ -199,7 +203,7 @@ const readOthers = async ($: EngineInterface) => {
   const isAppChanged = found.some(s => s.host) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
   const next = ordered(found)
   if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
-  else if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged) redraw($)
+  else if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) redraw($)
 }
 
 // The chats this Mac's Claude app holds: its session files, one per chat, under
@@ -210,6 +214,8 @@ const readOthers = async ($: EngineInterface) => {
 const appIds = new Set<string>()
 const appOfChat = new Map<string, string>()
 const appFiles = new Map<string, string>()
+// The title the app gives each chat it holds, by the chat's id, as read with its file
+const appTitles = new Map<string, string>()
 let appIdsAt = 0
 // The app's own id for a chat this Mac's app holds, or ''
 const heldApp = (c: Shared) => (c.link?.app && appIds.has(c.link.app) ? c.link.app : (appOfChat.get(c.chat) ?? ''))
@@ -234,6 +240,15 @@ const readAppIds = async ($: EngineInterface, now: number) => {
             }
           })()
           if (text) appFiles.set(app, /^[A-Za-z0-9_-]{1,80}$/.test(chat) ? chat : '')
+          const title = (() => {
+            try {
+              const t = (JSON.parse(text) as { title?: unknown }).title
+              return typeof t === 'string' ? t.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim().slice(0, 120) : ''
+            } catch {
+              return ''
+            }
+          })()
+          if (text && title && appFiles.get(app)) appTitles.set(appFiles.get(app) ?? '', title)
         }
         found.set(app, appFiles.get(app) ?? '')
       }

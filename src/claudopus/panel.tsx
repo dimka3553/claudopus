@@ -854,6 +854,7 @@ const panelHooks = (on: On) => {
             </Box>
           </Box>
         ) : null}
+        {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
           ? big(alone, talked?.lines)

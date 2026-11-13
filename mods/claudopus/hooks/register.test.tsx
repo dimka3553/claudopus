@@ -1,7 +1,7 @@
 // Made by src/claudopus/build.mjs from the parts in src/claudopus/tests: change them there and build again, never this file. Its tests run with the engine's plugin test.
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
-import { headLine, headMood, openTake, opensOf, shareable } from './shared'
+import { headLine, headMood, OFF_LOOK, offOf, openTake, opensOf, shareable, stuckOf, trip } from './shared'
 
 // The world beneath the mod in every test: files in memory, the app's session tools, a cheap model; and small helpers
 
@@ -171,6 +171,18 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
       if (command.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/")) files.delete('ssh:opens')
       const said = command.startsWith("sh -c 'cd $HOME/.claude/claudopus/live/outbox/") ? opens : command.startsWith("sh -c 'L=") ? files.get('ssh:fetch') : command.startsWith("sh -c 'echo $HOME;") ? files.get('ssh:results') : files.has('ssh:down') ? undefined : ''
       return { value: { exitCode: said === undefined ? 255 : 0, stdout: said ?? '', stderr: said === undefined ? 'ssh: connect to host m4: timed out' : '', isStdoutTruncated: command.startsWith("sh -c 'echo $HOME;") && files.has('ssh:cut'), isStderrTruncated: false } }
+    }
+    // The looks for chats running without Claudopus here and for what the app's log says: what the test lays as sh:off and sh:applog.
+    // A notification told once makes its folder under live/macs/told, which a second try finds there
+    if (tool === 'sh' && (String(rest[1]).includes('custom-title.json') || String(rest[1]).includes('Starting app'))) {
+      const said = files.get(String(rest[1]).includes('Starting app') ? 'sh:applog' : 'sh:off') ?? ''
+      return { value: { exitCode: 0, stdout: said, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
+    if (tool === 'sh' && String(rest[1]).startsWith('mkdir -p "$1" && mkdir "$2"')) {
+      const told = `told:${String(rest[4])}`
+      const isNew = !files.has(told)
+      files.set(told, '')
+      return { value: { exitCode: isNew ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     // A shell run here: bringing results from another Mac lays there what the test laid as remote:<folder>/<file>, and a folder moved
     // into place goes only where none has its name
@@ -3565,4 +3577,69 @@ test("in a chat another Mac's app runs here, with no Mac handing its chats here,
   expect(await list.find({ key: 'chat-open--chat-b' })).toBeUndefined()
   expect(shown.filter(one => one[0] === 'open')).toEqual([])
   await list.unmount()
+})
+
+test("a chat on the other Mac running without Claudopus, and this Mac's app having decided new ones will, show as a warning under the header until neither holds", async ($, on) => {
+  const { files, clock } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  files.set('ssh:fetch', `${NOW / 1000}\noff 0bcc28d2-aaaa {"customTitle":"FaceIQ email plan"}\noff bad;id\n`)
+  files.set('sh:applog', "2026-11-12 13:57:59 [warn] [CCD] SSH local_x: 1 plugin(s) left to the host's own install did not load there; their copies are handed over from the next start on\n")
+  await $.session.start(start)
+  await clock.advance(40_000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Claudopus is off in some chats' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^New chats on m4 start without Claudopus\. .* at 2026-11-12 13:57 .*quit and opened again\.$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^“FaceIQ email plan” on m4 runs without Claudopus/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /bad;id/ })).toBeUndefined()
+  // The app is quit and opened again, and the chat there has gone: the warning goes
+  files.set('sh:applog', '2026-11-13 09:00:00 [info] Starting app {\n')
+  files.set('ssh:fetch', `${NOW / 1000}\n`)
+  await clock.advance(40_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: /^Claudopus is off/ })) ? undefined : true))).toBe(true)
+  await list.unmount()
+})
+
+test("the other Mac's asks and finishes are told here as a notification once, opening that chat; old ones are not", async ($, on) => {
+  const { files, clock, own } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
+  const chat = (at: number, more: object = {}) => JSON.stringify({ ...JSON.parse(otherChat(at, 'chat-m4', 'Robot arm')), link: { bridge: 'cse_robot1', app: '' }, ...more })
+  // An ask from long ago is not told
+  files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${chat(NOW - 3_600_000, { at: NOW })}\n`)
+  await $.session.start(start)
+  await clock.advance(15_000)
+  expect(own.filter(one => one.includes('--asks'))).toEqual([])
+  // A fresh one is, once, however many looks see it
+  const later = NOW + 15_000
+  files.set('ssh:fetch', `${later / 1000}\n---claudopus-live---\n${chat(later)}\n`)
+  await clock.advance(30_000)
+  const asked = () => own.filter(one => one.includes('--asks') && one.includes('Send the invoices needs you'))
+  expect(await until(async () => (asked().length ? true : undefined))).toBe(true)
+  await clock.advance(20_000)
+  expect(asked()).toHaveLength(1)
+  const one = asked()[0] ?? []
+  expect(one[one.indexOf('--text') + 1]).toBe('May I send 12 invoices? · Robot arm on m4')
+  expect(one[one.indexOf('--open') + 1]).toBe('claude://code/cse_robot1')
+  // Its work finishes there: told as ready, once
+  const ended = later + 50_000
+  const done = JSON.parse(chat(later)) as { cards: { status: string; endedAt: number; ask?: unknown }[] }
+  done.cards = done.cards.map(c => ({ ...c, status: 'done', endedAt: ended, ask: undefined }))
+  files.set('ssh:fetch', `${ended / 1000}\n---claudopus-live---\n${JSON.stringify({ ...done, at: ended })}\n`)
+  await clock.advance(30_000)
+  const readyOnes = () => own.filter(one => !one.includes('--asks') && one.includes('Check the totals'))
+  expect(await until(async () => (readyOnes().length ? true : undefined))).toBe(true)
+  await clock.advance(20_000)
+  expect(readyOnes()).toHaveLength(1)
+})
+
+test('the look for chats without Claudopus is read whole, each chat once, and what the app last logged says whether its decision holds', () => {
+  expect(offOf(`banner\n1700000000\noff abc-1 {"customTitle":"Plan"}\noff abc-1 {"customTitle":"Plan"}\noff new \noff $(rm) x\n---claudopus-live---\noff later-1\n`)).toEqual([
+    { chat: 'abc-1', title: 'Plan' },
+    { chat: 'new', title: '' },
+  ])
+  expect(stuckOf("2026-11-12 13:57:59 [warn] [CCD] SSH local_x: 1 plugin(s) left to the host's own install did not load there; their copies are handed over\n")).toBe('2026-11-12 13:57')
+  expect(stuckOf('2026-11-13 09:00:00 [info] Starting app {\n')).toBe('')
+  expect(stuckOf('')).toBe('')
+  // A trip carries the look, with nothing in it that ends its single quotes
+  expect(OFF_LOOK).not.toContain("'")
+  expect(trip('sams-m5', [])).toContain(OFF_LOOK)
 })

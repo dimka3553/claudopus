@@ -118,16 +118,17 @@ const clickOf = async ($: EngineInterface) => {
 // One notification, through the app, else as Claudopus in this Mac's Notification Centre, with its icon, a click opening the
 // chat; else, where Claudopus may not notify, macOS's plain one. `what` names it in the log. Work that needs the person (`asks`)
 // goes as Claudopus Asks, the amber octopus, and with `chime` its notification carries the "needs you" sound, which macOS plays
-// as the person set it for that app and as a Focus allows. Says whether the sound went with the notification
-const alertPerson = async ($: EngineInterface, what: string, title: string, text: string, key: string, asks?: { chime: boolean }) => {
-  const sent = await $.ui.notify(text, { title, key: key.slice(0, 200) }).catch(err => ({ isSent: false as const, reason: String(err) }))
+// as the person set it for that app and as a Focus allows. Says whether the sound went with the notification. `opens`, a link to
+// another chat, is what a click opens instead of this chat; the app's own notification, which opens this chat, is then passed over
+const alertPerson = async ($: EngineInterface, what: string, title: string, text: string, key: string, asks?: { chime: boolean }, opens?: string) => {
+  const sent = opens !== undefined ? { isSent: false as const, reason: 'another chat' } : await $.ui.notify(text, { title, key: key.slice(0, 200) }).catch(err => ({ isSent: false as const, reason: String(err) }))
   if (sent.isSent || sent.reason === 'disabled' || sent.reason === 'refused') {
     void log($, `${what}: ${title} — ${sent.isSent ? `notified through ${sent.channel}` : `not notified (${sent.reason})`}`)
     return false
   }
   // The desktop app takes no notification from a mod yet (no-surface): Claudopus.app raises it. 0 shown, 5 macOS is asking the
   // person to allow Claudopus and it is shown once they do
-  const click = [...(await clickOf($)), '--key', key.slice(0, 200)]
+  const click = [...(opens ? ['--open', opens] : opens === undefined ? await clickOf($) : []), '--key', key.slice(0, 200)]
   const run = (lead: string[]) => $.process.run([`${$.plugin.root}/bin/notify`, ...lead, '--title', title, '--text', text, ...click]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   const amber = asks ? await run(['--asks', ...(asks.chime ? ['--chime'] : [])]) : undefined
   if (amber && (amber.exitCode === 0 || amber.exitCode === 5)) {
@@ -157,7 +158,7 @@ let lastChime = -Infinity
 // Work that needs the person's hands says so at once: the panel comes up with its card standing out, and a notification with the
 // "needs you" sound. config.json's sound off makes it silent; its notifications off leaves only the mod's own chime. The chime
 // plays apart from the notification only where the notification could not carry the sound, so one ask is heard once
-const aloud = async ($: EngineInterface, what: string, title: string, text: string, key: string) => {
+const aloud = async ($: EngineInterface, what: string, title: string, text: string, key: string, opens?: string) => {
   let config: { sound?: unknown; notifications?: unknown } = {}
   try {
     config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
@@ -165,7 +166,7 @@ const aloud = async ($: EngineInterface, what: string, title: string, text: stri
     // A config.json being edited leaves both on
   }
   const chime = config.sound !== false
-  const isHeard = config.notifications !== false && (await alertPerson($, what, title, text, key, { chime }))
+  const isHeard = config.notifications !== false && (await alertPerson($, what, title, text, key, { chime }, opens))
   const now = await $.clock.now()
   if (!chime || isHeard || now - lastChime < QUIET_CHIME) return
   lastChime = now
