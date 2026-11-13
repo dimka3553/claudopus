@@ -21,3 +21,9 @@ jobs:
       - name: The site's version matches the plugin's
         run: |
           test "$(jq -r .version mods/claudopus/.claude-plugin/plugin.json)" = "$(jq -r .version site/version.json)"
+      - name: The committed notification apps match their recorded checksums
+        run: sh mods/claudopus/notifier/check.sh
+      # Every test, as the release runs them: Claude Code's own test kit, from its public npm package, pinned to a version that
+      # passes them all. The release runs them again with the desktop app's engine
+      - name: The mod's tests pass
+        run: npx --yes @anthropic-ai/claude-code@2.1.325 plugin test mods/claudopus
