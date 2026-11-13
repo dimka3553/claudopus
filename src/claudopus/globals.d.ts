@@ -157,6 +157,7 @@ declare global {
   export import stampOf = M7.stampOf
   export import UPDATE_AFTER = M7.UPDATE_AFTER
   export import UPDATE_LOOK = M7.UPDATE_LOOK
+  export import updatedArt = M7.updatedArt
   export import updatedFrom = M7.updatedFrom
   export import updatedLook = M7.updatedLook
   export import updatedTo = M7.updatedTo

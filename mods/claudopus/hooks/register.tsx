@@ -11,7 +11,7 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
-import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_STEP, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
+import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_STEP, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
 // helpers, the log and the chat's saved words
@@ -2408,8 +2408,9 @@ const DONE = 'success'
 // file of the mod's, art/<name>.svg, read when the session starts: a drawing is swapped by replacing its file. Happy is the
 // octopus in the finished green, bouncing with its arms up once over the two seconds finished work pauses, then still
 // Asking is the wave in the amber of work that needs the person: it waves once as something starts to wait, then rests amber
-const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '', asking: '' }
-const ART_FILES: Record<Exclude<keyof typeof ART, 'asking'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
+// Updated is the happy octopus in the workflow blue, jumping through the moment a chat moves to a newer version
+const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '', asking: '', updated: '' }
+const ART_FILES: Record<Exclude<keyof typeof ART, 'asking' | 'updated'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
 // Whether the octopus is happy at a time: work of this chat's that finished, not stopped or failed, is in its pause. A new drawing
 // starts its animation, so it plays from the first finish and holds its last picture through any finish that follows in the pause
 const isHappy = (cards: { id: string; parentId?: string; status: string; endedAt: number }[], at: number) =>
@@ -2426,7 +2427,7 @@ const moments = new Map<string, { art: keyof typeof ART; mark: string; at: numbe
 const MOMENT_GAP = 5000
 // The happy drawings last only a finish's short pause, so one drawn again after a gap is a new finish and plays anew; the wave
 // rests on its last picture for as long as something waits, and plays again only when the octopus turns to it anew
-const ONCE = new Set<keyof typeof ART>(['happy', 'happySmall'])
+const ONCE = new Set<keyof typeof ART>(['happy', 'happySmall', 'updated'])
 const RUN_MARK = Math.random().toString(36).slice(2, 8)
 let momentCount = 0
 const momentOf = (key: string, art: keyof typeof ART) => {
@@ -3355,9 +3356,34 @@ const noteLoaded = async ($: EngineInterface) => {
   updatedMoment = { from, to: loaded, loadedAt: now, startedAt: 0 }
   // A panel drawn while this load was still reading has no moment yet: it is drawn again now
   await update($, tick, n => n + 1)
-  await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header says Updated`)
+  await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header's octopus turns blue and says so`)
 }
-// The header's version as it stands now (blue in Claudopus's workflow blue, the glint in the text's own bright colour): the moment's pieces while it lasts, drawn again each UPDATED_STEP until it is over
+// The sound of the moment, a file of the mod's: three bright rising notes, 0.9 s, made by mockups/claudopus-sound/updated.py
+const UPDATED_SOUND = 'sounds/updated.wav'
+// The sound plays once for each version on this Mac, however many chats move to it: the first to begin its moment makes the file
+// updated/<version> (made only where none is, the shell's noclobber) and plays it; config.json's sound off keeps it silent
+const playUpdated = async ($: EngineInterface, version: string) => {
+  if (!dir || !/^[0-9A-Za-z.+-]{1,40}$/.test(version)) return
+  let config: { sound?: unknown } = {}
+  try {
+    config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
+  } catch {
+    // A config.json being edited leaves the sound on
+  }
+  if (config.sound === false) return
+  const played = `${dir}/updated/${version}`
+  const made = await $.process
+    .run(['sh', '-c', 'mkdir -p "$(dirname "$1")" && set -C && : > "$1"', 'sh', played])
+    .catch(() => ({ exitCode: 1 }))
+  if (made.exitCode !== 0) return
+  // A sound that could not play leaves the version free for the next chat that moves to it
+  await $.audio.play({ asset: UPDATED_SOUND }).catch(async err => {
+    await $.process.run(['rm', '-f', played]).catch(() => undefined)
+    await log($, `updated sound not played: ${String(err)}`)
+  })
+}
+// The moment as it stands now, while it lasts, drawn again each UPDATED_STEP until it is over: the name line's pieces (blue in
+// Claudopus's workflow blue, the glint in a light blue); the words are pieces of their own, a space between each; the panel draws the blue octopus beside them
 const updatedPieces = async ($: EngineInterface, version: string) => {
   const moment = updatedMoment
   if (!moment || moment.to !== version) return undefined
@@ -3365,6 +3391,7 @@ const updatedPieces = async ($: EngineInterface, version: string) => {
   if (!moment.startedAt) {
     if (now - moment.loadedAt > UPDATED_LATE) return void (updatedMoment = undefined)
     moment.startedAt = now
+    void playUpdated($, moment.to)
     let left = Math.ceil(UPDATED_FOR / UPDATED_STEP) + 2
     const step = () =>
       void $.clock.after(UPDATED_STEP, () => {
@@ -3373,19 +3400,29 @@ const updatedPieces = async ($: EngineInterface, version: string) => {
       })
     step()
   }
-  const look = updatedLook(moment.from, moment.to, now - moment.startedAt)
+  const look = updatedLook(moment.to, now - moment.startedAt)
   if (!look && updatedMoment === moment) updatedMoment = undefined
   return look
 }
-const versionLine = (ui: Ui, pieces: ReturnType<typeof updatedLook>) => (
-  <ui.Box key="head-version" flexDirection="row" flexShrink={1} minWidth={0}>
-    {(pieces ?? []).map((piece, i) => (
-      <ui.Text key={`head-version-${i}`} wrap="truncate-end" dimColor={piece.tone === 'dim'} color={piece.tone === 'blue' ? FLOW : undefined} bold={piece.tone !== 'dim'}>
-        {piece.text}
-      </ui.Text>
-    ))}
-  </ui.Box>
-)
+// The glint: a light blue letter passing along the blue word, bright in either theme
+const GLINT = '#A9CDFF'
+const nameLine = (ui: Ui, pieces: NonNullable<ReturnType<typeof updatedLook>>) => {
+  // "Claudopus" first, then the word or version beside it, its pieces together
+  const words = [pieces.slice(0, 1), pieces.slice(1)].filter(word => word.length)
+  return (
+    <ui.Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
+      {words.map((word, w) => (
+        <ui.Box key={`head-name-${w}`} flexDirection="row" flexShrink={w ? 1 : 0} minWidth={0}>
+          {word.map((piece, i) => (
+            <ui.Text key={`head-name-${w}-${i}`} wrap="truncate-end" color={piece.tone === 'glint' ? GLINT : FLOW} bold>
+              {piece.text}
+            </ui.Text>
+          ))}
+        </ui.Box>
+      ))}
+    </ui.Box>
+  )
+}
 
 // The asking card: an ask's text to copy, its buttons and reply box, and the answer reaching the work
 
@@ -4636,13 +4673,14 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
-    // A load that moved this chat to a newer version has the header say so
-    await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
       const text = await readOr($, `${$.plugin.root}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
     }
     ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
+    ART.updated = updatedArt(ART.happy, FLOW)
+    // A load that moved this chat to a newer version has the header say so, once its octopus is read
+    await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     cwd = e.cwd
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press
@@ -6518,16 +6556,21 @@ const panelHooks = (on: On) => {
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off
           <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
-              {octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
+              {/* Just moved to a newer version: the octopus turns blue and jumps for the moment */}
+              {updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
-                <Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
-                  <Box flexShrink={0}>
-                    <Text bold>Claudopus</Text>
+                {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
+                {updated ? (
+                  nameLine(ui, updated)
+                ) : (
+                  <Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
+                    <Box flexShrink={0}>
+                      <Text bold>Claudopus</Text>
+                    </Box>
+                    {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
                   </Box>
-                  {/* Just moved to a newer version: it rolls to the new number and says Updated in blue for a moment */}
-                  {updated ? versionLine(ui, updated) : versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
-                </Box>
+                )}
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
                 <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
               </Box>

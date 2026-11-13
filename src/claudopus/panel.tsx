@@ -967,16 +967,21 @@ const panelHooks = (on: On) => {
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off
           <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
-              {octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
+              {/* Just moved to a newer version: the octopus turns blue and jumps for the moment */}
+              {updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
-                <Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
-                  <Box flexShrink={0}>
-                    <Text bold>Claudopus</Text>
+                {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
+                {updated ? (
+                  nameLine(ui, updated)
+                ) : (
+                  <Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
+                    <Box flexShrink={0}>
+                      <Text bold>Claudopus</Text>
+                    </Box>
+                    {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
                   </Box>
-                  {/* Just moved to a newer version: it rolls to the new number and says Updated in blue for a moment */}
-                  {updated ? versionLine(ui, updated) : versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
-                </Box>
+                )}
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
                 <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
               </Box>
