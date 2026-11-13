@@ -57,6 +57,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const notified: string[] = []
   // What was handed to osascript
   const osa: string[][] = []
+  const keychain: string[] = []
   // What was handed to Claudopus.app, the mod's own notifier
   const own: string[][] = []
   // What was handed to open: a folder shown in Finder
@@ -158,6 +159,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     const sipsSaid = tool === 'sips' ? options.sips?.([...e.argv]) : undefined
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'osascript') osa.push([...e.argv])
+    // What was handed to this Mac's keychain on security's stdin
+    if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
       own.push([...e.argv])
@@ -301,7 +304,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events, keychain }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it

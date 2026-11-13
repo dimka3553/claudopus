@@ -233,6 +233,8 @@ const chatHooks = (on: On) => {
     await unshare($, true).catch(() => undefined)
     if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
+    // There the hidden boxes of the admin and secret runners are drawn in the panel
+    if (isRunFromAfar) $.clock.every(BOX_EVERY, () => lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`)))
     if (macs.length) $.clock.every(OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) $.clock.every(FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     await shareMine($).catch(() => undefined)

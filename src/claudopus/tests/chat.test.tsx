@@ -262,7 +262,7 @@ test('a chat the app runs on another Mac over ssh tells every conversation that 
   const ours = told.instructionFiles?.[0]?.content ?? ''
   expect(ours.startsWith(PRINCIPLES.trimEnd())).toBe(true)
   expect(ours).toContain('## This chat runs on another Mac')
-  expect(ours).toContain('a sign-in by device code or a link that works opened on their own device, never a browser, window, dialog or keychain prompt on this Mac')
+  expect(ours).toContain('a sign-in by device code or a link that works opened on my device, never a browser, window, dialog or keychain prompt on this Mac')
   expect(ours).not.toContain('{name}')
   // A second copy of the mod that already added them, rule and all, does not make them go out twice
   const twice = await $.prompt.context({ blocks: [], instructionFiles: [{ path: '/other/copy/rules/CLAUDE.md', kind: 'user', content: ours }] })

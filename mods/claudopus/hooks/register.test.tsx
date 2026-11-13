@@ -62,6 +62,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const notified: string[] = []
   // What was handed to osascript
   const osa: string[][] = []
+  const keychain: string[] = []
   // What was handed to Claudopus.app, the mod's own notifier
   const own: string[][] = []
   // What was handed to open: a folder shown in Finder
@@ -163,6 +164,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     const sipsSaid = tool === 'sips' ? options.sips?.([...e.argv]) : undefined
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'osascript') osa.push([...e.argv])
+    // What was handed to this Mac's keychain on security's stdin
+    if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
       own.push([...e.argv])
@@ -306,7 +309,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events, keychain }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -589,7 +592,7 @@ test('a chat the app runs on another Mac over ssh tells every conversation that 
   const ours = told.instructionFiles?.[0]?.content ?? ''
   expect(ours.startsWith(PRINCIPLES.trimEnd())).toBe(true)
   expect(ours).toContain('## This chat runs on another Mac')
-  expect(ours).toContain('a sign-in by device code or a link that works opened on their own device, never a browser, window, dialog or keychain prompt on this Mac')
+  expect(ours).toContain('a sign-in by device code or a link that works opened on my device, never a browser, window, dialog or keychain prompt on this Mac')
   expect(ours).not.toContain('{name}')
   // A second copy of the mod that already added them, rule and all, does not make them go out twice
   const twice = await $.prompt.context({ blocks: [], instructionFiles: [{ path: '/other/copy/rules/CLAUDE.md', kind: 'user', content: ours }] })
@@ -3145,6 +3148,47 @@ test('an answer to ended work that cannot be started again is left in the chat a
   expect(await until(async () => appended.find(line => line.startsWith('undefined: ') && line.includes('could not be started again')))).toBeDefined()
   expect(submitted.some(line => line.includes('Blue'))).toBe(false)
   await list.unmount()
+})
+
+test('in a chat the app runs on another Mac over ssh, a password or key the runners need is typed in the panel and goes only into the keychain', async ($, on) => {
+  const { files, logged, keychain, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', at: 1_700_000_000_000 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  // The chat is told only the name, and where to type it
+  expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('top of the Claudopus panel')
+  const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
+  expect(field).toBeDefined()
+  expect((await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' }))?.props.color).toBe('#E5A50A')
+  const value = 'ghp_s3cret"with\\quote'
+  await list.input({ key: field?.key ?? '', text: value })
+  // It goes to the keychain under the box's id, escaped for security's own reading, and the box goes
+  expect(await until(async () => keychain.find(one => one.includes(id)))).toBe(`add-generic-password -U -s "claudopus-box" -a "${id}" -l "Claudopus box" -w "ghp_s3cret\\"with\\\\quote"\n`)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' })) ? undefined : true))).toBe(true)
+  // Nowhere else: not the chat, its saved words, the log or any file
+  expect(logged.some(line => line.includes('s3cret'))).toBe(false)
+  expect([...files.values()].some(text => text.includes('s3cret'))).toBe(false)
+  // A box cancelled removes its request, which the runner takes as cancelled
+  const other = '1f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, text: 'Claudopus needs the admin password of this Mac to run an admin command for work in this chat.', at: 1_700_000_000_000 }))
+  await clock.advance(1000)
+  const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)))
+  await list.press({ key: cancel?.key ?? '' })
+  expect(await until(async () => (files.has(`${MEMORY}/boxes/${other}.json`) ? undefined : true))).toBe(true)
+})
+
+test('a chat on this Mac\'s own screen draws no box: there the runners show their own', async ($, on) => {
+  const { files, logged, clock } = world(on)
+  await $.session.start(start)
+  const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', at: 1_700_000_000_000 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(2000)
+  expect(await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' })).toBeUndefined()
+  expect(logged.some(line => line.includes('GITHUB_TOKEN'))).toBe(false)
 })
 
 // The welcome for a new person
