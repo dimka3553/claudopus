@@ -248,6 +248,10 @@ const chatHooks = (on: On) => {
     // and an open chat moves to a newer copy installed while it runs, by itself, once it is idle
     reloadAsked = ''
     $.clock.every(RELOAD_EVERY, () => reloadToInstalled($).catch(err => log($, `reload not looked for: ${String(err)}`)))
+    if (isRunFromAfar) {
+      await holdOldCopies($).catch(() => undefined)
+      $.clock.every(HOLD_EVERY, () => holdOldCopies($).catch(err => log($, `old copies not held: ${String(err)}`)))
+    }
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
 
     return begun
