@@ -168,8 +168,18 @@ const movedTo = (name: string, at: number) => {
 const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() => '')
 // Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
-const log = async ($: EngineInterface, line: string) =>
-  $.fs.write(`${dir}/log.md`, `${await readOr($, `${dir}/log.md`)}${new Date().toISOString()} ${line.replace(/\s+/g, ' ').slice(0, 400)}\n`).catch(() => undefined)
+// Added to its end, never read and written back whole: every chat on this Mac writes here, and two rewriting it at once left runs of
+// empty bytes in it, which make grep take the log for binary and find nothing. Where the shell cannot add it, it is written whole
+const log = async ($: EngineInterface, line: string) => {
+  const text = `${new Date().toISOString()} ${line.replace(/\s+/g, ' ').slice(0, 400)}\n`
+  const r = await $.process.run(['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', `${dir}/log.md`, text]).catch(() => undefined)
+  if (r?.exitCode !== 0) await $.fs.write(`${dir}/log.md`, `${await readOr($, `${dir}/log.md`)}${text}`).catch(() => undefined)
+}
+// The empty bytes earlier versions left in the log are taken out once, as a chat starts
+const tidyLog = async ($: EngineInterface) => {
+  const text = await readOr($, `${dir}/log.md`)
+  if (text.includes('\u0000')) await $.fs.write(`${dir}/log.md`, text.replaceAll('\u0000', '')).catch(() => undefined)
+}
 // A chat's saved words, words/<chat id>.md: the person's messages and Claude's answers, added to the end
 const appendWords = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/words/${chatId}.md`, `${await readOr($, `${dir}/words/${chatId}.md`)}${text}`)
 // A chat's asks and answers, asks/<chat id>.md, added to the end

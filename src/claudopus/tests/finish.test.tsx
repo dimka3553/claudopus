@@ -191,15 +191,19 @@ test('work that answered while only its own background work held it, then stoppe
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4s', reason: 'answer', agentId: 'a4' } as never)
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
   expect(await drawn(pane)).toEqual(['happy'])
-  // The engine's next looks still list it held: its card stays done
+  // The engine's next looks still list it held: its card stays done, and stays in the list saying it left something running, with a
+  // way to stop it
   await clock.advance(20_000)
   expect(await drawn(pane)).toEqual(['mark'])
+  expect((await pane.find({ type: 'Text', text: /^It left something running in the background, / }))?.props.color).toBe('#E5A50A')
+  expect(await pane.find({ type: 'Button', text: 'Stop it' })).toBeDefined()
   // What it left running wakes it for a turn of words alone: it stays as it ended, not announced again, its report kept
   const otto = () => [...files.keys()].filter(key => /\/reports\/[^/]+-name-the-octopus\/report\.md$/.test(key))
   const reportsBefore = otto().length
   await clock.advance(11_000)
   await $.turn.complete({ answer: 'The watch exited.', durationMs: 1, isAborted: false, turnId: 't4w', reason: 'answer', agentId: 'a4' } as never)
-  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  // Not announced again: no second pause, though the card still says what it left running
+  expect(await pane.find({ type: 'Text', text: /^It left something running/ })).toBeDefined()
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(10)
   expect(otto().length).toBe(reportsBefore)
@@ -218,8 +222,11 @@ test('work that answered while only its own background work held it, then stoppe
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'h1', message: 'Named it Sid.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4t', reason: 'answer', agentId: 'h1' } as never)
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  // Once nothing of it is held any more, at the engine's next look, it leaves the list
   agents.h2 = 'completed'
-  await clock.advance(2_100)
+  agents.h1 = 'completed'
+  await clock.advance(20_000)
+  expect(await pane.find({ type: 'Text', text: /Name the squid/ })).toBeUndefined()
 
   // Sent a message after its report, it works again: stopped before it took a step, it is stopped
   await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' } as never)

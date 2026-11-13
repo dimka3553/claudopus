@@ -55,7 +55,7 @@ That is all. It is on in every chat from then on, and it keeps itself up to date
 | Part | What you get |
 | --- | --- |
 | **Background work** | Each message becomes a piece of work run by a background agent. The chat answers in one line and is free for your next message. A message about running work steers it. |
-| **The panel** | Every job is a card with its to-dos and where it stands. The octopus moves while anything runs. It lists the work of every open chat on this Mac, and of your other Macs if you name them. |
+| **The panel** | Every job is a card with its to-dos and where it stands. The octopus moves while anything runs. It lists the work of every open chat on this Mac, and of your other Macs if you name them. Work that gets nothing new back for 12 minutes says so, and the chat is told; a step running for minutes shows its time; finished work that left something running says so, with Stop it. |
 | **When it needs you** | The card turns amber, rises to the top and asks, with buttons or a box to answer in. You get a notification and a short sound, and the question also arrives in the chat. |
 | **When it is done** | The card turns green, a chime plays, and a notification names the work. Clicking it opens that chat. |
 | **Memory** | Your messages, the results and a brief per subject are kept as plain files in `~/.claude/claudopus`, so chats can stay small. |

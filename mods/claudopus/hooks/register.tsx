@@ -183,8 +183,18 @@ const movedTo = (name: string, at: number) => {
 const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() => '')
 // Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
-const log = async ($: EngineInterface, line: string) =>
-  $.fs.write(`${dir}/log.md`, `${await readOr($, `${dir}/log.md`)}${new Date().toISOString()} ${line.replace(/\s+/g, ' ').slice(0, 400)}\n`).catch(() => undefined)
+// Added to its end, never read and written back whole: every chat on this Mac writes here, and two rewriting it at once left runs of
+// empty bytes in it, which make grep take the log for binary and find nothing. Where the shell cannot add it, it is written whole
+const log = async ($: EngineInterface, line: string) => {
+  const text = `${new Date().toISOString()} ${line.replace(/\s+/g, ' ').slice(0, 400)}\n`
+  const r = await $.process.run(['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', `${dir}/log.md`, text]).catch(() => undefined)
+  if (r?.exitCode !== 0) await $.fs.write(`${dir}/log.md`, `${await readOr($, `${dir}/log.md`)}${text}`).catch(() => undefined)
+}
+// The empty bytes earlier versions left in the log are taken out once, as a chat starts
+const tidyLog = async ($: EngineInterface) => {
+  const text = await readOr($, `${dir}/log.md`)
+  if (text.includes('\u0000')) await $.fs.write(`${dir}/log.md`, text.replaceAll('\u0000', '')).catch(() => undefined)
+}
 // A chat's saved words, words/<chat id>.md: the person's messages and Claude's answers, added to the end
 const appendWords = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/words/${chatId}.md`, `${await readOr($, `${dir}/words/${chatId}.md`)}${text}`)
 // A chat's asks and answers, asks/<chat id>.md, added to the end
@@ -334,6 +344,9 @@ const OWED =
 // What the work is told when it has taken many steps without touching its to-dos or saying where it stands
 const drifted = (steps: number) =>
   `You have taken ${steps} steps since you last touched your to-dos or said where the work stands. Look at your to-do list now: tick what is done, mark the one you are on as doing, add what you took on, and say where the work stands with the \`note\` tool. If all of it is already true, carry on.`
+// The chat is told once when nothing new has come back under a piece of work for a while
+const STUCK_IN_CHAT = (title: string, mins: number) =>
+  `"${title}" has had nothing new come back to it or its helpers for ${mins} minutes: it may be stuck waiting on something that will not come. Its card shows where it stands.`
 // The work is reminded after this many steps past a steer with no decision, and after this many without touching its to-dos
 const OWED_AFTER = 2
 const QUIET_STEPS = 12
@@ -581,7 +594,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, newAt: at })
 // How work that is stopped ends: done when its turn had already ended with its report and only its own background work held it
 // (the chat stops such work once its report is in), stopped otherwise
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
@@ -589,6 +602,8 @@ const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'sto
 const handedBack = new Map<string, string>()
 // Work whose card a handback ended, until it works again: a turn of words alone that what it left running wakes changes nothing
 const endedByHandback = new Set<string>()
+// Work stopped by the chat or the panel: whatever the engine still lists of it is going, so it is never said to have left something running
+const stoppedHere = new Set<string>()
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
@@ -674,7 +689,8 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false) => {
 const helpersChecked = new Set<string>()
 // The engine's own list is the truth: work it runs is listed, and work that failed or was stopped ends no turn
 const sync = async ($: EngineInterface) => {
-  const live = await $.agent.list().catch(() => [])
+  const listed = await $.agent.list().catch(() => undefined)
+  const live = listed ?? []
   const now = await $.clock.now()
   // Work the mod never saw start (it was running when the mod was installed or renamed) that no loop is said to have started:
   // the chat's own Agent calls tell a piece of work from a helper whose start the engine did not record
@@ -705,6 +721,10 @@ const sync = async ($: EngineInterface) => {
           : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
             card.status === 'working' && !card.steps && !card.entries.length && !card.words && one.status === 'idle'
             ? ended(card, 'done', now)
+          : // Work that handed in its report and that the engine still holds on its own background work left something running;
+            // once nothing does, or it was stopped, not
+            !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id)) !== Boolean(card.leftSince)
+            ? { ...card, leftSince: card.leftSince ? undefined : now }
           : card.parentId === HELPER && !one.parentId && ownCalls.has(one.description)
             ? { ...card, parentId: '', title: card.title || oneLine(one.description) }
             : !card.title && one.description
@@ -713,6 +733,8 @@ const sync = async ($: EngineInterface) => {
       if (next) cards.set(one.id, next)
       isChanged ||= Boolean(next)
     }
+    // Finished work the engine no longer lists has nothing of its own left running
+    for (const card of cards.values()) if (listed && card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
   await keepStoppedReports($, now)
@@ -739,8 +761,10 @@ const stop = async ($: EngineInterface, id: string) => {
   if ((await read($, todos)).some(one => one.id === id && one.status === 'working')) pressed.add(id)
   const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
   if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
+  stoppedHere.add(id)
   const now = await $.clock.now()
-  await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one)))
+  // What finished work left running is stopped with it
+  await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === id && one.leftSince ? { ...one, leftSince: undefined } : one)))
   await keepStoppedReports($, now)
   await lookEnds($)
 }
@@ -917,13 +941,15 @@ const loadFinished = async ($: EngineInterface) => {
   const kept = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   if (!Array.isArray(kept) || !kept.length) return
   await update($, todos, list => {
-    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id))
+    // What it left running is looked at afresh: the record of how it ended does not outlive the load
+    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined }))
     return fresh.length ? capped(byEnd([...fresh, ...list])) : list
   })
 }
 
 const follow = async ($: EngineInterface) => {
   await sync($)
+  await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
   const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)
@@ -4812,6 +4838,7 @@ const chatHooks = (on: On) => {
       await holdOldCopies($).catch(() => undefined)
       $.clock.every(HOLD_EVERY, () => holdOldCopies($).catch(err => log($, `old copies not held: ${String(err)}`)))
     }
+    await tidyLog($)
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
 
     return begun
@@ -4971,6 +4998,122 @@ const chatHooks = (on: On) => {
 
 }
 
+// Work that stops moving: what each piece of work is running now and since when, when something new last came back to it, the
+// card of work under which nothing new has come back for STUCK_AFTER, and finished work that something it started still holds
+
+// Nothing new for this long anywhere under a piece of work, while it works, and its card says so and the chat is told once. Above
+// the longest one command can run (ten minutes) with a step either side of it, so a single long build or wait is not flagged
+const STUCK_AFTER = 12 * 60_000
+// One call running this long shows on its row, with its time
+const RUNNING_SHOWN = 2 * 60_000
+// Lines each agent has seen come back, so a wait that returns what it returned before is no news; kept to this many each
+const SEEN_KEPT = 5000
+// Only this many lines of one result are looked at
+const LINES_READ = 2000
+
+// The calls running now, by tool_use_id: whose, what, since when
+const inFlight = new Map<string, { agent: string; what: string; at: number }>()
+const seenLines = new Map<string, Set<string>>()
+
+// What a running call is, in a few words, for its row
+const runningWhat = (tool: string) =>
+  tool === 'Bash' ? 'one command running' : tool === 'Grep' || tool === 'Glob' ? 'one search running' : tool === 'Agent' ? 'its helper running' : `${tool.replace(/^mcp__.*__/, '')} running`
+
+// A result as lines: its text where it has some, else its parts each on a line of their own
+const resultLines = (result: unknown): string[] => {
+  const text =
+    typeof result === 'string'
+      ? result
+      : Array.isArray((result as { content?: unknown })?.content)
+        ? ((result as { content: { text?: unknown }[] }).content.map(part => String(part.text ?? '')).join('\n'))
+        : result && typeof result === 'object'
+          ? Object.values(result as Record<string, unknown>).map(value => (typeof value === 'string' ? value : JSON.stringify(value) ?? '')).join('\n')
+          : String(result ?? '')
+  // Digits are left out, so a wait that only prints a new time or count says nothing new
+  return text.split('\n', LINES_READ).map(line => line.trim().replace(/\d/g, '#').slice(0, 300)).filter(Boolean)
+}
+
+// The longest-running call of an agent, as its card keeps it
+const runningOf = (agent: string) => {
+  const first = [...inFlight.values()].filter(one => one.agent === agent).sort((a, b) => a.at - b.at)[0]
+  return first ? { what: first.what, at: first.at } : undefined
+}
+// A card with its running call as it is now, worked out as it is changed, so calls that begin and end together leave it true;
+// the list itself when nothing changed
+const withRunning = (list: Todo[], agent: string, newAt?: number) => {
+  const running = runningOf(agent)
+  const at = list.findIndex(one => one.id === agent)
+  const one = list[at]
+  if (!one || (one.running?.at === running?.at && one.running?.what === running?.what && (newAt === undefined || one.newAt === newAt))) return list
+  return list.map((card, n) => (n === at ? { ...card, running, newAt: newAt ?? card.newAt } : card))
+}
+
+// A call of a piece of work begins: its card keeps the one it has been running longest
+const callBegun = async ($: EngineInterface, id: string, agent: string, tool: string) => {
+  inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now() })
+  await update($, todos, list => withRunning(list, agent))
+}
+
+// A call of a piece of work ended with what it returned: a line its agent had not seen come back before is news. The mod's own
+// tools say back what they were given, so they bring none
+const callEnded = async ($: EngineInterface, id: string, agent: string, tool: string, r: { result?: unknown; deny?: unknown } | undefined) => {
+  inFlight.delete(id)
+  const now = await $.clock.now()
+  let isNew = false
+  if (r && !r.deny && !tool.startsWith(TOOLS) && !tool.startsWith(OLD_TOOLS)) {
+    const seen = seenLines.get(agent) ?? new Set<string>()
+    for (const line of resultLines(r.result)) if (!seen.has(line)) ((isNew = true), seen.add(line))
+    if (seen.size > SEEN_KEPT) seenLines.set(agent, new Set([...seen].slice(-SEEN_KEPT / 2)))
+    else seenLines.set(agent, seen)
+  }
+  await update($, todos, list => withRunning(list, agent, isNew ? now : undefined))
+}
+
+// When something last moved under a piece of work: it or a helper started, ended, or had something new come back
+const movedAt = (list: Todo[], top: Todo) => Math.max(...[top, ...underOf(list, top.id)].map(one => Math.max(one.startedAt, one.endedAt, one.newAt ?? 0)))
+
+// Looked at as the list is followed: work under which nothing new has come back for STUCK_AFTER is flagged on its card, and the
+// chat is told once; it clears when something does. Work waiting on the person is not flagged: asking them something, or stopped
+// on the app's own prompt to allow a call; nor work that gave its report and is only held by what it left running
+const lookStuck = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  const told: Todo[] = []
+  await update($, todos, list => {
+    let isChanged = false
+    const isPrompted = (one: Todo) => waiting.some(p => p.agent && topOf(list, p.agent) === one.id)
+    const next = list.map(one => {
+      if (one.parentId || one.chat) return one
+      const isStuck = one.status === 'working' && !one.ask && !one.answeredAt && !isPrompted(one) && now - movedAt(list, one) >= STUCK_AFTER
+      if (isStuck && !one.stuckAt) return ((isChanged = true), told.push(one), { ...one, stuckAt: movedAt(list, one) })
+      if (!isStuck && one.stuckAt) return ((isChanged = true), { ...one, stuckAt: undefined })
+      return one
+    })
+    return isChanged ? next : list
+  })
+  for (const one of told) await sayInChat($, named(STUCK_IN_CHAT(titleOf(one), Math.round((now - movedAt(await read($, todos), one)) / 60_000))))
+  // What agents that have ended had seen come back is let go
+  const list = await read($, todos)
+  for (const agent of seenLines.keys()) if (!list.some(one => one.id === agent && one.status === 'working')) seenLines.delete(agent)
+}
+
+// What a stuck card says above its line: how long nothing new has come back, and whether its helpers, or it, sit in a long call
+const stuckLine = (list: Todo[], one: Todo, at: number) => {
+  if (!one.stuckAt) return ''
+  const mins = Math.max(1, Math.round((at - one.stuckAt) / 60_000))
+  const isLong = (kid: Todo) => Boolean(kid.running && at - kid.running.at >= RUNNING_SHOWN)
+  const helpers = underOf(list, one.id).filter(kid => kid.status === 'working')
+  const tail = helpers.length
+    ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper keeps' : helpers.length === 2 ? 'Both helpers keep' : `All ${helpers.length} helpers keep`} waiting.` : ''
+    : isLong(one) ? ` One call has run ${took(at - (one.running?.at ?? at))}.` : ''
+  return `Nothing new for ${mins} min.${tail}`
+}
+
+// A row's running call, with its time, once it has run RUNNING_SHOWN
+const runningLine = (one: Todo, at: number) => (one.status === 'working' && one.running && at - one.running.at >= RUNNING_SHOWN ? `${one.running.what} · ${took(at - one.running.at)}` : '')
+
+// What finished work left running says on its card
+const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `It left something running in the background, ${took(at - one.leftSince)}` : '')
+
 // Work starting and running: the chat's own thread kept to handing work over, how full the chat is, each step of work, and new
 // work's card
 
@@ -4980,9 +5123,15 @@ const workHooks = (on: On) => {
   on('tool.call', async ($, e, raw) => {
     // A prompt the call raised goes as the call ends: refused, interrupted, or allowed and run
     const run = async (call: typeof e) => {
+      // What work runs, and what comes back of it, tells the stuck check whether it moves
+      const isWatched = e.agentId !== undefined && Boolean(dir)
+      if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool).catch(err => log($, `call not followed: ${String(err)}`))
+      let r: Awaited<ReturnType<typeof raw>> | undefined
       try {
-        return await raw(call)
+        r = await raw(call)
+        return r
       } finally {
+        if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool)
       }
@@ -5061,6 +5210,7 @@ const workHooks = (on: On) => {
       // What this work starts with the Agent tool is its helper, which the engine's own record does not always say
       if (e.tool === 'Agent') helperCalls.set(e.tool_use_id, id)
       endedByHandback.delete(id)
+      stoppedHere.delete(id)
       // Work that calls a tool is working: a card that had ended is back. Its steps are counted: to place a steer among them,
       // to see that a steer got its decision, and to see that its to-dos are still being kept
       if (dir) {
@@ -5113,8 +5263,9 @@ const workHooks = (on: On) => {
       const r = await next(e)
       const stopId = String((e as { task_id?: unknown }).task_id ?? '')
       if (!r.deny && stopId) {
+        stoppedHere.add(stopId)
         const now = await $.clock.now()
-        await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one)))
+        await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
         await keepStoppedReports($, now)
         await lookEnds($)
       }
@@ -5441,7 +5592,7 @@ const panelHooks = (on: On) => {
     const at = await $.clock.now()
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask)
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.leftSince)
     // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of the chat always does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
@@ -5589,11 +5740,15 @@ const panelHooks = (on: On) => {
               {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} done` : '')}
             </Box>
             {one.ask ? askBlock(one, `ask-${one.id}`) : null}
+            {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
+            {one.stuckAt && one.status === 'working' && !one.chat ? (
+              <Text key={`stuck-${one.id}`} color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
+            ) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden">
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
-                {lingers(one, at) ? (
+                {lingers(one, at) || leftLine(one, at) ? (
                   <Text wrap="truncate-end" color={one.status === 'done' ? DONE : undefined} dimColor={one.status !== 'done'}>
                     {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : 'Stopped'}
                   </Text>
@@ -5602,6 +5757,15 @@ const panelHooks = (on: On) => {
                 )}
               </Box>
             </Box>
+            {/* Finished, with something it started still running: what, how long, and a way to stop it */}
+            {leftLine(one, at) && !one.chat ? (
+              <Box key={`left-${one.id}`} flexDirection="column" gap={1}>
+                <Text color={NEEDS} wrap="wrap">{leftLine(one, at)}</Text>
+                <Box flexDirection="row">
+                  <Button key={`left-stop-${one.id}-${presses}`} label="Stop it" onPress={() => void stop($, one.id)} />
+                </Box>
+              </Box>
+            ) : null}
             {/* Its helpers, inside the card: its coloured edge runs down beside them */}
             {tree.length ? <Box key={`tree-${one.id}`} flexDirection="column">{tree}</Box> : null}
           </Box>
@@ -5678,7 +5842,9 @@ const panelHooks = (on: On) => {
       const time = took((one.endedAt || at) - one.startedAt)
       const model = modelName(one.model ?? '')
       const width = perRow - 4 - t.depth * 2
-      const side = [[model, one.tokens ? thousands(one.tokens) : '', time], [model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
+      // A call it has run for minutes says so in place of the model and context, so a long step does not look like a hang
+      const busy = [runningLine(one, at), runningLine(one, at).replace(/^.* running · /, 'running · ')].find(text => text && width - text.length >= 12)
+      const side = busy ? busy : [[model, one.tokens ? thousands(one.tokens) : '', time], [model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
       return twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
     }
     // In a small card: the helpers at work now or just ended, and any that one of those runs under; the rest are one closing

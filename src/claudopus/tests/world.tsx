@@ -155,6 +155,11 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   // What the Mac answers: a dev server on 3100 started by a chat, and the system's own listener, which is not the person's
   on('process.run', (_, e) => {
     const [tool, ...rest] = e.argv
+    // A line added to the end of a file, as the log is written
+    if (tool === 'sh' && rest[1] === 'printf %s "$2" >> "$1"' && rest[3] !== undefined) {
+      files.set(rest[3], `${files.get(rest[3]) ?? ''}${rest[4] ?? ''}`)
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     // What sips says of a picture, where the test gives it
     const sipsSaid = tool === 'sips' ? options.sips?.([...e.argv]) : undefined
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -263,7 +268,11 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     resumed.push(`${e.to}: ${e.text}`)
     return { isDelivered: true } as never
   })
-  on('tool.call', (_, e) => {
+  // A command a test holds running until it lets it go, with what it then prints: `held.get(id)?.(text)`
+  const held = new Map<string, (text: string) => void>()
+  on('tool.call', async (_, e) => {
+    const command = String((e as { command?: string }).command ?? '')
+    if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
     if (e.tool === 'SendMessage') sent.push(String((e as { message?: string }).message))
     // A command that prints the key, as one could print it by mistake
@@ -304,7 +313,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events, keychain }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events, held, keychain }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it

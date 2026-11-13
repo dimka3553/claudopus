@@ -160,6 +160,11 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   // What the Mac answers: a dev server on 3100 started by a chat, and the system's own listener, which is not the person's
   on('process.run', (_, e) => {
     const [tool, ...rest] = e.argv
+    // A line added to the end of a file, as the log is written
+    if (tool === 'sh' && rest[1] === 'printf %s "$2" >> "$1"' && rest[3] !== undefined) {
+      files.set(rest[3], `${files.get(rest[3]) ?? ''}${rest[4] ?? ''}`)
+      return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     // What sips says of a picture, where the test gives it
     const sipsSaid = tool === 'sips' ? options.sips?.([...e.argv]) : undefined
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -268,7 +273,11 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     resumed.push(`${e.to}: ${e.text}`)
     return { isDelivered: true } as never
   })
-  on('tool.call', (_, e) => {
+  // A command a test holds running until it lets it go, with what it then prints: `held.get(id)?.(text)`
+  const held = new Map<string, (text: string) => void>()
+  on('tool.call', async (_, e) => {
+    const command = String((e as { command?: string }).command ?? '')
+    if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
     if (e.tool === 'SendMessage') sent.push(String((e as { message?: string }).message))
     // A command that prints the key, as one could print it by mistake
@@ -309,7 +318,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events, keychain }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events, held, keychain }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -1615,15 +1624,19 @@ test('work that answered while only its own background work held it, then stoppe
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4s', reason: 'answer', agentId: 'a4' } as never)
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
   expect(await drawn(pane)).toEqual(['happy'])
-  // The engine's next looks still list it held: its card stays done
+  // The engine's next looks still list it held: its card stays done, and stays in the list saying it left something running, with a
+  // way to stop it
   await clock.advance(20_000)
   expect(await drawn(pane)).toEqual(['mark'])
+  expect((await pane.find({ type: 'Text', text: /^It left something running in the background, / }))?.props.color).toBe('#E5A50A')
+  expect(await pane.find({ type: 'Button', text: 'Stop it' })).toBeDefined()
   // What it left running wakes it for a turn of words alone: it stays as it ended, not announced again, its report kept
   const otto = () => [...files.keys()].filter(key => /\/reports\/[^/]+-name-the-octopus\/report\.md$/.test(key))
   const reportsBefore = otto().length
   await clock.advance(11_000)
   await $.turn.complete({ answer: 'The watch exited.', durationMs: 1, isAborted: false, turnId: 't4w', reason: 'answer', agentId: 'a4' } as never)
-  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  // Not announced again: no second pause, though the card still says what it left running
+  expect(await pane.find({ type: 'Text', text: /^It left something running/ })).toBeDefined()
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(10)
   expect(otto().length).toBe(reportsBefore)
@@ -1642,8 +1655,11 @@ test('work that answered while only its own background work held it, then stoppe
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'h1', message: 'Named it Sid.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4t', reason: 'answer', agentId: 'h1' } as never)
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  // Once nothing of it is held any more, at the engine's next look, it leaves the list
   agents.h2 = 'completed'
-  await clock.advance(2_100)
+  agents.h1 = 'completed'
+  await clock.advance(20_000)
+  expect(await pane.find({ type: 'Text', text: /Name the squid/ })).toBeUndefined()
 
   // Sent a message after its report, it works again: stopped before it took a step, it is stopped
   await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' } as never)
@@ -4262,4 +4278,130 @@ test("in a chat over ssh the panel's text stays the same from second to second w
   await clock.advance(41_000)
   expect(await texts()).toContain('1m')
   await pane.unmount()
+})
+
+// Work that stops moving: its card says so, the chat is told once, a long step shows on its row, and the log stays plain text
+
+test('work and its helpers that get nothing new back for 12 minutes are flagged on the card and told to the chat once; news clears it, and a wait that only prints a new number is no news', async ($, on) => {
+  const { clock, held, logged } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'one merger for all pushes', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'One merger for all pushes', prompt: 'one merger' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Trial work ONE releasing', prompt: 'one', parentAgentId: 'a1', resume: { agentId: 'h1' } } as never)
+  await $.agent.spawn({ ...spawn, description: 'Trial work TWO releasing', prompt: 'two', parentAgentId: 'a1', resume: { agentId: 'h2' } } as never)
+  const bash = (agentId: string, command: string, id: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command } as never)
+  const look = async <T,>(fn: (pane: { find: (q: object) => Promise<{ text?: string; props: Record<string, unknown> } | undefined>; findAll: (q: object) => Promise<unknown[]> }) => Promise<T>) => {
+    const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+    const r = await fn(pane as never)
+    await pane.unmount()
+    return r
+  }
+  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^Nothing new for / }))
+
+  // The work waits on its helpers, and they each wait on a start signal only it could give: nothing comes back to any of them
+  await bash('a1', 'git log', 'p1')
+  await bash('h1', 'git status', 'b1')
+  await bash('h2', 'git status', 'b2')
+  await clock.advance(11 * 60_000)
+  expect(await stuck()).toBeUndefined()
+  await clock.advance(2 * 60_000)
+  expect((await stuck())?.props.color).toBe('#E5A50A')
+  expect((await stuck())?.text).toMatch(/^Nothing new for 1[23] min\.$/)
+  expect(logged.filter(line => line.includes('"One merger for all pushes" has had nothing new'))).toHaveLength(1)
+  // Looked at again, nothing more is said
+  await clock.advance(60_000)
+  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(1)
+
+  // Something new comes back: the flag goes at the next look
+  void bash('h1', 'hold release', 'b3')
+  const letRelease = await until(async () => held.get('release'))
+  letRelease?.('released Thing 0.1.1')
+  expect(await stuck()).toBeDefined()
+  await clock.advance(25_000)
+  expect(await stuck()).toBeUndefined()
+  // A poll that prints what it printed before, a new count aside, is no news: twelve minutes on it is flagged again
+  void bash('h1', 'hold poll', 'b4')
+  const letPoll = await until(async () => held.get('poll'))
+  letPoll?.('released Thing 0.1.7')
+  await clock.advance(13 * 60_000)
+  expect(await stuck()).toBeDefined()
+  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(2)
+})
+
+test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', async ($, on) => {
+  const { clock, held } = world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Lay out the rows', prompt: 'lay out' } as never)
+  await $.agent.spawn({ ...spawn, description: 'How the app draws panes', prompt: 'look', parentAgentId: 'a1', resume: { agentId: 'h1' } } as never)
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'h1', command: 'hold search' } as never)
+  const rows = async () => {
+    const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+    const r = (await pane.findAll({ type: 'Text', text: / running · / })).map(one => one.text)
+    await pane.unmount()
+    return r
+  }
+  await clock.advance(90_000)
+  expect(await rows()).toEqual([])
+  await clock.advance(70_000)
+  expect(await rows()).toEqual(['one command running · 2m 40s'])
+  const letSearch = await until(async () => held.get('search'))
+  letSearch?.('found it')
+  await clock.advance(1_000)
+  expect(await rows()).toEqual([])
+})
+
+test('work sent a message after a long rest, and work only held by what it left running after its report, are not flagged', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = { a2: 'general-purpose' }
+  const { clock, logged, held } = world(on, { agents, kinds })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' } as never)
+  // Its first run, moving all along, takes longer than the stuck check waits; then it rests
+  for (const part of ['left ear', 'right ear', 'lobes']) {
+    await clock.advance(5 * 60_000)
+    void $.tool.call({ tool: 'Bash', tool_use_id: `e-${part}`, agentId: 'a1', command: `hold ${part}` } as never)
+    const letGo = await until(async () => held.get(part))
+    letGo?.(`drew the ${part}`)
+  }
+  await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(30 * 60_000)
+  await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'bigger', resume: { agentId: 'a1' } } as never)
+  await clock.advance(25_000)
+  const look = async () => {
+    const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+    const r = await pane.find({ type: 'Text', text: /^Nothing new for / })
+    await pane.unmount()
+    return r
+  }
+  expect(await look()).toBeUndefined()
+  await $.turn.complete({ answer: 'Bigger now.', durationMs: 1, isAborted: false, turnId: 't1b', reason: 'answer', agentId: 'a1' } as never)
+  // Held on a watch it started after a report as long as one: its card goes on, but it is not stuck
+  agents.a2 = 'waiting'
+  await $.agent.spawn({ ...spawn, description: 'Watch the build', prompt: 'watch' } as never)
+  await $.turn.complete({ answer: `The build is watched. ${'Every check passes and it is pushed. '.repeat(15)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
+  await clock.advance(13 * 60_000)
+  expect(await look()).toBeUndefined()
+  expect(logged.filter(line => line.includes('has had nothing new'))).toEqual([])
+})
+
+test('work asking the person something waits on them and is never flagged', async ($, on) => {
+  const { clock, logged } = world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Release it', prompt: 'release it' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] } as never)
+  await clock.advance(30 * 60_000)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
+  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(0)
+  await pane.unmount()
+})
+
+test('the log is added to, never rewritten whole, and the empty bytes earlier versions left in it are taken out', async ($, on) => {
+  const { files } = world(on)
+  files.set(`${MEMORY}/log.md`, `2026-01-01T00:00:00.000Z start one\u0000\u0000\u00002026-01-01T00:00:01.000Z start two\n`)
+  await $.session.start(start)
+  const text = files.get(`${MEMORY}/log.md`) ?? ''
+  expect(text).not.toContain('\u0000')
+  expect(text.startsWith('2026-01-01T00:00:00.000Z start one2026-01-01T00:00:01.000Z start two\n')).toBe(true)
+  expect(text).toMatch(/Z start engine-id in \/repo\n$/)
 })
