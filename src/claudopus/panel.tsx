@@ -8,6 +8,18 @@ const panelHooks = (on: On) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
     const { Box, Button, Markdown, Text } = $.ui.resolve(e)
+    // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
+    const large = pictureIn.get(paneId)
+    if (large) {
+      const back = (key: string) => <Button key={`${key}-${presses}`} label="← Back to Details" plain onPress={() => ((presses += 1), pictureBack($, paneId))} />
+      return (
+        <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+          {back('pic-back-top')}
+          {await pictureView($, e, large.path)}
+          {back('pic-back-end')}
+        </Box>
+      )
+    }
     // The list's running times move each second; a Details tab is drawn again only when its work moves
     if (paneId === LIST) await read($, tick)
     if (paneId === LIST) drawnNow = await $.clock.now()
@@ -569,7 +581,7 @@ const panelHooks = (on: On) => {
                     key={`pic-open-${at}-${n}-${presses}`}
                     label={`⤢ ${pic.thumb && e.surface !== 'terminal' ? 'Open large' : 'Open'}: ${cut(pic.name, Math.max(12, room - 14))}`}
                     plain
-                    onPress={() => ((presses += 1), redraw($), void showPicture($, pic.path))}
+                    onPress={() => ((presses += 1), redraw($), void showPicture($, pic.path, paneId, `pic-${at}-${n}`))}
                   />
                 )}
               </Box>

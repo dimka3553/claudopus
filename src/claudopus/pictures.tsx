@@ -15,21 +15,33 @@ type Pic = { name: string; path: string; thumb: Thumb; isGone?: boolean }
 // A press opens the picture whole in the Mac's own viewer (Preview for a photo or screenshot), a window of its own as large as the
 // screen allows, which can go full screen and closes as any window does: the panel is only a sidebar wide. A chat the app runs on
 // another Mac over ssh has its engine, and so `open`, on this Mac, where nobody looks: Preview opened on its screen (seen on the
-// M4). There the picture opens in a tab of the app's own instead, which the app draws on the screen the person is at
-const showPicture = async ($: EngineInterface, path: string) => {
-  if (isRunFromAfar) return showPictureTab($, path)
+// M4). There the picture is drawn large in the Details tab it was pressed in, which the app draws on the screen the person is at,
+// over its Details, with a row back to them: no tab is opened, closed or opened again. 0.2.46 to 0.2.50 opened a picture tab of its
+// own, which from a Details tab closed the tab pressed in and opened it again so it let go of the keyboard: that tab came back drawn
+// afresh, its chat at its end and slow to scroll, and the picture's tab stayed behind it (seen on 0.2.49 in a helper's Details)
+const showPicture = async ($: EngineInterface, path: string, pane: string, row: string) => {
+  if (isRunFromAfar) return showPictureIn($, path, pane, row)
   const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `picture ${path} not opened: ${opened.stderr}`)
 }
-// The picture tab: one at a time, the newest picture pressed
+// The picture tab of 0.2.46 to 0.2.50: one still open after an update says how pictures open now
 const PICTURE_PANE = 'picture'
-let pictureShown = ''
-const showPictureTab = async ($: EngineInterface, path: string) => {
-  pictureShown = path
+const pictureShown = ''
+// The picture each Details tab draws large over its Details, by the tab, and the row it was pressed on, which Back brings into view
+const pictureIn = new Map<string, { path: string; row: string }>()
+const showPictureIn = async ($: EngineInterface, path: string, pane: string, row: string) => {
+  pictureIn.set(pane, { path, row })
   // One that could not be made is tried again on a new press
   for (const [id, one] of larges) if (!one && id.startsWith(`${path}:`)) larges.delete(id)
-  await front($, PICTURE_PANE, cut(fileName(path), 30))
   $.ui.invalidate('ui.render')
+  await $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(() => undefined)
+}
+const pictureBack = ($: EngineInterface, pane: string) => {
+  const was = pictureIn.get(pane)
+  pictureIn.delete(pane)
+  $.ui.invalidate('ui.render')
+  // Once the Details are drawn again, the picture's row is brought into view, where the person was
+  if (was?.row) $.clock.after(120, () => void $.ui.scroll({ in: pane, to: { key: was.row }, block: 'center' }).catch(() => undefined))
 }
 // The large copy the tab draws, as wide as a wide sidebar on a sharp screen. An Svg carries at most 131072 characters, too few for
 // a large screenshot to stay readable, so the copy is cut into bands across, each an Svg of its own drawn under the one before.
@@ -125,9 +137,8 @@ const largeOf = ($: EngineInterface, path: string, id: string): Large | undefine
   return undefined
 }
 // What the tab draws: the picture as wide as the tab, its name and size, and how to see it larger
-const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0]) => {
+const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], path = pictureShown) => {
   const ui = $.ui.resolve(e)
-  const path = pictureShown
   if (!path) return <ui.Text dimColor>No picture is open. Press a picture's row in a work's Details.</ui.Text>
   const name = fileName(path)
   const stat = await $.fs.stat(path).catch(() => undefined)

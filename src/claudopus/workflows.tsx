@@ -204,7 +204,7 @@ const openFlow = ($: EngineInterface, id: string) => {
   void (async () => {
     const f = (await read($, flows)).find(one => one.id === id)
     if (!f) return
-    if (!(await $.ui.panes()).some(pane => pane.id === flowPaneOf(id))) flowPicked.delete(id)
+    if (!(await $.ui.panes()).some(pane => pane.id === flowPaneOf(id))) (flowPicked.delete(id), pictureIn.delete(flowPaneOf(id)))
     await front($, flowPaneOf(id), cut(f.title, 30))
     redraw($)
   })().catch(err => log($, `workflow ${id} not opened: ${String(err)}`))

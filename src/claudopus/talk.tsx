@@ -171,7 +171,7 @@ const openWork = ($: EngineInterface, id: string) => {
     const one = [...(await read($, todos)), ...cardsOf(await read($, others))].find(card => card.id === id)
     if (!one) return
     // A tab opened afresh starts folded; one already open keeps what was unfolded in it
-    if (!(await $.ui.panes()).some(pane => pane.id === workPaneOf(id))) folds.delete(id)
+    if (!(await $.ui.panes()).some(pane => pane.id === workPaneOf(id))) (folds.delete(id), pictureIn.delete(workPaneOf(id)))
     await front($, workPaneOf(id), cut(titleOf(one), 30))
     // The pressed card's button gets a new name, so the app does not hold the list where that button was
     redraw($)
