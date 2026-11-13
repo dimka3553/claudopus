@@ -3532,7 +3532,8 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   // later, once the engine lists its run as over
   agents.a1 = 'running'
   await $.turn.complete({ answer: 'Release PR 54 to production? (Answers: Release it / Not now.) The differences are…', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
-  agents.a1 = 'completed'
+  // Listed as idle after, as the engine lists some ended work
+  agents.a1 = 'idle'
   await clock.advance(2_000)
   const after = await until(async () => {
     const l = await look()

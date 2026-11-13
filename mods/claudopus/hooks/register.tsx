@@ -5420,6 +5420,12 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
 const HELD_LOOK = 1500
 const heldLook = async ($: EngineInterface, id: string) => {
   await sync($)
+  // Listed as idle, or no longer listed, its run is over too: nothing holds it
+  const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
+  if (listed === 'idle' || listed === undefined) {
+    const now = await $.clock.now()
+    await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
+  }
   if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
   await replyUnread($, id)
   if (wakes.length) await sendWakes($)
