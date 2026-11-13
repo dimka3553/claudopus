@@ -15,6 +15,8 @@ import type { LookIo } from './update'
 import { checkSaid, copyOf, folderSaid, installedFrom, isNewer, isReloadDue, isUpdateDue, lookOnce, RELOAD_AGAIN, RELOAD_EVERY, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
+import { tabMoveQueue } from './tabmoves'
+import type { TabMove } from './tabmoves'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
 // helpers, the log and the chat's saved words
@@ -1887,47 +1889,14 @@ const rosterOf = (panes: { id: string; isShown: boolean; isFocused: boolean; isP
 // terminal (under 144 columns, a phone over ssh) left every tab a press opened undrawn, and the panel, opened again to take back the
 // keys, vanished with it. So while a press of the mod's in the terminal is answered, a tab move is handed to that press's own
 // `ui.press` hook (tabHooks), whose handle the engine counts as the person's, and done there
-type TabMove = { kind: 'front'; id: string; title: string } | { kind: 'back'; id: string }
-let isPressing = false
-// Opens that read something first (a card's Details, a result) are counted from the press on, so the hook waits for their move
-let tabMovesComing = 0
-let wakeTabMoves: (() => void) | undefined
-const tabMoves: { move: TabMove; done: () => void; failed: (err: unknown) => void }[] = []
-const handOver = (move: TabMove) =>
-  new Promise<void>((done, failed) => {
-    tabMoves.push({ move, done, failed })
-    wakeTabMoves?.()
-  })
-const comingTab = (opening: Promise<void>) => {
-  if (!isPressing) return opening
-  tabMovesComing += 1
-  return opening.finally(() => {
-    tabMovesComing -= 1
-    wakeTabMoves?.()
-  })
-}
+const tabMoves = tabMoveQueue()
+const comingTab = (opening: Promise<void>) => tabMoves.coming(opening)
 const front = async ($: EngineInterface, id: string, title: string) => {
-  if (isPressing) return handOver({ kind: 'front', id, title })
+  if (tabMoves.isPressing()) return tabMoves.handOver({ kind: 'front', id, title })
   await frontAsked($, id, title)
 }
-// Run in the press's hook: each tab move handed over, as they come, until none is on its way
-const doTabMoves = async ($: EngineInterface) => {
-  while (tabMoves.length || tabMovesComing > 0) {
-    const one = tabMoves.shift()
-    if (!one) {
-      await new Promise<void>(woken => (wakeTabMoves = woken))
-      continue
-    }
-    try {
-      if (one.move.kind === 'front') await frontAsked($, one.move.id, one.move.title)
-      else await backAsked($, one.move.id)
-      one.done()
-    } catch (err) {
-      one.failed(err)
-    }
-  }
-  wakeTabMoves = undefined
-}
+// What a press's hook does with a move handed over, by its own handle
+const runTabMove = ($: EngineInterface, move: TabMove) => (move.kind === 'front' ? frontAsked($, move.id, move.title) : backAsked($, move.id))
 const frontAsked = async ($: EngineInterface, id: string, title: string) => {
   const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown)
   // A press inside a tab gives that tab the keyboard, and the engine never shows a new tab over the one holding it: it waits on
@@ -6763,7 +6732,7 @@ const bandHooks = (on: On) => {
 // Back from a tab to the panel, in the terminal: the tab is closed and the panel, opened again, holds the keys
 // Handed to the press's own hook while one is answered (front), so a narrow terminal draws the panel opened again
 const backToPanel = async ($: EngineInterface, id: string) => {
-  if (isPressing) return handOver({ kind: 'back', id })
+  if (tabMoves.isPressing()) return tabMoves.handOver({ kind: 'back', id })
   await backAsked($, id)
 }
 const backAsked = async ($: EngineInterface, id: string) => {
@@ -7877,15 +7846,14 @@ const tabHooks = (on: On) => {
   // since the panel was last drawn, and the tabs as the engine lists them, so a press that did nothing shows whether it arrived at all
   on('ui.press', async ($, e, next) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
-    // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (front)
+    // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
-    if (isTerminal) isPressing = true
+    if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>
     try {
       r = await next(e)
-      if (isTerminal) await doTabMoves($)
     } finally {
-      if (isTerminal) isPressing = false
+      if (isTerminal) await tabMoves.finish(move => runTabMove($, move), ms => $.clock.sleep(ms))
     }
     // An answer the press gave to work that had ended starts it again from here, inside the press's own hook (sendWakes)
     if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))

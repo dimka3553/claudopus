@@ -3,7 +3,7 @@
 // Back from a tab to the panel, in the terminal: the tab is closed and the panel, opened again, holds the keys
 // Handed to the press's own hook while one is answered (front), so a narrow terminal draws the panel opened again
 const backToPanel = async ($: EngineInterface, id: string) => {
-  if (isPressing) return handOver({ kind: 'back', id })
+  if (tabMoves.isPressing()) return tabMoves.handOver({ kind: 'back', id })
   await backAsked($, id)
 }
 const backAsked = async ($: EngineInterface, id: string) => {

@@ -8,6 +8,7 @@ import * as M5 from '../../mods/claudopus/hooks/shared'
 import * as M6 from '../../mods/claudopus/hooks/config'
 import * as M7 from '../../mods/claudopus/hooks/update'
 import * as M8 from '../../mods/claudopus/hooks/changelog'
+import * as M9 from '../../mods/claudopus/hooks/tabmoves'
 
 declare global {
   export import atom = M0.atom
@@ -179,4 +180,6 @@ declare global {
   export import seenIn = M8.seenIn
   export import TAB_BUDGET = M8.TAB_BUDGET
   export import Version = M8.Version
+  export import tabMoveQueue = M9.tabMoveQueue
+  export import TabMove = M9.TabMove
 }

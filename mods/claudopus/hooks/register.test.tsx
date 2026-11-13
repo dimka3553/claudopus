@@ -132,7 +132,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('session.id', () => ({ value: 'engine-id' }))
   // A chat drawn on the desktop app, as most are; `headless` none, as a -p run
   // `narrow`: a terminal under 144 columns, as a phone over ssh, which draws only a tab opened as the person asked: here, one opened
-  // while the test's press is still being answered (isPressing), as the engine counts only what the press's own dispatch opens
+  // while the test's press is still being answered (isPressing). The engine counts only what the press's own hook opens, which the kit
+  // cannot tell from what a button's closure opens in that time; tabmoves.test.tsx holds the hand-over to the hook itself
   on('session.surfaces', () => ({ value: options.headless ? [] : options.narrow ? ['terminal'] : ['desktop'] }) as never)
   on('session.version', () => ({ value: { version: '2.1.321', base: '2.1.321' } }))
   // The chat of a piece of work as the engine keeps it, or its refusal to read one
