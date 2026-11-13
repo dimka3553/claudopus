@@ -4655,7 +4655,7 @@ const boxesDir = () => `${dir}/boxes`
 // Another chat's request is left to it this long, so its own chat tells it, when that chat is open
 const BOX_GRACE = 5000
 // In the chat only the name of what is asked, once per box, in the chat that asked or else whichever chat sees it first
-const BOX_TOLD = (text: string) => `${text}\n\nType it in the box at the top of the Claudopus panel (/claudopus opens it). What is typed there goes only into this Mac's keychain, never into a chat.`
+const BOX_TOLD = (text: string) => `${text} Type it in the box at the top of the Claudopus panel (/claudopus opens it). What is typed there goes only into this Mac's keychain, never into a chat.`
 // This chat's own id, as the runner reads it from CLAUDE_CODE_SESSION_ID
 let boxChat = ''
 // Requests this chat has told or seen told
