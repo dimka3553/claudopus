@@ -3647,9 +3647,7 @@ const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await $.session.send({ to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-  if (!r.isDelivered) return wakeFailed($, wake, r.reason)
-  // The answers joined before the last one are on their way too: their cards say so as the last one's does once it is read
-  for (const { one, sent } of wake.answers.slice(0, -1)) sentReplies.set(one.id, { ...sent, to: 'read' })
+  if (!r.isDelivered) await wakeFailed($, wake, r.reason)
 }
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
   if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
