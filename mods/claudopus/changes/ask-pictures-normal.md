@@ -1,1 +1,1 @@
-- The pictures of a question from background work now show in the chat: the chat sends them the way that shows, not the way that left them unseen.
+- The pictures of a question from background work, and of a result, are sent to the chat the way that showed in a remote chat; sent the other way, they did not show.
