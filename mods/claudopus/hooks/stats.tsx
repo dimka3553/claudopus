@@ -14,7 +14,8 @@ export type TodoCall = [at: number, item: string, state: string, was: string]
 // What jq makes of one transcript: the stretches it was busy (rows less than GAP apart), its responses, its to-do calls
 // and, in a chat's own transcript, each turn that began with the person's message: from it to the chat's last response or tool
 // result before the next message of any kind (the person's, or a background agent's notice); bookkeeping rows such as the queue's,
-// which Claude Code writes as the next message arrives, never end a turn
+// which Claude Code writes as the next message arrives, and meta rows (the mod's notices, a command's caveat, a compaction's
+// summary) never end a turn
 export type FileSum = { s: Span[]; u: Msg[]; d: TodoCall[]; turns?: Span[] }
 // One transcript, and what it was: a piece of work the chat started, a helper a piece of work started, an agent of a workflow,
 // or the chat's own thread
@@ -221,7 +222,7 @@ reduce (inputs | fromjson? | select(type == "object" and (.timestamp | type) == 
    ($o.timestamp | ms) as $s
    | (if $o.type == "user" and ($o.isMeta | not) and (($o.message.content | type) == "string" or ([$o.message.content[]? | select(type == "object" and .type == "tool_result")] | length) == 0)
       then (if ($o.origin | type) == "object" and $o.origin.kind == "human" then "h" else "o" end)
-      elif $o.type == "assistant" or $o.type == "user" then "a" else "r" end) as $k
+      elif $o.type == "assistant" or ($o.type == "user" and ($o.isMeta | not)) then "a" else "r" end) as $k
    | .r += [[$s, $k]]
    | if $o.type == "assistant" and ($o.message.usage | type) == "object" then
        $o.message.usage as $u
