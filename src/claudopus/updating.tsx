@@ -6,6 +6,50 @@
 // update steps for the mod, under a lock the other chats see, and
 // keeps what it learnt in update.json; a copy not installed from a marketplace (its maker's folder) is never updated
 let isUpdating = false
+// The lock is one file made only where none is (the shell's noclobber), holding when it was taken and by whom; a lock left by a
+// chat that closed mid-look is moved aside by exactly one chat once it is old (by what it says, else by when it was written).
+// Taken, the act runs and only this chat's own lock is removed after it; held by another chat, nothing runs and 'busy' comes back
+const UPDATE_BUSY = 'busy' as const
+const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): Promise<T | typeof UPDATE_BUSY> => {
+  const lock = `${dir}/update.lock`
+  const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
+  const take = async () =>
+    (await $.process.run(['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
+  if (!(await take())) {
+    const now = await $.clock.now()
+    const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
+    if (now - at < UPDATE_LOOK) return UPDATE_BUSY
+    const aside = `${lock}.${token.split(' ')[1]}`
+    if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
+    await $.process.run(['rm', '-f', aside]).catch(() => undefined)
+    if (!(await take())) return UPDATE_BUSY
+  }
+  try {
+    return await act()
+  } finally {
+    // Only this chat's own lock is removed: one taken over meanwhile is the other chat's
+    if ((await readOr($, lock)) === token) await $.process.run(['rm', '-f', lock]).catch(() => undefined)
+  }
+}
+// The Mac, as one look needs it
+const lookIo = ($: EngineInterface): LookIo => ({
+  read: path => readOr($, path),
+  write: (path, text) => $.fs.write(path, text),
+  run: (argv, timeoutMs) => $.process.run(argv, { timeoutMs }),
+  page: () =>
+    Promise.race([
+      $.http.fetch(VERSION_PAGE).catch(err => ({ ok: false, status: 0, text: String(err) })),
+      new Promise<{ ok: false; status: 0; text: string }>(done => void $.clock.after(VERSION_WAIT, () => done({ ok: false, status: 0, text: 'no answer' }))),
+    ]),
+  now: () => $.clock.now(),
+  log: text => log($, text),
+})
+const lookAt = async ($: EngineInterface, from: NonNullable<ReturnType<typeof installedFrom>>) =>
+  lookOnce(lookIo($), { from, root: $.plugin.root, engine: (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude', stampPath: `${dir}/update.json` })
+
+// Every hour one chat on this Mac reads the version page and, when it differs from the installed version, runs Claude Code's own two
+// update steps for the mod, under a lock the other chats see, and
+// keeps what it learnt in update.json; a copy not installed from a marketplace (its maker's folder) is never updated
 const selfUpdate = async ($: EngineInterface) => {
   const from = installedFrom($.plugin.root)
   if (!from || isUpdating || !dir) return
@@ -14,67 +58,45 @@ const selfUpdate = async ($: EngineInterface) => {
   const stampPath = `${dir}/update.json`
   if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now())) return
   isUpdating = true
-  // The lock is one file made only where none is (the shell's noclobber), holding when it was taken and by whom; a lock left by a
-  // chat that closed mid-look is moved aside by exactly one chat once it is old (by what it says, else by when it was written)
-  const lock = `${dir}/update.lock`
-  const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
-  const take = async () =>
-    (await $.process.run(['sh', '-c', 'set -C; printf %s "$2" > "$1"', 'sh', lock, token]).catch(() => ({ exitCode: 1 }))).exitCode === 0
   try {
-    if (!(await take())) {
-      const now = await $.clock.now()
-      const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
-      if (now - at < UPDATE_LOOK) return
-      const aside = `${lock}.${token.split(' ')[1]}`
-      if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return
-      await $.process.run(['rm', '-f', aside]).catch(() => undefined)
-      if (!(await take())) return
-    }
-    try {
-      // Another chat may have looked between this chat's reading and its lock
-      const before = stampOf(await readOr($, stampPath))
-      const now = await $.clock.now()
-      // and the person may have turned automatic updates off while this chat waited for it
-      if (!isUpdateDue(before, now) || (await readConfig($, dir)).updates === false) return
-      const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
-      const id = `${from.plugin}@${from.marketplace}`
-      const scope = scopeOf(installed, id, $.plugin.root)
-      const have = installedVersionOf(installed, id, $.plugin.root, scope)
-      // The version page on claudopus.ai says which version is current; the same one installed means nothing is run
-      const page = await Promise.race([
-        $.http.fetch(VERSION_PAGE).catch(err => ({ ok: false, status: 0, text: String(err) })),
-        new Promise<{ ok: false; status: 0; text: string }>(done => void $.clock.after(VERSION_WAIT, () => done({ ok: false, status: 0, text: 'no answer' }))),
-      ])
-      const current = page.ok ? versionOnPage(page.text) : undefined
-      if (!current) {
-        const result = `version page not read: ${page.ok ? 'no version on it' : page.status || page.text.slice(0, 120)}`
-        await $.fs.write(stampPath, JSON.stringify({ at: now, version: before?.version || have, result }))
-        await log($, `Claudopus ${result}`)
-        return
-      }
-      if (current === have) {
-        await $.fs.write(stampPath, JSON.stringify({ at: now, version: have, result: 'latest' }))
-        return
-      }
-      await log($, `Claudopus ${current} is on the version page and ${have} is installed: updating`)
-      const engine = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
-      const [refresh, update] = updateSteps(engine, from, scope)
-      const run = (argv: string[], timeoutMs: number) => $.process.run(argv, { timeoutMs }).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
-      const refreshed = await run(refresh, 180_000)
-      const updated = refreshed.exitCode === 0 ? await run(update, 300_000) : refreshed
-      const to = refreshed.exitCode === 0 ? updatedTo(`${updated.stdout}\n${updated.stderr}`) : undefined
-      const why = `${updated.stderr || updated.stdout}`.trim().slice(-200)
-      const result = to ? (to.isNew ? 'updated' : 'latest') : `${refreshed.exitCode === 0 ? 'not updated' : 'marketplace not refreshed'}: ${why}`
-      // A look that learnt nothing keeps the version the last one found, so About still says what is installed
-      await $.fs.write(stampPath, JSON.stringify({ at: now, version: to?.version ?? before?.version ?? '', result }))
-      if (to?.isNew) await log($, `Claudopus updated to ${to.version}: chats that start from now on load it`)
-      else if (!to) await log($, `Claudopus ${result}`)
-    } finally {
-      // Only this chat's own lock is removed: one taken over meanwhile is the other chat's
-      if ((await readOr($, lock)) === token) await $.process.run(['rm', '-f', lock]).catch(() => undefined)
-    }
+    await underUpdateLock($, async () => {
+      // Another chat may have looked between this chat's reading and its lock, and the person may have turned automatic updates
+      // off while this chat waited for it
+      if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now()) || (await readConfig($, dir)).updates === false) return
+      await lookAt($, from)
+    })
   } finally {
     isUpdating = false
+  }
+}
+
+// Config's Check for updates: the same look, now, whatever the switch and the hour say. A look already under way here, or another
+// chat's, is waited for (CHECK_STEP at a time, up to UPDATE_LOOK, after which a stale lock is taken over), then this one runs, so
+// two looks never run at once; it is cheap when the other one already downloaded the newest version
+const CHECK_STEP = 3000
+const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
+  const loaded = (await versionsOf($)).version
+  const from = installedFrom($.plugin.root)
+  if (!from || !dir) {
+    const page = await lookIo($).page()
+    return folderSaid(page.ok ? versionOnPage(page.text) : undefined, loaded)
+  }
+  const until = (await $.clock.now()) + UPDATE_LOOK + CHECK_STEP
+  for (;;) {
+    if (!isUpdating) {
+      isUpdating = true
+      try {
+        const look = await underUpdateLock($, () => lookAt($, from))
+        if (look !== UPDATE_BUSY) {
+          await log($, `Claudopus checked for updates from Config: ${look.kind}${'version' in look && look.version ? ` ${look.version}` : ''}`)
+          return checkSaid(look, loaded)
+        }
+      } finally {
+        isUpdating = false
+      }
+    }
+    if ((await $.clock.now()) > until) return { text: "Couldn't check: another chat's check did not finish. Try again later.", isError: true }
+    await new Promise<void>(done => void $.clock.after(CHECK_STEP, done))
   }
 }
 

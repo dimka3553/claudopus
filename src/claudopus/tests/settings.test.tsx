@@ -73,3 +73,44 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   await config.select({ key: 'config-model-legwork-pick', value: 'sonnet' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })
+
+test('Check for updates in Config shows it is checking, then what it found; a second press meanwhile starts no second look', async ($, on) => {
+  world(on)
+  // The tests run the mod from a folder of its code, as its maker does: only the version page is read, and nothing is downloaded
+  let page = '{"version":"0.1.0"}'
+  let answer: (() => void) | undefined
+  let fetches = 0
+  on('http.fetch', async () => {
+    fetches += 1
+    await new Promise<void>(done => (answer = done))
+    return { value: { status: 200, ok: true, headers: {}, text: page } } as never
+  })
+  const release = () => {
+    const one = answer
+    answer = undefined
+    one?.()
+  }
+  await $.session.start(start)
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  expect(await config.find({ type: 'Text', text: 'This chat runs v0.1.0' })).toBeDefined()
+  await pressed(config, 'config-check')
+  expect(await until(() => config.find({ type: 'Text', text: 'Checking…' }))).toBeDefined()
+  // While it checks there is no button to press again
+  expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check for updates')).toBe(false)
+  release()
+  expect(await until(() => config.find({ type: 'Text', text: /^You're on the newest version \(v0\.1\.0\)/ }))).toBeDefined()
+  expect(fetches).toBe(1)
+  // A newer release: said, with what to do for a copy run from its folder
+  page = '{"version":"0.1.2"}'
+  await pressed(config, 'config-check')
+  await until(async () => answer)
+  release()
+  expect(await until(() => config.find({ type: 'Text', text: /^v0\.1\.2 is out\. This copy runs from a folder of its code/ }))).toBeDefined()
+  // No answer that reads as a version: said as a failure, in the error colour
+  page = 'oops'
+  await pressed(config, 'config-check')
+  await until(async () => answer)
+  release()
+  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check/ }))
+  expect(failed?.props.color).toBe('error')
+})

@@ -155,6 +155,74 @@ export const updatedTo = (out: string): { version: string; isNew: boolean } | un
   return same?.[1] ? { version: same[1], isNew: false } : undefined
 }
 
+// ---- One look: the version page, then the two steps when it names another version ----
+
+// What a look found: this Mac already has the version the page names, it downloaded it now, or it could not tell or download
+export type Look = { kind: 'latest'; version: string } | { kind: 'updated'; version: string } | { kind: 'failed'; why: string; version?: string }
+// What a look needs of the Mac, so the hourly look and Config's Check for updates run the very same steps, and tests can give them
+export type LookIo = {
+  read: (path: string) => Promise<string>
+  write: (path: string, text: string) => Promise<unknown>
+  run: (argv: string[], timeoutMs: number) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+  page: () => Promise<{ ok: boolean; status: number; text: string }>
+  now: () => Promise<number>
+  log: (text: string) => Promise<unknown>
+}
+// One look, run by whoever holds the update lock: it reads the version page, runs the two update steps only when the page names a
+// version other than the one installed, and keeps what it learnt in update.json
+export const lookOnce = async (io: LookIo, at: { from: { plugins: string; marketplace: string; plugin: string }; root: string; engine: string; stampPath: string }): Promise<Look> => {
+  const { from, root, engine, stampPath } = at
+  const before = stampOf(await io.read(stampPath).catch(() => ''))
+  const now = await io.now()
+  const installed = await io.read(`${from.plugins}/installed_plugins.json`).catch(() => '')
+  const id = `${from.plugin}@${from.marketplace}`
+  const scope = scopeOf(installed, id, root)
+  const have = installedVersionOf(installed, id, root, scope)
+  // The version page on claudopus.ai says which version is current; the same one installed means nothing is run
+  const page = await io.page()
+  const current = page.ok ? versionOnPage(page.text) : undefined
+  if (!current) {
+    const result = `version page not read: ${page.ok ? 'no version on it' : page.status || page.text.slice(0, 120)}`
+    await io.write(stampPath, JSON.stringify({ at: now, version: before?.version || have, result }))
+    await io.log(`Claudopus ${result}`)
+    return { kind: 'failed', why: page.ok ? 'claudopus.ai named no version' : 'claudopus.ai did not answer' }
+  }
+  if (current === have) {
+    await io.write(stampPath, JSON.stringify({ at: now, version: have, result: 'latest' }))
+    return { kind: 'latest', version: have }
+  }
+  await io.log(`Claudopus ${current} is on the version page and ${have} is installed: updating`)
+  const [refresh, update] = updateSteps(engine, from, scope)
+  const run = (argv: string[], timeoutMs: number) => io.run(argv, timeoutMs).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+  const refreshed = await run(refresh, 180_000)
+  const updated = refreshed.exitCode === 0 ? await run(update, 300_000) : refreshed
+  const to = refreshed.exitCode === 0 ? updatedTo(`${updated.stdout}\n${updated.stderr}`) : undefined
+  const why = `${updated.stderr || updated.stdout}`.trim().slice(-200)
+  const result = to ? (to.isNew ? 'updated' : 'latest') : `${refreshed.exitCode === 0 ? 'not updated' : 'marketplace not refreshed'}: ${why}`
+  // A look that learnt nothing keeps the version the last one found, so About still says what is installed
+  await io.write(stampPath, JSON.stringify({ at: now, version: to?.version ?? before?.version ?? '', result }))
+  if (to?.isNew) await io.log(`Claudopus updated to ${to.version}: chats that start from now on load it`)
+  else if (!to) await io.log(`Claudopus ${result}`)
+  if (to) return { kind: to.isNew ? 'updated' : 'latest', version: to.version }
+  const said = why.split('\n').at(-1)?.trim() ?? ''
+  return { kind: 'failed', version: current, why: `${refreshed.exitCode === 0 ? 'Claude Code did not update it' : 'Claude Code could not refresh where it comes from'}${said ? ` (${said.slice(0, 120)})` : ''}` }
+}
+
+// What Config's Check for updates says once its look is over, for a chat running `loaded`: newest, downloaded and waiting for
+// /reload-plugins in this chat, or why not
+export const checkSaid = (look: Look, loaded: string): { text: string; isError: boolean } => {
+  if (look.kind === 'failed') return { text: `Couldn't ${look.version ? `download v${look.version}` : 'check'}: ${look.why}. Try again later.`, isError: true }
+  if (loaded && isNewer(look.version, loaded)) return { text: `v${look.version} downloaded. Type /reload-plugins to switch this chat to it.`, isError: false }
+  return { text: `You're on the newest version (v${look.version}).`, isError: false }
+}
+// The same for a copy run from a folder of its code, which Claude Code did not install and so cannot update: only what the page says
+export const folderSaid = (current: string | undefined, loaded: string): { text: string; isError: boolean } => {
+  if (!current) return { text: "Couldn't check: claudopus.ai did not answer. Try again later.", isError: true }
+  if (loaded && isNewer(current, loaded))
+    return { text: `v${current} is out. This copy runs from a folder of its code, so it is not downloaded here: update that folder, then type /reload-plugins.`, isError: false }
+  return { text: `You're on the newest version (v${loaded || current}). This copy runs from a folder of its code, so it updates with that folder.`, isError: false }
+}
+
 // Whether a look is due: none yet, or the last one is older than UPDATE_EVERY (a clock moved back counts as due)
 export const isUpdateDue = (stamp: UpdateStamp | undefined, now: number) => !stamp || now - stamp.at >= UPDATE_EVERY || now < stamp.at
 
