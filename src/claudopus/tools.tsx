@@ -69,10 +69,10 @@ const toolHooks = (on: On) => {
     const text = oneLine(typeof input.text === 'string' ? input.text : '').slice(0, 300)
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
     const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
-    // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and a path relative to a
-    // folder never named is refused, since the person types it somewhere else
-    if (given0 && !hasFolder && !/^cd\s+[\/~]/.test(given0) && /(?:^|\s)(?![\/~-])[\w.-]+\/[\w./-]*/.test(given0)) {
-      return { result: 'Not shown: the command has a relative path and no folder. Give `cwd`, the full path of the folder it runs in, or use full paths, so it runs as it is wherever it is typed.' }
+    // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and one that starts with a
+    // path relative to a folder never named is refused, since the person types it somewhere else
+    if (given0 && !hasFolder && /^(?:\.{1,2}\/|[\w-][\w.-]*\/)/.test(given0)) {
+      return { result: 'Not shown: the command starts with a path relative to a folder it does not name. Give `cwd`, the full path of the folder it runs in, or a full path, so it runs as it is wherever it is typed.' }
     }
     const command = given0 && hasFolder && !/^cd\s/.test(given0) ? `cd ${zshQuoted(String(input.cwd))} && ${given0}` : given0
     // Copy is for text pasted elsewhere: a sentence of instructions, or the ask's own words, gets none

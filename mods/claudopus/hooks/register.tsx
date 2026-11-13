@@ -115,8 +115,7 @@ const folds = new Map<string, number[]>()
 let dir = ''
 // The person's last message, for the pass that runs after the reply
 let said = ''
-// The person's last messages in this chat: only a message that carries one of them is their steer
-const HEARD_KEPT = 8
+// Each message of the person's in the chat's turn under way: only a message that carries one of them is their steer
 let heard: string[] = []
 // config.json can switch the handing-over off: every chat then does its own work again
 let isOff = false
@@ -290,11 +289,11 @@ const KEEP =
 const KEEP_AGENTS = 'Keep the name or id of each background agent with its subject and where it stands.'
 // What every piece of background work is told as it starts: it keeps its own to-do in the panel true
 const PANEL_RULE =
-  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, the full paths of any pictures it is about in `pictures`, a command only {name} can run, never one you can run yourself, in `command`, whole, with its folder (`cd <folder> && <full path> …`) (open no terminal for it yourself); clear it with empty `text` once you have seen it done.'
+  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, the full paths of any pictures it is about in `pictures`, a command only {name} can run, never one you can run yourself, in `command` with its folder in `cwd` (open no terminal for it yourself); clear it with empty `text` once you have seen it done.'
 // What every conversation of a chat the app runs on another Mac over ssh carries after the principles, the chat's, its work's and
 // their helpers' alike: the person cannot see this Mac, so nothing waits on their hands here
 const AFAR_RULE =
-  "## This chat runs on another Mac\n\n- {Name} works from their own device and cannot see this Mac's screen. Anything that needs {name}'s hands is done from their own device: a sign-in by device code or a link that works opened on their own device, never a browser, window, dialog or keychain prompt on this Mac, and nothing that needs seeing its screen. A command only {name} can run is given whole, with its folder and full paths, to run as it is in their own SSH session to this Mac; nothing opens a terminal on this Mac for it."
+  "## This chat runs on another Mac\n\n- I work from my own device and cannot see this Mac's screen. Anything that needs my hands is done from my own device: a sign-in by device code or a link that works opened on my device, never a browser, window, dialog or keychain prompt on this Mac, and nothing that needs seeing its screen. A command only I can run is given whole, with its folder and full paths, to run as it is in my own SSH session to this Mac; nothing opens a terminal on this Mac for it."
 // What the chat shows when its work asks the person something: the ask as the mod's own notice in the chat, with its answers and
 // pictures, never a message in the person's place; its model reads the ask in a row of its own, with how to pass an answer on.
 // An answer typed in the chat goes to the work as a press on the card does
@@ -325,6 +324,8 @@ const ANSWERED_IN_CHAT = (asked: string, words: string) =>
 const STEER = (words: string) =>
   `The message sent to you just now that carries {name}'s words "${words}" is from {name}, in their own words, typed by them in the chat. Stop: take no other step until you have thought about it. Decide which of three it is. More for this work: add it to your to-do list. A new task of its own: do not do it; hand it back with the \`note\` tool, its \`task\` set to the ask in one line, and the chat starts it. A change in how you are working: change your to-dos to match. Then say with the \`note\` tool, in one plain line, what you did with their message, such as that you added it to your to-do list, and carry on. Call it {name}'s message, by no other name.`
 // What the work is told when it has gone on after a steer without saying what it decided
+// What work that had ended is told of the person's words that started it again: whose they are, nothing more
+const WOKE = (words: string) => `The message that started you again, carrying {name}'s words "${words}", is from {name}, in their own words, typed by them in the chat.`
 // What the work is told when a message under way is not the person's: who sent it, and that it is no steer of theirs
 const FROM = (sender: string, start: string) =>
   `The message sent to you just now that begins "${start}" is from ${sender}, not from {name}: that one is not theirs. Take it as ${sender}'s and carry on; a message that carries {name}'s own words stays theirs.`
@@ -4328,6 +4329,129 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
   }
 }
 
+// The hidden boxes of bin/secret and bin/admin, in a chat the app runs on another Mac over ssh
+
+// There a box on this Mac's screen is one nobody sees, so the runner leaves a request in boxes/ instead: what it needs, never a
+// value. The panel draws it at its top with a field; what is typed there goes from the field straight into this Mac's keychain on
+// security's stdin, under the request's id, where the runner takes it and removes it. It never reaches the chat, a notice, the saved
+// words, a file or the log. A chat on this Mac's own screen draws none: there the runner shows its own box
+type Asked = { id: string; text: string; at: number }
+let boxes: Asked[] = []
+// What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
+const boxDrafts = new Map<string, string>()
+// A line under a box: what went wrong with what was sent
+const boxSaid = new Map<string, string>()
+// Sent from here: the box goes at once, before the runner removes its request
+const boxSent = new Set<string>()
+let boxPresses = 0
+const BOX_EVERY = 1000
+// A request older than the runner's own wait there (590 s, under the longest a Bash call may run) is one whose runner is gone
+const BOX_OLD = 11 * 60_000
+// What security reads as one line (it cuts a line at about 4095, seen), and gives back as typed: plain printable characters (others it
+// prints as hex). The longest value, escaped, leaves room for the rest of the line
+const BOX_LONGEST = 3800
+const BOX_SERVICE = 'claudopus-box'
+const BOX_ID = /^[0-9a-f-]{36}$/
+const boxesDir = () => `${dir}/boxes`
+// In the chat only the name of what is asked, once per box, in whichever chat sees it first
+const BOX_TOLD = (text: string) => `${text}\n\nType it in the box at the top of the Claudopus panel. What is typed there goes only into this Mac's keychain, never into a chat.`
+
+const lookBoxes = async ($: EngineInterface) => {
+  if (!dir || !isRunFromAfar) return
+  const now = await $.clock.now()
+  const found: Asked[] = []
+  for (const entry of await $.fs.list(boxesDir()).catch(() => [])) {
+    const id = entry.name.replace(/\.json$/, '')
+    if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
+    try {
+      const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Partial<Asked>
+      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at })
+      // A runner killed outright leaves its request: it goes once it is stale, with its mark
+      else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`]).catch(() => undefined)
+    } catch {
+      // A request being written is read at the next look
+    }
+  }
+  found.sort((a, b) => a.at - b.at)
+  for (const one of found) {
+    if (boxes.some(b => b.id === one.id)) continue
+    // The first chat to make the mark tells it
+    const mark = await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
+    if (mark.exitCode === 0) $.ui.log(BOX_TOLD(one.text))
+  }
+  for (const id of [...boxDrafts.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxDrafts.delete(id), boxSaid.delete(id))
+  if (JSON.stringify(found) === JSON.stringify(boxes)) return
+  boxes = found
+  $.ui.invalidate('ui.render')
+}
+
+// Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
+const sendBox = async ($: EngineInterface, id: string, value: string) => {
+  boxDrafts.delete(id)
+  if (!value) return
+  const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That was longer than ${BOX_LONGEST} characters, so it was not sent.` : /[^\x20-\x7E]/.test(value) ? 'That held a line break, a curly quote or another character outside plain letters, digits and signs, so it was not sent. Type it again.' : ''
+  if (refused) {
+    boxSaid.set(id, refused)
+    boxPresses += 1
+    return void $.ui.invalidate('ui.render')
+  }
+  const request = `${boxesDir()}/${id}.json`
+  // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
+  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id))
+  const escaped = value.replace(/[\\"]/g, '\\$&')
+  const r = await $.process
+    .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
+    .catch(() => ({ exitCode: -1 }))
+  // security -i can end well when the add failed: the entry is looked for by its attributes, never its value
+  const isKept = r.exitCode === 0 && (await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
+  // and one whose runner stopped meanwhile is taken out again
+  if (isKept && !(await $.fs.exists(request).catch(() => false))) await $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => undefined)
+  boxPresses += 1
+  if (!isKept) {
+    boxSaid.set(id, 'It could not be put in this Mac\'s keychain. Try again.')
+    await log($, `box ${id} not kept: security ended ${r.exitCode}`)
+  } else {
+    boxSent.add(id)
+    boxSaid.delete(id)
+    boxes = boxes.filter(one => one.id !== id)
+    await log($, `box ${id} sent to the keychain`)
+  }
+  $.ui.invalidate('ui.render')
+}
+// Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
+const cancelBox = async ($: EngineInterface, id: string) => {
+  boxDrafts.delete(id)
+  boxSent.add(id)
+  boxes = boxes.filter(one => one.id !== id)
+  await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
+  $.ui.invalidate('ui.render')
+}
+
+const boxesPart = ($: EngineInterface, ui: Ui) => {
+  if (!boxes.length || !('Input' in ui)) return null
+  return boxes.map((one, n) => (
+    <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+      <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
+      <ui.Text dimColor wrap="wrap">What you type here shows as you type it, on your screen only. It goes only into this Mac's keychain, never into a chat.</ui.Text>
+      <ui.Box width="100%" flexDirection="column">
+        <ui.Input
+          key={`box-${one.id}-field-${boxPresses}`}
+          placeholder="Type or paste it here"
+          value={boxDrafts.get(one.id) ?? ''}
+          submitLabel="send"
+          autoFocus={n === 0}
+          onInput={value => void boxDrafts.set(one.id, value)}
+          onSubmit={value => void sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`))}
+        />
+      </ui.Box>
+      {boxSaid.get(one.id) ? <ui.Text key={`box-${one.id}-said`} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
+      <ui.Box flexDirection="row">
+        <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain onPress={() => void cancelBox($, one.id)} />
+      </ui.Box>
+    </ui.Box>
+  ))
+}
+
 // The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel
 
 // ---- The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel ----
@@ -4695,6 +4819,8 @@ const chatHooks = (on: On) => {
     await unshare($, true).catch(() => undefined)
     if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
+    // There the hidden boxes of the admin and secret runners are drawn in the panel
+    if (isRunFromAfar) $.clock.every(BOX_EVERY, () => lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`)))
     if (macs.length) $.clock.every(OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) $.clock.every(FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
@@ -4767,8 +4893,7 @@ const chatHooks = (on: On) => {
     }
 
     said = text
-    // Kept past the turn: the chat often passes their words on in a later turn, once the work they answer has come back
-    heard = [...heard, text].slice(-HEARD_KEPT)
+    heard = [...heard, text]
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
@@ -4831,6 +4956,7 @@ const chatHooks = (on: On) => {
     }
     const text = said
     said = ''
+    heard = []
     // Off the turn's clock, so the reply is never held up
     $.clock.after(5, () => void afterReply($, text, e.answer ?? '').catch(err => log($, `pass after reply failed: ${String(err)}`)))
 
@@ -5036,6 +5162,7 @@ const workHooks = (on: On) => {
     let answered = ''
     let answer: { card: Todo; ask: NonNullable<Todo['ask']>; key: string; words: string; at: number } | undefined
     let message = ''
+    let woke = ''
     let words = ''
     if (dir && e.tool === 'SendMessage') {
       const to = String((e as { to?: unknown }).to ?? '')
@@ -5056,8 +5183,9 @@ const workHooks = (on: On) => {
       }
       if (target) {
         woken = target.id
-        // Their words are theirs whether the work is under way or is started again by them: an ended work gets the same line
-        const isSteer = Boolean(words) && !answered
+        // Their words are theirs whether the work is under way or is started again by them: ended work is told whose they are
+        const isSteer = target.status === 'working' && Boolean(words) && !answered
+        if (target.status !== 'working' && words && !answered) woke = words
         if (target.status === 'working' && message && !isSteer) {
           const sender = list.find(one => one.id === e.agentId)
           const title = (one?: Todo) => (one?.title ? ` "${cut(oneLine(one.title), 60)}"` : '')
@@ -5081,7 +5209,7 @@ const workHooks = (on: On) => {
                 },
           ),
         )
-        if (isSteer || from || answered) steered = target.id
+        if (isSteer || from || answered || woke) steered = target.id
       }
     }
     if (e.agentId !== undefined) {
@@ -5119,7 +5247,7 @@ const workHooks = (on: On) => {
       // message of its own instead, read once it reaches it
       // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
       // chat's own note that landed after the person's words once marked their words as not theirs
-      const line = named(answered ? ANSWERED_IN_CHAT(answered, words) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words))
+      const line = named(answered ? ANSWERED_IN_CHAT(answered, words) : woke ? WOKE(woke) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words))
       if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? $.session.send({ to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
       return sent
     }
@@ -5333,10 +5461,10 @@ const toolHooks = (on: On) => {
     const text = oneLine(typeof input.text === 'string' ? input.text : '').slice(0, 300)
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
     const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
-    // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and a path relative to a
-    // folder never named is refused, since the person types it somewhere else
-    if (given0 && !hasFolder && !/^cd\s+[\/~]/.test(given0) && /(?:^|\s)(?![\/~-])[\w.-]+\/[\w./-]*/.test(given0)) {
-      return { result: 'Not shown: the command has a relative path and no folder. Give `cwd`, the full path of the folder it runs in, or use full paths, so it runs as it is wherever it is typed.' }
+    // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and one that starts with a
+    // path relative to a folder never named is refused, since the person types it somewhere else
+    if (given0 && !hasFolder && /^(?:\.{1,2}\/|[\w-][\w.-]*\/)/.test(given0)) {
+      return { result: 'Not shown: the command starts with a path relative to a folder it does not name. Give `cwd`, the full path of the folder it runs in, or a full path, so it runs as it is wherever it is typed.' }
     }
     const command = given0 && hasFolder && !/^cd\s/.test(given0) ? `cd ${zshQuoted(String(input.cwd))} && ${given0}` : given0
     // Copy is for text pasted elsewhere: a sentence of instructions, or the ask's own words, gets none
@@ -6392,7 +6520,7 @@ const panelHooks = (on: On) => {
       here: working.filter(one => !one.ask).length + runningFlows.length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
-      asks: own.filter(one => one.ask).length + waiting.length + elsewhere.filter(one => one.ask).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
+      asks: boxes.length + own.filter(one => one.ask).length + waiting.length + elsewhere.filter(one => one.ask).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
@@ -6429,6 +6557,7 @@ const panelHooks = (on: On) => {
             </Box>
           </Box>
         ) : null}
+        {!alone ? boxesPart($, ui) : null}
         {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone

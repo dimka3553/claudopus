@@ -257,6 +257,61 @@ test('an answer to ended work that cannot be started again is left in the chat a
   await list.unmount()
 })
 
+test('in a chat the app runs on another Mac over ssh, a password or key the runners need is typed in the panel and goes only into the keychain', async ($, on) => {
+  const { files, logged, keychain, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', at: 1_700_000_000_000 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  // The chat is told only the name, and where to type it
+  expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('top of the Claudopus panel')
+  const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
+  expect(field).toBeDefined()
+  expect((await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' }))?.props.color).toBe('#E5A50A')
+  const value = 'ghp_s3cret"with\\quote'
+  await list.input({ key: field?.key ?? '', text: value })
+  // It goes to the keychain under the box's id, escaped for security's own reading, and the box goes
+  expect(await until(async () => keychain.find(one => one.includes(id)))).toBe(`add-generic-password -U -s "claudopus-box" -a "${id}" -l "Claudopus box" -w "ghp_s3cret\\"with\\\\quote"\n`)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' })) ? undefined : true))).toBe(true)
+  // Nowhere else: not the chat, its saved words, the log or any file
+  expect(logged.some(line => line.includes('s3cret'))).toBe(false)
+  expect([...files.values()].some(text => text.includes('s3cret'))).toBe(false)
+  // A curly quote from a phone's keyboard, which security would give back as hex, is not sent, and the box says why
+  const third = '2f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, text: 'Claudopus needs NPM_TOKEN for work on this Mac.', at: 1_700_000_000_000 }))
+  await clock.advance(1000)
+  const curly = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`)))
+  const before = keychain.length
+  await list.input({ key: curly?.key ?? '', text: 'it’s-mine' })
+  expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => (one.text ?? '').startsWith('That held a line break, a curly quote')))).toBeDefined()
+  // and one whose runner has stopped takes nothing
+  files.delete(`${MEMORY}/boxes/${third}.json`)
+  const again = (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`))
+  await list.input({ key: again?.key ?? '', text: 'plain-value-1234' })
+  await clock.advance(1000)
+  expect(keychain.length).toBe(before)
+  // A box cancelled removes its request, which the runner takes as cancelled
+  const other = '1f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, text: 'Claudopus needs the admin password of this Mac to run an admin command for work in this chat.', at: 1_700_000_000_000 }))
+  await clock.advance(1000)
+  const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)))
+  await list.press({ key: cancel?.key ?? '' })
+  expect(await until(async () => (files.has(`${MEMORY}/boxes/${other}.json`) ? undefined : true))).toBe(true)
+})
+
+test('a chat on this Mac\'s own screen draws no box: there the runners show their own', async ($, on) => {
+  const { files, logged, clock } = world(on)
+  await $.session.start(start)
+  const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', at: 1_700_000_000_000 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(2000)
+  expect(await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' })).toBeUndefined()
+  expect(logged.some(line => line.includes('GITHUB_TOKEN'))).toBe(false)
+})
+
 test('in a chat run from another Mac a command for the person is given whole, with its folder, and nothing offers to open a terminal here', async ($, on) => {
   const { terminals, shown } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
   await $.session.start(start)

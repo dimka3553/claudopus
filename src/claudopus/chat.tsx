@@ -233,6 +233,8 @@ const chatHooks = (on: On) => {
     await unshare($, true).catch(() => undefined)
     if (macs.length) $.clock.every(FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
+    // There the hidden boxes of the admin and secret runners are drawn in the panel
+    if (isRunFromAfar) $.clock.every(BOX_EVERY, () => lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`)))
     if (macs.length) $.clock.every(OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) $.clock.every(FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
@@ -305,8 +307,7 @@ const chatHooks = (on: On) => {
     }
 
     said = text
-    // Kept past the turn: the chat often passes their words on in a later turn, once the work they answer has come back
-    heard = [...heard, text].slice(-HEARD_KEPT)
+    heard = [...heard, text]
     // A message that names a report starts work from it: that work's own report is kept linked to it
     fromReport = (await read($, reports)).find(r => text.includes(`${reportPath(r)}/`) || text.includes(`reports/${r.id}`))?.id ?? ''
     const how = `${e.turnId ? ' (sent while Claude was working)' : ''}${e.origin.kind === 'bridge' ? ' (from the phone)' : ''}${isPressed ? ' (pressed or replied in the panel)' : ''}`
@@ -369,6 +370,7 @@ const chatHooks = (on: On) => {
     }
     const text = said
     said = ''
+    heard = []
     // Off the turn's clock, so the reply is never held up
     $.clock.after(5, () => void afterReply($, text, e.answer ?? '').catch(err => log($, `pass after reply failed: ${String(err)}`)))
 

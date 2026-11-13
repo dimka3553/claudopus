@@ -44,6 +44,7 @@ const workHooks = (on: On) => {
     let answered = ''
     let answer: { card: Todo; ask: NonNullable<Todo['ask']>; key: string; words: string; at: number } | undefined
     let message = ''
+    let woke = ''
     let words = ''
     if (dir && e.tool === 'SendMessage') {
       const to = String((e as { to?: unknown }).to ?? '')
@@ -64,8 +65,9 @@ const workHooks = (on: On) => {
       }
       if (target) {
         woken = target.id
-        // Their words are theirs whether the work is under way or is started again by them: an ended work gets the same line
-        const isSteer = Boolean(words) && !answered
+        // Their words are theirs whether the work is under way or is started again by them: ended work is told whose they are
+        const isSteer = target.status === 'working' && Boolean(words) && !answered
+        if (target.status !== 'working' && words && !answered) woke = words
         if (target.status === 'working' && message && !isSteer) {
           const sender = list.find(one => one.id === e.agentId)
           const title = (one?: Todo) => (one?.title ? ` "${cut(oneLine(one.title), 60)}"` : '')
@@ -89,7 +91,7 @@ const workHooks = (on: On) => {
                 },
           ),
         )
-        if (isSteer || from || answered) steered = target.id
+        if (isSteer || from || answered || woke) steered = target.id
       }
     }
     if (e.agentId !== undefined) {
@@ -127,7 +129,7 @@ const workHooks = (on: On) => {
       // message of its own instead, read once it reaches it
       // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
       // chat's own note that landed after the person's words once marked their words as not theirs
-      const line = named(answered ? ANSWERED_IN_CHAT(answered, words) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words))
+      const line = named(answered ? ANSWERED_IN_CHAT(answered, words) : woke ? WOKE(woke) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words))
       if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? $.session.send({ to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
       return sent
     }
