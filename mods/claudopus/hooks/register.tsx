@@ -33,8 +33,10 @@ const OLD_PANE = 'agents'
 // Rarely used tools wait behind ToolSearch instead of loading into every chat
 const RARE_TOOLS = ['ReportFindings', 'SuggestPluginInstall', 'SuggestSkills', 'SearchPlugins', 'ScheduleWakeup', 'Workflow']
 const RARE_SERVERS = ['mcp__Claude_Browser__', 'mcp__Claude_Code_iOS_Simulator__', 'mcp__visualize__']
-// What a chat's own thread may call: it starts agents and workflows, and talks to them. An agent may call anything
+// What a chat's own thread may call to hand work over: it starts agents and workflows, and talks to them. An agent may call anything
 const OWN = ['Agent', 'Workflow', 'SendMessage', 'ListAgents', 'TaskStop', 'ToolSearch', 'AskUserQuestion', 'SendUserFile', 'ReadNotifications', 'Skill']
+// And what it reads with, to answer a question a few files answer: none of them changes a file or runs a command
+const READS = ['Read', 'Grep', 'Glob']
 // The mod's own tools, as the chat names them; work recorded before the rename called them by the old name
 const TOOLS = 'mcp__claudopus__'
 const OLD_TOOLS = 'mcp__progress__'
@@ -313,9 +315,9 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'Answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). Only a message that steers what listed work is already doing (a change to what it builds, an answer it waits for, a stop) goes to that work instead, with SendMessage, in their words. A fault, a question or a new ask gets its own agent even when it is about the same area, code or card as running work, so it never waits behind it; when in doubt, its own agent.'
+  'A question answered by reading a few files is answered directly: read them yourself with Read, Grep and Glob. Anything that changes a file, runs a command or takes more than a few reads goes to an agent: answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). Only a message that steers what listed work is already doing (a change to what it builds, an answer it waits for, a stop) goes to that work instead, with SendMessage, in their words. A fault, a question or a new ask gets its own agent even when it is about the same area, code or card as running work, so it never waits behind it; when in doubt, its own agent. A question a few reads answer is still answered directly.'
 const REFUSED =
-  'This chat\'s own thread does no work itself. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
+  'This chat\'s own thread only reads (Read, Grep, Glob); it changes no file and runs no command. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
 const NO_COPY = () =>
   `Work is never started as a copy of this chat. Start a fresh agent instead: subagent_type "general-purpose", the model named (${modelsShort(models)}), and a brief as the prompt.`
 // A command that would print a password or key the keychain keeps. Work uses a kept key only through `bin/secret`, which reads it itself
@@ -6127,7 +6129,7 @@ const waitLine = (one: Todo, at: number) => {
 // What finished work left running says on its card
 const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `It left something running in the background, ${took(at - one.leftSince)}` : '')
 
-// Work starting and running: the chat's own thread kept to handing work over, how full the chat is, each step of work, and new
+// Work starting and running: the chat's own thread kept to reading and handing work over, how full the chat is, each step of work, and new
 // work's card
 
 // A call that writes into the runners' boxes folder or reads their keychain service: a command that names them, a file it runs that
@@ -6158,7 +6160,7 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
 
 const workHooks = (on: On) => {
 
-  // A chat's own thread starts agents and talks to them; the work runs in the agents, which carry an agent id
+  // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
   on('tool.call', async ($, e, raw) => {
     // A prompt the call raised goes as the call ends: refused, interrupted, or allowed and run
     const run = async (call: typeof e) => {
@@ -6332,9 +6334,11 @@ const workHooks = (on: On) => {
       return r
     }
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
-    // The chat reads a kept report itself, to answer from it
-    const readPath = String((e as { file_path?: unknown }).file_path ?? '')
-    if (e.tool === 'Read' && readPath.startsWith(`${reportsDir()}/`) && !readPath.split('/').includes('..')) return next(e)
+    // The chat reads for itself: a kept report to answer from, or the few files a question needs. A saved paste stays out of it:
+    // the agent that needs it reads it
+    const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
+    const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
+    if (READS.includes(e.tool) && !isPaste) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
 
     return { deny: REFUSED }

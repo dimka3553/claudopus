@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.84 · 13 November 2026
+- The chat answers a question that reading a few files answers, such as what a function does, by reading them itself, with no background work started. Anything that changes a file, runs a command or needs more than a few reads still goes to background work.
+
 ## 0.2.83 · 13 November 2026
 - The password and key boxes now say only the panel's own words, made from what the request names (a Mac's admin password or a key, the Mac or the key's name), so a request file with made-up text shows that text nowhere, and one the panel cannot word is not shown at all.
 - Work is refused commands that write into the boxes' folder or read their keychain entries, typed, redirected, in a script or in another language's code; only the admin and secret runners use them. This stops slips and common tricks, and is no wall.
