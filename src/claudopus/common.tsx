@@ -36,8 +36,7 @@ const TALK_KEPT = 300
 const TALK_CHARS = 40_000
 // The most characters the app draws in one tab: it counts every text and every picture's source, and a drawing of more is thrown
 // away whole, so the tab keeps its old drawing, or after a switch away and back says "Nothing to show yet". The pictures a tab draws
-// keep well under it, with room for its text
-const DRAWING_CHARS = 262_144
+// keep well under it (262144), with room for its text
 const PICTURES_CHARS = 150_000
 // How long one message of that chat may be
 const SAID_CHARS = 8000

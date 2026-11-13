@@ -51,8 +51,7 @@ const TALK_KEPT = 300
 const TALK_CHARS = 40_000
 // The most characters the app draws in one tab: it counts every text and every picture's source, and a drawing of more is thrown
 // away whole, so the tab keeps its old drawing, or after a switch away and back says "Nothing to show yet". The pictures a tab draws
-// keep well under it, with room for its text
-const DRAWING_CHARS = 262_144
+// keep well under it (262144), with room for its text
 const PICTURES_CHARS = 150_000
 // How long one message of that chat may be
 const SAID_CHARS = 8000
@@ -2425,7 +2424,7 @@ const pictureBack = ($: EngineInterface, pane: string) => {
 }
 // The large copy the tab draws, as wide as a wide sidebar on a sharp screen. An Svg carries at most 131072 characters, too few for
 // a large screenshot to stay readable, so the copy is cut into bands across, each an Svg of its own drawn under the one before.
-// The whole copy fits in one drawing the app accepts (DRAWING_CHARS): a size that needs more gives way to a lower JPEG quality,
+// The whole copy fits in one drawing the app accepts (262144 characters): a size that needs more gives way to a lower JPEG quality,
 // then a narrower one. 0.2.46 to 0.2.55 let it reach 600000, which the app threw away, so the tab stayed on "Making a large copy"
 // and went blank once left and come back to. A picture with see-through parts keeps them as PNG, else JPEG
 const LARGE_SIZES: [number, number][] = [
@@ -3184,10 +3183,11 @@ const installedCopy = async ($: EngineInterface) => {
 // for the same version for RELOAD_AGAIN, and a chat never reloads over and over
 let reloadAsked = ''
 // In a chat the app runs on another Mac over ssh, the engine refuses a /reload-plugins it was not typed in ("isn't available over a
-// remote connection in this session"): every one the mod ran there was refused, every one typed was not. The header then says to type it
+// remote connection in this session"): every one the mod ran there was refused, every one typed was not. There it is not sent, since
+// each refusal is a line in the chat, and the header says to type it
 let isReloadRefused = false
 const reloadToInstalled = async ($: EngineInterface) => {
-  if (!dir || reloadAsked) return
+  if (!dir || reloadAsked || isRunFromAfar) return
   const loaded = (await versionsOf($)).version
   const copy = await installedCopy($)
   if (!loaded || !copy?.version || !isNewer(copy.version, loaded)) return
@@ -3209,6 +3209,7 @@ const reloadToInstalled = async ($: EngineInterface) => {
     const said = await $.command.run({ command: 'reload-plugins' })
     if (/isn't available/i.test(String((said as { text?: unknown } | undefined)?.text ?? ''))) {
       isReloadRefused = true
+      $.ui.invalidate('ui.render')
       await log($, `Claudopus not reloaded to ${copy.version}: the engine refused it over the remote connection; the header says to type /reload-plugins`)
     }
   } catch (err) {
@@ -6102,7 +6103,7 @@ const panelHooks = (on: On) => {
                     <Text bold>Claudopus</Text>
                   </Box>
                   {/* Just moved to a newer version: it rolls to the new number and says Updated in blue for a moment */}
-                  {updated ? versionLine(ui, updated) : versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
+                  {updated ? versionLine(ui, updated) : versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
                 </Box>
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
                 <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>

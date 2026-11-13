@@ -97,10 +97,11 @@ const installedCopy = async ($: EngineInterface) => {
 // for the same version for RELOAD_AGAIN, and a chat never reloads over and over
 let reloadAsked = ''
 // In a chat the app runs on another Mac over ssh, the engine refuses a /reload-plugins it was not typed in ("isn't available over a
-// remote connection in this session"): every one the mod ran there was refused, every one typed was not. The header then says to type it
+// remote connection in this session"): every one the mod ran there was refused, every one typed was not. There it is not sent, since
+// each refusal is a line in the chat, and the header says to type it
 let isReloadRefused = false
 const reloadToInstalled = async ($: EngineInterface) => {
-  if (!dir || reloadAsked) return
+  if (!dir || reloadAsked || isRunFromAfar) return
   const loaded = (await versionsOf($)).version
   const copy = await installedCopy($)
   if (!loaded || !copy?.version || !isNewer(copy.version, loaded)) return
@@ -122,6 +123,7 @@ const reloadToInstalled = async ($: EngineInterface) => {
     const said = await $.command.run({ command: 'reload-plugins' })
     if (/isn't available/i.test(String((said as { text?: unknown } | undefined)?.text ?? ''))) {
       isReloadRefused = true
+      $.ui.invalidate('ui.render')
       await log($, `Claudopus not reloaded to ${copy.version}: the engine refused it over the remote connection; the header says to type /reload-plugins`)
     }
   } catch (err) {

@@ -54,7 +54,7 @@ const pictureBack = ($: EngineInterface, pane: string) => {
 }
 // The large copy the tab draws, as wide as a wide sidebar on a sharp screen. An Svg carries at most 131072 characters, too few for
 // a large screenshot to stay readable, so the copy is cut into bands across, each an Svg of its own drawn under the one before.
-// The whole copy fits in one drawing the app accepts (DRAWING_CHARS): a size that needs more gives way to a lower JPEG quality,
+// The whole copy fits in one drawing the app accepts (262144 characters): a size that needs more gives way to a lower JPEG quality,
 // then a narrower one. 0.2.46 to 0.2.55 let it reach 600000, which the app threw away, so the tab stayed on "Making a large copy"
 // and went blank once left and come back to. A picture with see-through parts keeps them as PNG, else JPEG
 const LARGE_SIZES: [number, number][] = [
