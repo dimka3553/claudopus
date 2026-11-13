@@ -52,9 +52,12 @@ export const versionOnPage = (text: string): string | undefined => {
 export const installedVersionOf = (installed: string, id: string, root: string, scope?: string): string => {
   const folder = root.replace(/\/$/, '').split('/').at(-1) ?? ''
   try {
-    const entries: { scope?: string; version?: string }[] = JSON.parse(installed)?.plugins?.[id] ?? []
-    const version = entries.find(one => (scope ? one.scope === scope : true) && typeof one.version === 'string')?.version
-    return version || folder
+    const entries: { scope?: string; version?: string; installPath?: string }[] = (JSON.parse(installed)?.plugins?.[id] ?? []).filter(
+      (one: { version?: unknown }) => typeof one?.version === 'string' && one.version,
+    )
+    // This very folder's entry first, then one at the scope it was installed at, then the user's
+    const own = entries.find(one => one.installPath?.replace(/\/$/, '') === root.replace(/\/$/, ''))
+    return (own ?? entries.find(one => one.scope === (scope ?? 'user')))?.version || folder
   } catch {
     return folder
   }
