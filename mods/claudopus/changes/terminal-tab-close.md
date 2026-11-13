@@ -1,2 +1,2 @@
 - In a narrow terminal, as on a phone over ssh, a button in the panel that opens a tab (Results, Stats, Memory, Config, About, a card's Details, a result) now opens it where you can see it, instead of opening nothing or making the panel vanish.
-- Every tab of the panel in the terminal starts with x: Close: click it, or press x once the tab has the keys (ctrl+x Tab), and the tab closes and the panel comes back; Claude Code's ✕ at the frame's top right closes it too.
+- Every tab of the panel in the terminal starts with x: Close: click it, or press x once the tab has the keys (ctrl+x Tab), and the tab closes and the panel comes back.

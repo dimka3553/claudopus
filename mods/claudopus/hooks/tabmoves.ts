@@ -6,8 +6,9 @@
 
 export type TabMove = { kind: 'front'; id: string; title: string } | { kind: 'back'; id: string }
 
-// The engine counts an open as the person's for 10 s after their press; past that a press's hook waits no longer
-export const TAB_MOVES_WAIT = 10_000
+// The engine counts an open as the person's for 10 s from their press, and runs a hook under the same 10 s: a press's hook waits for
+// coming opens at most this long after its onPress, leaving a margin for the onPress itself and the moves
+export const TAB_MOVES_WAIT = 8_000
 
 export const tabMoveQueue = () => {
   // Presses being answered: two may overlap (a double tap, x while a Details tab reads its card)
