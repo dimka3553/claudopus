@@ -3221,6 +3221,64 @@ test('a chat on this Mac\'s own screen draws no box: there the runners show thei
   expect(logged.some(line => line.includes('GITHUB_TOKEN'))).toBe(false)
 })
 
+test('a copy a reload replaced wakes no work: its timers stop, an answer left for its work stays for the copy in charge, and a press it still gets goes to the chat', async ($, on) => {
+  const { resumed, appended, files, clock } = world(on)
+  let isNewer = false
+  on('state.get', (_, e, next) => ((e as { key?: string }).key === 'load' && isNewer ? { value: { value: `${'9'.repeat(15)}-a-newer-load`, version: 99 } } : next(e)) as never)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'restart the old chat', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Restart the old chat', prompt: 'restart the old chat' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I restart it?', choices: ['Approve', 'Not now'] } as never)
+  await $.turn.complete({ answer: 'It waits on your go-ahead.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(2000)
+  // A newer load takes charge in this chat, as a /reload-plugins does; this copy's timers run on beside it, as the engine leaves them
+  isNewer = true
+  const at = 1_700_000_002_000
+  files.set(`${MEMORY}/live/answers/engine-id/0-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: false, ask: 'May I restart it?', askAt: at - 2000, at }))
+  await clock.advance(10_000)
+  // Work this copy woke would run under it, and the engine calls none of its hooks there: so it wakes none, and leaves the answer
+  expect(['by its timers', ...resumed.filter(line => line.startsWith('a1: '))]).toEqual(['by its timers'])
+  expect(files.has(`${MEMORY}/live/answers/engine-id/0-a.json`)).toBe(true)
+  // A press on a button it drew before the reload does not wake the work either: the chat gets the answer to pass on
+  const approve = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key
+  expect(approve).toBeDefined()
+  if (approve) {
+    await list.press({ key: approve })
+    expect(['by a press', ...resumed.filter(line => line.startsWith('a1: '))]).toEqual(['by a press'])
+    expect(await until(async () => appended.find(line => line.includes('Approve') && line.includes('May I restart it?')))).toBeDefined()
+  }
+  await list.unmount()
+})
+
+test('an answer that reaches ended work from a timer is sent from inside the next hook, where the work keeps its tools; with none soon, from the timer all the same', async ($, on) => {
+  const { resumed, files, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'restart the old chat', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Restart the old chat', prompt: 'restart the old chat' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I restart it?', choices: ['Approve', 'Not now'] } as never)
+  await $.turn.complete({ answer: 'It waits on your go-ahead.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  // Another chat leaves an answer, which this chat's timer takes: from there the engine would skip the mod's hooks in the work it woke
+  files.set(`${MEMORY}/live/answers/engine-id/0-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: true, ask: 'May I restart it?', at: 1_700_000_000_000 }))
+  await clock.advance(6000)
+  expect(files.has(`${MEMORY}/live/answers/engine-id/0-a.json`)).toBe(false)
+  expect(['from the timer', ...resumed.filter(line => line.startsWith('a1: '))]).toEqual(['from the timer'])
+  // so it waits for a hook: the chat's next prompt sends it from there
+  await $.prompt.submit({ text: 'and the logs?', wait: false, origin: composer })
+  expect(resumed.filter(line => line.startsWith('a1: ')).map(line => line.includes('replied') && line.includes('Approve'))).toEqual([true])
+  // The woken work's first step reads it
+  for await (const _ of $.turn.step({ turnId: 'turn-1b', index: 0, model: 'm', messageCount: 2, agentId: 'a1' })) void _
+
+  // A second answer, with no hook for WAKE_WAIT in a chat where nothing runs, is sent from the timer all the same, and said so: the
+  // work does what it was asked, and its rules have it end with its ask in its report when the panel does not answer
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'And the other one?', choices: ['Yes'] } as never)
+  await $.turn.complete({ answer: 'Waiting again.', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
+  files.set(`${MEMORY}/live/answers/engine-id/1-b.json`, JSON.stringify({ card: 'a1', choice: 'Yes', isReply: true, ask: 'And the other one?', at: 1_700_000_007_000 }))
+  await clock.advance(12_000)
+  expect(resumed.filter(line => line.startsWith('a1: ')).map(line => (line.includes('Approve') ? 'Approve' : line.includes('Yes') ? 'Yes' : line))).toEqual(['Approve', 'Yes'])
+  expect(files.get(`${MEMORY}/log.md`)).toContain('started again from a timer')
+})
+
 // The welcome for a new person
 
 test('a new person gets a welcome once: it opens the panel, names /claudopus, and its button starts indexing their old chats', async ($, on) => {

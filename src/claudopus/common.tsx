@@ -86,6 +86,41 @@ const tick = atom({ plugin: 'claudopus', key: 'tick' } as const, 0, { shape: 'ti
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
 let drawnNow = 0
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
+// Each load of this code in a chat, first or a reload, is told by a mark of its own, kept in the session's state as the load now in
+// charge. A /reload-plugins starts the new copy but leaves the old copy's timers running in the same chat, and work an old copy wakes
+// with $.session.send runs under that copy, whose hooks the engine no longer calls: every panel tool of that work answered "no
+// tool.call hook answered". So a copy whose mark is no longer the one in charge stops its timers and does nothing more
+// Marks order by when the load began, so a slow start of an older copy never takes charge back from a newer one
+const thisLoad = `${String(Date.now()).padStart(15, '0')}-${Math.random().toString(36).slice(2)}`
+const loadNow = { plugin: 'claudopus', key: 'load' } as const
+// A copy whose own mark could not be written never takes another's for its own replacement
+let isMarked = false
+// Written only over the mark it read, so of two loads marking at once the newer one's stands
+const takeCharge = async ($: EngineInterface) => {
+  for (let tries = 0; tries < 3; tries += 1) {
+    const was = await $.state.get(loadNow).catch(() => undefined)
+    if (typeof was?.value === 'string' && was.value > thisLoad) return void (isMarked = true)
+    const r = await $.state.set(loadNow, thisLoad, was ? { ifVersion: was.version } : undefined).catch(err => (log($, `load not marked: ${String(err)}`), undefined))
+    if (!r) return void (isMarked = false)
+    if (r.isSet) return void (isMarked = true)
+  }
+  isMarked = false
+}
+let isLeft = false
+const isReplaced = async ($: EngineInterface) => {
+  if (isLeft) return true
+  if (!isMarked) return false
+  const now = (await $.state.get(loadNow).catch(() => undefined))?.value
+  if (typeof now === 'string' && now > thisLoad) isLeft = true
+  return isLeft
+}
+// A timer of this load: it stops for good the first time it fires after a newer load took charge
+const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
+  const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : fn())))
+  return timer
+}
+// and one that fires once, unless a newer load took charge before it does
+const afterLoad = ($: EngineInterface, ms: number, fn: () => unknown) => $.clock.after(ms, () => void isReplaced($).then(left => (left ? undefined : fn())))
 
 // The chat of the card that is open, as last read: read again only when that work has moved
 // Counts presses in the open card; the card's buttons carry it in their keys. On the desktop app the button last pressed holds the

@@ -166,6 +166,7 @@ const workHooks = (on: On) => {
 
   // How full this chat's context is, as the app counts it, each time it moves
   on('session.measure', async ($, e, next) => {
+    if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
     const tokens = e.context.tokens
     if (tokens !== undefined) await update($, me, one => (one.tokens === tokens && one.window ? one : { ...one, tokens, window: one.window || e.context.window }))
 

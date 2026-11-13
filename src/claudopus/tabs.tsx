@@ -6,7 +6,16 @@ const tabHooks = (on: On) => {
   // since the panel was last drawn, and the tabs as the engine lists them, so a press that did nothing shows whether it arrived at all
   on('ui.press', async ($, e, next) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
-    return next(e)
+    const r = await next(e)
+    // An answer the press gave to work that had ended starts it again from here, inside the press's own hook (sendWakes)
+    if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
+    return r
+  })
+  // and so does a reply typed in a card's box
+  on('ui.input', async ($, e, next) => {
+    const r = await next(e)
+    if (e.plugin === 'claudopus' && e.kind === 'submit' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `reply not sent: ${String(err)}`))
+    return r
   })
 
   // The reports, in a pane of their own
