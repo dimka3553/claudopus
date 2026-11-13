@@ -110,6 +110,11 @@ test('work uses a kept key without reading it: the keychain is not read, and wha
   const shown = await $.tool.call({ tool: 'Bash', tool_use_id: 'k4', command: 'bin/secret API_KEY here "echo $API_KEY"', agentId: 'w1' } as never)
   expect(JSON.stringify(shown.result)).toContain('token is [hidden API_KEY]')
   expect(JSON.stringify(shown.result)).not.toContain('sk-live-123456')
+  // What the chat reads in its own thread comes back with the key hidden too
+  const read2 = await $.tool.call({ tool: 'Read', tool_use_id: 'k8', file_path: '/repo/.env' } as never)
+  expect(read2.deny).toBeUndefined()
+  expect(JSON.stringify(read2.result)).toContain('API_KEY=[hidden API_KEY]')
+  expect(JSON.stringify(read2.result)).not.toContain('sk-live-123456')
 })
 
 test('work never writes into the boxes folder or reads the boxes\' keychain service, by any common way, while the admin and secret runners still run', async ($, on) => {
@@ -240,20 +245,46 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
   expect(r.text).toContain('were saved to')
   const saved = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/pastes/`))
   expect(saved?.[1]).toBe(paste)
+  // and the chat does not read it back in: the agent that needs it reads it
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p1', file_path: saved?.[0] } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'p2', pattern: 'end', path: `${MEMORY}/pastes` } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p3', file_path: saved?.[0], agentId: 'w1' } as never)).deny).toBeUndefined()
 })
 
-test("a chat's own thread may only start agents and talk to them; an agent may do the work", async ($, on) => {
+test("a chat's own thread may only read, start agents and talk to them; an agent may do the work", async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
-  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
+  expect(told.context?.join('\n')).toContain('A question answered by reading a few files is answered directly')
+  expect(told.context?.join('\n')).toContain('Anything that changes a file, runs a command or takes more than a few reads')
 
   const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'ls' } as never)
   expect(refused.deny).toContain('Start a fresh agent')
+  expect(refused.deny).toContain('changes no file and runs no command')
   expect(files.get(`${MEMORY}/log.md`)).toContain('refused Bash')
+
+  // It reads for itself: any file, a search, a list of names
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: '/repo/src/nose.ts' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'r2', pattern: 'function nose', path: '/repo' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Glob', tool_use_id: 'r3', pattern: '**/*.ts', path: '/repo' } as never)).deny).toBeUndefined()
+  // and still changes nothing and runs nothing
+  for (const [i, call] of [
+    { tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' },
+    { tool: 'Write', file_path: '/repo/src/new.ts', content: 'x' },
+    { tool: 'MultiEdit', file_path: '/repo/src/nose.ts', edits: [] },
+    { tool: 'NotebookEdit', notebook_path: '/repo/n.ipynb', new_source: 'x' },
+    { tool: 'Bash', command: 'cat /repo/src/nose.ts' },
+    { tool: 'WebFetch', url: 'https://example.com', prompt: 'p' },
+    { tool: 'mcp__other__write_file', path: '/repo/x' },
+  ].entries())
+    expect((await $.tool.call({ ...call, tool_use_id: `n${i}` } as never)).deny).toContain('Start a fresh agent')
 
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 't2', prompt: 'fix the nose', subagent_type: 'general-purpose', model: 'opus' } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', tool_use_id: 't3', recap: 'r' } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't4', command: 'ls', agentId: 'fork-1' } as never)).deny).toBeUndefined()
+  // Work and its helpers are not held to the chat's reading: they read, write and run
+  for (const [i, call] of [{ tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' }, { tool: 'Write', file_path: '/repo/x', content: 'x' }, { tool: 'Grep', pattern: 'nose' }, { tool: 'Bash', command: 'npm test' }].entries())
+    for (const agentId of ['w1', 'helper-1']) expect((await $.tool.call({ ...call, tool_use_id: `w${i}${agentId}`, agentId } as never)).deny).toBeUndefined()
 })
 
 test('a session the person has not typed into does its own work', async ($, on) => {

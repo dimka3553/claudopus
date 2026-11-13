@@ -1,4 +1,4 @@
-// Work starting and running: the chat's own thread kept to handing work over, how full the chat is, each step of work, and new
+// Work starting and running: the chat's own thread kept to reading and handing work over, how full the chat is, each step of work, and new
 // work's card
 
 // A call that writes into the runners' boxes folder or reads their keychain service: a command that names them, a file it runs that
@@ -29,7 +29,7 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
 
 const workHooks = (on: On) => {
 
-  // A chat's own thread starts agents and talks to them; the work runs in the agents, which carry an agent id
+  // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
   on('tool.call', async ($, e, raw) => {
     // A prompt the call raised goes as the call ends: refused, interrupted, or allowed and run
     const run = async (call: typeof e) => {
@@ -203,9 +203,11 @@ const workHooks = (on: On) => {
       return r
     }
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
-    // The chat reads a kept report itself, to answer from it
-    const readPath = String((e as { file_path?: unknown }).file_path ?? '')
-    if (e.tool === 'Read' && readPath.startsWith(`${reportsDir()}/`) && !readPath.split('/').includes('..')) return next(e)
+    // The chat reads for itself: a kept report to answer from, or the few files a question needs. A saved paste stays out of it:
+    // the agent that needs it reads it
+    const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
+    const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
+    if (READS.includes(e.tool) && !isPaste) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
 
     return { deny: REFUSED }
