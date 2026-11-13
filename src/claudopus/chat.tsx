@@ -261,6 +261,8 @@ const chatHooks = (on: On) => {
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
     // This load takes charge in this chat once all it runs is started: the copies before it see the mark change and stop
     await takeCharge($)
+    // A move to a newer version has its moment begin now that the load has started whole
+    await readyUpdated($).catch(() => undefined)
 
     return begun
   })

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, RELOAD_AGAIN, isUpdateDue, scopeOf, stampOf, UPDATE_EVERY, updatedArt, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, VERSION_PAGE, versionOnPage } from './update'
+import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, RELOAD_AGAIN, isUpdateDue, scopeOf, stampOf, UPDATE_EVERY, updatedArt, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, versionOnPage } from './update'
 
 test('only a copy installed from a marketplace is updated, read off its cache folder', async () => {
   expect(installedFrom('/Users/sam/.claude/plugins/cache/claudopus/claudopus/0.2.25')).toEqual({ plugins: '/Users/sam/.claude/plugins', marketplace: 'claudopus', plugin: 'claudopus' })
@@ -128,15 +128,23 @@ test('a chat that moved to a newer version knows the one it ran before; the same
 test('the moment says Claudopus updated in blue, then the new version, then is over', async () => {
   const text = (t: number) => updatedLook('0.2.40', t)?.map(p => p.text).join('')
   expect(text(0)).toBe('Claudopusupdated')
-  expect(updatedLook('0.2.40', 0)![0]).toEqual({ text: 'Claudopus', tone: 'blue' })
-  // The glint crosses "updated" once, and is gone before the version shows
-  expect(updatedLook('0.2.40', 600)!.some(p => p.tone === 'glint')).toBe(true)
-  expect(updatedLook('0.2.40', 2400)!.some(p => p.tone === 'glint')).toBe(false)
+  expect(text(2499)).toBe('Claudopusupdated')
+  expect(text(UPDATED_SAYS)).toBe('Claudopusv0.2.40')
   expect(text(4900)).toBe('Claudopusv0.2.40')
-  expect(updatedLook('0.2.40', 4900)!.at(-1)).toEqual({ text: 'v0.2.40', tone: 'blue' })
   expect(updatedLook('0.2.40', UPDATED_FOR)).toBeUndefined()
   expect(updatedLook('0.2.40', -1)).toBeUndefined()
   expect(UPDATED_FOR).toBe(5000)
+})
+
+test('the moment changes only at UPDATED_SAYS and its end, so a panel drawn over ssh shows it', async () => {
+  // The desktop app drops a drawing it asked for once the next change is announced: redrawn every 150 ms, no drawing of the
+  // moment came back in time to a chat run over ssh. Two changes, 2.5 s apart, add no drawings of the moment's own between them
+  const looks: { t: number; look: string }[] = []
+  for (let t = 0; t <= UPDATED_FOR; t += 10) {
+    const look = JSON.stringify(updatedLook('0.2.40', t) ?? null)
+    if (looks.at(-1)?.look !== look) looks.push({ t, look })
+  }
+  expect(looks.map(one => one.t)).toEqual([0, UPDATED_SAYS, UPDATED_FOR])
 })
 
 test('the moment never shows a version but the one moved to', async () => {

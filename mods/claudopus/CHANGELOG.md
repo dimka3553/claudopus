@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.69 · 13 November 2026
+- The header's update moment now shows in a chat the app runs on another Mac over ssh: before, the app dropped each of its drawings because the next was asked for before it arrived, so the moment was never seen there. It now changes only twice, so each drawing has time to arrive.
+- The moment starts once the chat has finished loading, then runs its full 5 seconds: the blue octopus jumps, "Claudopus updated" turns into the new version after 2.5 seconds. The light shine across "updated" is gone.
+
 ## 0.2.68 · 13 November 2026
 - Work you answer on its card after it finished now keeps its notes, asks and to-dos when it starts again. Before, all of them failed, so a new question from it never reached its card.
 - An answer that arrives while nothing else runs in the chat still starts the work again; if its panel does not answer, the work puts its question in its report, and the chat asks you.

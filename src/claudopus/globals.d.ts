@@ -165,7 +165,7 @@ declare global {
   export import updateSteps = M7.updateSteps
   export import UPDATED_FOR = M7.UPDATED_FOR
   export import UPDATED_LATE = M7.UPDATED_LATE
-  export import UPDATED_STEP = M7.UPDATED_STEP
+  export import UPDATED_SAYS = M7.UPDATED_SAYS
   export import VERSION_PAGE = M7.VERSION_PAGE
   export import VERSION_WAIT = M7.VERSION_WAIT
   export import versionOnPage = M7.versionOnPage
