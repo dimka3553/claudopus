@@ -43,6 +43,8 @@ const STEP_CHARS = 160
 // What a to-do's box is filled with: a grey so faint it reads on a dark and on a light theme. The app rounds the corners of every
 // border it draws, so a box with square corners is a filled one
 const FILL = '#80808024'
+// A card's edge shows each to-do as a part of its own up to this many; more are one edge filled as far as they are done
+const EDGE_PARTS = 14
 // How long a line of the log may be
 const NOTE_CHARS = 200
 // How much of an answer the panel keeps

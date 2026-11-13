@@ -36,15 +36,16 @@ const panelHooks = (on: On) => {
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
-    const glance = (one: Todo) =>
-      [stood[one.status], modelName(one.model ?? ''), one.tokens ? share(one.tokens, windowOf(one)) : '', took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+    const glance = (one: Todo, count = '') =>
+      [stood[one.status], modelName(one.model ?? ''), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
-    const facts = (one: Todo, isWhole: boolean) => {
+    // On a small card the line also counts its to-dos, before the time
+    const facts = (one: Todo, isWhole: boolean, count = '') => {
       const name = modelName(one.model ?? '')
       // Another chat's work is moved to another model in that chat
-      if (one.status !== 'working' || !name || one.chat) return <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one)}</Text>
+      if (one.status !== 'working' || !name || one.chat) return <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one, count)}</Text>
       const scope = `model-${one.id}`
       if (picking === one.id)
         return (
@@ -61,7 +62,7 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
         )
-      const rest = [one.tokens ? share(one.tokens, windowOf(one)) : '', took(at - one.startedAt)].filter(Boolean).join(' · ')
+      const rest = [one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
       return (
         <Box flexDirection="row" alignItems="flex-start">
           <Button
@@ -147,21 +148,36 @@ const panelHooks = (on: On) => {
       )
     }
 
-    // The small card: a title, where it stands, the line the work last wrote beside the three dots, and how many to-dos are done.
-    // Each part has a fixed number of rows and is clipped to them, so a card never changes height as the work goes
+    // The small card: its title, which opens its Details, with Stop at the far end of that row; where it stands and how many
+    // to-dos are done; the line the work last wrote beside the three dots; its helpers. Each part has a fixed number of rows
+    // and is clipped to them, so a card never changes height as the work goes
     const small = (one: Todo) => {
       const kept = one.items.filter(item => item.state !== 'dropped')
       const done = kept.filter(item => item.state === 'done').length
       const tree = treeUnder(one)
+      const scope = `card-${one.id}`
       return (
         <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-          {/* Purple while it works, green once it finished; work stopped or stopped by an error has no mark */}
-          {/* Amber while it needs the person's hands */}
-          {one.status === 'working' || one.status === 'done' ? <Box width={1} flexShrink={0} backgroundColor={one.ask ? NEEDS : one.status === 'working' ? LIVE : DONE} /> : <Box width={1} flexShrink={0} />}
+          {edge(one, kept.length, done, kept.some(item => item.state === 'doing'))}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
             <Box flexDirection="column">
-              <Text bold wrap="truncate-end">{titleOf(one)}</Text>
-              {facts(one, false)}
+              <Box flexDirection="row" gap={1} height={1} overflow="hidden">
+                <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
+                  <Button key={`open-${one.id}-${presses}`} plain hover={{ scope, underline: true }} onPress={() => openWork($, one.id)}>
+                    <Text bold wrap="truncate-end">{titleOf(one)}</Text>
+                  </Button>
+                </Box>
+                <Box flexShrink={0}>
+                  <Button key={`go-${one.id}-${presses}`} label="›" plain dimColor hover={{ scope }} onPress={() => openWork($, one.id)} />
+                </Box>
+                <Box flexGrow={1} />
+                {one.status === 'working' && !one.chat ? (
+                  <Box flexShrink={0}>
+                    <Button key={`stop-${one.id}`} label="Stop" plain dimColor hover={{ scope: `stop-${one.id}`, underline: true }} onPress={() => void stop($, one.id)} />
+                  </Box>
+                ) : null}
+              </Box>
+              {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} done` : '')}
             </Box>
             {one.ask ? askBlock(one, `ask-${one.id}`) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden">
@@ -177,25 +193,37 @@ const panelHooks = (on: On) => {
                 )}
               </Box>
             </Box>
-            <Box flexDirection="row" alignItems="center" gap={1}>
-              <Button key={`open-${one.id}-${presses}`} label="Details" onPress={() => openWork($, one.id)} />
-              {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
-              <Box flexGrow={1} />
-              {kept.length > 0 ? (
-                <Box flexShrink={0}>
-                  <Text dimColor>{`${done} of ${kept.length} done`}</Text>
-                </Box>
-              ) : null}
-            </Box>
             {/* Its helpers, inside the card: its coloured edge runs down beside them */}
             {tree.length ? <Box key={`tree-${one.id}`} flexDirection="column">{tree}</Box> : null}
           </Box>
         </Box>
       )
     }
+    // The card's coloured edge. Purple while it works, green once it finished, amber while it needs the person's hands; work
+    // stopped or stopped by an error has none. While it works the edge is also its to-dos, one part each from the top down:
+    // those done bright, the one being done between, the rest a dim tint of the same purple, so the whole edge stays purple.
+    // More than EDGE_PARTS to-dos are one edge filled as far as they are done. The parts are boxes that share the card's
+    // height, whatever it is; a terminal has no part thinner than a row, so there the edge is whole
+    const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
+      if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
+      if (one.ask || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={one.ask ? NEEDS : one.status === 'working' ? LIVE : DONE} />
+      const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
+      return count > EDGE_PARTS ? (
+        <Box key={`edge-${one.id}`} width={1} flexShrink={0} flexDirection="column">
+          {done ? <Box key="done" flexGrow={done} backgroundColor={LIVE} /> : null}
+          {count > done ? <Box key="left" flexGrow={count - done} backgroundColor={`${LIVE}5C`} /> : null}
+        </Box>
+      ) : (
+        <Box key={`edge-${one.id}`} width={1} flexShrink={0} flexDirection="column" gap={count > 8 ? 0.2 : 0.3}>
+          {Array.from({ length: count }, (_, n) => (
+            <Box key={`part-${n}`} flexGrow={1} backgroundColor={shade(n)} />
+          ))}
+        </Box>
+      )
+    }
 
     // ---- The helpers a piece of work started, inside its card as a tree: each one slim row joined to its parent by a line ----
-    // A row is a dot at the end of its line, the helper's name, its time, and a mark to open it: a press on the name or the mark
+    // A row is a dot at the end of its line, the helper's name, its model, context and time, and a mark to open it: a press on the name or the mark
     // opens its own Details. The dot is purple while it works, green once it finished, red when an error stopped it, grey when it
     // was stopped; one that ended is dim, and one at work has a ring that slowly grows out of its dot and fades.
     // The lines are drawn as a card's three dots are, which the app is seen to draw
@@ -239,7 +267,13 @@ const panelHooks = (on: On) => {
     const twigRow = (t: Twig, scope: string) => {
       const one = t.one
       if (!one) return null
-      return twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, perRow - 12 - t.depth * 2)), one.status !== 'working', took((one.endedAt || at) - one.startedAt), () => openWork($, one.id), one.status)
+      // Beside its name: the model it runs on, how much context it holds, and its time last, so the ticking moves nothing else.
+      // A narrow panel drops the context, then the model, so the name keeps room to be read
+      const time = took((one.endedAt || at) - one.startedAt)
+      const model = modelName(one.model ?? '')
+      const width = perRow - 6 - t.depth * 2
+      const side = [[model, one.tokens ? thousands(one.tokens) : '', time], [model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
+      return twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
     }
     // In a small card: the helpers at work now or just ended, and any that one of those runs under; the rest are one closing
     // row, laid out as the others, that says how many have ended and opens the card's Details, where every helper is listed
