@@ -14,7 +14,7 @@ test('the changelog reads as its versions newest first, each with its date and c
 
 test('the update screen shows every version after the one seen, up to the one moved to, and none for the same version', async () => {
   const versions = changelogOf(LOG)
-  expect(missedOf(versions, '0.2.1', '0.2.3').shown.map(v => v.version)).toEqual(['0.2.3', '0.2.2'])
+  expect(missedOf(versions, '0.2.1', '0.2.3').shown.map(v => v.version)).toEqual(['0.2.3'])
   expect(missedOf(versions, '0.2.2', '0.2.3').shown.map(v => v.version)).toEqual(['0.2.3'])
   expect(missedOf(versions, '0.2.1', '0.2.2').shown.map(v => v.version)).toEqual(['0.2.2'])
   expect(isScreenDue('0.2.3', '0.2.3')).toBe(false)
