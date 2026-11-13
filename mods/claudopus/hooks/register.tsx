@@ -575,6 +575,8 @@ const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', s
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
 // Work that called SubagentHandback in the turn now ending: what it ends that turn with is its report
 const handedBack = new Map<string, string>()
+// Work whose card a handback ended, until it works again: a turn of words alone that what it left running wakes changes nothing
+const endedByHandback = new Set<string>()
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
@@ -3231,6 +3233,31 @@ let reloadAsked = ''
 // remote connection in this session"): every one the mod ran there was refused, every one typed was not. There it is not sent, since
 // each refusal is a line in the chat, and the header says to type it
 let isReloadRefused = false
+// A /reload-plugins run from afar loads the new copy but leaves the old one's timers running in the same chat, and copies before
+// 0.2.56 send it whatever the connection, each a refused line. They all wait while reloads/<chat>.json names the installed version from under RELOAD_AGAIN ago, so
+// in a chat run from afar this copy keeps that mark naming it, looked at every HOLD_EVERY, which is far below their RELOAD_EVERY.
+// A copy that a newer load in this chat has replaced (the version this chat ran last is not its own) does nothing, so the holds of
+// copies left behind by typed reloads do not pile up
+const HOLD_EVERY = 1000
+const holdOldCopies = async ($: EngineInterface) => {
+  if (!dir) return
+  const loaded = (await versionsOf($)).version
+  if (!loaded || (await read($, ranVersion)) !== loaded) return
+  const copy = await installedCopy($)
+  if (!copy?.version) return
+  const mark = `${dir}/reloads/${await $.session.id()}.json`
+  const before = await readOr($, mark).then(text => {
+    try {
+      return JSON.parse(text) as { version?: unknown; at?: unknown }
+    } catch {
+      return undefined
+    }
+  })
+  const now = await $.clock.now()
+  const at = typeof before?.at === 'number' ? before.at : 0
+  if (before?.version === copy.version && now >= at && now - at < RELOAD_AGAIN / 2) return
+  await $.fs.write(mark, JSON.stringify({ version: copy.version, from: loaded, at: now }))
+}
 const reloadToInstalled = async ($: EngineInterface) => {
   if (!dir || reloadAsked || isRunFromAfar) return
   const loaded = (await versionsOf($)).version
@@ -4644,6 +4671,10 @@ const chatHooks = (on: On) => {
     // and an open chat moves to a newer copy installed while it runs, by itself, once it is idle
     reloadAsked = ''
     $.clock.every(RELOAD_EVERY, () => reloadToInstalled($).catch(err => log($, `reload not looked for: ${String(err)}`)))
+    if (isRunFromAfar) {
+      await holdOldCopies($).catch(() => undefined)
+      $.clock.every(HOLD_EVERY, () => holdOldCopies($).catch(err => log($, `old copies not held: ${String(err)}`)))
+    }
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
 
     return begun
@@ -4720,14 +4751,22 @@ const chatHooks = (on: On) => {
       // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
       // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
       const isReport = how === 'done' && isHeld && (handedBack.has(id) || answer.length >= REPORT_LEAST)
+      // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
+      // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
+      const isHandedBack = how === 'done' && handedBack.has(id)
       handedBack.delete(id)
+      if (isHandedBack) endedByHandback.add(id)
       await update($, todos, list => {
-        const isWaiting = how === 'done' && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
+        const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
         // An aborted turn's own text is not kept over the report the work gave before it was stopped
         return list.map(one =>
           one.id !== id
             ? one
-            : isWaiting
+            : // Work that had ended, woken by what it left running, that ends a turn of words alone has not worked again: it stays
+              // as it ended, with its report, and is not announced a second time
+              one.status !== 'working' && how === 'done' && !isHandedBack && endedByHandback.has(id)
+              ? one
+              : isWaiting
               ? { ...one, answer: answer || one.answer, answeredAt: isReport ? now : one.answeredAt }
               : how === 'stopped'
                 ? one.status === 'working'
@@ -4744,7 +4783,7 @@ const chatHooks = (on: On) => {
       // held on its own background work leaves it once it ends (keepStoppedReports)
       const card = (await read($, todos)).find(one => one.id === id)
       const report = (e.answer ?? '').trim() || answer
-      if (card && !card.parentId && card.status === 'done' && how === 'done' && report) {
+      if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
       }
       return done
@@ -4880,7 +4919,7 @@ const workHooks = (on: On) => {
       const id = e.agentId
       // What this work starts with the Agent tool is its helper, which the engine's own record does not always say
       if (e.tool === 'Agent') helperCalls.set(e.tool_use_id, id)
-      if (String(e.tool) === 'SubagentHandback') handedBack.set(id, String((e as { message?: unknown }).message ?? '').trim())
+      endedByHandback.delete(id)
       // Work that calls a tool is working: a card that had ended is back. Its steps are counted: to place a steer among them,
       // to see that a steer got its decision, and to see that its to-dos are still being kept
       if (dir) {
@@ -4911,6 +4950,12 @@ const workHooks = (on: On) => {
       const line = named(answered ? ANSWERED_IN_CHAT(answered) : from ? FROM(from) : STEER)
       if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? $.session.send({ to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
       return sent
+    }
+    // A report handed back is kept as the turn's answer only once the handback went through: refused, the work carries on
+    if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
+      const r = await next(e)
+      if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
+      return r
     }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
@@ -4988,6 +5033,7 @@ const workHooks = (on: On) => {
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : e)
     if (!dir || !r.agentId) return r
     const id = r.agentId
+    endedByHandback.delete(id)
     const now = await $.clock.now()
     // A brief that names one result, on what that result's title is about, goes on with its work: a round of it. One that names
     // several, or one on something else, only reads them

@@ -100,6 +100,31 @@ let reloadAsked = ''
 // remote connection in this session"): every one the mod ran there was refused, every one typed was not. There it is not sent, since
 // each refusal is a line in the chat, and the header says to type it
 let isReloadRefused = false
+// A /reload-plugins run from afar loads the new copy but leaves the old one's timers running in the same chat, and copies before
+// 0.2.56 send it whatever the connection, each a refused line. They all wait while reloads/<chat>.json names the installed version from under RELOAD_AGAIN ago, so
+// in a chat run from afar this copy keeps that mark naming it, looked at every HOLD_EVERY, which is far below their RELOAD_EVERY.
+// A copy that a newer load in this chat has replaced (the version this chat ran last is not its own) does nothing, so the holds of
+// copies left behind by typed reloads do not pile up
+const HOLD_EVERY = 1000
+const holdOldCopies = async ($: EngineInterface) => {
+  if (!dir) return
+  const loaded = (await versionsOf($)).version
+  if (!loaded || (await read($, ranVersion)) !== loaded) return
+  const copy = await installedCopy($)
+  if (!copy?.version) return
+  const mark = `${dir}/reloads/${await $.session.id()}.json`
+  const before = await readOr($, mark).then(text => {
+    try {
+      return JSON.parse(text) as { version?: unknown; at?: unknown }
+    } catch {
+      return undefined
+    }
+  })
+  const now = await $.clock.now()
+  const at = typeof before?.at === 'number' ? before.at : 0
+  if (before?.version === copy.version && now >= at && now - at < RELOAD_AGAIN / 2) return
+  await $.fs.write(mark, JSON.stringify({ version: copy.version, from: loaded, at: now }))
+}
 const reloadToInstalled = async ($: EngineInterface) => {
   if (!dir || reloadAsked || isRunFromAfar) return
   const loaded = (await versionsOf($)).version

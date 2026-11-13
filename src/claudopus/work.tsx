@@ -87,7 +87,7 @@ const workHooks = (on: On) => {
       const id = e.agentId
       // What this work starts with the Agent tool is its helper, which the engine's own record does not always say
       if (e.tool === 'Agent') helperCalls.set(e.tool_use_id, id)
-      if (String(e.tool) === 'SubagentHandback') handedBack.set(id, String((e as { message?: unknown }).message ?? '').trim())
+      endedByHandback.delete(id)
       // Work that calls a tool is working: a card that had ended is back. Its steps are counted: to place a steer among them,
       // to see that a steer got its decision, and to see that its to-dos are still being kept
       if (dir) {
@@ -118,6 +118,12 @@ const workHooks = (on: On) => {
       const line = named(answered ? ANSWERED_IN_CHAT(answered) : from ? FROM(from) : STEER)
       if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? $.session.send({ to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
       return sent
+    }
+    // A report handed back is kept as the turn's answer only once the handback went through: refused, the work carries on
+    if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
+      const r = await next(e)
+      if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
+      return r
     }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
@@ -195,6 +201,7 @@ const workHooks = (on: On) => {
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : e)
     if (!dir || !r.agentId) return r
     const id = r.agentId
+    endedByHandback.delete(id)
     const now = await $.clock.now()
     // A brief that names one result, on what that result's title is about, goes on with its work: a round of it. One that names
     // several, or one on something else, only reads them
