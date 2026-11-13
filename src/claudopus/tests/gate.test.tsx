@@ -41,6 +41,9 @@ test('an admin command is held however the runner is reached, and nothing else i
     `eval "${ADMIN} here 'id -u'"`,
     `out=$(${ADMIN} here 'id -u') && echo "$out"`,
     `echo start; ${ADMIN} here 'id -u' | grep 0`,
+    `sudo -u root ${ADMIN} here 'id -u'`,
+    `if ${ADMIN} here 'id -u'; then echo yes; fi`,
+    `if true; then ${ADMIN} here 'id -u'; fi`,
   ]) {
     const id = `d${(n += 1)}`
     const call = bash(id, command)
@@ -56,9 +59,15 @@ test('an admin command is held however the runner is reached, and nothing else i
   expect(await list.find({ type: 'Text', text: 'echo "a b" > /etc/x; chmod 644 /etc/x' })).toBeDefined()
   await press('gate-q1-0-deny')
   await quoted
+  // Inside double quotes a backslash stays, as the shell leaves it, unless it escapes a quote, a dollar or itself
+  const slashed = bash('q2', `${ADMIN} here "printf 'a\\nb' > \\"/etc/x y\\""`)
+  expect(await held('q2')).toBeDefined()
+  expect(await list.find({ type: 'Text', text: `printf 'a\\nb' > "/etc/x y"` })).toBeDefined()
+  await press('gate-q2-0-deny')
+  await slashed
   expect(admins).toEqual([])
   // Words about it, forgetting a password, and other tools are no admin command: they run as they are
-  for (const command of [`git commit -m "bin/admin here 'id -u' now asks"`, `echo ${ADMIN} here id`, `${ADMIN} here --forget`, `${ADMIN}`, 'django-admin migrate', 'ls bin/admin', `cat ${ADMIN}`]) expect((await bash(`n${(n += 1)}`, command)).result).toBe('ran')
+  for (const command of [`git commit -m "bin/admin here 'id -u' now asks"`, `echo ${ADMIN} here id`, `${ADMIN} here --forget`, `${ADMIN}`, 'django-admin migrate', 'ls bin/admin', `cat ${ADMIN}`, '/usr/local/bin/admin here now', 'vendor/bin/admin migrate up']) expect((await bash(`n${(n += 1)}`, command)).result).toBe('ran')
 })
 
 test('asked each time: the call is held, its card shows the exact command and the Mac with three buttons, and Allow once lets that one command run', async ($, on) => {
@@ -306,4 +315,38 @@ test('Let macOS ask, keep nothing: chosen in Config it forgets every kept passwo
   await press('gate-b2-0-once')
   expect((await call).result).toBe('ran')
   expect(admins.length).toBe(1)
+})
+
+test("the chat's own thread, doing its own work, is asked at the top of the panel, each time even under once per piece of work", async ($, on) => {
+  const w = world(on)
+  w.files.set('keychain:gate', 'kept-key')
+  w.files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', agents: false, admin: 'work', adminSealed: fakeSeal('kept-key', 'mode\nwork') }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the hosts file', wait: false, origin: composer })
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  for (const id of ['c1', 'c2']) {
+    const call = $.tool.call({ tool: 'Bash', tool_use_id: id, command: `${ADMIN} here 'id -u'` } as never)
+    expect(await until(async () => keyed(list, `gate-${id}-0-deny`))).toBeDefined()
+    expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeDefined()
+    // No piece of work to allow it for: the chat's thread never ends, so it is asked each time
+    expect((await list.findAll({ type: 'Button' })).map(one => one.props.label)).toContain('Allow once')
+    expect((await list.findAll({ type: 'Button' })).map(one => one.props.label)).not.toContain('Allow for this work')
+    await pressed(list, `gate-${id}-0-once`)
+    w.wake()
+    expect((await call).result).toBe('ran')
+  }
+  expect(w.admins.length).toBe(2)
+})
+
+test("another chat's panel shows an admin command that waits, with no button: only the chat that holds the call allows it", async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  const at = 1_700_000_000_000
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ chat: 'chat-b', title: 'Billing page', folder: '/repo/billing', host: '', at, cards: [{ id: 'b1', parentId: '', isFork: false, tokens: 0, title: 'Update the server', words: 'update it', items: [], entries: [], answer: '', admins: [{ id: 'x-0', host: 'here', command: 'softwareupdate -i -a', at }], startedAt: at - 60_000, endedAt: 0, status: 'working' }] }))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'softwareupdate -i -a' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Allow or deny it on its card in its own chat.' })).toBeDefined()
+  expect((await list.findAll({ type: 'Button' })).some(one => ['Allow once', 'Always allow this command', 'Deny'].includes(String(one.props.label)))).toBe(false)
 })

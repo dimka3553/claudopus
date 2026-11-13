@@ -68,6 +68,7 @@ expect 'through a shell and a variable: refused' 6 "$REFUSED" -- /bin/sh -c 'a=a
 expect 'handed to bash as a script: refused' 6 "$REFUSED" -- /bin/bash "$admin" here 'id -u'
 printf 'security() { echo abc; }\nperl() { echo "granted keep"; }\n' >"$tmp/env.sh"
 expect 'with BASH_ENV set to replace its tools: refused' 6 "$REFUSED" -- env BASH_ENV="$tmp/env.sh" "$admin" here 'id -u'
+expect 'handed to bash with BASH_ENV set: refused' 6 "$REFUSED" -- env BASH_ENV="$tmp/env.sh" /bin/bash "$admin" here 'id -u'
 expect 'with a perl option set to load other code: refused' 6 "$REFUSED" -- env PERL5OPT=-MNoSuchModuleAtAll "$admin" here 'id -u'
 
 grant forged here 'id -u' "$(now)" "$(seal x not-the-key)"

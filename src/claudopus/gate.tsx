@@ -37,36 +37,38 @@ const MACOS_AFAR = () =>
 // The admin commands a Bash command runs, as the shell splits it: bin/admin by any spelling of its path, after what runs a
 // command it is handed, and inside a shell's -c or an eval. What the shell would build (a variable, a substitution) is read as
 // written, so the grant names what was shown and bin/admin refuses what differs
-const isAdminPath = (word: string) => {
+const isAdminPath = (word: string, root: string) => {
   const parts: string[] = []
   for (const part of word.split('/')) {
     if (part === '..' && parts.length && parts.at(-1) !== '..' && parts.at(-1) !== '') parts.pop()
     else if (part !== '.' && (part !== '' || !parts.length)) parts.push(part)
   }
   const path = parts.join('/')
-  return path === 'admin' || path === 'bin/admin' || path.endsWith('/bin/admin')
+  // Reached from its own folder, by the mod's own path, or by a path that names the mod or is filled in by the shell: another
+  // tool that happens to be called admin is none of this
+  return path === 'admin' || path === 'bin/admin' || (path.endsWith('/bin/admin') && (path === `${root}/bin/admin` || /claudopus/i.test(path) || path.includes('$')))
 }
-const adminCalls = (command: string, depth = 0): AdminCall[] => {
+const adminCalls = (command: string, root: string, depth = 0): AdminCall[] => {
   if (depth > 4) return []
   return shellWords(command).flatMap(words => {
     let i = 0
     for (;;) {
       while (i < words.length && /^\w+=/.test(words[i]!)) i++
       const head = (words[i] ?? '').split('/').pop() ?? ''
-      if (!['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'builtin', 'timeout', 'caffeinate', 'nice'].includes(head)) break
+      if (!['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'builtin', 'timeout', 'caffeinate', 'nice', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{'].includes(head)) break
       i++
-      while (i < words.length && (words[i]!.startsWith('-') || /^\d+[smhd]?$/.test(words[i]!) || (head === 'env' && /^\w+=/.test(words[i]!)))) i++
+      while (i < words.length && (words[i]!.startsWith('-') || (head === 'sudo' && words[i - 1] === '-u') || /^\d+[smhd]?$/.test(words[i]!) || (head === 'env' && /^\w+=/.test(words[i]!)))) i++
     }
     const tool = (words[i] ?? '').split('/').pop() ?? ''
-    if (tool === 'eval') return adminCalls(words.slice(i + 1).join(' '), depth + 1)
+    if (tool === 'eval') return adminCalls(words.slice(i + 1).join(' '), root, depth + 1)
     if (tool === 'bash' || tool === 'sh' || tool === 'zsh') {
       const c = words.findIndex((one, n) => n > i && /^-[a-z]*c$/.test(one))
-      if (c > 0) return adminCalls(words[c + 1] ?? '', depth + 1)
+      if (c > 0) return adminCalls(words[c + 1] ?? '', root, depth + 1)
       // A shell handed the runner as a script
       i++
       while (i < words.length && words[i]!.startsWith('-')) i++
     }
-    if (!isAdminPath(words[i] ?? '')) return []
+    if (!isAdminPath(words[i] ?? '', root)) return []
     const [host = '', run = ''] = [words[i + 1], words[i + 2]]
     return !host || !run || host.startsWith('-') || run === '--forget' ? [] : [{ host, command: run }]
   })
@@ -252,7 +254,7 @@ const answerGate = ($: EngineInterface, id: string, said: GateSaid) => {
 // Before a Bash call runs: each admin command in it is allowed already (never asked, this work allowed, the command always
 // allowed) or waits for the press; allowed, it gets its grant. Refused, the call does not run
 const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
-  const calls = adminCalls(String((e as { command?: unknown }).command ?? ''))
+  const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root)
   if (!calls.length || !dir) return { grants: [] }
   const gate = await gateOf($)
   if (gate.password === 'macos' && calls.some(one => one.host !== 'here')) return { deny: MACOS_ONLY_HERE(), grants: [] }
@@ -263,15 +265,17 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
   const card = list.find(one => one.id === top)
   const grants: string[] = []
   for (const [n, call] of calls.entries()) {
-    const isCovered = (gate.mode === 'work' && workAllowed.has(top)) || (await isAllowed($, call))
+    // "Once per piece of work" is for work with a card, which ends; the chat's own thread never does, so there each command asks
+    const isWork = gate.mode === 'work' && Boolean(card)
+    const isCovered = (isWork && workAllowed.has(top)) || (await isAllowed($, call))
     if (!isCovered) {
-      const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(gate.mode === 'work' ? { isWork: true } : {}) }, card ? top : '')
+      const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(isWork ? { isWork: true } : {}) }, card ? top : '')
       if (said !== 'once' && said !== 'always') {
         await dropGrants($, grants)
         return { deny: said === 'deny' ? GATE_DENIED() : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
       }
       if (said === 'always') await allowAlways($, call).catch(err => log($, `admin command not always allowed: ${String(err)}`))
-      if (gate.mode === 'work') workAllowed.add(top)
+      if (isWork) workAllowed.add(top)
     }
     const grant = await issueGrant($, `${e.tool_use_id}-${n}`, call)
     if (!grant) {
