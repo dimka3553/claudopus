@@ -127,9 +127,12 @@ test('a chat that moved to a newer version knows the one it ran before; the same
 
 test('the moment says Claudopus updated in blue, then the new version, then is over', async () => {
   const text = (t: number) => updatedLook('0.2.40', t)?.map(p => p.text).join('')
-  expect(text(0)).toBe('Claudopus updated')
-  expect(updatedLook('0.2.40', 0)!.every(p => p.tone !== 'name')).toBe(true)
-  expect(text(4900)).toBe('Claudopus v0.2.40')
+  expect(text(0)).toBe('Claudopusupdated')
+  expect(updatedLook('0.2.40', 0)![0]).toEqual({ text: 'Claudopus', tone: 'blue' })
+  // The glint crosses "updated" once, and is gone before the version shows
+  expect(updatedLook('0.2.40', 600)!.some(p => p.tone === 'glint')).toBe(true)
+  expect(updatedLook('0.2.40', 2400)!.some(p => p.tone === 'glint')).toBe(false)
+  expect(text(4900)).toBe('Claudopusv0.2.40')
   expect(updatedLook('0.2.40', 4900)!.at(-1)).toEqual({ text: 'v0.2.40', tone: 'blue' })
   expect(updatedLook('0.2.40', UPDATED_FOR)).toBeUndefined()
   expect(updatedLook('0.2.40', -1)).toBeUndefined()
@@ -147,9 +150,12 @@ test('the moment never shows a version but the one moved to', async () => {
 })
 
 test('the octopus of the moment is the happy one in blue, jumping all through it', async () => {
-  const happy = '<svg><g fill="#4EBA65"><animate values="a;b" dur="2s" fill="freeze"/></g></svg>'
+  // Shaped as art/happy.svg is: two pictures taking turns, each on a timed animate (the tests cannot read the mod's files)
+  const happy = '<svg viewBox="0 0 24 24"><g fill="#4EBA65"><g><animate attributeName="visibility" values="visible;hidden" dur="2s" calcMode="discrete" fill="freeze"/></g><g><animate attributeName="visibility" values="hidden;visible" dur="2s" calcMode="discrete" fill="freeze"/></g></g></svg>'
   const art = updatedArt(happy, '#4E93EF')
   expect(art).not.toContain('#4EBA65')
   expect(art).toContain('fill="#4E93EF"')
-  expect(art).toContain('dur="1.25s" repeatCount="4"')
+  expect(art).toContain('viewBox="1 -1 22 22"')
+  expect(art).not.toMatch(/dur="(?!1\.25s")/)
+  expect(art.match(/repeatCount="4"/g)?.length).toBe(happy.match(/<animate /g)?.length)
 })

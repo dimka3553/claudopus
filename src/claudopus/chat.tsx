@@ -52,14 +52,14 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
-    // A load that moved this chat to a newer version has the header say so
-    await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
       const text = await readOr($, `${$.plugin.root}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
     }
     ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
     ART.updated = updatedArt(ART.happy, FLOW)
+    // A load that moved this chat to a newer version has the header say so, once its octopus is read
+    await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     cwd = e.cwd
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press

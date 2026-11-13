@@ -3356,12 +3356,12 @@ const noteLoaded = async ($: EngineInterface) => {
   updatedMoment = { from, to: loaded, loadedAt: now, startedAt: 0 }
   // A panel drawn while this load was still reading has no moment yet: it is drawn again now
   await update($, tick, n => n + 1)
-  await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header says Updated`)
+  await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header's octopus turns blue and says so`)
 }
 // The sound of the moment, a file of the mod's: three bright rising notes, 0.9 s, made by mockups/claudopus-sound/updated.py
 const UPDATED_SOUND = 'sounds/updated.wav'
 // The sound plays once for each version on this Mac, however many chats move to it: the first to begin its moment makes the file
-// played/<version> (made only where none is, the shell's noclobber) and plays it; config.json's sound off keeps it silent
+// updated/<version> (made only where none is, the shell's noclobber) and plays it; config.json's sound off keeps it silent
 const playUpdated = async ($: EngineInterface, version: string) => {
   if (!dir || !/^[0-9A-Za-z.+-]{1,40}$/.test(version)) return
   let config: { sound?: unknown } = {}
@@ -3376,10 +3376,14 @@ const playUpdated = async ($: EngineInterface, version: string) => {
     .run(['sh', '-c', 'mkdir -p "$(dirname "$1")" && set -C && : > "$1"', 'sh', played])
     .catch(() => ({ exitCode: 1 }))
   if (made.exitCode !== 0) return
-  await $.audio.play({ asset: UPDATED_SOUND }).catch(err => log($, `updated sound not played: ${String(err)}`))
+  // A sound that could not play leaves the version free for the next chat that moves to it
+  await $.audio.play({ asset: UPDATED_SOUND }).catch(async err => {
+    await $.process.run(['rm', '-f', played]).catch(() => undefined)
+    await log($, `updated sound not played: ${String(err)}`)
+  })
 }
 // The moment as it stands now, while it lasts, drawn again each UPDATED_STEP until it is over: the name line's pieces (blue in
-// Claudopus's workflow blue, the glint in the text's own bright colour); the panel draws the blue octopus beside them
+// Claudopus's workflow blue, the glint in a light blue); the words are pieces of their own, a space between each; the panel draws the blue octopus beside them
 const updatedPieces = async ($: EngineInterface, version: string) => {
   const moment = updatedMoment
   if (!moment || moment.to !== version) return undefined
@@ -3400,17 +3404,25 @@ const updatedPieces = async ($: EngineInterface, version: string) => {
   if (!look && updatedMoment === moment) updatedMoment = undefined
   return look
 }
-const nameLine = (ui: Ui, pieces: NonNullable<ReturnType<typeof updatedLook>>) => (
-  <ui.Box key="head-name" flexDirection="row" minWidth={0}>
-    {pieces.map((piece, i) => (
-      <ui.Box key={`head-name-${i}`} flexShrink={piece.tone === 'blue' && i ? 1 : 0} minWidth={0}>
-        <ui.Text wrap="truncate-end" color={piece.tone === 'blue' ? FLOW : undefined} bold>
-          {piece.text}
-        </ui.Text>
-      </ui.Box>
-    ))}
-  </ui.Box>
-)
+// The glint: a light blue letter passing along the blue word, bright in either theme
+const GLINT = '#A9CDFF'
+const nameLine = (ui: Ui, pieces: NonNullable<ReturnType<typeof updatedLook>>) => {
+  // "Claudopus" first, then the word or version beside it, its pieces together
+  const words = [pieces.slice(0, 1), pieces.slice(1)].filter(word => word.length)
+  return (
+    <ui.Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
+      {words.map((word, w) => (
+        <ui.Box key={`head-name-${w}`} flexDirection="row" flexShrink={w ? 1 : 0} minWidth={0}>
+          {word.map((piece, i) => (
+            <ui.Text key={`head-name-${w}-${i}`} wrap="truncate-end" color={piece.tone === 'glint' ? GLINT : FLOW} bold>
+              {piece.text}
+            </ui.Text>
+          ))}
+        </ui.Box>
+      ))}
+    </ui.Box>
+  )
+}
 
 // The asking card: an ask's text to copy, its buttons and reply box, and the answer reaching the work
 
@@ -4661,14 +4673,14 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
-    // A load that moved this chat to a newer version has the header say so
-    await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
       const text = await readOr($, `${$.plugin.root}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
     }
     ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
     ART.updated = updatedArt(ART.happy, FLOW)
+    // A load that moved this chat to a newer version has the header say so, once its octopus is read
+    await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     cwd = e.cwd
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press

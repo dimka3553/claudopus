@@ -121,27 +121,28 @@ export const updatedFrom = (loaded: string, ran: string, mark: { version?: unkno
 }
 
 // What the name line shows `t` after the moment began, as pieces in a tone each; nothing once it is over. First "Claudopus updated"
-// in blue, a glint crossing the word; then "Claudopus v<to>", the version in blue. Only the version moved to is ever shown: no
+// in blue, a glint crossing the word once; then "Claudopus v<to>" in blue. Only the version moved to is ever shown: no
 // number rolls through others on its way, which read as a version that does not exist (0.2.63 to 0.2.64 showed v0.2.65 to v0.2.69)
-export type UpdatedPiece = { text: string; tone: 'name' | 'blue' | 'glint' }
+export type UpdatedPiece = { text: string; tone: 'blue' | 'glint' }
 export const updatedLook = (to: string, t: number): UpdatedPiece[] | undefined => {
   if (!(t >= 0 && t < UPDATED_FOR) || !to) return undefined
-  if (t >= UPDATED_SAYS) return [{ text: 'Claudopus ', tone: 'name' }, { text: `v${to}`, tone: 'blue' }]
-  // The glint crosses the word, rests a little, and crosses again
-  const at = Math.floor(t / UPDATED_STEP) % (UPDATED_WORD.length + 4)
+  if (t >= UPDATED_SAYS) return [{ text: 'Claudopus', tone: 'blue' }, { text: `v${to}`, tone: 'blue' }]
+  // The glint crosses the word once, a little after it shows
+  const at = Math.floor(t / UPDATED_STEP) - 2
   const word: UpdatedPiece[] =
-    at < UPDATED_WORD.length
+    at >= 0 && at < UPDATED_WORD.length
       ? [
           { text: UPDATED_WORD.slice(0, at), tone: 'blue' },
           { text: UPDATED_WORD.charAt(at), tone: 'glint' },
           { text: UPDATED_WORD.slice(at + 1), tone: 'blue' },
         ]
       : [{ text: UPDATED_WORD, tone: 'blue' }]
-  return [{ text: 'Claudopus ', tone: 'blue' } as UpdatedPiece, ...word].filter(piece => piece.text)
+  return [{ text: 'Claudopus', tone: 'blue' } as UpdatedPiece, ...word].filter(piece => piece.text)
 }
-// The octopus of the moment: the happy one in the workflow blue, its jump played over the whole moment, resting on its last picture
+// The octopus of the moment: the happy one in the workflow blue, its jump played over the whole moment, resting on its last picture,
+// and drawn closer, so it is as big as the octopus at rest (the happy drawing leaves room round it for its arms and sparkles)
 export const updatedArt = (happy: string, blue: string) =>
-  happy.replaceAll('#4EBA65', blue).replaceAll('dur="2s"', `dur="${UPDATED_FOR / 4000}s" repeatCount="4"`)
+  happy.replace('viewBox="0 0 24 24"', 'viewBox="1 -1 22 22"').replaceAll('#4EBA65', blue).replaceAll('dur="2s"', `dur="${UPDATED_FOR / 4000}s" repeatCount="4"`)
 const versionIn = (manifest: string) => {
   try {
     return String(JSON.parse(manifest)?.version ?? '')
