@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.81 · 13 November 2026
+- The shipped principles no longer say that your decisions are deliberate or what done means: those are yours to add in Config.
+- If you already made your own copy of the principles, nothing changes for you: an update leaves it as it is.
+
+## 0.2.80 · 13 November 2026
+- Every pull request to Claudopus, and every release on main, is now checked on GitHub by running all of its tests, so a broken test shows before it reaches you.
+
 ## 0.2.79 · 13 November 2026
 - The README and the guide say that jobs running at once each spend their own tokens, so on metered billing five at a time spend about five times as fast.
 - Stats says what its reply time measures, and measures it: from your message to the chat's last step before the next message, on average, without the background work it started. It used to run on until the next message came in, which counted the wait for background work and idle time.

@@ -61,7 +61,7 @@ That is all. It is on in every chat from then on, and it keeps itself up to date
 | **When it needs you** | The card turns amber, rises to the top and asks, with buttons or a box to answer in. You get a notification and a short sound, and the question also arrives in the chat. |
 | **When it is done** | The card turns green, a chime plays, and a notification names the work. Clicking it opens that chat. |
 | **Memory** | Your messages, the results and a brief per subject are kept as plain files in `~/.claude/claudopus`, so chats can stay small. |
-| **Working rules** | A short set of principles goes into every chat: ask less, show the result, have a second agent check the work. Edit them in the Config tab. |
+| **Working rules** | A short set of principles goes into every chat: ask less, show the result, have a second agent check the work. They leave the rest to you: edit them in the Config tab, and your copy is the one used. |
 | **Models** | Opus for most work, Sonnet for long legwork, Fable only for heavy work. Checks never run on a weaker model than the one that built the work. An agent named an older model or Haiku is refused, and work the app moves to an older model runs on Fable instead; its card says so. |
 | **Passwords and keys** | Asked for once in a box at the top of the panel, in every chat, kept in the macOS keychain, never put in a chat or a file. |
 | **One release at a time** | Work changes a repo only in its own worktree and branch, and reaches main only through one release command that takes its turn, numbers the version, builds, checks and pushes. A push to main by hand is refused. |
