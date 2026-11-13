@@ -113,7 +113,7 @@ const serversTabHooks = (on: On) => {
 
   // The servers panel: one block per server with its link, where it runs and which chat started it; nothing is cut off
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Link, Text } = $.ui.resolve(e)
+    const { Box, Button, Link, Text } = uiOf($, e)
     if (!scannedAt) await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
     await read($, tick)
     const found = await read($, servers)

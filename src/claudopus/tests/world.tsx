@@ -27,7 +27,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -62,6 +62,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const own: string[][] = []
   // What was handed to open: a folder shown in Finder
   const shown: string[][] = []
+  // What was handed to Tailscale to send to another device
+  const dropped: string[][] = []
   // What was run over ssh, with what it was handed
   const sshed: string[][] = []
   prompts.length = 0
@@ -80,6 +82,9 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     // The octopus drawings, each an SVG naming its file, when a test asks for them
     const drawing = options.art ? /\/art\/([\w-]+)\.svg$/.exec(e.path)?.[1] : undefined
     if (drawing) return { value: `<svg xmlns="http://www.w3.org/2000/svg"><title>${drawing}</title></svg>` }
+    // Or drawn as the mod's own are, where the test gives them
+    const drawn = options.drawings?.(/\/art\/([\w-]+)\.svg$/.exec(e.path)?.[1] ?? '')
+    if (drawn !== undefined) return { value: drawn }
     // The texts the mod ships; a copy of one in the memory folder is the person's own, kept in files
     const isShipped = !e.path.startsWith(MEMORY)
     if (isShipped && e.path.endsWith('roles/chat.md')) return { value: options.chatRole ?? 'CHAT ROLE' }
@@ -173,6 +178,12 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
       return { value: { exitCode: (rest[0] === '--asks' ? options.app?.asks : options.app?.claudopus) ?? 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (tool === 'open') shown.push([...e.argv])
+    // Tailscale's file sending, where the test says this Mac has it: the devices it reaches, and what was sent
+    if (tool === 'tailscale' || tool?.endsWith('/Tailscale')) {
+      if (options.tailscale === undefined) return { value: { exitCode: 127, stdout: '', stderr: 'not found', isStdoutTruncated: false, isStderrTruncated: false } }
+      if (!rest.includes('--targets')) dropped.push([...e.argv])
+      return { value: { exitCode: 0, stdout: rest.includes('--targets') ? options.tailscale : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (tool === 'kill') killed.push(String(rest[0]))
     // Another Mac over ssh: what it answers is laid by the test as ssh:<what>; an answer sent there is kept as it was handed over
     if (tool === 'ssh') {
@@ -317,7 +328,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events, held, keychain }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
