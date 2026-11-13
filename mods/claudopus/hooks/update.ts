@@ -170,12 +170,15 @@ export type LookIo = {
 }
 // One look, run by whoever holds the update lock: it reads the version page, runs the two update steps only when the page names a
 // version other than the one installed, and keeps what it learnt in update.json
-export const lookOnce = async (io: LookIo, at: { from: { plugins: string; marketplace: string; plugin: string }; root: string; engine: string; stampPath: string }): Promise<Look> => {
-  const { from, root, engine, stampPath } = at
+export const lookOnce = async (io: LookIo, at: { from: { plugins: string; marketplace: string; plugin: string }; root: string; engine: string; stampPath: string; cwd?: string }): Promise<Look> => {
+  const { from, engine, stampPath } = at
   const before = stampOf(await io.read(stampPath).catch(() => ''))
   const now = await io.now()
   const installed = await io.read(`${from.plugins}/installed_plugins.json`).catch(() => '')
   const id = `${from.plugin}@${from.marketplace}`
+  // A chat on a copy another update has replaced has no entry of its own: the copy it would load now stands for it, so its scope and
+  // version are the ones compared and updated (a project-only install is not updated at the user's scope)
+  const root = scopeOf(installed, id, at.root) ? at.root : (copyOf(installed, id, at.root, at.cwd)?.installPath ?? at.root)
   const scope = scopeOf(installed, id, root)
   const have = installedVersionOf(installed, id, root, scope)
   // The version page on claudopus.ai says which version is current; the same one installed means nothing is run
@@ -185,7 +188,7 @@ export const lookOnce = async (io: LookIo, at: { from: { plugins: string; market
     const result = `version page not read: ${page.ok ? 'no version on it' : page.status || page.text.slice(0, 120)}`
     await io.write(stampPath, JSON.stringify({ at: now, version: before?.version || have, result }))
     await io.log(`Claudopus ${result}`)
-    return { kind: 'failed', why: page.ok ? 'claudopus.ai named no version' : 'claudopus.ai did not answer' }
+    return { kind: 'failed', why: page.ok ? 'claudopus.ai named no version' : page.status ? `claudopus.ai answered ${page.status}` : 'claudopus.ai did not answer' }
   }
   if (current === have) {
     await io.write(stampPath, JSON.stringify({ at: now, version: have, result: 'latest' }))
@@ -209,10 +212,12 @@ export const lookOnce = async (io: LookIo, at: { from: { plugins: string; market
 }
 
 // What Config's Check for updates says once its look is over, for a chat running `loaded`: newest, downloaded and waiting for
-// /reload-plugins in this chat, or why not
-export const checkSaid = (look: Look, loaded: string): { text: string; isError: boolean } => {
+// /reload-plugins in this chat, or why not. A chat on this Mac also switches by itself once it is idle; one run from another Mac
+// cannot (the engine refuses a reload it was not typed in there), so there it is only typed
+export const checkSaid = (look: Look, loaded: string, isTypedOnly = false): { text: string; isError: boolean } => {
   if (look.kind === 'failed') return { text: `Couldn't ${look.version ? `download v${look.version}` : 'check'}: ${look.why}. Try again later.`, isError: true }
-  if (loaded && isNewer(look.version, loaded)) return { text: `v${look.version} downloaded. Type /reload-plugins to switch this chat to it.`, isError: false }
+  if (loaded && isNewer(look.version, loaded))
+    return { text: `v${look.version} downloaded. Type /reload-plugins to switch this chat to it${isTypedOnly ? '.' : ', or it switches by itself in a moment.'}`, isError: false }
   return { text: `You're on the newest version (v${look.version}).`, isError: false }
 }
 // The same for a copy run from a folder of its code, which Claude Code did not install and so cannot update: only what the page says

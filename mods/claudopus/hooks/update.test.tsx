@@ -205,9 +205,21 @@ test('a look for a newer version runs both steps and says to type /reload-plugin
   expect(look).toEqual({ kind: 'updated', version: '0.2.71' })
   expect(ran).toEqual(updateSteps('claude', at.from, 'user'))
   expect(stampOf(files.get('/u/update.json') ?? '')?.result).toBe('updated')
-  expect(checkSaid(look, '0.2.69')).toEqual({ text: 'v0.2.71 downloaded. Type /reload-plugins to switch this chat to it.', isError: false })
+  expect(checkSaid(look, '0.2.69')).toEqual({ text: 'v0.2.71 downloaded. Type /reload-plugins to switch this chat to it, or it switches by itself in a moment.', isError: false })
+  // In a chat run from another Mac it only switches when typed
+  expect(checkSaid(look, '0.2.69', true).text).toBe('v0.2.71 downloaded. Type /reload-plugins to switch this chat to it.')
   // Downloaded before by another chat while this one still runs the old copy: the same words, since this chat has yet to switch
-  expect(checkSaid({ kind: 'latest', version: '0.2.71' }, '0.2.69').text).toBe('v0.2.71 downloaded. Type /reload-plugins to switch this chat to it.')
+  expect(checkSaid({ kind: 'latest', version: '0.2.71' }, '0.2.69', true).text).toBe('v0.2.71 downloaded. Type /reload-plugins to switch this chat to it.')
+})
+
+test('a chat on a copy another update replaced compares the copy it would load, at that copy\'s scope', async () => {
+  // Installed only for the project, already moved to 0.2.71 by another chat; this chat still runs the 0.2.69 folder
+  const { io, at, files, ran } = mac('0.2.69', '0.2.71')
+  files.set('/p/installed_plugins.json', JSON.stringify({ plugins: { 'claudopus@m': [{ scope: 'project', projectPath: '/repo', version: '0.2.71', installPath: '/p/cache/m/claudopus/0.2.71' }] } }))
+  const look = await lookOnce(io, { ...at, cwd: '/repo/src' })
+  expect(look).toEqual({ kind: 'latest', version: '0.2.71' })
+  expect(ran).toEqual([])
+  expect(checkSaid(look, '0.2.69', true).text).toBe('v0.2.71 downloaded. Type /reload-plugins to switch this chat to it.')
 })
 
 test('a look that cannot read the page or download says why, plainly', async () => {
@@ -228,4 +240,10 @@ test('a copy run from a folder of its code says what the page names, and that it
   expect(folderSaid('0.2.70', '0.2.70')).toEqual({ text: "You're on the newest version (v0.2.70). This copy runs from a folder of its code, so it updates with that folder.", isError: false })
   expect(folderSaid('0.2.71', '0.2.70').text).toBe('v0.2.71 is out. This copy runs from a folder of its code, so it is not downloaded here: update that folder, then type /reload-plugins.')
   expect(folderSaid(undefined, '0.2.70').isError).toBe(true)
+})
+
+test('a page that answered with an error is said with its status, not as no answer', async () => {
+  const { io, at } = mac('0.2.70', '0.2.70')
+  const look = await lookOnce({ ...io, page: async () => ({ ok: false, status: 404, text: 'Not Found' }) }, at)
+  expect(look).toEqual({ kind: 'failed', why: 'claudopus.ai answered 404' })
 })

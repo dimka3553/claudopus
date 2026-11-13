@@ -3278,7 +3278,7 @@ const lookIo = ($: EngineInterface): LookIo => ({
   log: text => log($, text),
 })
 const lookAt = async ($: EngineInterface, from: NonNullable<ReturnType<typeof installedFrom>>) =>
-  lookOnce(lookIo($), { from, root: $.plugin.root, engine: (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude', stampPath: `${dir}/update.json` })
+  lookOnce(lookIo($), { from, root: $.plugin.root, cwd, engine: (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude', stampPath: `${dir}/update.json` })
 
 // Every hour one chat on this Mac reads the version page and, when it differs from the installed version, runs Claude Code's own two
 // update steps for the mod, under a lock the other chats see, and
@@ -3310,7 +3310,8 @@ const CHECK_STEP = 3000
 const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
   const loaded = (await versionsOf($)).version
   const from = installedFrom($.plugin.root)
-  if (!from || !dir) {
+  if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
+  if (!from) {
     const page = await lookIo($).page()
     return folderSaid(page.ok ? versionOnPage(page.text) : undefined, loaded)
   }
@@ -3322,7 +3323,7 @@ const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isEr
         const look = await underUpdateLock($, () => lookAt($, from))
         if (look !== UPDATE_BUSY) {
           await log($, `Claudopus checked for updates from Config: ${look.kind}${'version' in look && look.version ? ` ${look.version}` : ''}`)
-          return checkSaid(look, loaded)
+          return checkSaid(look, loaded, isRunFromAfar || isReloadRefused)
         }
       } finally {
         isUpdating = false
