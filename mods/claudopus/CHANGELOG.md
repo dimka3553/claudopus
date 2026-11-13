@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.76 · 14 November 2026
+- In the Claude app's panel a card's title, its model line and the line under them now start at one left edge, in every state of the card; a chat's name above its cards no longer sits a little further in or out depending on which Mac the chat is on.
+
 ## 0.2.75 · 13 November 2026
 - Requests for an admin password or key now ask in the box at the top of the panel in every chat, on this Mac too, not only in a chat run from another Mac: the same notice, wait and Cancel everywhere, and what you type goes straight into this Mac's keychain.
 - The chat that asked tells you and brings the panel up with the field ready to type in.
