@@ -1480,6 +1480,13 @@ const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
 // shown is opened again
 const front = async ($: EngineInterface, id: string, title: string) => {
   const shown = async () => Boolean((await $.ui.panes()).find(pane => pane.id === id)?.isShown)
+  // A press inside a tab gives that tab the keyboard, and the engine never shows a new tab over the one holding it: it waits on
+  // the screen to honour the open's focus, which a screen with a turn running or text in the box refuses (seen every press in a
+  // chat the app runs on another Mac over ssh). The tab holding the keyboard is closed and opened again first, so it lets go
+  for (const held of (await $.ui.panes()).filter(pane => pane.isFocused && pane.id !== id)) {
+    await $.ui.close({ id: held.id }).catch(() => undefined)
+    await $.ui.open({ id: held.id, title: held.title }).catch(err => log($, `${held.id} not opened again: ${String(err)}`))
+  }
   // A tab open behind another is not shown, and opening it again would leave it behind: it is closed and opened again, which
   // brings it to the front (seen in the app on a press of Results and of one result)
   const was = (await $.ui.panes()).find(pane => pane.id === id)
