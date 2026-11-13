@@ -1,6 +1,8 @@
 // The world beneath the mod in every test: files in memory, the app's session tools, a cheap model; and small helpers
 
 const HOME = '/home/sam'
+// For the longest tests, near the kit's 5 seconds on GitHub's runner, which runs them about twice as slow as a Mac
+const SLOW = { timeoutMs: 20_000 }
 const MEMORY = `${HOME}/.claude/claudopus`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const

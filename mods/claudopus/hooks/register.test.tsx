@@ -7,6 +7,8 @@ import { timelineRows } from './stats'
 // The world beneath the mod in every test: files in memory, the app's session tools, a cheap model; and small helpers
 
 const HOME = '/home/sam'
+// For the longest tests, near the kit's 5 seconds on GitHub's runner, which runs them about twice as slow as a Mac
+const SLOW = { timeoutMs: 20_000 }
 const MEMORY = `${HOME}/.claude/claudopus`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
@@ -1034,7 +1036,7 @@ test('work that takes many steps without touching its to-dos is reminded to brin
   expect(appended).toHaveLength(2)
 })
 
-test('work that ends in an error is kept as failed, time lying ended is not counted, and work under way is never forgotten', async ($, on) => {
+test('work that ends in an error is kept as failed, time lying ended is not counted, and work under way is never forgotten', SLOW, async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
@@ -1796,7 +1798,7 @@ test('work that answered while only its own background work held it, then stoppe
   await pane.unmount()
 })
 
-test('work that answers a question while a copy of its own still runs, with that copy still its to-do, stays at work and says what it waits for; it finishes only when the copy is checked and it reports', async ($, on) => {
+test('work that answers a question while a copy of its own still runs, with that copy still its to-do, stays at work and says what it waits for; it finishes only when the copy is checked and it reports', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const { clock, files, logged } = world(on, { art: true, agents, kinds })
@@ -2969,7 +2971,9 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await value('Work added up')).toBe('30m')
   expect(await value('On the clock')).toBe('20m')
   expect(await value('Saved by running side by side')).toBe('10m')
-  expect(await value('The chat’s reply, on average')).toBe('20s')
+  // From the person's message to the chat's last response or tool result before the next message: 20 seconds here
+  expect(await value('From your message to the chat’s last step, on average')).toBe('20s')
+  expect(await stats.find({ type: 'Text', text: /^Each of your messages is timed from when the chat takes it up/ })).toBeDefined()
   // The sums are kept, so the transcripts are read again only when they change
   expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').folder).toBe(chat)
 })
@@ -4808,7 +4812,7 @@ test("in a chat over ssh the panel's text stays the same from second to second w
 
 // Work that stops moving: its card says so, the chat is told once, a long step shows on its row, and the log stays plain text
 
-test('work and its helpers that get nothing new back for 12 minutes are flagged on the card and told to the chat once; news clears it, and a wait that only prints a new number is no news', async ($, on) => {
+test('work and its helpers that get nothing new back for 12 minutes are flagged on the card and told to the chat once; news clears it, and a wait that only prints a new number is no news', SLOW, async ($, on) => {
   const { clock, held, logged } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'one merger for all pushes', wait: false, origin: composer })
@@ -4854,7 +4858,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(2)
 })
 
-test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', async ($, on) => {
+test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', SLOW, async ($, on) => {
   const { clock, held } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Lay out the rows', prompt: 'lay out' } as never)
@@ -4876,7 +4880,7 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
   expect(await rows()).toEqual([])
 })
 
-test('work sent a message after a long rest, and work only held by what it left running after its report, are not flagged', async ($, on) => {
+test('work sent a message after a long rest, and work only held by what it left running after its report, are not flagged', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = { a2: 'general-purpose' }
   const { clock, logged, held } = world(on, { agents, kinds })
@@ -4910,7 +4914,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   expect(logged.filter(line => line.includes('has had nothing new'))).toEqual([])
 })
 
-test('work asking the person something waits on them and is never flagged', async ($, on) => {
+test('work asking the person something waits on them and is never flagged', SLOW, async ($, on) => {
   const { clock, logged } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Release it', prompt: 'release it' } as never)

@@ -1,6 +1,6 @@
 // Work that stops moving: its card says so, the chat is told once, a long step shows on its row, and the log stays plain text
 
-test('work and its helpers that get nothing new back for 12 minutes are flagged on the card and told to the chat once; news clears it, and a wait that only prints a new number is no news', async ($, on) => {
+test('work and its helpers that get nothing new back for 12 minutes are flagged on the card and told to the chat once; news clears it, and a wait that only prints a new number is no news', SLOW, async ($, on) => {
   const { clock, held, logged } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'one merger for all pushes', wait: false, origin: composer })
@@ -46,7 +46,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(2)
 })
 
-test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', async ($, on) => {
+test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', SLOW, async ($, on) => {
   const { clock, held } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Lay out the rows', prompt: 'lay out' } as never)
@@ -68,7 +68,7 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
   expect(await rows()).toEqual([])
 })
 
-test('work sent a message after a long rest, and work only held by what it left running after its report, are not flagged', async ($, on) => {
+test('work sent a message after a long rest, and work only held by what it left running after its report, are not flagged', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = { a2: 'general-purpose' }
   const { clock, logged, held } = world(on, { agents, kinds })
@@ -102,7 +102,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   expect(logged.filter(line => line.includes('has had nothing new'))).toEqual([])
 })
 
-test('work asking the person something waits on them and is never flagged', async ($, on) => {
+test('work asking the person something waits on them and is never flagged', SLOW, async ($, on) => {
   const { clock, logged } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Release it', prompt: 'release it' } as never)
