@@ -184,7 +184,7 @@ const chatHooks = (on: On) => {
     const choice = await followPanel($).catch(() => undefined)
     if (!choice && (isRunning || isWelcomeOpen)) await openList($)
     if (!choice && ((await read($, paneShown)) || isRunning) && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST))
-      await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => log($, `panel not opened again: ${String(err)}`))
+      await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => log($, `panel not opened again: ${String(err)}`))
     // Someone whose panel was open before chats shared it (as when this version is installed, which reloads every chat) has it
     // open in every chat from now on
     if (!choice && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)) await choosePanel($, true)

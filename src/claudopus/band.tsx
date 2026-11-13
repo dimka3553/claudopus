@@ -13,7 +13,7 @@ const bandHooks = (on: On) => {
     if (happy) await read($, tick)
     if (!working.length && !happy) return next(e)
 
-    const ui = $.ui.resolve(e)
+    const ui = uiOf($, e)
     const { Box, Text } = ui
 
     // What the work that last said something is doing, in a few whole words: the to-do it is on (a to-do is written in a few

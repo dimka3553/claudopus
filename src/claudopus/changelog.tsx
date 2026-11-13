@@ -105,14 +105,15 @@ const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: nu
   if (screenSounded !== loaded) void playUpdated($, (screenSounded = loaded))
   const back = (key: string) => (
     <ui.Box key={key} flexDirection="row" flexWrap="wrap" gap={1} flexShrink={0}>
-      <ui.Button key={`${key}-close-${presses}`} label="Back to the panel" onPress={() => void closeScreen($, loaded).catch(err => log($, `update screen not closed: ${String(err)}`))} />
+      <ui.Button key={`${key}-close-${presses}`} label="Back to the panel" hotkey="b" onPress={() => void closeScreen($, loaded).catch(err => log($, `update screen not closed: ${String(err)}`))} />
       <ui.Button key={`${key}-log-${presses}`} label="Changelog" plain onPress={() => void openChangelog($).catch(err => log($, `changelog not opened: ${String(err)}`))} />
     </ui.Box>
   )
   const count = shown.length + left
   return (
-    <ui.Box key="update-screen" flexDirection="column" gap={1} flexGrow={1}>
-      <ui.Box key="update-head" flexDirection="column" alignItems="center" gap={1} backgroundColor={FILL} paddingX={2} paddingY={2} flexShrink={0}>
+    <ui.Box key="update-screen" flexDirection="column" gap={1} flexGrow={1} {...(surface === 'terminal' ? { width: '100%' } : {})}>
+      {/* The terminal leaves a column's rows as wide as what they hold, so there the head is made as wide as the panel to centre in it */}
+      <ui.Box key="update-head" flexDirection="column" alignItems="center" gap={1} backgroundColor={FILL} paddingX={2} paddingY={2} flexShrink={0} {...(surface === 'terminal' ? { width: '100%' } : {})}>
         {octopus(ui, 'update-mark', 'updated', UPDATE_MARK, `Claudopus, updated to ${loaded}`, $, { surface, requestId: LIST })}
         <ui.Text bold color={FLOW}>Claudopus updated</ui.Text>
         <ui.Text dimColor wrap="wrap">{`v${seen} → v${loaded}${count > 1 ? ` · ${count} versions` : ''}`}</ui.Text>

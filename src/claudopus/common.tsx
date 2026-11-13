@@ -4,6 +4,9 @@
 // The panel beside the chat: one small card per piece of work under way; pressed, a card shows all its to-dos and its own chat
 const LIST = 'claudopus'
 const LIST_TITLE = 'Claudopus'
+// How many rows the panel asks for when a narrow terminal seats it above the prompt, where it fits its cards up to what the screen
+// spares; left to itself it takes a third of the screen, which the header fills before any card
+const PANEL_ROWS = 24
 // The panel that lists the servers on this Mac; it opens when asked for
 const PANE = 'servers'
 const PANE_TITLE = 'Servers'
@@ -221,6 +224,26 @@ const appendWords = async ($: EngineInterface, chatId: string, text: string) => 
 const appendAsks = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/asks/${chatId}.md`, `${await readOr($, `${dir}/asks/${chatId}.md`)}${text}`)
 
 type Ui = ElementTable
+// A colour with a see-through part, #RRGGBBAA, and how much of it shows (0 to 255)
+const alphaOf = (color: unknown) => (typeof color === 'string' && /^#[0-9a-f]{8}$/i.test(color) ? parseInt(color.slice(7), 16) : 255)
+// The terminal has no see-through colour: it paints the app's faint grey tint (FILL) as a solid mid-grey bar that buries dim text,
+// darker than the text around it on a light theme. There a faint tint is left out with the padding that only framed it, and a
+// stronger one (a picked segment, the edge's part still to do) becomes the theme's own subtle grey, which follows dark and light
+const TERM_SOLID = 'subtle'
+type BoxArgs = Parameters<Ui['Box']>[0]
+const termBox = (Box: Ui['Box']) => (props: BoxArgs) => {
+  const alpha = alphaOf(props.backgroundColor)
+  if (alpha === 255) return Box(props)
+  const { backgroundColor: _tint, paddingY, paddingTop, paddingBottom, ...rest } = props
+  const isFrame = alpha < 0x40
+  const framed = isFrame ? {} : { paddingY, paddingTop, paddingBottom }
+  return Box({ ...rest, ...framed, ...(isFrame ? {} : { backgroundColor: TERM_SOLID }) } as BoxArgs)
+}
+// The element table a drawing uses: the surface's own, with the terminal's Box taking the app's tints as above
+const uiOf = <E extends Parameters<EngineInterface['ui']['resolve']>[0]>($: EngineInterface, e: E): Ui => {
+  const ui = $.ui.resolve(e) as Ui
+  return e.surface === 'terminal' ? ({ ...ui, Box: termBox(ui.Box) } as Ui) : ui
+}
 // One part of a report's view or of the list: a filled block with a bold heading and, at its right, a dim count
 const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => (
   <ui.Box key={key} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>

@@ -125,6 +125,6 @@ const openStats = async ($: EngineInterface) => {
 }
 const statsButton = ($: EngineInterface, ui: Ui) => (
   <ui.Box key="stats-button" flexShrink={0}>
-    <ui.Button key={`stats-open-${presses}`} label="Stats" onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
+    <ui.Button key={`stats-open-${presses}`} label="Stats" hotkey="s" onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
   </ui.Box>
 )

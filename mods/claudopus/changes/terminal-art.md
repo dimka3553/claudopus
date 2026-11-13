@@ -1,3 +1,0 @@
-- In the terminal the octopus is drawn too, in coloured blocks: at rest, at work, happy when work finishes, amber when something waits, waving in About and jumping blue on the update screen; a tiny one sits above the prompt while work runs.
-- In the terminal a running card's three dots and a working helper's dot move, as they do in the app.
-- In the terminal the pictures work made are drawn small in their colours in Details, in Results and when opened, in every terminal and over ssh.

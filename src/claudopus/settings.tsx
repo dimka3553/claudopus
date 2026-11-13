@@ -115,7 +115,7 @@ const openConfig = async ($: EngineInterface) => {
 }
 const configButton = ($: EngineInterface, ui: Ui) => (
   <ui.Box key="config-button" flexShrink={0}>
-    <ui.Button key={`config-open-${presses}`} label="Config" onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
+    <ui.Button key={`config-open-${presses}`} label="Config" hotkey="c" onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
   </ui.Box>
 )
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({

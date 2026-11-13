@@ -80,13 +80,15 @@ const openMemory = ($: EngineInterface, path: string) => {
 }
 
 // Memory: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on
-const showMemory = async ($: EngineInterface) => {
+// A terminal, or a chat run over ssh, has no Finder the person can see: there the folder opens as a tab of the panel, each file a link
+const showMemory = async ($: EngineInterface, surface: RenderSurface) => {
+  if (isRunFromAfar || surface === 'terminal') return openMemory($, dir)
   const opened = await $.process.run(['open', dir]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stderr}`)
 }
 const memoryButton = ($: EngineInterface, ui: Ui) => (
   <ui.Box key="memory-button" flexShrink={0}>
-    <ui.Button key={`memory-open-${presses}`} label="Memory" onPress={() => void showMemory($).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
+    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey="m" onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
   </ui.Box>
 )
 
@@ -98,7 +100,7 @@ const memoryHooks = (on: On) => {
     if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return next(e)
     const { text, hrefs } = memoryLinked(e.props.text)
     if (!hrefs.length) return next(e)
-    const { Markdown } = $.ui.resolve(e)
+    const { Markdown } = uiOf($, e)
     return (
       <Markdown
         key={`memory-reply-${mark(e.requestId)}`}
@@ -115,7 +117,7 @@ const memoryHooks = (on: On) => {
   // A memory file opened as a tab of its own; the links in it to other memory files open there too
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (!e.requestId?.startsWith(MEMORY_PANE)) return next(e)
-    const { Box, Markdown, Text } = $.ui.resolve(e)
+    const { Box, Button, Markdown, Text } = uiOf($, e)
     const path = memoryPanes.get(e.requestId)
     if (!path) return <Text dimColor>Press the link in the chat again to open this file.</Text>
     const held = memoryText.get(e.requestId) ?? ''
@@ -123,7 +125,22 @@ const memoryHooks = (on: On) => {
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
         <Text dimColor wrap="wrap">{path}</Text>
-        {held ? (
+        {held && e.surface === 'terminal' ? (
+          // The terminal writes each link's whole address beside its words, and the keys cannot reach a link: there the words stand
+          // alone and each file linked is a button under the text, which Tab reaches
+          <Box key="memory-terminal" flexDirection="column" gap={1}>
+            {/^# [^\n]*\n\n(- \[[^\]]*\]\([^)]*\)\n?)+$/.test(held.trim() + '\n') ? null : <Markdown key={`memory-text-${e.requestId}`} text={text.replace(/\[([^\]]*)\]\((?:file:\/\/)?[^)]*\)/g, '$1')} />}
+            {(() => {
+              // Every memory file the text names, by a link of its own or by its path, once each
+              const named = [...new Set([...[...held.matchAll(/\]\(([^)\s]+)\)/g)].map(m => m[1] ?? ''), ...hrefs].map(href => memoryPressed(href)).filter(Boolean))].slice(0, 200)
+              return named.length ? (
+                <Box key="memory-links" flexDirection="column">
+                  {named.map(to => <Button key={`memory-link-${to}`} label={to.slice(dir.length + 1)} plain onPress={() => openMemory($, to)} />)}
+                </Box>
+              ) : null
+            })()}
+          </Box>
+        ) : held ? (
           <Markdown
             key={`memory-text-${e.requestId}`}
             text={text}

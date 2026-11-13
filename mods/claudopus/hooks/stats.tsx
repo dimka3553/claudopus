@@ -360,6 +360,49 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
 }
 
 type Ui = ElementTable
+// The most rows the terminal's timeline takes; more work at once shares the last row
+const TEXT_LANES = 8
+// The timeline in a terminal, which draws no SVG: a row of cells per lane, each cell a block in the colour of the model that ran
+// then, on the same squeezed time axis, and the first and last times under it
+export const timelineRows = (pieces: Piece[], cols: number) => {
+  const { lane, count } = lanesOf(pieces)
+  const { parts, at } = axisOf(pieces, cols)
+  const rows = Array.from({ length: Math.min(TEXT_LANES, Math.max(1, count)) }, () => Array.from({ length: cols }, () => ''))
+  for (const p of pieces)
+    for (const b of p.bars) {
+      const row = rows[Math.min(rows.length - 1, lane.get(p.id) ?? 0)]
+      const [from, to] = [Math.floor(at(b.from)), Math.max(Math.floor(at(b.from)) + 1, Math.ceil(at(b.to)))]
+      for (let x = Math.max(0, from); x < Math.min(cols, to); x++) if (row) row[x] = b.model
+    }
+  const first = parts[0]?.from ?? 0
+  const last = parts.at(-1)?.to ?? 0
+  const label = (t: number) => (dayText(first) === dayText(last) ? clockText(t) : `${dayText(t)} ${clockText(t)}`)
+  return { rows, from: parts.length ? label(first) : '', to: parts.length ? label(last) : '' }
+}
+const timelineText = (ui: Ui, pieces: Piece[], cols: number) => {
+  const { Box, Text } = ui
+  const { rows, from, to } = timelineRows(pieces, cols)
+  // Each row as runs of one model, so a row is a few Texts, not one per cell
+  const runs = (row: string[]) => row.reduce<{ model: string; n: number }[]>((all, model) => {
+    const tail = all.at(-1)
+    if (tail && tail.model === model) tail.n += 1
+    else all.push({ model, n: 1 })
+    return all
+  }, [])
+  return (
+    <Box key="timeline-cells" flexDirection="column" flexShrink={0}>
+      {rows.map((row, i) => (
+        <Box key={`lane-${i}`} flexDirection="row" height={1} flexShrink={0}>
+          {runs(row).map((run, j) => (run.model ? <Text key={`run-${j}`} color={colorOf(run.model)}>{'█'.repeat(run.n)}</Text> : <Text key={`run-${j}`}>{' '.repeat(run.n)}</Text>))}
+        </Box>
+      ))}
+      <Box key="axis" flexDirection="row" justifyContent="space-between" width={cols} height={1} flexShrink={0}>
+        <Text dimColor>{from}</Text>
+        <Text dimColor>{to}</Text>
+      </Box>
+    </Box>
+  )
+}
 export type Scope = 'chat' | 'all'
 type Range = 'today' | 'all'
 export const view = { scope: 'chat' as Scope, range: 'today' as Range, presses: 0 }
@@ -428,8 +471,9 @@ const tile = (ui: Ui, key: string, value: string, label: string) => (
     <ui.Box height={1} overflow="hidden">
       <ui.Text bold wrap="truncate-end">{value}</ui.Text>
     </ui.Box>
-    <ui.Box height={1} overflow="hidden">
-      <ui.Text dimColor wrap="truncate-end">{label}</ui.Text>
+    {/* The label wraps rather than being cut: in a narrow terminal 'pieces of work done' read 'pieces of work d…' */}
+    <ui.Box minWidth={0}>
+      <ui.Text dimColor wrap="wrap">{label}</ui.Text>
     </ui.Box>
   </ui.Box>
 )
@@ -498,9 +542,9 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
           <table.Svg key={`timeline-${view.scope}-${view.range}`} source={svg} alt={`${s.pieces.length} pieces of work on a time axis`} width={width} height={BARS + 18} isInteractive />
         </Box>
       ) : (
-        note(ui, 'timeline-terminal', 'The timeline is drawn in the desktop app.')
+        timelineText(ui, s.pieces, Math.max(20, Math.floor((px + 32) / 7.4) - 6))
       )}
-      <Box flexDirection="row" gap={2} height={1} overflow="hidden" flexShrink={0}>
+      <Box flexDirection="row" flexWrap="wrap" columnGap={2} flexShrink={0}>
         {legend.map(model => (
           <Box key={`legend-${model}`} flexDirection="row" gap={1} flexShrink={0}>
             <Text color={colorOf(model)}>■</Text>

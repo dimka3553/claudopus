@@ -1,0 +1,10 @@
+- In the terminal the panel no longer sits on solid grey bars: the app's faint tint, which a terminal cannot draw see-through, is left out, so cards, Stats, Config, Results, About and the Changelog read clearly on dark and light themes and over ssh.
+- In the terminal each header button has a key (r Results, s Stats, m Memory, c Config, a About, b back from the update screen), and the panel says how to reach it: ctrl+x Tab gives it the keys, Tab and Enter press, Esc goes back to the chat.
+- In the terminal one tab opens beside the panel at a time and the panel stays first, instead of every press adding a tab until their names were cut off.
+- In a terminal or a chat run over ssh, Memory opens the memory folder as a tab of the panel, each file a button, instead of Finder on a Mac you may not be looking at.
+- In a narrow terminal, where the panel sits above the prompt, its header is two lines so the work's cards show.
+- Stats draws its timeline in the terminal, as coloured blocks, and its labels are no longer cut short.
+- An ask's notice in the terminal chat no longer shows a broken character between the question and its answers.
+- In the terminal the octopus is drawn too, in coloured blocks: at rest, at work, happy when work finishes, amber when something waits, waving in About and jumping blue on the update screen; a tiny one sits above the prompt while work runs.
+- In the terminal a running card's three dots and a working helper's dot move, as they do in the app.
+- In the terminal the pictures work made are drawn small in their colours in Details, in Results and when opened, in every terminal and over ssh.

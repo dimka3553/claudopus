@@ -7,7 +7,7 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
-    const { Box, Button, Markdown, Text } = $.ui.resolve(e)
+    const { Box, Button, Markdown, Text } = uiOf($, e)
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
     if (large) {
@@ -94,7 +94,7 @@ const panelHooks = (on: On) => {
     // Where a piece of work is: the line it last wrote about itself
     const now = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')?.text ?? ''
 
-    const table = $.ui.resolve(e)
+    const table = uiOf($, e)
     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are
     // narrower than a cell, the terminal's are one each
     const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
@@ -567,7 +567,7 @@ const panelHooks = (on: On) => {
     const talk = (one: Todo, lines: Line[] | undefined, shots: Map<number, Pic[]>) => {
       // The pictures a run of steps made, under its row whether it is open or not: each drawn small where the panel can, with
       // a row under it that opens it whole in a window of its own, large enough to look at; one that is gone is named
-      const drawing = $.ui.resolve(e)
+      const drawing = uiOf($, e)
       const picturesOfRun = (block: Line[], at: number) => {
         const made = block.flatMap(line => shots.get(line.at ?? -1) ?? [])
         if (!made.length) return null
@@ -948,7 +948,9 @@ const panelHooks = (on: On) => {
     const talked = alone ? talks.get(alone.id) : undefined
     // The reports kept, in every chat: on this pane only the button that opens their own
     const kept = await read($, reports)
-    const ui = $.ui.resolve(e)
+    const ui = uiOf($, e)
+    // A terminal too narrow to dock the panel seats it above the prompt, a few rows tall
+    const isInline = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
     // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and
     // work that just finished (happy too for a workflow in its pause whose card turned green: it finished and its last round passed)
     const runningThere = elsewhere.filter(one => one.status === 'working' && !one.ask)
@@ -967,14 +969,15 @@ const panelHooks = (on: On) => {
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
     return (
-      <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={e.props.scroll.bodyRows}>
         {!alone ? (
           // The mark and its lines across the whole width, so the chat's size is read whole; the buttons on a row of their own under
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off
-          <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+          <Box key="head" flexDirection="column" gap={isInline ? 0 : 1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
-              {/* Just moved to a newer version: the octopus turns blue and jumps for the moment */}
-              {updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
+              {/* Just moved to a newer version: the octopus turns blue and jumps for the moment. Above the prompt in a narrow terminal the
+                  panel is a few rows tall, so it keeps them for the work and leaves the octopus to the line above the prompt */}
+              {isInline ? null : updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
                 {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
@@ -989,7 +992,7 @@ const panelHooks = (on: On) => {
                   </Box>
                 )}
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
-                <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
+                {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>}
               </Box>
             </Box>
             <Box key="head-buttons" flexDirection="row" flexWrap="wrap" gap={1}>
@@ -998,7 +1001,15 @@ const panelHooks = (on: On) => {
               {memoryButton($, ui)}
               {configButton($, ui)}
               {aboutButton($, ui)}
+              {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x Tab for keys</Text> : null}
             </Box>
+            {/* The terminal reaches a pane from the keys only after ctrl+x Tab, which nothing else tells; once it holds them each
+                button above answers its first letter */}
+            {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
+              <Text key="head-keys" dimColor wrap="wrap">
+                {e.props.isFocused ? 'Keys: r s m c a open a tab · Tab and Enter press · arrows scroll · Esc back to the chat' : 'ctrl+x Tab: use the panel from the keys'}
+              </Text>
+            ) : null}
           </Box>
         ) : null}
         {!alone ? boxesPart($, ui) : null}

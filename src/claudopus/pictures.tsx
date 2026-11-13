@@ -162,7 +162,7 @@ const largeOf = ($: EngineInterface, path: string, id: string): Large | undefine
 }
 // What the tab draws: the picture as wide as the tab, its name and size, and how to see it larger
 const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], path = pictureShown) => {
-  const ui = $.ui.resolve(e)
+  const ui = uiOf($, e)
   if (!path) return <ui.Text dimColor>Pictures now open large in the Details tab they are pressed in. This tab can be closed.</ui.Text>
   const name = fileName(path)
   const stat = await $.fs.stat(path).catch(() => undefined)

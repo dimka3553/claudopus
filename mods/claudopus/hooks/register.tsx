@@ -21,6 +21,9 @@ import type { Version } from './changelog'
 // The panel beside the chat: one small card per piece of work under way; pressed, a card shows all its to-dos and its own chat
 const LIST = 'claudopus'
 const LIST_TITLE = 'Claudopus'
+// How many rows the panel asks for when a narrow terminal seats it above the prompt, where it fits its cards up to what the screen
+// spares; left to itself it takes a third of the screen, which the header fills before any card
+const PANEL_ROWS = 24
 // The panel that lists the servers on this Mac; it opens when asked for
 const PANE = 'servers'
 const PANE_TITLE = 'Servers'
@@ -238,6 +241,26 @@ const appendWords = async ($: EngineInterface, chatId: string, text: string) => 
 const appendAsks = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/asks/${chatId}.md`, `${await readOr($, `${dir}/asks/${chatId}.md`)}${text}`)
 
 type Ui = ElementTable
+// A colour with a see-through part, #RRGGBBAA, and how much of it shows (0 to 255)
+const alphaOf = (color: unknown) => (typeof color === 'string' && /^#[0-9a-f]{8}$/i.test(color) ? parseInt(color.slice(7), 16) : 255)
+// The terminal has no see-through colour: it paints the app's faint grey tint (FILL) as a solid mid-grey bar that buries dim text,
+// darker than the text around it on a light theme. There a faint tint is left out with the padding that only framed it, and a
+// stronger one (a picked segment, the edge's part still to do) becomes the theme's own subtle grey, which follows dark and light
+const TERM_SOLID = 'subtle'
+type BoxArgs = Parameters<Ui['Box']>[0]
+const termBox = (Box: Ui['Box']) => (props: BoxArgs) => {
+  const alpha = alphaOf(props.backgroundColor)
+  if (alpha === 255) return Box(props)
+  const { backgroundColor: _tint, paddingY, paddingTop, paddingBottom, ...rest } = props
+  const isFrame = alpha < 0x40
+  const framed = isFrame ? {} : { paddingY, paddingTop, paddingBottom }
+  return Box({ ...rest, ...framed, ...(isFrame ? {} : { backgroundColor: TERM_SOLID }) } as BoxArgs)
+}
+// The element table a drawing uses: the surface's own, with the terminal's Box taking the app's tints as above
+const uiOf = <E extends Parameters<EngineInterface['ui']['resolve']>[0]>($: EngineInterface, e: E): Ui => {
+  const ui = $.ui.resolve(e) as Ui
+  return e.surface === 'terminal' ? ({ ...ui, Box: termBox(ui.Box) } as Ui) : ui
+}
 // One part of a report's view or of the list: a filled block with a bold heading and, at its right, a dim count
 const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => (
   <ui.Box key={key} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
@@ -511,7 +534,7 @@ const openConfig = async ($: EngineInterface) => {
 }
 const configButton = ($: EngineInterface, ui: Ui) => (
   <ui.Box key="config-button" flexShrink={0}>
-    <ui.Button key={`config-open-${presses}`} label="Config" onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
+    <ui.Button key={`config-open-${presses}`} label="Config" hotkey="c" onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
   </ui.Box>
 )
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
@@ -845,7 +868,7 @@ const followPanel = async ($: EngineInterface) => {
   if (!choice || seenOf(choice) === panelSeen) return choice
   const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
   if (choice.isOpen && !isOpen) {
-    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => (log($, `panel not opened with the others: ${String(err)}`), undefined))
+    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => (log($, `panel not opened with the others: ${String(err)}`), undefined))
     if (!opened) return choice
     await update($, me, one => ({ ...one, isListOpened: true }))
     await update($, paneShown, () => true)
@@ -864,7 +887,7 @@ const openList = async ($: EngineInterface) => {
   if (!choice) await choosePanel($, true)
   await update($, me, one => ({ ...one, isListOpened: true }))
   await update($, paneShown, () => true)
-  await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => log($, `panel not opened: ${String(err)}`))
+  await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => log($, `panel not opened: ${String(err)}`))
 }
 
 // Keeps the list true while work runs: the engine's list, and the minutes
@@ -1325,7 +1348,7 @@ const serversTabHooks = (on: On) => {
 
   // The servers panel: one block per server with its link, where it runs and which chat started it; nothing is cut off
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Button, Link, Text } = $.ui.resolve(e)
+    const { Box, Button, Link, Text } = uiOf($, e)
     if (!scannedAt) await scanServers($).catch(err => log($, `servers not read: ${String(err)}`))
     await read($, tick)
     const found = await read($, servers)
@@ -1703,6 +1726,23 @@ const front = async ($: EngineInterface, id: string, title: string) => {
   // other tab of the mod may be the one pressed in, so each is closed and opened again, in the order they stand. Elsewhere a
   // roster that says nothing has nothing drawn, and is left alone
   const before = await $.ui.panes()
+  // A terminal has one narrow row of tabs: every press opening a tab of its own crowded it past reading, and the panel, closed and
+  // opened again to let go of the keys, moved along it. There the panel stays first and one other tab is open beside it at a time
+  const surfaces = await $.session.surfaces().catch(() => [])
+  if (surfaces.length && surfaces.every(one => one === 'terminal')) {
+    for (const pane of before) if (pane.id !== LIST && pane.id !== id) await $.ui.close({ id: pane.id }).catch(() => undefined)
+    const list = before.find(pane => pane.id === LIST)
+    const was = before.find(pane => pane.id === id)
+    if (list?.isFocused || (was && !was.isShown)) {
+      if (was) await $.ui.close({ id }).catch(() => undefined)
+      if (list?.isFocused) {
+        await $.ui.close({ id: LIST }).catch(() => undefined)
+        await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => log($, `panel not opened again: ${String(err)}`))
+      }
+    }
+    await $.ui.open({ id, title, focus: true })
+    return
+  }
   const isBlind = isRunFromAfar && before.length > 0 && !before.some(pane => pane.isPlaced || pane.isShown || pane.isFocused)
   const holding = before.filter(pane => (isBlind || pane.isFocused) && pane.id !== id)
   if (isBlind) await log($, `front ${id}: the engine says no tab is shown or holding the keyboard; ${holding.length} other tabs closed and opened again first`)
@@ -1846,7 +1886,7 @@ const reportsButton = ($: EngineInterface, ui: Ui, all: Report[]) => {
   if (!list.length) return null
   return (
     <Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
+      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
     </Box>
   )
 }
@@ -2139,13 +2179,15 @@ const openMemory = ($: EngineInterface, path: string) => {
 }
 
 // Memory: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on
-const showMemory = async ($: EngineInterface) => {
+// A terminal, or a chat run over ssh, has no Finder the person can see: there the folder opens as a tab of the panel, each file a link
+const showMemory = async ($: EngineInterface, surface: RenderSurface) => {
+  if (isRunFromAfar || surface === 'terminal') return openMemory($, dir)
   const opened = await $.process.run(['open', dir]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stderr}`)
 }
 const memoryButton = ($: EngineInterface, ui: Ui) => (
   <ui.Box key="memory-button" flexShrink={0}>
-    <ui.Button key={`memory-open-${presses}`} label="Memory" onPress={() => void showMemory($).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
+    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey="m" onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
   </ui.Box>
 )
 
@@ -2157,7 +2199,7 @@ const memoryHooks = (on: On) => {
     if (e.surface === 'terminal' || !dir || e.props.isSummary || !memoryPathIn().test(e.props.text)) return next(e)
     const { text, hrefs } = memoryLinked(e.props.text)
     if (!hrefs.length) return next(e)
-    const { Markdown } = $.ui.resolve(e)
+    const { Markdown } = uiOf($, e)
     return (
       <Markdown
         key={`memory-reply-${mark(e.requestId)}`}
@@ -2174,7 +2216,7 @@ const memoryHooks = (on: On) => {
   // A memory file opened as a tab of its own; the links in it to other memory files open there too
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (!e.requestId?.startsWith(MEMORY_PANE)) return next(e)
-    const { Box, Markdown, Text } = $.ui.resolve(e)
+    const { Box, Button, Markdown, Text } = uiOf($, e)
     const path = memoryPanes.get(e.requestId)
     if (!path) return <Text dimColor>Press the link in the chat again to open this file.</Text>
     const held = memoryText.get(e.requestId) ?? ''
@@ -2182,7 +2224,22 @@ const memoryHooks = (on: On) => {
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
         <Text dimColor wrap="wrap">{path}</Text>
-        {held ? (
+        {held && e.surface === 'terminal' ? (
+          // The terminal writes each link's whole address beside its words, and the keys cannot reach a link: there the words stand
+          // alone and each file linked is a button under the text, which Tab reaches
+          <Box key="memory-terminal" flexDirection="column" gap={1}>
+            {/^# [^\n]*\n\n(- \[[^\]]*\]\([^)]*\)\n?)+$/.test(held.trim() + '\n') ? null : <Markdown key={`memory-text-${e.requestId}`} text={text.replace(/\[([^\]]*)\]\((?:file:\/\/)?[^)]*\)/g, '$1')} />}
+            {(() => {
+              // Every memory file the text names, by a link of its own or by its path, once each
+              const named = [...new Set([...[...held.matchAll(/\]\(([^)\s]+)\)/g)].map(m => m[1] ?? ''), ...hrefs].map(href => memoryPressed(href)).filter(Boolean))].slice(0, 200)
+              return named.length ? (
+                <Box key="memory-links" flexDirection="column">
+                  {named.map(to => <Button key={`memory-link-${to}`} label={to.slice(dir.length + 1)} plain onPress={() => openMemory($, to)} />)}
+                </Box>
+              ) : null
+            })()}
+          </Box>
+        ) : held ? (
           <Markdown
             key={`memory-text-${e.requestId}`}
             text={text}
@@ -2328,7 +2385,7 @@ const openStats = async ($: EngineInterface) => {
 }
 const statsButton = ($: EngineInterface, ui: Ui) => (
   <ui.Box key="stats-button" flexShrink={0}>
-    <ui.Button key={`stats-open-${presses}`} label="Stats" onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
+    <ui.Button key={`stats-open-${presses}`} label="Stats" hotkey="s" onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
   </ui.Box>
 )
 
@@ -2348,7 +2405,7 @@ const openAbout = async ($: EngineInterface) => {
 }
 const aboutButton = ($: EngineInterface, ui: Ui) => (
   <ui.Box key="about-button" flexShrink={0}>
-    <ui.Button key={`about-open-${presses}`} label="About" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
+    <ui.Button key={`about-open-${presses}`} label="About" hotkey="a" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
   </ui.Box>
 )
 // The version this chat loaded, read once from its own copy, so a chat on an older copy shows its own number; and a newer one the
@@ -3099,7 +3156,7 @@ const largeOf = ($: EngineInterface, path: string, id: string): Large | undefine
 }
 // What the tab draws: the picture as wide as the tab, its name and size, and how to see it larger
 const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], path = pictureShown) => {
-  const ui = $.ui.resolve(e)
+  const ui = uiOf($, e)
   if (!path) return <ui.Text dimColor>Pictures now open large in the Details tab they are pressed in. This tab can be closed.</ui.Text>
   const name = fileName(path)
   const stat = await $.fs.stat(path).catch(() => undefined)
@@ -4025,14 +4082,15 @@ const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: nu
   if (screenSounded !== loaded) void playUpdated($, (screenSounded = loaded))
   const back = (key: string) => (
     <ui.Box key={key} flexDirection="row" flexWrap="wrap" gap={1} flexShrink={0}>
-      <ui.Button key={`${key}-close-${presses}`} label="Back to the panel" onPress={() => void closeScreen($, loaded).catch(err => log($, `update screen not closed: ${String(err)}`))} />
+      <ui.Button key={`${key}-close-${presses}`} label="Back to the panel" hotkey="b" onPress={() => void closeScreen($, loaded).catch(err => log($, `update screen not closed: ${String(err)}`))} />
       <ui.Button key={`${key}-log-${presses}`} label="Changelog" plain onPress={() => void openChangelog($).catch(err => log($, `changelog not opened: ${String(err)}`))} />
     </ui.Box>
   )
   const count = shown.length + left
   return (
-    <ui.Box key="update-screen" flexDirection="column" gap={1} flexGrow={1}>
-      <ui.Box key="update-head" flexDirection="column" alignItems="center" gap={1} backgroundColor={FILL} paddingX={2} paddingY={2} flexShrink={0}>
+    <ui.Box key="update-screen" flexDirection="column" gap={1} flexGrow={1} {...(surface === 'terminal' ? { width: '100%' } : {})}>
+      {/* The terminal leaves a column's rows as wide as what they hold, so there the head is made as wide as the panel to centre in it */}
+      <ui.Box key="update-head" flexDirection="column" alignItems="center" gap={1} backgroundColor={FILL} paddingX={2} paddingY={2} flexShrink={0} {...(surface === 'terminal' ? { width: '100%' } : {})}>
         {octopus(ui, 'update-mark', 'updated', UPDATE_MARK, `Claudopus, updated to ${loaded}`, $, { surface, requestId: LIST })}
         <ui.Text bold color={FLOW}>Claudopus updated</ui.Text>
         <ui.Text dimColor wrap="wrap">{`v${seen} → v${loaded}${count > 1 ? ` · ${count} versions` : ''}`}</ui.Text>
@@ -4262,7 +4320,10 @@ const askInChat = async ($: EngineInterface, one: Todo) => {
   // The person sees the ask as the mod's notice in the chat: a prompt the mod submitted would be drawn by the desktop app as the
   // person's own message, and a chat cannot send itself a message from another session. Its model reads the ask in a row of its
   // own, with how to pass an answer on; neither starts a turn
-  $.ui.log(named(ASK_IN_CHAT(titleOf(one), ask, answers)))
+  // The terminal draws a notice as one line and a line break in it as a broken character: there each line is a notice of its own
+  const notice = named(ASK_IN_CHAT(titleOf(one), ask, answers))
+  const surfaces = await $.session.surfaces().catch(() => [])
+  for (const line of surfaces.length && surfaces.every(s => s === 'terminal') ? notice.split('\n') : [notice]) $.ui.log(line)
   await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(ASK_RELAY(one.id, titleOf(one), ask, answers)) }] } }).catch(err => (inChat.get(one.id) === askKey(ask) && inChat.delete(one.id), log($, `chat not told of an ask: ${String(err)}`)))
 }
 // A line in the chat the person sees (the mod's notice, which the model never reads) and its model reads (a row the person does not
@@ -5478,7 +5539,7 @@ const chatHooks = (on: On) => {
     const choice = await followPanel($).catch(() => undefined)
     if (!choice && (isRunning || isWelcomeOpen)) await openList($)
     if (!choice && ((await read($, paneShown)) || isRunning) && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST))
-      await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => log($, `panel not opened again: ${String(err)}`))
+      await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => log($, `panel not opened again: ${String(err)}`))
     // Someone whose panel was open before chats shared it (as when this version is installed, which reloads every chat) has it
     // open in every chat from now on
     if (!choice && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)) await choosePanel($, true)
@@ -6082,7 +6143,7 @@ const commandHooks = (on: On) => {
   on('command.run', { command: 'claudopus' }, async $ => {
     await update($, me, one => ({ ...one, isListOpened: true }))
     await update($, paneShown, () => true)
-    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE })
+    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS })
     // Asked for where it can be drawn, it is open in every chat from now on
     if (opened.isPlaced) await choosePanel($, true)
 
@@ -6258,7 +6319,7 @@ const bandHooks = (on: On) => {
     if (happy) await read($, tick)
     if (!working.length && !happy) return next(e)
 
-    const ui = $.ui.resolve(e)
+    const ui = uiOf($, e)
     const { Box, Text } = ui
 
     // What the work that last said something is doing, in a few whole words: the to-do it is on (a to-do is written in a few
@@ -6294,7 +6355,7 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
-    const { Box, Button, Markdown, Text } = $.ui.resolve(e)
+    const { Box, Button, Markdown, Text } = uiOf($, e)
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
     if (large) {
@@ -6381,7 +6442,7 @@ const panelHooks = (on: On) => {
     // Where a piece of work is: the line it last wrote about itself
     const now = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')?.text ?? ''
 
-    const table = $.ui.resolve(e)
+    const table = uiOf($, e)
     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are
     // narrower than a cell, the terminal's are one each
     const room = Math.max(40, Math.floor((e.props.bodyColumns - 9) * (e.surface === 'terminal' ? 1.8 : 2.3)))
@@ -6854,7 +6915,7 @@ const panelHooks = (on: On) => {
     const talk = (one: Todo, lines: Line[] | undefined, shots: Map<number, Pic[]>) => {
       // The pictures a run of steps made, under its row whether it is open or not: each drawn small where the panel can, with
       // a row under it that opens it whole in a window of its own, large enough to look at; one that is gone is named
-      const drawing = $.ui.resolve(e)
+      const drawing = uiOf($, e)
       const picturesOfRun = (block: Line[], at: number) => {
         const made = block.flatMap(line => shots.get(line.at ?? -1) ?? [])
         if (!made.length) return null
@@ -7235,7 +7296,9 @@ const panelHooks = (on: On) => {
     const talked = alone ? talks.get(alone.id) : undefined
     // The reports kept, in every chat: on this pane only the button that opens their own
     const kept = await read($, reports)
-    const ui = $.ui.resolve(e)
+    const ui = uiOf($, e)
+    // A terminal too narrow to dock the panel seats it above the prompt, a few rows tall
+    const isInline = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
     // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and
     // work that just finished (happy too for a workflow in its pause whose card turned green: it finished and its last round passed)
     const runningThere = elsewhere.filter(one => one.status === 'working' && !one.ask)
@@ -7254,14 +7317,15 @@ const panelHooks = (on: On) => {
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
     return (
-      <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
+      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={e.props.scroll.bodyRows}>
         {!alone ? (
           // The mark and its lines across the whole width, so the chat's size is read whole; the buttons on a row of their own under
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off
-          <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+          <Box key="head" flexDirection="column" gap={isInline ? 0 : 1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
-              {/* Just moved to a newer version: the octopus turns blue and jumps for the moment */}
-              {updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
+              {/* Just moved to a newer version: the octopus turns blue and jumps for the moment. Above the prompt in a narrow terminal the
+                  panel is a few rows tall, so it keeps them for the work and leaves the octopus to the line above the prompt */}
+              {isInline ? null : updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
                 {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
@@ -7276,7 +7340,7 @@ const panelHooks = (on: On) => {
                   </Box>
                 )}
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
-                <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
+                {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>}
               </Box>
             </Box>
             <Box key="head-buttons" flexDirection="row" flexWrap="wrap" gap={1}>
@@ -7285,7 +7349,15 @@ const panelHooks = (on: On) => {
               {memoryButton($, ui)}
               {configButton($, ui)}
               {aboutButton($, ui)}
+              {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x Tab for keys</Text> : null}
             </Box>
+            {/* The terminal reaches a pane from the keys only after ctrl+x Tab, which nothing else tells; once it holds them each
+                button above answers its first letter */}
+            {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
+              <Text key="head-keys" dimColor wrap="wrap">
+                {e.props.isFocused ? 'Keys: r s m c a open a tab · Tab and Enter press · arrows scroll · Esc back to the chat' : 'ctrl+x Tab: use the panel from the keys'}
+              </Text>
+            ) : null}
           </Box>
         ) : null}
         {!alone ? boxesPart($, ui) : null}
@@ -7340,31 +7412,31 @@ const tabHooks = (on: On) => {
 
   // The reports, in a pane of their own
   on('ui.render', { component: 'Pane', requestId: REPORTS_PANE }, async ($, e) => {
-    const { Box } = $.ui.resolve(e)
+    const { Box } = uiOf($, e)
     const kept = await read($, reports)
     // What one row holds: the pane's cells less the block's padding. The app's letters are narrower than a cell
     const line = Math.max(24, Math.floor((e.props.bodyColumns - 8) * (e.surface === 'terminal' ? 1 : 1.25)))
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportsView($, $.ui.resolve(e), kept, await $.clock.now(), line)}
+        {reportsView($, uiOf($, e), kept, await $.clock.now(), line)}
       </Box>
     )
   })
 
   // Stats, in a pane of its own: drawn at once from what was read last, while the records are read again at most once a minute
   on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
-    const { Box } = $.ui.resolve(e)
+    const { Box } = uiOf($, e)
     void statsRead($, statsShown.scope).catch(() => undefined)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {statsView(() => $.ui.invalidate('ui.render'), $.ui.resolve(e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
+        {statsView(() => $.ui.invalidate('ui.render'), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
       </Box>
     )
   })
 
   // About, in a pane of its own
   on('ui.render', { component: 'Pane', requestId: CONFIG_PANE }, async ($, e) => {
-    const ui = $.ui.resolve(e)
+    const ui = uiOf($, e)
     return (
       <ui.Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
         {configView(ui, await configShown($), configActs($), band, presses, dir)}
@@ -7373,27 +7445,27 @@ const tabHooks = (on: On) => {
   })
 
   on('ui.render', { component: 'Pane', requestId: ABOUT_PANE }, async ($, e) => {
-    const { Box } = $.ui.resolve(e)
+    const { Box } = uiOf($, e)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {await aboutView($, $.ui.resolve(e), e.surface)}
+        {await aboutView($, uiOf($, e), e.surface)}
       </Box>
     )
   })
 
   // The changelog, in a pane of its own
   on('ui.render', { component: 'Pane', requestId: CHANGELOG_PANE }, async ($, e) => {
-    const { Box } = $.ui.resolve(e)
+    const { Box } = uiOf($, e)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {await changelogView($, $.ui.resolve(e), e.surface)}
+        {await changelogView($, uiOf($, e), e.surface)}
       </Box>
     )
   })
 
   // A picture opened large, in a chat the app runs on another Mac over ssh
   on('ui.render', { component: 'Pane', requestId: PICTURE_PANE }, async ($, e) => {
-    const { Box } = $.ui.resolve(e)
+    const { Box } = uiOf($, e)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
         {await pictureView($, e)}
@@ -7404,7 +7476,7 @@ const tabHooks = (on: On) => {
   // A report opened as a pane of its own, named after it
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (!e.requestId?.startsWith('report-')) return next(e)
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text } = uiOf($, e)
     const kept = await read($, reports)
     const r = kept.find(one => paneOf(one) === e.requestId)
     if (!r) return <Text dimColor>This result is no longer kept.</Text>
@@ -7416,7 +7488,7 @@ const tabHooks = (on: On) => {
     const cells = e.surface === 'terminal' && (RASTER.test(file) || /\.svg$/i.test(file)) ? await termPictureOf($, `${reportPath(r)}/${file}`, Math.max(8, Math.min(60, e.props.bodyColumns - 6))) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, $.ui.resolve(e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, cells)}
+        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, cells)}
       </Box>
     )
   })

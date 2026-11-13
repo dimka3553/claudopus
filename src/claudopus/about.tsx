@@ -14,7 +14,7 @@ const openAbout = async ($: EngineInterface) => {
 }
 const aboutButton = ($: EngineInterface, ui: Ui) => (
   <ui.Box key="about-button" flexShrink={0}>
-    <ui.Button key={`about-open-${presses}`} label="About" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
+    <ui.Button key={`about-open-${presses}`} label="About" hotkey="a" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
   </ui.Box>
 )
 // The version this chat loaded, read once from its own copy, so a chat on an older copy shows its own number; and a newer one the

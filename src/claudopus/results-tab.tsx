@@ -54,6 +54,23 @@ const front = async ($: EngineInterface, id: string, title: string) => {
   // other tab of the mod may be the one pressed in, so each is closed and opened again, in the order they stand. Elsewhere a
   // roster that says nothing has nothing drawn, and is left alone
   const before = await $.ui.panes()
+  // A terminal has one narrow row of tabs: every press opening a tab of its own crowded it past reading, and the panel, closed and
+  // opened again to let go of the keys, moved along it. There the panel stays first and one other tab is open beside it at a time
+  const surfaces = await $.session.surfaces().catch(() => [])
+  if (surfaces.length && surfaces.every(one => one === 'terminal')) {
+    for (const pane of before) if (pane.id !== LIST && pane.id !== id) await $.ui.close({ id: pane.id }).catch(() => undefined)
+    const list = before.find(pane => pane.id === LIST)
+    const was = before.find(pane => pane.id === id)
+    if (list?.isFocused || (was && !was.isShown)) {
+      if (was) await $.ui.close({ id }).catch(() => undefined)
+      if (list?.isFocused) {
+        await $.ui.close({ id: LIST }).catch(() => undefined)
+        await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => log($, `panel not opened again: ${String(err)}`))
+      }
+    }
+    await $.ui.open({ id, title, focus: true })
+    return
+  }
   const isBlind = isRunFromAfar && before.length > 0 && !before.some(pane => pane.isPlaced || pane.isShown || pane.isFocused)
   const holding = before.filter(pane => (isBlind || pane.isFocused) && pane.id !== id)
   if (isBlind) await log($, `front ${id}: the engine says no tab is shown or holding the keyboard; ${holding.length} other tabs closed and opened again first`)
@@ -197,7 +214,7 @@ const reportsButton = ($: EngineInterface, ui: Ui, all: Report[]) => {
   if (!list.length) return null
   return (
     <Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
+      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
     </Box>
   )
 }
