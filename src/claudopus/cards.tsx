@@ -35,9 +35,12 @@ const keepStoppedReports = async ($: EngineInterface, now: number) => {
 // Work that has ended, the oldest first, then work under way: what `capped` forgets first comes first
 const byEnd = (list: Todo[]) => [...list].sort((a, b) => (a.status === 'working' ? Infinity : a.endedAt) - (b.status === 'working' ? Infinity : b.endedAt) || 0)
 // The list is kept short by forgetting work that has ended, the oldest first; work under way, and work still asking, is never forgotten
+// Helpers are not counted: each is kept as long as the work it runs under, and goes with it
 const capped = (list: Todo[]) => {
-  let over = list.length - KEPT
-  return over > 0 ? list.filter(one => one.status === 'working' || Boolean(one.ask) || (over -= 1) < 0) : list
+  let over = list.filter(one => !one.parentId).length - KEPT
+  const kept = over > 0 ? list.filter(one => Boolean(one.parentId) || one.status === 'working' || Boolean(one.ask) || (over -= 1) < 0) : list
+  const tops = new Set(kept.filter(one => !one.parentId).map(one => one.id))
+  return kept.some(one => one.parentId && one.status !== 'working' && !tops.has(topOf(kept, one.id))) ? kept.filter(one => !one.parentId || one.status === 'working' || tops.has(topOf(kept, one.id))) : kept
 }
 
 // Stands for the work that started a helper when the engine does not say which it was
@@ -52,6 +55,47 @@ const topOf = (list: Todo[], id: string) => {
     at = one.parentId
   }
   return at
+}
+
+// ---- The helpers a piece of work started, and theirs, as a tree under it ----
+
+// What one piece of work started itself, the oldest first
+const kidsOf = (list: Todo[], id: string) => list.filter(one => one.parentId === id).sort((a, b) => a.startedAt - b.startedAt)
+// Every helper under a piece of work, however deep
+const underOf = (list: Todo[], id: string, depth = 1): Todo[] => (depth > TREE_DEEP ? [] : kidsOf(list, id).flatMap(one => [one, ...underOf(list, one.id, depth + 1)]))
+const TREE_DEEP = 8
+type Branch = { one: Todo; kids: Branch[] }
+// The helpers under a piece of work that `keep` picks, each with its own; one that is not picked stays while one under it is
+const branchesOf = (list: Todo[], id: string, keep: (one: Todo) => boolean, depth = 1): Branch[] =>
+  depth > TREE_DEEP ? [] : kidsOf(list, id).map(one => ({ one, kids: branchesOf(list, one.id, keep, depth + 1) })).filter(b => keep(b.one) || b.kids.length > 0)
+// One row of the tree: how deep it is, which of the levels above it still have a row to come (their line runs on past it),
+// whether it is the last under its parent, and whether rows of its own follow
+type Twig = { one?: Todo; depth: number; rails: boolean[]; isLast: boolean; hasKids: boolean }
+// The rows in the order they are drawn; `isMore` says a closing row follows the top level's last
+const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[] = []): Twig[] =>
+  branches.flatMap((b, i) => {
+    const isLast = i === branches.length - 1 && !isMore
+    return [{ one: b.one, depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
+  })
+// The lines that join a row to the tree, as text: its first line, then the lines under it. Each level is two letters wide; a
+// row's own helpers hang from the second
+const twigText = (t: Twig, line: number) =>
+  `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${line === 0 ? `${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}` : `${t.isLast ? '  ' : '│ '}${t.hasKids ? '│ ' : '  '}`}`
+// The same lines drawn thin, for a surface that draws: as tall as the row's lines of text
+const TWIG_STEP = 14
+const twigWidth = (t: Twig) => (t.rails.length + 2) * TWIG_STEP
+const twigSvg = (t: Twig, rows: number, line: number) => {
+  const height = rows * line
+  const mid = line / 2
+  const x = (level: number) => level * TWIG_STEP + TWIG_STEP / 2
+  const own = x(t.rails.length)
+  const paths = [
+    ...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${height}`] : [])),
+    `M${own} 0V${t.isLast ? mid : height}`,
+    `M${own} ${mid}H${twigWidth(t)}`,
+    ...(t.hasKids ? [`M${own + TWIG_STEP} ${mid}V${height}`] : []),
+  ]
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${height}" viewBox="0 0 ${twigWidth(t)} ${height}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/></svg>`
 }
 
 // Work the chat's own record was already looked through for
@@ -195,11 +239,13 @@ const finishedPath = (chatId: string) => `${dir}/finished/${chatId}.json`
 let finishedSaved = ''
 const saveFinished = async ($: EngineInterface) => {
   const { id } = await read($, me)
-  const ended = (await read($, todos)).filter(one => !one.parentId && one.status !== 'working')
+  // Its helpers are kept with it, so its Details still lists them after a reload
+  const all = await read($, todos)
+  const ended = all.filter(one => one.status !== 'working' && (!one.parentId || all.some(top => top.id === topOf(all, one.id) && !top.parentId && top.status !== 'working')))
   const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title].join(':')).join(',')
   if (!id || !dir || !ended.length || sign === finishedSaved) return
   const old = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
-  const kept = [...old.filter(one => !ended.some(card => card.id === one.id)), ...ended].sort((a, b) => a.endedAt - b.endedAt).slice(-KEPT)
+  const kept = capped([...old.filter(one => !ended.some(card => card.id === one.id)), ...ended].sort((a, b) => a.endedAt - b.endedAt))
   await $.fs.write(`${dir}/finished/${id}.json`, JSON.stringify(kept))
   finishedSaved = sign
 }

@@ -507,9 +507,12 @@ const keepStoppedReports = async ($: EngineInterface, now: number) => {
 // Work that has ended, the oldest first, then work under way: what `capped` forgets first comes first
 const byEnd = (list: Todo[]) => [...list].sort((a, b) => (a.status === 'working' ? Infinity : a.endedAt) - (b.status === 'working' ? Infinity : b.endedAt) || 0)
 // The list is kept short by forgetting work that has ended, the oldest first; work under way, and work still asking, is never forgotten
+// Helpers are not counted: each is kept as long as the work it runs under, and goes with it
 const capped = (list: Todo[]) => {
-  let over = list.length - KEPT
-  return over > 0 ? list.filter(one => one.status === 'working' || Boolean(one.ask) || (over -= 1) < 0) : list
+  let over = list.filter(one => !one.parentId).length - KEPT
+  const kept = over > 0 ? list.filter(one => Boolean(one.parentId) || one.status === 'working' || Boolean(one.ask) || (over -= 1) < 0) : list
+  const tops = new Set(kept.filter(one => !one.parentId).map(one => one.id))
+  return kept.some(one => one.parentId && one.status !== 'working' && !tops.has(topOf(kept, one.id))) ? kept.filter(one => !one.parentId || one.status === 'working' || tops.has(topOf(kept, one.id))) : kept
 }
 
 // Stands for the work that started a helper when the engine does not say which it was
@@ -524,6 +527,47 @@ const topOf = (list: Todo[], id: string) => {
     at = one.parentId
   }
   return at
+}
+
+// ---- The helpers a piece of work started, and theirs, as a tree under it ----
+
+// What one piece of work started itself, the oldest first
+const kidsOf = (list: Todo[], id: string) => list.filter(one => one.parentId === id).sort((a, b) => a.startedAt - b.startedAt)
+// Every helper under a piece of work, however deep
+const underOf = (list: Todo[], id: string, depth = 1): Todo[] => (depth > TREE_DEEP ? [] : kidsOf(list, id).flatMap(one => [one, ...underOf(list, one.id, depth + 1)]))
+const TREE_DEEP = 8
+type Branch = { one: Todo; kids: Branch[] }
+// The helpers under a piece of work that `keep` picks, each with its own; one that is not picked stays while one under it is
+const branchesOf = (list: Todo[], id: string, keep: (one: Todo) => boolean, depth = 1): Branch[] =>
+  depth > TREE_DEEP ? [] : kidsOf(list, id).map(one => ({ one, kids: branchesOf(list, one.id, keep, depth + 1) })).filter(b => keep(b.one) || b.kids.length > 0)
+// One row of the tree: how deep it is, which of the levels above it still have a row to come (their line runs on past it),
+// whether it is the last under its parent, and whether rows of its own follow
+type Twig = { one?: Todo; depth: number; rails: boolean[]; isLast: boolean; hasKids: boolean }
+// The rows in the order they are drawn; `isMore` says a closing row follows the top level's last
+const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[] = []): Twig[] =>
+  branches.flatMap((b, i) => {
+    const isLast = i === branches.length - 1 && !isMore
+    return [{ one: b.one, depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
+  })
+// The lines that join a row to the tree, as text: its first line, then the lines under it. Each level is two letters wide; a
+// row's own helpers hang from the second
+const twigText = (t: Twig, line: number) =>
+  `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${line === 0 ? `${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}` : `${t.isLast ? '  ' : '│ '}${t.hasKids ? '│ ' : '  '}`}`
+// The same lines drawn thin, for a surface that draws: as tall as the row's lines of text
+const TWIG_STEP = 14
+const twigWidth = (t: Twig) => (t.rails.length + 2) * TWIG_STEP
+const twigSvg = (t: Twig, rows: number, line: number) => {
+  const height = rows * line
+  const mid = line / 2
+  const x = (level: number) => level * TWIG_STEP + TWIG_STEP / 2
+  const own = x(t.rails.length)
+  const paths = [
+    ...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${height}`] : [])),
+    `M${own} 0V${t.isLast ? mid : height}`,
+    `M${own} ${mid}H${twigWidth(t)}`,
+    ...(t.hasKids ? [`M${own + TWIG_STEP} ${mid}V${height}`] : []),
+  ]
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${height}" viewBox="0 0 ${twigWidth(t)} ${height}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/></svg>`
 }
 
 // Work the chat's own record was already looked through for
@@ -667,11 +711,13 @@ const finishedPath = (chatId: string) => `${dir}/finished/${chatId}.json`
 let finishedSaved = ''
 const saveFinished = async ($: EngineInterface) => {
   const { id } = await read($, me)
-  const ended = (await read($, todos)).filter(one => !one.parentId && one.status !== 'working')
+  // Its helpers are kept with it, so its Details still lists them after a reload
+  const all = await read($, todos)
+  const ended = all.filter(one => one.status !== 'working' && (!one.parentId || all.some(top => top.id === topOf(all, one.id) && !top.parentId && top.status !== 'working')))
   const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title].join(':')).join(',')
   if (!id || !dir || !ended.length || sign === finishedSaved) return
   const old = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
-  const kept = [...old.filter(one => !ended.some(card => card.id === one.id)), ...ended].sort((a, b) => a.endedAt - b.endedAt).slice(-KEPT)
+  const kept = capped([...old.filter(one => !ended.some(card => card.id === one.id)), ...ended].sort((a, b) => a.endedAt - b.endedAt))
   await $.fs.write(`${dir}/finished/${id}.json`, JSON.stringify(kept))
   finishedSaved = sign
 }
@@ -4748,7 +4794,9 @@ const panelHooks = (on: On) => {
       $.clock.after(LINGER + 20, () => void update($, tick, n => n + 1))
     }
     const { isFinishedOpen = false } = await read($, view)
-    const own = (await read($, todos)).filter(one => !one.parentId)
+    // Every piece of work this chat keeps; its own are the ones the chat's thread started, the rest are their helpers
+    const all = await read($, todos)
+    const own = all.filter(one => !one.parentId)
     // The work of the other chats, by chat; an ask answered here leaves its card at once
     const otherChats = await read($, others)
     const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
@@ -4915,6 +4963,94 @@ const panelHooks = (on: On) => {
       )
     }
 
+    // ---- The helpers a piece of work started, under it as a tree: each a slim row joined to its parent by a line ----
+    // A helper is two rows: its name, then its model and time. A helper's own helper is one row: its name and time. Each
+    // opens its own Details. How it stands is its mark: the dots while it works, a tick, a cross or a square once it ended
+    const twigMark = (one: Todo, key: string) => (
+      <Box flexShrink={0} width={3}>
+        {one.status === 'working' ? live(key) : <Text color={one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status === 'stopped'}>{one.status === 'done' ? '✓' : one.status === 'failed' ? '✕' : '■'}</Text>}
+      </Box>
+    )
+    const twigLines = (t: Twig, rows: number, key: string) =>
+      'Svg' in table && e.surface !== 'terminal' ? (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, rows, LINE)} alt="" width={twigWidth(t)} height={rows * LINE} />
+        </Box>
+      ) : (
+        <Box key={key} flexDirection="column" flexShrink={0}>
+          {Array.from({ length: rows }, (_, line) => (
+            <Text key={`${key}-${line}`} dimColor>{twigText(t, line)}</Text>
+          ))}
+        </Box>
+      )
+    const twigRow = (t: Twig, scope: string) => {
+      const one = t.one
+      if (!one) return null
+      const rows = t.depth === 1 ? 2 : 1
+      const time = took((one.endedAt || at) - one.startedAt)
+      return (
+        <Box key={`twig-${scope}-${one.id}`} flexDirection="row" height={rows} overflow="hidden" flexShrink={0}>
+          {twigLines(t, rows, `twig-lines-${scope}-${one.id}`)}
+          <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} paddingLeft={1}>
+            <Box flexDirection="row" alignItems="flex-start" gap={1} height={1} overflow="hidden">
+              {twigMark(one, `twig-live-${scope}-${one.id}`)}
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                <Text wrap="truncate-end" dimColor={one.status !== 'working'}>{titleOf(one)}</Text>
+              </Box>
+              {rows === 1 ? (
+                <Box flexShrink={0}>
+                  <Text dimColor>{time}</Text>
+                </Box>
+              ) : null}
+              <Box flexShrink={0}>
+                <Button key={`open-${scope}-${one.id}-${presses}`} label="Details" plain dimColor hover={{ scope: `twig-${scope}-${one.id}`, underline: true }} onPress={() => openWork($, one.id)} />
+              </Box>
+            </Box>
+            {rows === 2 ? (
+              <Box flexDirection="row" height={1} overflow="hidden">
+                <Box width={4} flexShrink={0} />
+                <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                  <Text dimColor wrap="truncate-end">{[{ working: '', done: 'Finished', stopped: 'Stopped', failed: 'Error' }[one.status], modelName(one.model ?? ''), time].filter(Boolean).join(' · ')}</Text>
+                </Box>
+              </Box>
+            ) : null}
+          </Box>
+        </Box>
+      )
+    }
+    // Under a small card: the helpers at work now or just ended, and any that one of those runs under; the rest are one closing
+    // row that says how many have ended, which opens the card's Details, where every helper is listed
+    const treeUnder = (one: Todo) => {
+      const under = underOf(all, one.id)
+      if (!under.length) return []
+      const branches = branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at))
+      const twigs = twigsOf(branches, true)
+      const rest = under.length - twigs.length
+      if (!rest) return twigsOf(branches).map(t => twigRow(t, 'list'))
+      const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
+      return [
+        ...twigs.map(t => twigRow(t, 'list')),
+        <Box key={`twig-rest-${one.id}`} flexDirection="row" height={1} overflow="hidden" flexShrink={0}>
+          {twigLines(closing, 1, `twig-rest-lines-${one.id}`)}
+          <Box paddingLeft={1} flexShrink={1} minWidth={0}>
+            <Button key={`open-rest-${one.id}-${presses}`} label={`${rest} ${rest === 1 ? 'helper' : 'helpers'} ended`} plain dimColor hover={{ scope: `twig-rest-${one.id}`, underline: true }} onPress={() => openWork($, one.id)} />
+          </Box>
+        </Box>,
+      ]
+    }
+    // A small card with its tree: the rows hang straight under it, with no gap, a little in from its edge
+    const smallWithTree = (one: Todo) => {
+      const rows = treeUnder(one)
+      return rows.length ? (
+        <Box key={`tree-${one.id}`} flexDirection="column" flexShrink={0}>
+          {small(one)}
+          <Box flexDirection="column" paddingLeft={1} paddingRight={2}>{rows}</Box>
+        </Box>
+      ) : (
+        small(one)
+      )
+    }
+
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----
     const flowMine = await sessionName($)
     const flowList = (await read($, flows)).filter(f => isFlowShown(f, flowMine))
@@ -5039,7 +5175,7 @@ const panelHooks = (on: On) => {
 
     // The work this Details tab is for, if it is one; a workflow's tab folds each of its agents' chats apart
     const flowOpen = flowShown ? pickedOf(flowShown) : undefined
-    const workId = paneId === LIST ? '' : flowShown ? `${flowShown.id}:${flowOpen?.id ?? ''}` : ([...own, ...elsewhere].find(one => workPaneOf(one.id) === paneId)?.id ?? '')
+    const workId = paneId === LIST ? '' : flowShown ? `${flowShown.id}:${flowOpen?.id ?? ''}` : ([...all, ...elsewhere].find(one => workPaneOf(one.id) === paneId)?.id ?? '')
     // What is unfolded in this tab: runs of tool steps and long messages by number, and the parts named by OPEN_ASK and the rest
     const open = folds.get(workId) ?? []
     const fold = (at: number) => {
@@ -5154,6 +5290,19 @@ const panelHooks = (on: On) => {
             </Box>
           ) : null}
         </Box>,
+      )
+    }
+
+    // In Details: every helper the work started, and theirs, at work or ended, as the same tree; each opens its own Details
+    const helpersPart = (one: Todo) => {
+      const under = underOf(all, one.id)
+      if (!under.length) return null
+      const running = under.filter(kid => kid.status === 'working').length
+      return part(
+        'part-helpers',
+        'Helpers',
+        running ? `${running} at work · ${under.length} in all` : `${under.length} in all`,
+        <Box flexDirection="column">{twigsOf(branchesOf(all, one.id, () => true)).map(t => twigRow(t, 'details'))}</Box>,
       )
     }
 
@@ -5282,6 +5431,7 @@ const panelHooks = (on: On) => {
     // buttons sit at the top, above a chat of any length
     const big = (one: Todo, lines: Line[] | undefined) => {
       const showing = lines ? newest(lines).length : 0
+      const parent = one.parentId ? all.find(card => card.id === one.parentId) : undefined
       return (
         <Box key={`todo-${one.id}`} flexDirection="column" gap={1} flexGrow={1}>
           <Box key="part-head" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
@@ -5291,6 +5441,11 @@ const panelHooks = (on: On) => {
                 <Text bold wrap="wrap">{titleOf(one)}</Text>
                 {facts(one, true)}
               </Box>
+              {parent ? (
+                <Box flexDirection="row" alignItems="flex-start">
+                  <Button key={`open-parent-${one.id}-${presses}`} label={`↑ A helper of: ${cut(titleOf(parent), Math.max(20, room - 16))}`} plain dimColor hover={{ scope: `parent-${one.id}`, underline: true }} onPress={() => openWork($, parent.id)} />
+                </Box>
+              ) : null}
               {one.chat ? <Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat, selfName()) ? `, ${chatSide(one.chat, selfName())}` : ''}`}</Text> : null}
               {(one.status === 'working' && !one.chat) || left(one) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
@@ -5315,6 +5470,7 @@ const panelHooks = (on: On) => {
           ) : null}
           {one.words ? askPart(one) : null}
           {todoPart(one)}
+          {helpersPart(one)}
           {one.chat
             ? part('part-chat', 'Its chat', '', theirChat(one, one.chat))
             : part('part-chat', 'Its chat', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading its chat…</Text>)}
@@ -5525,7 +5681,7 @@ const panelHooks = (on: On) => {
     }
 
     // A Details tab stays, even once its work has ended, until it is closed; work no longer kept says so
-    const alone = [...own, ...elsewhere].find(one => one.id === workId)
+    const alone = [...all, ...elsewhere].find(one => one.id === workId)
     if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This work has ended, or its chat is closed. Its chat keeps it.' : 'This work is no longer kept.'}</Text>
     // Its chat and pictures are read outside the drawing, which draws at once from what was read last: a long chat takes seconds to
     // read, and a drawing that waits on it is never shown
@@ -5585,7 +5741,7 @@ const panelHooks = (on: On) => {
               // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
               ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...waiting.map(p => promptCard(p, `this-${p.id}`, 'Answer it in this chat')),
-              ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => smallWithTree(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, those that wait on the person first
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))

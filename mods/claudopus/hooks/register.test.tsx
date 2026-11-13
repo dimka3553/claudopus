@@ -575,7 +575,7 @@ test('what I ask for becomes a box in the panel, the panel opens once, and the c
 })
 
 test('a small card shows where the work is and a count of its to-dos; pressed, it lists every to-do; ended work leaves the panel', async ($, on) => {
-  const { logged, clock, files } = world(on)
+  const { logged, clock, files, opened } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
@@ -654,7 +654,24 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect(prompts.at(-1)).toBe('search')
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 't', agentId: 'a2', text: 'I am reading how the other model draws outlines.' } as never)
   expect((await pane.find({ type: 'Text', text: /^I am reading/ }))?.text).toBe('I am reading how the other model draws outlines.')
-  expect(await pane.find({ type: 'Text', text: /Search the docs/ })).toBeUndefined()
+  // It hangs under that card as a slim row of its own: its name on one line that is cut at the edge, where it stands under it, joined to the card by a line
+  expect((await pane.find({ type: 'Text', text: /Search the docs/ }))?.props.wrap).toBe('truncate-end')
+  expect((await pane.find({ type: 'Text', text: /Search the docs/ }))?.props.bold).toBeUndefined()
+  expect((await pane.findAll({ type: 'Svg' })).filter(svg => String(svg.props.source).includes('M7 0V10M7 10H28'))).toHaveLength(1)
+  const plain = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  expect((await plain.find({ type: 'Text', text: /^└─/ }))?.text).toBe('└───')
+  await plain.unmount()
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label).filter(label => label === 'Details')).toHaveLength(2)
+  // Pressed, the helper's own Details opens as a tab of its own, which names the work it helps and leads to it
+  await pressed(pane, 'open-list-a2')
+  expect(await until(async () => opened.includes('work-a2') || undefined)).toBe(true)
+  const helperTab = await $.ui.mount({ ...LIST, requestId: 'work-a2', surface: 'desktop' } as never)
+  expect((await helperTab.find({ type: 'Text', text: /Search the docs/ }))?.props.bold).toBe(true)
+  expect((await keyed(helperTab, 'open-parent-a2'))?.props.label).toBe('↑ A helper of: Fix the nose')
+  await helperTab.unmount()
+  // and the work's own Details lists it under Helpers
+  expect((await tab.find({ type: 'Text', text: /^Helpers$/ }))?.props.bold).toBe(true)
+  expect((await tab.find({ type: 'Text', text: /at work · / }))?.text).toBe('1 at work · 1 in all')
 
   // Work that ends its turn to wait for its helper goes on working
   await clock.advance(120_000)
@@ -673,7 +690,8 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Details'])
+  // Its helper, ended in the same moment, stays under it for the same pause
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Details', 'Details'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeDefined()
   await clock.advance(1_100)
@@ -695,7 +713,8 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   await ended.unmount()
   expect(files.get(`${MEMORY}/finished/engine-id.json`) ?? '').toBe('')
   await clock.advance(20_000)
-  expect(JSON.parse(files.get(`${MEMORY}/finished/engine-id.json`) ?? '[]').map((one: { id: string }) => one.id)).toEqual(['a1'])
+  // kept with its helper, so its Details still lists it after a reload
+  expect(JSON.parse(files.get(`${MEMORY}/finished/engine-id.json`) ?? '[]').map((one: { id: string }) => one.id)).toEqual(['a1', 'a2'])
   await pane.unmount()
 
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
@@ -1205,6 +1224,49 @@ test('work that ended before the mod kept it is read back from the chat\'s own r
   expect((await pane.find({ type: 'Text', text: /^Finished ·/ }))?.text).toBe('Finished · Opus 5.5 · context 1.0k · 5m 00s')
   expect(await pane.find({ type: 'Text', text: /secret|not ours|helper/ })).toBeUndefined()
   await pane.unmount()
+})
+
+test('helpers hang under their work as a tree, a helper of a helper slimmer still; ended ones fold into one row, and Details lists every one', async ($, on) => {
+  const { clock, opened } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  const helper = (description: string, parentAgentId: string) => $.agent.spawn({ subagentType: 'general-purpose', background: true, description, prompt: 'go', parentAgentId } as never)
+  await helper('Measure the nose', 'a1')
+  await clock.advance(1_000)
+  await helper('Read the manual', 'a2')
+  await clock.advance(1_000)
+  await helper('Read the appendix', 'a2')
+  await clock.advance(1_000)
+  await helper('Measure the ears', 'a1')
+
+  const pane = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  const lines = async () => (await pane.findAll({ type: 'Text' })).map(one => one.text).filter(text => /^[│├└┬─ ]{4,}$/.test(text))
+  // Each helper is joined to the row above it; a helper is two rows, its own helper one
+  expect(await lines()).toEqual(['├─┬─', '│ │ ', '│ ├───', '│ └───', '└───', '    '])
+  // Only what the chat started is a card
+  expect((await pane.findAll({ type: 'Text' })).filter(one => one.props.bold && /nose|ears|manual|appendix/.test(one.text)).map(one => one.text)).toEqual(['Fix the nose'])
+  // A helper says its time under its name; its own helper has its time beside its name, and no row under it
+  expect((await pane.findAll({ type: 'Text', text: /^\ds$/ })).map(one => one.text)).toEqual(['3s', '3s', '2s', '1s', '0s'])
+  // Each opens its own Details
+  await pressed(pane, 'open-list-a4')
+  expect(await until(async () => opened.includes('work-a4') || undefined)).toBe(true)
+
+  // A helper that ended leaves the tree after its pause; one that still has a helper at work stays to hold it
+  await $.turn.complete({ answer: 'Read.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a3' } as never)
+  await $.turn.complete({ answer: 'Measured.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a5' } as never)
+  await clock.advance(2_100)
+  expect(await lines()).toEqual(['├─┬─', '│ │ ', '│ └───', '└───'])
+  expect((await keyed(pane, 'open-rest-a1'))?.props.label).toBe('2 helpers ended')
+  expect(await pane.find({ type: 'Text', text: /Measure the ears|Read the manual/ })).toBeUndefined()
+  await pane.unmount()
+
+  // The work's Details lists every helper, ended or not, as the same tree
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'terminal' } as never)
+  expect((await tab.find({ type: 'Text', text: / in all$/ }))?.text).toBe('2 at work · 4 in all')
+  expect((await tab.findAll({ type: 'Text' })).map(one => one.text).filter(text => /manual|appendix|Measure/.test(text))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
+  expect(await keyed(tab, 'open-details-a3')).toBeDefined()
+  await tab.unmount()
 })
 
 // Finished work: the happy green octopus and its pause
