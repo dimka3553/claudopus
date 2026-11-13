@@ -1,0 +1,12 @@
+- In the terminal the panel no longer sits on solid grey bars: the app's faint tint, which a terminal cannot draw see-through, is left out, so cards, Stats, Config, Results, About and the Changelog read clearly on dark and light themes and over ssh.
+- In the terminal a question from work is shown above the prompt with its answers numbered: typing the number in an empty prompt answers it, with no need to reach the panel first.
+- In the terminal every button that has a key shows it: r Results, s Stats, m Memory, c Config, a About, f Finished, a number for each card and each result, and p in every tab to go back to the panel. ctrl+x Tab gives the panel the keys, Esc goes back to the chat.
+- In the terminal the octopus is small, three rows beside the header's three lines: at rest, paddling at work, amber with a hand up when something waits, cheering green when work finishes, waving in About and jumping blue on the update screen; a tiny one sits above the prompt while work runs.
+- In the terminal a switch such as On and Off marks the one in force with a filled dot instead of a grey box.
+- In the terminal the pictures work made are drawn in their colours in Details, in Results and when opened, twice as sharp across as before, in every terminal and over ssh; under a picture z zooms in and w a s d move over it, so small things in it can be read.
+- In a narrow terminal, where the panel sits above the prompt once you type /claudopus, its header is two lines so the work's cards show, and the line above the prompt says how to bring the panel up.
+- In the terminal one tab opens beside the panel at a time and the panel stays first, instead of every press adding a tab until their names were cut off.
+- In a terminal or a chat run over ssh, Memory opens the memory folder as a tab of the panel, each file a button, instead of Finder on a Mac you may not be looking at.
+- Stats draws its timeline in the terminal, as coloured blocks, and its labels are no longer cut short.
+- An ask's notice in the terminal chat no longer shows a broken character between the question and its answers.
+- In the terminal a running card's three dots and a working helper's dot move, as they do in the app.

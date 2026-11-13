@@ -1997,7 +1997,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
 // A report opened in its own pane: what it is and when; the question it waits on, with its answers; what it found; its pictures,
 // with the one press that opens them all; the report itself; then how to carry on from it, and the other rounds of its work
 type Thumb = { source: string; width: number; height: number } | null
-const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, cells?: Cells | null) => {
+const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, cells?: Cells | null, paneId = '') => {
   const { Box, Button, Markdown, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   // The other rounds of its work first, as the list shows them as one row; then what it started from or started, and the subject's others
@@ -2060,6 +2060,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
             <Box flexDirection="column" gap={1}>
               {thumb && table.Svg ? <table.Svg key={`report-picture-${r.id}-${at}`} source={thumb.source} alt={pictures[at]?.file ?? 'Picture'} /> : null}
               {cells ? termPicture(ui, `report-cells-${r.id}-${at}`, cells, pictures[at]?.file ?? 'Picture') : null}
+              {cells !== null && 'isTerminal' in ui && paneId ? termZoomKeys(ui, $, paneId) : null}
               {/* Shown here, never handed to another app: that would take the person out of Claude and switch their desktop. Where the
                   picture cannot be drawn, its path is given as text */}
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
@@ -3011,7 +3012,28 @@ const bmpPixels = (bytes: Uint8Array) => {
   }
   return { width, height, px }
 }
-const makeTermPicture = async ($: EngineInterface, path: string, columns: number): Promise<Cells | null> => {
+// How far a picture is zoomed in where it is drawn (a tab), and which part shows: a terminal's picture is a few pixels a cell, so
+// what is small in it is read by zooming, twice or four times, and moving over it a quarter at a time
+type Zoom = { zoom: number; x: number; y: number }
+const WHOLE: Zoom = { zoom: 1, x: 0, y: 0 }
+const termZooms = new Map<string, Zoom>()
+const zoomOf = (id: string) => termZooms.get(id) ?? WHOLE
+// The keys under a picture: z zooms in, twice, then back to the whole; zoomed, w a s d move over it
+const termZoomKeys = (ui: Ui, $: EngineInterface, id: string) => {
+  const now = zoomOf(id)
+  const set = (next: Zoom) => (termZooms.size > 50 && termZooms.clear(), termZooms.set(id, next), $.ui.invalidate('ui.render'))
+  const edge = (n: number) => Math.min(1, Math.max(0, n))
+  const move = (key: string, label: string, dx: number, dy: number) => (
+    <ui.Button key={`zoom-${key}-${id}`} label={label} plain hotkey={key} onPress={() => set({ ...now, x: edge(now.x + dx / (now.zoom * 2 - 2)), y: edge(now.y + dy / (now.zoom * 2 - 2)) })} />
+  )
+  return (
+    <ui.Box key={`zoom-${id}`} flexDirection="row" flexWrap="wrap" columnGap={2}>
+      <ui.Button key={`zoom-z-${id}`} label={now.zoom === 1 ? 'Zoom in' : now.zoom === 2 ? 'Zoom in more' : 'Whole picture'} plain hotkey="z" onPress={() => set(now.zoom >= 4 ? WHOLE : { ...now, zoom: now.zoom * 2 })} />
+      {now.zoom > 1 ? [move('w', 'Up', 0, -1), move('a', 'Left', -1, 0), move('s', 'Down', 0, 1), move('d', 'Right', 1, 0)] : null}
+    </ui.Box>
+  )
+}
+const makeTermPicture = async ($: EngineInterface, path: string, columns: number, view: Zoom = WHOLE): Promise<Cells | null> => {
   const said = (await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path]).catch(() => ({ stdout: '' }))).stdout
   const width = Number(/pixelWidth:\s*(\d+)/.exec(said)?.[1] ?? 0)
   const height = Number(/pixelHeight:\s*(\d+)/.exec(said)?.[1] ?? 0)
@@ -3026,30 +3048,39 @@ const makeTermPicture = async ($: EngineInterface, path: string, columns: number
   const out = `${dir}/thumbs/term-${Math.random().toString(36).slice(2, 10)}.bmp`
   try {
     await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
-    const made = await $.process.run(['sips', '-z', String(h), String(w), '-s', 'format', 'bmp', path, '--out', out])
+    // Zoomed, the picture is made that many times larger (never larger than it is, nor than 2048 across) and the part shown cut
+    // out of it, the same box of cells
+    const zoom = Math.max(1, Math.min(view.zoom, width / w, 2048 / w))
+    const [bigW, bigH] = [Math.round(w * zoom), Math.round(h * zoom)]
+    const made = await $.process.run(['sips', '-z', String(bigH), String(bigW), '-s', 'format', 'bmp', path, '--out', out])
     if (made.exitCode !== 0) return null
     const read = (await $.fs.read(out, { as: 'bytes' })) as { base64: string }
     const pic = bmpPixels(fromBase64(read.base64))
-    return pic ? quarterBlocks(pic.px, pic.width, pic.height) : null
+    if (!pic) return null
+    if (pic.width <= w && pic.height <= h) return quarterBlocks(pic.px, pic.width, pic.height)
+    const [fromX, fromY] = [Math.round(view.x * (pic.width - w)), Math.round(view.y * (pic.height - h))]
+    const part = new Array<number>(w * h)
+    for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) part[y * w + x] = pic.px[(y + fromY) * pic.width + x + fromX] ?? -1
+    return quarterBlocks(part, w, h)
   } finally {
     await $.process.run(['rm', '-f', out]).catch(() => undefined)
   }
 }
 // The cells of a picture as wide as the cells given, else nothing yet (being made) or null (it cannot be)
-const termPictureOf = async ($: EngineInterface, path: string, columns: number): Promise<Cells | null | undefined> => {
+const termPictureOf = async ($: EngineInterface, path: string, columns: number, view: Zoom = WHOLE): Promise<Cells | null | undefined> => {
   const stat = await $.fs.stat(path).catch(() => undefined)
   if (!stat || stat.kind !== 'file') return null
-  return termPictureNow($, path, columns, String(stat.mtimeMs))
+  return termPictureNow($, path, columns, String(stat.mtimeMs), view)
 }
 // The same for a drawing that cannot wait, by a mark of the file's version it was given: what is made, or it is begun
-const termPictureNow = ($: EngineInterface, path: string, columns: number, version: string): Cells | null | undefined => {
-  const id = `${path}:${version}:${columns}`
+const termPictureNow = ($: EngineInterface, path: string, columns: number, version: string, view: Zoom = WHOLE): Cells | null | undefined => {
+  const id = `${path}:${version}:${columns}:${view.zoom}:${view.x}:${view.y}`
   if (termPictures.has(id)) return termPictures.get(id) ?? null
   if (!termMaking.has(id)) {
     termMaking.add(id)
     // Made from a timer, not from the drawing: what a drawing starts is cut off once it is drawn again
     $.clock.after(0, () =>
-      void makeTermPicture($, path, columns)
+      void makeTermPicture($, path, columns, view)
         .catch(err => (void log($, `terminal picture of ${path} not made: ${String(err)}`), null))
         .then(cells => {
           if (termPictures.size >= 30) termPictures.delete(termPictures.keys().next().value ?? '')
@@ -3246,12 +3277,13 @@ const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui
   if (!stat || stat.kind !== 'file') return said('This picture is no longer kept.')
   if (e.surface === 'terminal') {
     // The terminal draws it as cells as wide as the tab
-    const cells = await termPictureOf($, path, Math.max(8, Math.min(160, Number((e as { props?: { bodyColumns?: number } }).props?.bodyColumns ?? 60) - 2)))
+    const cells = await termPictureOf($, path, Math.max(8, Math.min(160, Number((e as { props?: { bodyColumns?: number } }).props?.bodyColumns ?? 60) - 2)), zoomOf((e as { requestId?: string }).requestId ?? ''))
     if (cells === null) return said(`This picture could not be drawn here. It is at ${path}`)
     return (
       <ui.Box flexDirection="column" gap={1} width="100%">
         <ui.Text bold wrap="wrap">{name}</ui.Text>
         {termPicture(ui, 'large-cells', cells, 'Picture')}
+        {termZoomKeys(ui, $, (e as { requestId?: string }).requestId ?? '')}
         <ui.Text dimColor wrap="wrap">{path}</ui.Text>
       </ui.Box>
     )
@@ -6600,6 +6632,9 @@ const panelHooks = (on: On) => {
     // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button, then
     // the same three ways to answer on every ask, on the small card as in Details: the work's own buttons, or Done and Not now when
     // it gave none, and a box for a reply in the person's own words. The list's times stand still while the person types (holdTimes)
+    // In the terminal the first ask's reply box holds the keys as the panel takes them: what is typed then is the person's words,
+    // never a button's letter, and Tab leaves it for the buttons and their keys
+    let askFocused = false
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
@@ -6632,6 +6667,7 @@ const panelHooks = (on: On) => {
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}`}
+                autoFocus={e.surface === 'terminal' && !askFocused ? ((askFocused = true), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={drafts.get(one.id) ?? ''}
                 submitLabel="send"
@@ -7454,9 +7490,9 @@ const panelHooks = (on: On) => {
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
-    // A letter for each header button, in the terminal alone, and only while the panel has no box to type in (an ask's reply, a
-    // password): there the letters are the person's words, never a press
-    const isKeyed = e.surface === 'terminal' && !head.asks
+    // A letter for each header button, in the terminal alone, and only while the panel has no password box to type in: there the
+    // letters are the person's words, never a press. An ask's reply box takes the keys itself (askFocused)
+    const isKeyed = e.surface === 'terminal' && !boxes.length
     keyed = isKeyed
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
@@ -7491,7 +7527,7 @@ const panelHooks = (on: On) => {
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>}
               </Box>
             </Box>
-            <Box key="head-buttons" flexDirection="row" flexWrap="wrap" gap={1}>
+            <Box key="head-buttons" flexDirection="row" flexWrap="wrap" columnGap={isKeyed ? 2 : 1} rowGap={0}>
               {reportsButton($, ui, kept, isKeyed)}
               {statsButton($, ui, isKeyed)}
               {memoryButton($, ui, isKeyed)}
@@ -7633,10 +7669,10 @@ const tabHooks = (on: On) => {
     const file = r.files[at] ?? ''
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
     // The terminal draws it as cells, as wide as the band it is in
-    const cells = e.surface === 'terminal' && (RASTER.test(file) || /\.svg$/i.test(file)) ? await termPictureOf($, `${reportPath(r)}/${file}`, Math.max(8, Math.min(160, e.props.bodyColumns - 4))) : null
+    const cells = e.surface === 'terminal' && (RASTER.test(file) || /\.svg$/i.test(file)) ? await termPictureOf($, `${reportPath(r)}/${file}`, Math.max(8, Math.min(160, e.props.bodyColumns - 4)), zoomOf(e.requestId ?? '')) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, cells)}
+        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, cells, e.requestId)}
       </Box>
     )
   })

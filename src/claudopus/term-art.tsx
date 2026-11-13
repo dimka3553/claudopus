@@ -438,7 +438,28 @@ const bmpPixels = (bytes: Uint8Array) => {
   }
   return { width, height, px }
 }
-const makeTermPicture = async ($: EngineInterface, path: string, columns: number): Promise<Cells | null> => {
+// How far a picture is zoomed in where it is drawn (a tab), and which part shows: a terminal's picture is a few pixels a cell, so
+// what is small in it is read by zooming, twice or four times, and moving over it a quarter at a time
+type Zoom = { zoom: number; x: number; y: number }
+const WHOLE: Zoom = { zoom: 1, x: 0, y: 0 }
+const termZooms = new Map<string, Zoom>()
+const zoomOf = (id: string) => termZooms.get(id) ?? WHOLE
+// The keys under a picture: z zooms in, twice, then back to the whole; zoomed, w a s d move over it
+const termZoomKeys = (ui: Ui, $: EngineInterface, id: string) => {
+  const now = zoomOf(id)
+  const set = (next: Zoom) => (termZooms.size > 50 && termZooms.clear(), termZooms.set(id, next), $.ui.invalidate('ui.render'))
+  const edge = (n: number) => Math.min(1, Math.max(0, n))
+  const move = (key: string, label: string, dx: number, dy: number) => (
+    <ui.Button key={`zoom-${key}-${id}`} label={label} plain hotkey={key} onPress={() => set({ ...now, x: edge(now.x + dx / (now.zoom * 2 - 2)), y: edge(now.y + dy / (now.zoom * 2 - 2)) })} />
+  )
+  return (
+    <ui.Box key={`zoom-${id}`} flexDirection="row" flexWrap="wrap" columnGap={2}>
+      <ui.Button key={`zoom-z-${id}`} label={now.zoom === 1 ? 'Zoom in' : now.zoom === 2 ? 'Zoom in more' : 'Whole picture'} plain hotkey="z" onPress={() => set(now.zoom >= 4 ? WHOLE : { ...now, zoom: now.zoom * 2 })} />
+      {now.zoom > 1 ? [move('w', 'Up', 0, -1), move('a', 'Left', -1, 0), move('s', 'Down', 0, 1), move('d', 'Right', 1, 0)] : null}
+    </ui.Box>
+  )
+}
+const makeTermPicture = async ($: EngineInterface, path: string, columns: number, view: Zoom = WHOLE): Promise<Cells | null> => {
   const said = (await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path]).catch(() => ({ stdout: '' }))).stdout
   const width = Number(/pixelWidth:\s*(\d+)/.exec(said)?.[1] ?? 0)
   const height = Number(/pixelHeight:\s*(\d+)/.exec(said)?.[1] ?? 0)
@@ -453,30 +474,39 @@ const makeTermPicture = async ($: EngineInterface, path: string, columns: number
   const out = `${dir}/thumbs/term-${Math.random().toString(36).slice(2, 10)}.bmp`
   try {
     await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
-    const made = await $.process.run(['sips', '-z', String(h), String(w), '-s', 'format', 'bmp', path, '--out', out])
+    // Zoomed, the picture is made that many times larger (never larger than it is, nor than 2048 across) and the part shown cut
+    // out of it, the same box of cells
+    const zoom = Math.max(1, Math.min(view.zoom, width / w, 2048 / w))
+    const [bigW, bigH] = [Math.round(w * zoom), Math.round(h * zoom)]
+    const made = await $.process.run(['sips', '-z', String(bigH), String(bigW), '-s', 'format', 'bmp', path, '--out', out])
     if (made.exitCode !== 0) return null
     const read = (await $.fs.read(out, { as: 'bytes' })) as { base64: string }
     const pic = bmpPixels(fromBase64(read.base64))
-    return pic ? quarterBlocks(pic.px, pic.width, pic.height) : null
+    if (!pic) return null
+    if (pic.width <= w && pic.height <= h) return quarterBlocks(pic.px, pic.width, pic.height)
+    const [fromX, fromY] = [Math.round(view.x * (pic.width - w)), Math.round(view.y * (pic.height - h))]
+    const part = new Array<number>(w * h)
+    for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) part[y * w + x] = pic.px[(y + fromY) * pic.width + x + fromX] ?? -1
+    return quarterBlocks(part, w, h)
   } finally {
     await $.process.run(['rm', '-f', out]).catch(() => undefined)
   }
 }
 // The cells of a picture as wide as the cells given, else nothing yet (being made) or null (it cannot be)
-const termPictureOf = async ($: EngineInterface, path: string, columns: number): Promise<Cells | null | undefined> => {
+const termPictureOf = async ($: EngineInterface, path: string, columns: number, view: Zoom = WHOLE): Promise<Cells | null | undefined> => {
   const stat = await $.fs.stat(path).catch(() => undefined)
   if (!stat || stat.kind !== 'file') return null
-  return termPictureNow($, path, columns, String(stat.mtimeMs))
+  return termPictureNow($, path, columns, String(stat.mtimeMs), view)
 }
 // The same for a drawing that cannot wait, by a mark of the file's version it was given: what is made, or it is begun
-const termPictureNow = ($: EngineInterface, path: string, columns: number, version: string): Cells | null | undefined => {
-  const id = `${path}:${version}:${columns}`
+const termPictureNow = ($: EngineInterface, path: string, columns: number, version: string, view: Zoom = WHOLE): Cells | null | undefined => {
+  const id = `${path}:${version}:${columns}:${view.zoom}:${view.x}:${view.y}`
   if (termPictures.has(id)) return termPictures.get(id) ?? null
   if (!termMaking.has(id)) {
     termMaking.add(id)
     // Made from a timer, not from the drawing: what a drawing starts is cut off once it is drawn again
     $.clock.after(0, () =>
-      void makeTermPicture($, path, columns)
+      void makeTermPicture($, path, columns, view)
         .catch(err => (void log($, `terminal picture of ${path} not made: ${String(err)}`), null))
         .then(cells => {
           if (termPictures.size >= 30) termPictures.delete(termPictures.keys().next().value ?? '')

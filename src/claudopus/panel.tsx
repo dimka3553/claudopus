@@ -139,6 +139,9 @@ const panelHooks = (on: On) => {
     // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button, then
     // the same three ways to answer on every ask, on the small card as in Details: the work's own buttons, or Done and Not now when
     // it gave none, and a box for a reply in the person's own words. The list's times stand still while the person types (holdTimes)
+    // In the terminal the first ask's reply box holds the keys as the panel takes them: what is typed then is the person's words,
+    // never a button's letter, and Tab leaves it for the buttons and their keys
+    let askFocused = false
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
@@ -171,6 +174,7 @@ const panelHooks = (on: On) => {
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}`}
+                autoFocus={e.surface === 'terminal' && !askFocused ? ((askFocused = true), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={drafts.get(one.id) ?? ''}
                 submitLabel="send"
@@ -993,9 +997,9 @@ const panelHooks = (on: On) => {
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
-    // A letter for each header button, in the terminal alone, and only while the panel has no box to type in (an ask's reply, a
-    // password): there the letters are the person's words, never a press
-    const isKeyed = e.surface === 'terminal' && !head.asks
+    // A letter for each header button, in the terminal alone, and only while the panel has no password box to type in: there the
+    // letters are the person's words, never a press. An ask's reply box takes the keys itself (askFocused)
+    const isKeyed = e.surface === 'terminal' && !boxes.length
     keyed = isKeyed
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
@@ -1030,7 +1034,7 @@ const panelHooks = (on: On) => {
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>}
               </Box>
             </Box>
-            <Box key="head-buttons" flexDirection="row" flexWrap="wrap" gap={1}>
+            <Box key="head-buttons" flexDirection="row" flexWrap="wrap" columnGap={isKeyed ? 2 : 1} rowGap={0}>
               {reportsButton($, ui, kept, isKeyed)}
               {statsButton($, ui, isKeyed)}
               {memoryButton($, ui, isKeyed)}
