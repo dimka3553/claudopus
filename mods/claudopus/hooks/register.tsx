@@ -3338,8 +3338,10 @@ const reloadToInstalled = async ($: EngineInterface) => {
 // The version this chat loaded last, kept through a reload of this code, so the load after it knows what it moved from
 const ranVersion = atom({ plugin: 'claudopus', key: 'ran' } as const, '', { shape: 'ran-1' })
 // A move to a newer version this load made, from the version it ran before; its moment begins at the panel's first drawing once
-// the load has started whole (isReady): in a chat run over ssh the start took 6 s, and drawings asked for meanwhile can be dropped
-// as each new change is announced, so a moment begun then could be over before one of its drawings arrived
+// the load has started whole (isReady), or UPDATED_READY after the load if its start never finishes: in a chat run over ssh the
+// start took 6 s, and drawings asked for meanwhile can be dropped as each new change is announced, so a moment begun then could be
+// over before one of its drawings arrived. Until then the header is as before, so the octopus's jump and the words keep time
+const UPDATED_READY = 15_000
 let updatedMoment: { from: string; to: string; loadedAt: number; startedAt: number; isReady: boolean } | undefined
 const noteLoaded = async ($: EngineInterface) => {
   updatedMoment = undefined
@@ -3360,6 +3362,8 @@ const noteLoaded = async ($: EngineInterface) => {
   updatedMoment = { from, to: loaded, loadedAt: now, startedAt: 0, isReady: false }
   // A panel drawn while this load was still reading has no moment yet: it is drawn again now
   await update($, tick, n => n + 1)
+  const moment = updatedMoment
+  $.clock.after(UPDATED_READY, () => void (updatedMoment === moment && readyUpdated($)))
   await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header's octopus turns blue and says so`)
 }
 // The load has started whole: the moment begins at the next drawing, asked for now
@@ -3398,8 +3402,8 @@ const updatedPieces = async ($: EngineInterface, version: string) => {
   const moment = updatedMoment
   if (!moment || moment.to !== version) return undefined
   const now = await $.clock.now()
-  // Drawn while the load is still starting: its first look, with its time not yet running
-  if (!moment.isReady) return updatedLook(moment.to, 0)
+  // Drawn while the load is still starting: nothing of it yet
+  if (!moment.isReady) return undefined
   if (!moment.startedAt) {
     if (now - moment.loadedAt > UPDATED_LATE) return void (updatedMoment = undefined)
     moment.startedAt = now

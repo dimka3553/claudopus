@@ -103,9 +103,9 @@ export const isReloadDue = (
 }
 // The moment a chat moves to a newer version, UPDATED_FOR long: the octopus turns blue and jumps (its own animation, played by the
 // surface), the name line says "Claudopus updated" in blue and, from UPDATED_SAYS, the new version; a sound plays once; then all is
-// as before. The look changes only at UPDATED_SAYS and UPDATED_FOR, so the panel is drawn again only then: the desktop app drops
-// a drawing it asked for once the next change is announced, so a moment redrawn each 150 ms never reached a chat run over ssh,
-// whose drawings take longer than that to come back. A panel first drawn later than UPDATED_LATE after the load shows nothing of it
+// as before. The look changes only at UPDATED_SAYS and UPDATED_FOR, so the moment adds no drawings of its own between them: the
+// desktop app drops a drawing it asked for once the next change is announced, so a moment redrawn each 150 ms never reached a chat
+// run over ssh, whose drawings take longer than that to come back. Its drawings then have as long as the panel's own beat allows. A panel first drawn later than UPDATED_LATE after the load shows nothing of it
 export const UPDATED_FOR = 5000
 export const UPDATED_SAYS = 2500
 export const UPDATED_LATE = 10 * 60 * 1000

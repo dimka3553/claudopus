@@ -138,7 +138,7 @@ test('the moment says Claudopus updated in blue, then the new version, then is o
 
 test('the moment changes only at UPDATED_SAYS and its end, so a panel drawn over ssh shows it', async () => {
   // The desktop app drops a drawing it asked for once the next change is announced: redrawn every 150 ms, no drawing of the
-  // moment came back in time to a chat run over ssh. Two changes, 2.5 s apart, leave each drawing 2.5 s to arrive
+  // moment came back in time to a chat run over ssh. Two changes, 2.5 s apart, add no drawings of the moment's own between them
   const looks: { t: number; look: string }[] = []
   for (let t = 0; t <= UPDATED_FOR; t += 10) {
     const look = JSON.stringify(updatedLook('0.2.40', t) ?? null)
