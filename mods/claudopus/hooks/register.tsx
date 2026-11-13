@@ -248,8 +248,14 @@ const alphaOf = (color: unknown) => (typeof color === 'string' && /^#[0-9a-f]{8}
 // stronger one (a picked segment, the edge's part still to do) becomes the theme's own subtle grey, which follows dark and light
 const TERM_SOLID = 'subtle'
 type BoxArgs = Parameters<Ui['Box']>[0]
+// The work's purple on a card's edge in the terminal. A terminal of 256 colours (over ssh, where COLORTERM is not sent) rounds a
+// Box's colour to its palette, which makes #8A63F0 a lavender (141), while the octopus's cells take the nearest colour, a deep
+// purple (99); there the edge is given a purple that rounds to 99 too. Set as the session starts
+const DEEP_LIVE = '#6E3CFF'
+let termLive = ''
 const termBox = (Box: Ui['Box']) => (props: BoxArgs) => {
   const alpha = alphaOf(props.backgroundColor)
+  if (props.backgroundColor === LIVE) return Box({ ...props, backgroundColor: termLive || LIVE })
   if (alpha === 255) return Box(props)
   const { backgroundColor: _tint, paddingY, paddingTop, paddingBottom, ...rest } = props
   const isFrame = alpha < 0x40
@@ -532,9 +538,9 @@ const openConfig = async ($: EngineInterface) => {
   configFailed = ''
   await front($, CONFIG_PANE, CONFIG_TITLE)
 }
-const configButton = ($: EngineInterface, ui: Ui) => (
+const configButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="config-button" flexShrink={0}>
-    <ui.Button key={`config-open-${presses}`} label="Config" hotkey="c" onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
+    <ui.Button key={`config-open-${presses}`} label="Config" hotkey={isKeyed ? 'c' : undefined} onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
   </ui.Box>
 )
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
@@ -1880,13 +1886,13 @@ const time = (at: number, now: number) => (day(at, now) === day(now, now) ? (dat
 
 // On the Claudopus pane the reports are one small button. It sits on the line above the cards, beside the chat's own size, so
 // nothing below it moves when a report arrives
-const reportsButton = ($: EngineInterface, ui: Ui, all: Report[]) => {
+const reportsButton = ($: EngineInterface, ui: Ui, all: Report[], isKeyed = false) => {
   const { Box, Button } = ui
   const list = all.filter(r => !r.archived)
   if (!list.length) return null
   return (
     <Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
+      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey={isKeyed ? 'r' : undefined} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
     </Box>
   )
 }
@@ -2173,7 +2179,8 @@ const openMemory = ($: EngineInterface, path: string) => {
     const open = (await $.ui.panes()).filter(pane => pane.id.startsWith(MEMORY_PANE) && pane.id !== id)
     for (const pane of open.slice(0, Math.max(0, open.length - (MEMORY_PANES - 1)))) await $.ui.close({ id: pane.id }).catch(() => undefined)
     const heading = text.match(/^#\s+(.+)$/m)?.[1]?.trim()
-    await front($, id, cut(heading || fileName(path), 30))
+    // The memory folder itself is named Memory, as its button; else its heading would read 'claudopus' beside the panel's tab
+    await front($, id, path === dir ? 'Memory' : cut(heading || fileName(path), 30))
     redraw($)
   })().catch(err => log($, `memory file ${path} not opened: ${String(err)}`))
 }
@@ -2185,9 +2192,9 @@ const showMemory = async ($: EngineInterface, surface: RenderSurface) => {
   const opened = await $.process.run(['open', dir]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stderr}`)
 }
-const memoryButton = ($: EngineInterface, ui: Ui) => (
+const memoryButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="memory-button" flexShrink={0}>
-    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey="m" onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
+    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey={isKeyed ? 'm' : undefined} onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
   </ui.Box>
 )
 
@@ -2383,9 +2390,9 @@ const openStats = async ($: EngineInterface) => {
   void statsRead($, statsShown.scope).catch(err => log($, `stats not read: ${String(err)}`))
   await front($, STATS_PANE, STATS_TITLE)
 }
-const statsButton = ($: EngineInterface, ui: Ui) => (
+const statsButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="stats-button" flexShrink={0}>
-    <ui.Button key={`stats-open-${presses}`} label="Stats" hotkey="s" onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
+    <ui.Button key={`stats-open-${presses}`} label="Stats" hotkey={isKeyed ? 's' : undefined} onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
   </ui.Box>
 )
 
@@ -2403,9 +2410,9 @@ const openAbout = async ($: EngineInterface) => {
   aboutOpens += 1
   await front($, ABOUT_PANE, ABOUT_TITLE)
 }
-const aboutButton = ($: EngineInterface, ui: Ui) => (
+const aboutButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="about-button" flexShrink={0}>
-    <ui.Button key={`about-open-${presses}`} label="About" hotkey="a" onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
+    <ui.Button key={`about-open-${presses}`} label="About" hotkey={isKeyed ? 'a' : undefined} onPress={() => void openAbout($).catch(err => log($, `about not opened: ${String(err)}`))} />
   </ui.Box>
 )
 // The version this chat loaded, read once from its own copy, so a chat on an older copy shows its own number; and a newer one the
@@ -5407,6 +5414,7 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
+    termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
       const text = await readOr($, `${$.plugin.root}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
@@ -7310,6 +7318,9 @@ const panelHooks = (on: On) => {
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
+    // A letter for each header button, in the terminal alone, and only while the panel has no box to type in (an ask's reply, a
+    // password): there the letters are the person's words, never a press
+    const isKeyed = e.surface === 'terminal' && !head.asks
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
@@ -7339,23 +7350,23 @@ const panelHooks = (on: On) => {
                     {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
                   </Box>
                 )}
-                <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
+                <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>}
               </Box>
             </Box>
             <Box key="head-buttons" flexDirection="row" flexWrap="wrap" gap={1}>
-              {reportsButton($, ui, kept)}
-              {statsButton($, ui)}
-              {memoryButton($, ui)}
-              {configButton($, ui)}
-              {aboutButton($, ui)}
+              {reportsButton($, ui, kept, isKeyed)}
+              {statsButton($, ui, isKeyed)}
+              {memoryButton($, ui, isKeyed)}
+              {configButton($, ui, isKeyed)}
+              {aboutButton($, ui, isKeyed)}
               {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x Tab for keys</Text> : null}
             </Box>
             {/* The terminal reaches a pane from the keys only after ctrl+x Tab, which nothing else tells; once it holds them each
                 button above answers its first letter */}
             {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
               <Text key="head-keys" dimColor wrap="wrap">
-                {e.props.isFocused ? 'Keys: r s m c a open a tab · Tab and Enter press · arrows scroll · Esc back to the chat' : 'ctrl+x Tab: use the panel from the keys'}
+                {e.props.isFocused ? `${isKeyed ? 'Keys: r s m c a open a tab · ' : ''}Tab and Enter press · arrows scroll · Esc back to the chat` : 'ctrl+x Tab: use the panel from the keys'}
               </Text>
             ) : null}
           </Box>

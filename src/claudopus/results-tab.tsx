@@ -208,13 +208,13 @@ const time = (at: number, now: number) => (day(at, now) === day(now, now) ? (dat
 
 // On the Claudopus pane the reports are one small button. It sits on the line above the cards, beside the chat's own size, so
 // nothing below it moves when a report arrives
-const reportsButton = ($: EngineInterface, ui: Ui, all: Report[]) => {
+const reportsButton = ($: EngineInterface, ui: Ui, all: Report[], isKeyed = false) => {
   const { Box, Button } = ui
   const list = all.filter(r => !r.archived)
   if (!list.length) return null
   return (
     <Box key="reports-button" flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
-      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
+      <Button key={`reports-open-${presses}`} label={`Results ${entriesOf(list).length}`} hotkey={isKeyed ? 'r' : undefined} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} />
     </Box>
   )
 }

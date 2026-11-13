@@ -466,14 +466,14 @@ const segments = (ui: Ui, key: string, items: { label: string; isOn: boolean; on
   </ui.Box>
 )
 // One of the headline figures: the number large in weight, what it is under it
-const tile = (ui: Ui, key: string, value: string, label: string) => (
+const tile = (ui: Ui, key: string, value: string, label: string, wraps = false) => (
   <ui.Box key={key} flexDirection="column" flexGrow={1} flexShrink={1} width="30%" minWidth={0} backgroundColor={FILL} paddingX={2} paddingY={1}>
     <ui.Box height={1} overflow="hidden">
       <ui.Text bold wrap="truncate-end">{value}</ui.Text>
     </ui.Box>
-    {/* The label wraps rather than being cut: in a narrow terminal 'pieces of work done' read 'pieces of work d…' */}
-    <ui.Box minWidth={0}>
-      <ui.Text dimColor wrap="wrap">{label}</ui.Text>
+    {/* In the terminal the label wraps rather than being cut: in a narrow one 'pieces of work done' read 'pieces of work d…' */}
+    <ui.Box minWidth={0} {...(wraps ? {} : { height: 1, overflow: 'hidden' as const })}>
+      <ui.Text dimColor wrap={wraps ? 'wrap' : 'truncate-end'}>{label}</ui.Text>
     </ui.Box>
   </ui.Box>
 )
@@ -522,9 +522,9 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
   const money = (n: number) => (n >= 100 ? `$${Math.round(n).toLocaleString('en-US')}` : `$${n.toFixed(2)}`)
   const hero = (
     <Box key="stats-hero" flexDirection="row" gap={1} flexShrink={0}>
-      {tile(ui, 'hero-saved', hours(saved), 'time saved')}
-      {tile(ui, 'hero-cost', money(s.all.cost), 'at API prices')}
-      {tile(ui, 'hero-work', count(s.finished), 'pieces of work done')}
+      {tile(ui, 'hero-saved', hours(saved), 'time saved', surface === 'terminal')}
+      {tile(ui, 'hero-cost', money(s.all.cost), 'at API prices', surface === 'terminal')}
+      {tile(ui, 'hero-work', count(s.finished), 'pieces of work done', surface === 'terminal')}
     </Box>
   )
   const width = Math.max(200, Math.round(px))
@@ -544,7 +544,13 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
       ) : (
         timelineText(ui, s.pieces, Math.max(20, Math.floor((px + 32) / 7.4) - 6))
       )}
-      <Box flexDirection="row" flexWrap="wrap" columnGap={2} flexShrink={0}>
+      {/* The terminal does not wrap a row of boxes: there the legend is one text that wraps, so no model is cut off */}
+      {surface === 'terminal' ? (
+        <Text key="legend-text" wrap="wrap">
+          {legend.flatMap((model, i) => [<Text key={`legend-mark-${model}`} color={colorOf(model)}>{`${i ? '   ' : ''}■ `}</Text>, <Text key={`legend-name-${model}`} dimColor>{nameOf(model)}</Text>])}
+        </Text>
+      ) : (
+      <Box flexDirection="row" gap={2} height={1} overflow="hidden" flexShrink={0}>
         {legend.map(model => (
           <Box key={`legend-${model}`} flexDirection="row" gap={1} flexShrink={0}>
             <Text color={colorOf(model)}>■</Text>
@@ -552,6 +558,7 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
           </Box>
         ))}
       </Box>
+      )}
     </Box>,
   )
   const time = band(

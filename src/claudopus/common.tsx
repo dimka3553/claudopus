@@ -231,8 +231,14 @@ const alphaOf = (color: unknown) => (typeof color === 'string' && /^#[0-9a-f]{8}
 // stronger one (a picked segment, the edge's part still to do) becomes the theme's own subtle grey, which follows dark and light
 const TERM_SOLID = 'subtle'
 type BoxArgs = Parameters<Ui['Box']>[0]
+// The work's purple on a card's edge in the terminal. A terminal of 256 colours (over ssh, where COLORTERM is not sent) rounds a
+// Box's colour to its palette, which makes #8A63F0 a lavender (141), while the octopus's cells take the nearest colour, a deep
+// purple (99); there the edge is given a purple that rounds to 99 too. Set as the session starts
+const DEEP_LIVE = '#6E3CFF'
+let termLive = ''
 const termBox = (Box: Ui['Box']) => (props: BoxArgs) => {
   const alpha = alphaOf(props.backgroundColor)
+  if (props.backgroundColor === LIVE) return Box({ ...props, backgroundColor: termLive || LIVE })
   if (alpha === 255) return Box(props)
   const { backgroundColor: _tint, paddingY, paddingTop, paddingBottom, ...rest } = props
   const isFrame = alpha < 0x40

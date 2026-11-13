@@ -962,6 +962,9 @@ const panelHooks = (on: On) => {
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
+    // A letter for each header button, in the terminal alone, and only while the panel has no box to type in (an ask's reply, a
+    // password): there the letters are the person's words, never a press
+    const isKeyed = e.surface === 'terminal' && !head.asks
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
@@ -991,23 +994,23 @@ const panelHooks = (on: On) => {
                     {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
                   </Box>
                 )}
-                <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
+                <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>}
               </Box>
             </Box>
             <Box key="head-buttons" flexDirection="row" flexWrap="wrap" gap={1}>
-              {reportsButton($, ui, kept)}
-              {statsButton($, ui)}
-              {memoryButton($, ui)}
-              {configButton($, ui)}
-              {aboutButton($, ui)}
+              {reportsButton($, ui, kept, isKeyed)}
+              {statsButton($, ui, isKeyed)}
+              {memoryButton($, ui, isKeyed)}
+              {configButton($, ui, isKeyed)}
+              {aboutButton($, ui, isKeyed)}
               {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x Tab for keys</Text> : null}
             </Box>
             {/* The terminal reaches a pane from the keys only after ctrl+x Tab, which nothing else tells; once it holds them each
                 button above answers its first letter */}
             {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
               <Text key="head-keys" dimColor wrap="wrap">
-                {e.props.isFocused ? 'Keys: r s m c a open a tab · Tab and Enter press · arrows scroll · Esc back to the chat' : 'ctrl+x Tab: use the panel from the keys'}
+                {e.props.isFocused ? `${isKeyed ? 'Keys: r s m c a open a tab · ' : ''}Tab and Enter press · arrows scroll · Esc back to the chat` : 'ctrl+x Tab: use the panel from the keys'}
               </Text>
             ) : null}
           </Box>

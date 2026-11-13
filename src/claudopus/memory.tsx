@@ -74,7 +74,8 @@ const openMemory = ($: EngineInterface, path: string) => {
     const open = (await $.ui.panes()).filter(pane => pane.id.startsWith(MEMORY_PANE) && pane.id !== id)
     for (const pane of open.slice(0, Math.max(0, open.length - (MEMORY_PANES - 1)))) await $.ui.close({ id: pane.id }).catch(() => undefined)
     const heading = text.match(/^#\s+(.+)$/m)?.[1]?.trim()
-    await front($, id, cut(heading || fileName(path), 30))
+    // The memory folder itself is named Memory, as its button; else its heading would read 'claudopus' beside the panel's tab
+    await front($, id, path === dir ? 'Memory' : cut(heading || fileName(path), 30))
     redraw($)
   })().catch(err => log($, `memory file ${path} not opened: ${String(err)}`))
 }
@@ -86,9 +87,9 @@ const showMemory = async ($: EngineInterface, surface: RenderSurface) => {
   const opened = await $.process.run(['open', dir]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stderr}`)
 }
-const memoryButton = ($: EngineInterface, ui: Ui) => (
+const memoryButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="memory-button" flexShrink={0}>
-    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey="m" onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
+    <ui.Button key={`memory-open-${presses}`} label="Memory" hotkey={isKeyed ? 'm' : undefined} onPress={press => void showMemory($, press.surface).catch(err => log($, `memory folder not opened: ${String(err)}`))} />
   </ui.Box>
 )
 
