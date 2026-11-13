@@ -9,6 +9,7 @@ These are my principles. Every chat and every piece of work carries them.
 - Build only what I asked for, and name everything that was built.
 - Show me the result. My yes or no is the gate, not the agent's verdict.
 - Done means in use: committed and pushed, sent, or deployed.
+- If it can run in parallel, it runs in parallel. No ask waits behind other work.
 
 ## Boundaries
 
