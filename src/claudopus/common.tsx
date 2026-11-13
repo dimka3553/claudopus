@@ -100,7 +100,8 @@ const folds = new Map<string, number[]>()
 let dir = ''
 // The person's last message, for the pass that runs after the reply
 let said = ''
-// Each message of the person's in the chat's turn under way: only a message that carries one of them is their steer
+// The person's last messages in this chat: only a message that carries one of them is their steer
+const HEARD_KEPT = 8
 let heard: string[] = []
 // config.json can switch the handing-over off: every chat then does its own work again
 let isOff = false

@@ -43,11 +43,13 @@ const workHooks = (on: On) => {
     let from = ''
     let answered = ''
     let answer: { card: Todo; ask: NonNullable<Todo['ask']>; key: string; words: string; at: number } | undefined
+    let message = ''
+    let words = ''
     if (dir && e.tool === 'SendMessage') {
       const to = String((e as { to?: unknown }).to ?? '')
-      const message = String((e as { message?: unknown }).message ?? '')
+      message = String((e as { message?: unknown }).message ?? '')
       const theirs = e.agentId === undefined ? heard.findLast(one => carries(message, one)) : undefined
-      const words = theirs ? quoted(theirs, 600) : ''
+      words = theirs ? quoted(theirs, 600) : ''
       const now = await $.clock.now()
       const list = await read($, todos)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
@@ -62,7 +64,8 @@ const workHooks = (on: On) => {
       }
       if (target) {
         woken = target.id
-        const isSteer = target.status === 'working' && Boolean(words) && !answered
+        // Their words are theirs whether the work is under way or is started again by them: an ended work gets the same line
+        const isSteer = Boolean(words) && !answered
         if (target.status === 'working' && message && !isSteer) {
           const sender = list.find(one => one.id === e.agentId)
           const title = (one?: Todo) => (one?.title ? ` "${cut(oneLine(one.title), 60)}"` : '')
@@ -122,7 +125,9 @@ const workHooks = (on: On) => {
       if (answer) await answeredInChat($, answer, steered, !sent.deny && !sent.isError)
       // Work that had ended is started again by the message, and may not be running yet to take a row: it gets the line as a
       // message of its own instead, read once it reaches it
-      const line = named(answered ? ANSWERED_IN_CHAT(answered) : from ? FROM(from) : STEER)
+      // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
+      // chat's own note that landed after the person's words once marked their words as not theirs
+      const line = named(answered ? ANSWERED_IN_CHAT(answered, words) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words))
       if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? $.session.send({ to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
       return sent
     }

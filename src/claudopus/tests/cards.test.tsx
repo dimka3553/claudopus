@@ -288,7 +288,7 @@ test('a steer is sent as written and the work is told it is one, the work is rem
   // The chat's call goes on as it was made; the work is told in its own chat what a steer asks of it
   expect(sent[0]).toBe('Sam: “Also make me a chart of the ears.”')
   expect(appended).toHaveLength(1)
-  expect(appended[0]).toContain('a1: The message sent to you just now is from the person, in their words')
+  expect(appended[0]).toContain('a1: The message sent to you just now that carries the person\'s words "Also make me a chart of the ears." is from the person, in their own words')
   expect(appended[0]).toContain('Decide which of three it is')
   expect(appended[0]).toContain('added it to your to-do list')
   expect(appended.join('\n')).not.toMatch(/steer/i)
@@ -333,16 +333,16 @@ test("only the person's words sent on by the chat are their steer: a helper's re
 
   // A helper replies to the work that started it, and that work writes to its helper
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'There are two nostrils.', agentId: 'a3' } as never)
-  expect(appended.at(-1)).toBe('a1: The message sent to you just now is from your helper "Count nostrils", not from the person: it is not theirs. Take it as your helper "Count nostrils"\'s and carry on.')
+  expect(appended.at(-1)).toBe('a1: The message sent to you just now that begins "There are two nostrils." is from your helper "Count nostrils", not from the person: that one is not theirs. Take it as your helper "Count nostrils"\'s and carry on; a message that carries the person\'s own words stays theirs.')
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a3', message: 'Count them again.', agentId: 'a1' } as never)
-  expect(appended.at(-1)).toContain('a3: The message sent to you just now is from the work that started you, not from the person')
+  expect(appended.at(-1)).toContain('a3: The message sent to you just now that begins "Count them again." is from the work that started you, not from the person')
   // One piece of work writes to another
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a2', message: 'The nose is done, check the ears against it.', agentId: 'a1' } as never)
-  expect(appended.at(-1)).toContain('a2: The message sent to you just now is from the work "Fix the nose", not from the person')
+  expect(appended.at(-1)).toContain('is from the work "Fix the nose", not from the person')
   // The chat's own note, which carries none of the person's words, is the chat's
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's4', to: 'a1', message: 'A fault seen from the chat: the card shows the wrong model.' } as never)
-  expect(appended.at(-1)).toContain('a1: The message sent to you just now is from the chat, not from the person')
-  expect(appended.join('\n')).not.toContain('from the person, in their words')
+  expect(appended.at(-1)).toContain('is from the chat, not from the person')
+  expect(appended.join('\n')).not.toContain('from the person, in their own words')
   // Nothing is owed for them: going on, the work is not reminded of a steer
   await steps('a1')
   expect(appended.join('\n')).not.toContain('waiting for your decision')
@@ -350,20 +350,35 @@ test("only the person's words sent on by the chat are their steer: a helper's re
   // A short message of theirs counts as whole words only: "yes" is not in "eyes"
   await $.prompt.submit({ text: 'yes', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's8', to: 'a1', message: 'Check the eyes again.' } as never)
-  expect(appended.at(-1)).toContain('a1: The message sent to you just now is from the chat, not from the person')
+  expect(appended.at(-1)).toContain('is from the chat, not from the person')
   // The person's words, sent on by the chat, are their steer, and the card keeps them
   await $.prompt.submit({ text: 'Make the left nostril a little wider than the right one.', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's5', to: 'a1', message: 'Sam on the nose, in their words: “Make the left nostril — a little wider than the right one”' } as never)
-  expect(appended.at(-1)).toContain('a1: The message sent to you just now is from the person, in their words')
+  expect(appended.at(-1)).toContain('is from the person, in their own words')
   await steps('a1')
   expect(appended.at(-1)).toContain('a1: A message from the person is waiting for your decision')
   // The same words sent by a piece of work are still not the person's steer
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's6', to: 'a2', message: 'Make the left nostril a little wider than the right one.', agentId: 'a1' } as never)
-  expect(appended.at(-1)).toContain('a2: The message sent to you just now is from the work "Fix the nose"')
-  // Once the chat's turn is over, a message from it is its own again
+  expect(appended.at(-1)).toContain('is from the work "Fix the nose"')
+  // Their words stay theirs after the chat's turn is over: the chat often passes them on in a later turn
   await $.turn.complete({ answer: 'Sent.', durationMs: 1, isAborted: false, turnId: 'turn-3', reason: 'answer' })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's7', to: 'a2', message: 'Make the left nostril a little wider than the right one.' } as never)
-  expect(appended.at(-1)).toContain('a2: The message sent to you just now is from the chat')
+  expect(appended.at(-1)).toContain('a2: The message sent to you just now that carries the person\'s words "Make the left nostril a little wider than the right one." is from the person')
+})
+
+test("the person's words sent to work that has ended are theirs, and the chat's own note sent after them is labelled by its own start", async ($, on) => {
+  const { appended } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await $.turn.complete({ answer: 'The nose is fixed. Shall I build it into the app? '.repeat(20), durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  await $.prompt.submit({ text: 'Yes, build the nose into the app', wait: false, origin: composer })
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'From Sam, as they said it: "Yes, build the nose into the app"' } as never)
+  expect(appended.join('\n')).toContain('carries the person\'s words "Yes, build the nose into the app" is from the person, in their own words')
+  // The work, started again, is working when the chat's own note follows: that line names the note, not their words
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1' } as never)
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'From the chat, not Sam: release through the release command.' } as never)
+  expect(appended.at(-1)).toContain('that begins "From the chat, not Sam: release through the release command." is from the chat, not from the person: that one is not theirs')
 })
 
 test('work that takes many steps without touching its to-dos is reminded to bring them up to date', async ($, on) => {
