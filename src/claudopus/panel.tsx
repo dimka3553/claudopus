@@ -75,7 +75,7 @@ const panelHooks = (on: On) => {
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
     const glance = (one: Todo, count = '') =>
-      [stood[one.status], modelName(one.model ?? ''), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -182,7 +182,7 @@ const panelHooks = (on: On) => {
           {'Input' in table ? (
             <Box width="100%" flexDirection="column">
               <table.Input
-                key={`${key}-reply-${replies.get(one.id) ?? 0}`}
+                key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
                 autoFocus={e.surface === 'terminal' && !askFocused ? ((askFocused = true), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={drafts.get(one.id) ?? ''}
@@ -253,7 +253,7 @@ const panelHooks = (on: On) => {
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
-                {lingers(one, at) || leftLine(one, at) ? (
+                {(!one.ask && lingers(one, at)) || leftLine(one, at) ? (
                   <Text wrap="truncate-end" color={one.status === 'done' ? DONE : undefined} dimColor={one.status !== 'done'}>
                     {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : 'Stopped'}
                   </Text>
@@ -842,7 +842,7 @@ const panelHooks = (on: On) => {
     // The newest result a piece of work left, which its open card links to
     const left = (one: Todo) => kept.filter(r => r.agent === one.id).sort((a, b) => b.at - a.at)[0]
 
-    // Work that has ended, under the running cards: one folded row, so nothing above it moves. Unfolded, the newest first, each a
+    // Work that has ended, under the running cards: one folded row (work that still asks, or still runs something, stays above), so nothing above it moves. Unfolded, the newest first, each a
     // steady row of two lines (what it was, how it ended, its model, how long it took, when) that opens its card as for running work
     // Other chats' ended work folds in here too, once its pause is over; the row then says it holds every chat's
     // Work shown finished only because it left its chat's file is not kept there: its chat said nothing of how it ended
@@ -851,7 +851,7 @@ const panelHooks = (on: On) => {
     // is not listed at all, however many are open: the app's own list of chats has them
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
     const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
-    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at)), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
+    const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
         <Box key="finished" flexDirection="column" gap={1} flexShrink={0}>

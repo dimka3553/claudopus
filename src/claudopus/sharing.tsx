@@ -343,14 +343,17 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   const said = choice.trim()
   const chat = one.chat
   if (!ask || !said || !chat || !/^[A-Za-z0-9_-]+$/.test(chat.id)) return
-  // A second press on an ask already answered here sends nothing
-  if (answeredHere.has(`${one.id}:${ask.at}`)) return
+  // A second press on an ask already answered here sends nothing. A reply that does not settle it leaves the ask shown here, as its
+  // own chat keeps it open, so a button can still answer it; the same reply sent twice at once counts once
+  const isHeld = !settles(ask, said, isReply)
+  const mark = isHeld ? `${one.id}:${ask.at}:${ask.replied?.at ?? ''}:${said}` : `${one.id}:${ask.at}`
+  if (answeredHere.has(`${one.id}:${ask.at}`) || answeredHere.has(mark)) return
   drafts.delete(one.id)
-  replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
+  if (!isHeld) replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   if (isReply) freeTimes()
-  answeredHere.add(`${one.id}:${ask.at}`)
+  answeredHere.add(mark)
   const at = await $.clock.now()
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line: lineOf(one) })
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line: lineOf(one), isHeld })
   redraw($)
   const answer: Answer = { card: chat.agent, choice: said, isReply, ask: ask.text, askAt: ask.at, at }
   const name = `${at}-${Math.random().toString(36).slice(2, 8)}`
@@ -366,7 +369,7 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
         ? await leaveHere($, `${OUTBOX}/${chat.host}`, name, { ...answer, chat: chat.id })
         : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
   if (r.exitCode !== 0) {
-    answeredHere.delete(`${one.id}:${ask.at}`)
+    answeredHere.delete(mark)
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost', at, line: lineOf(one) })
     redraw($)
     await log($, `answer for the chat ${chat.id}${chat.host ? ` on ${chat.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)

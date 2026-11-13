@@ -90,6 +90,10 @@ const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, ans
   `The background work "${title}" asked {name}, on its card and in this chat as a notice from the Claudopus panel that {name} sees and you do not: ${ask.text} (answers: ${answers.join(' · ')}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} has it already: do not pass it on, do not answer it yourself, and start no work for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
 const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks.`
+// What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
+const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to the work "${title}" on its card: ${said}. It still asks, while it acts on that.`
+// What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
+const REPLY_HOLDS = `That reply does not settle your ask, so it stays open on {name}'s card while you act on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still waits after you have done what they said, ask it again.`
 // What work that had ended is told when the person answers its ask on the card: the answer starts it again
 const RESUMED_BY_ANSWER = `You had ended; this answer starts you again. Carry the work on with it, then end with your report as before.`
 // What the chat's model reads, and the person sees as a notice, when that work could not be started again with the answer
@@ -97,8 +101,8 @@ const ANSWER_FOR_CHAT = (title: string, asked: string, said: string) => `{Name} 
 const ANSWER_FOR_CHAT_RELAY = `With {name}'s next message here, carry that work on with this answer as you would with their own words, beside whatever that message asks.`
 const ASK_CLEARED = (title: string) => `The work "${title}" no longer asks {name} anything.`
 // What the work is told when the chat passes on the person's answer to its ask, typed in the chat
-const ANSWERED_IN_CHAT = (asked: string, words: string) =>
-  `The message sent to you just now that carries {name}'s words "${words}" is {name}'s own reply, typed by them in the chat, to your ask: "${asked}". Their card no longer asks it. If it answers the ask, take it as their answer and carry on, and ask again if it leaves something waiting. If it asks for something else, it is a steer: decide whether it is more for this work, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
+const ANSWERED_IN_CHAT = (asked: string, words: string, isHeld = false) =>
+  `The message sent to you just now that carries {name}'s words "${words}" is {name}'s own reply, typed by them in the chat, to your ask: "${asked}". ${isHeld ? REPLY_HOLDS : 'Their card no longer asks it.'} If it answers the ask, take it as their answer and carry on, and ask again if it leaves something waiting. If it asks for something else, it is a steer: decide whether it is more for this work, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
 // What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
 // own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
 const STEER = (words: string) =>

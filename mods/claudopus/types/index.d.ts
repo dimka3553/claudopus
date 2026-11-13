@@ -64,8 +64,9 @@ export type Todo = {
   waits?: string[]
   // What it needs the person's own hands for now, said with the `ask` tool: what to do, and the exact text to copy for it. Its card
   // stands out with the ask in view until the work clears it or ends
+  // `replied`: the person's reply in their own words that did not settle it; the ask stays open while the work acts on it, until a button, the work clearing it or asking again
   // `isCommand`: `copy` is a command the person types in a terminal opened in `cwd`. `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card). `pictures` are the picture files the ask is about, shown with it in the chat
-  ask?: { text: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number }
+  ask?: { text: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; replied?: { text: string; at: number } }
   startedAt: number
   // 0 while it works
   endedAt: number

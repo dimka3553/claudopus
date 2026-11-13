@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.78 · 13 November 2026
+- A reply in your own words that isn't one of an ask's buttons, such as "Show me images first.", no longer clears the ask: it stays open on the card with your reply under it, and the card stays among the running cards while the work acts on it, even after the work has handed in its report.
+- Only a button, a reply in a button's words, or the work clearing or replacing its ask settles it. A card whose work has ended but still asks says "Waits for your answer" instead of "Finished", and never shows under Finished.
+- Work your answer or message starts again shows as working at once, instead of sitting under Finished until its first step.
+- A reply that started finished work again is no longer sent to it a second time when that run ends.
+
 ## 0.2.77 · 13 November 2026
 - The pictures of a question from background work, and of a result, are sent to the chat the way that showed in a remote chat; sent the other way, they did not show.
 

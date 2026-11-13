@@ -14,7 +14,10 @@ const tabHooks = (on: On) => {
   // and so does a reply typed in a card's box
   on('ui.input', async ($, e, next) => {
     const r = await next(e)
-    if (e.plugin === 'claudopus' && e.kind === 'submit' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `reply not sent: ${String(err)}`))
+    if (e.plugin !== 'claudopus' || e.kind !== 'submit') return r
+    // Two replies to ended work went from the timer with no sign of why: each submit says here what it found on its way
+    void log($, `reply submitted: ${answersOnWay.size} answer(s) and ${wakes.length} wake(s) on the way`)
+    if (answersOnWay.size || wakes.length) await sendWakes($, true).catch(err => log($, `reply not sent: ${String(err)}`))
     return r
   })
 
