@@ -37,7 +37,7 @@ Your messages, the results and a brief per subject are kept in a memory folder, 
 
 That is all. Nothing has to be typed in each chat.
 
-Claudopus keeps itself up to date. Every few hours one chat asks Claude Code to fetch the newest release, as `/plugin` would; chats you start after that use it, and About says when a newer version is installed than the one a chat loaded. A copy loaded from a folder of its code (`--plugin-dir`) is never updated.
+Claudopus keeps itself up to date. Every few hours one chat asks Claude Code to fetch the newest release, as `/plugin` would; chats you start after that use it, and About says when a newer version is installed than the one a chat loaded. To stay on the version you have, turn Automatic updates off in the Config tab. A copy loaded from a folder of its code (`--plugin-dir`) is never updated.
 
 ## What you see
 
@@ -82,6 +82,7 @@ The settings are `~/.claude/claudopus/config.json`. Every key is optional:
   "agents": true,
   "sound": true,
   "notifications": true,
+  "updates": true,
   "models": { "work": "opus", "legwork": "sonnet", "heavy": "fable" },
   "macs": ["sam@other-mac.local"]
 }
@@ -93,10 +94,11 @@ The settings are `~/.claude/claudopus/config.json`. Every key is optional:
 | `agents` | `false` stops the handing over; every chat then does its own work again. |
 | `sound` | `false` silences the short chime played when work is ready, and the "needs you" sound of a notification that work needs you. |
 | `notifications` | `false` stops the notification that names work when it is ready, stopped or failed. |
+| `updates` | `false` stops Claudopus updating itself; it stays on the version you have until you update it with `/plugin`. |
 | `models` | Which model runs most work, long legwork and helpers, and heavy work (`opus`, `sonnet`, `fable` or `haiku`). |
 | `macs` | Up to four other Macs, as `user@host` or a `Host` of `~/.ssh/config`, that this Mac's panel lists the chats of. It uses your own SSH, which must log in without asking; each Mac needs Claudopus of this version or newer. That Mac's panels list this Mac's chats in turn, with nothing to set there: each visit hands it this Mac's chats and brings back the answers pressed there for them. Results are kept the same on both, about every two minutes: each Mac gets the results it lacks, with paths moved onto its own home, and what you did to a result (archived, brought back, answered) reaches the other; nothing is deleted or overwritten. |
 
-`name`, `agents` and `macs` are read when a chat starts; `sound` and `notifications` each time work ends or needs you.
+`name`, `agents` and `macs` are read when a chat starts; `sound` and `notifications` each time work ends or needs you; `updates` before each look for a new version.
 
 ## Turn it off
 
@@ -145,7 +147,7 @@ Everything stays on your machine, apart from what Claude Code itself sends to Cl
 
 ### What it sends, and where
 
-After each reply, one short call through Claude Code (`$.model.complete`, Sonnet) sends the start of your message and of the reply to Claude, to title the chat and note what was asked and done. It sets that title, and reads the chat's own id, through the Claude desktop app's built-in session server (`ccd_session_mgmt`: `get_session`, `set_session_title`). With Macs named under `macs`, it runs `ssh` to each (key login only, never asking for a password): every 10 seconds one chat on this Mac reads the files under `~/.claude/claudopus/live` there that changed in the last three minutes, leaves there this Mac's own such files (`live/pushed/`), and brings back the answers pressed there for this Mac's chats (`live/outbox/`); every two seconds one chat takes from there the names pressed for this Mac to open (`live/outbox/<this Mac>/o-*.json`), over one connection kept open a minute after its last use (`ControlMaster`, its socket in `/tmp`); an answer you press for one of their chats is written into that Mac's `live/answers`. At most every two minutes one chat reads the `meta.json` of each result under `~/.claude/claudopus/reports` there, brings over with `tar` the result folders this Mac lacks and hands that Mac those it lacks (each put in place whole, only where no folder has its name, with its home path in `meta.json` and `report.md` changed to the other Mac's), and writes a result's `meta.json` on either Mac only to carry over an archive, a bring back or an answer, there only when it is unchanged since it was read. Each chat reads its own entry in `~/.claude/sessions` every 20 seconds for its Remote Control and app ids, which a press on its name in another panel opens; and, while another Mac's chats are listed, the Claude app's own session files in `~/Library/Application Support/Claude/claude-code-sessions`, listed at most every 30 seconds and each read once, for only its app id and chat id, to know which of those chats this Mac's app holds. At most every four hours one chat runs Claude Code's own `plugin marketplace update` and `plugin update` for Claudopus (the engine the chat runs on, `$CLAUDE_CODE_EXECPATH`, else `claude`), which fetch the marketplace from where it was added, GitHub for most; it keeps what it learnt in `~/.claude/claudopus/update.json`. No telemetry, no other network calls.
+After each reply, one short call through Claude Code (`$.model.complete`, Sonnet) sends the start of your message and of the reply to Claude, to title the chat and note what was asked and done. It sets that title, and reads the chat's own id, through the Claude desktop app's built-in session server (`ccd_session_mgmt`: `get_session`, `set_session_title`). With Macs named under `macs`, it runs `ssh` to each (key login only, never asking for a password): every 10 seconds one chat on this Mac reads the files under `~/.claude/claudopus/live` there that changed in the last three minutes, leaves there this Mac's own such files (`live/pushed/`), and brings back the answers pressed there for this Mac's chats (`live/outbox/`); every two seconds one chat takes from there the names pressed for this Mac to open (`live/outbox/<this Mac>/o-*.json`), over one connection kept open a minute after its last use (`ControlMaster`, its socket in `/tmp`); an answer you press for one of their chats is written into that Mac's `live/answers`. At most every two minutes one chat reads the `meta.json` of each result under `~/.claude/claudopus/reports` there, brings over with `tar` the result folders this Mac lacks and hands that Mac those it lacks (each put in place whole, only where no folder has its name, with its home path in `meta.json` and `report.md` changed to the other Mac's), and writes a result's `meta.json` on either Mac only to carry over an archive, a bring back or an answer, there only when it is unchanged since it was read. Each chat reads its own entry in `~/.claude/sessions` every 20 seconds for its Remote Control and app ids, which a press on its name in another panel opens; and, while another Mac's chats are listed, the Claude app's own session files in `~/Library/Application Support/Claude/claude-code-sessions`, listed at most every 30 seconds and each read once, for only its app id and chat id, to know which of those chats this Mac's app holds. Unless `updates` is `false`, at most every four hours one chat runs Claude Code's own `plugin marketplace update` and `plugin update` for Claudopus (the engine the chat runs on, `$CLAUDE_CODE_EXECPATH`, else `claude`), which fetch the marketplace from where it was added, GitHub for most; it keeps what it learnt in `~/.claude/claudopus/update.json`. No telemetry, no other network calls.
 
 ### What it puts in prompts
 

@@ -23,7 +23,7 @@ export const ROLES = [
 export type Role = (typeof ROLES)[number]['key']
 export type Models = Record<Role, string>
 export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', fable: 'Fable 5.2', haiku: 'Haiku 5.5' }
-export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; models?: Partial<Models> }
+export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; models?: Partial<Models> }
 
 export const parse = (text: string): Config => {
   try {
@@ -110,7 +110,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
     </Box>
   )
   // On and Off side by side, the one in force filled
-  const onOff = (key: 'agents' | 'sound' | 'notifications') => {
+  const onOff = (key: 'agents' | 'sound' | 'notifications' | 'updates') => {
     const isOn = config[key] !== false
     return (
       <Box key={`config-${key}-switch`} flexDirection="row" flexShrink={0} backgroundColor={FILL} height={1}>
@@ -122,7 +122,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       </Box>
     )
   }
-  const toggle = (key: 'agents' | 'sound' | 'notifications', label: string, what: string) => item(`config-${key}`, label, what, onOff(key), config[key] !== undefined, () => acts.set(key, undefined))
+  const toggle = (key: 'agents' | 'sound' | 'notifications' | 'updates', label: string, what: string) => item(`config-${key}`, label, what, onOff(key), config[key] !== undefined, () => acts.set(key, undefined))
   const choices = Object.entries(MODEL_NAMES).map(([value, label]) => ({ value, label }))
   const textItem = ({ text, isOwn, isStale, body }: ConfigShown['texts'][number]) => {
     const isEditing = editing.key === text.key
@@ -198,6 +198,17 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           {toggle('sound', 'Sound', 'A short chime.')}
           {toggle('notifications', 'Notifications', 'A notification naming the work, also when it stopped or failed.')}
         </Box>,
+      )}
+      {band(
+        ui,
+        'config-updates',
+        'Updates',
+        '',
+        toggle(
+          'updates',
+          'Automatic updates',
+          'Every few hours Claudopus installs its newest release, and chats you start after that use it. Off, it stays on the version you have until you update it yourself.',
+        ),
       )}
       {shown.failed ? (
         <Box key="config-failed" paddingX={2} flexShrink={0}>

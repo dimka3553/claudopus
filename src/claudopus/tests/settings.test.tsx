@@ -19,7 +19,7 @@ test('Config lists each thing a person can set with what is in force, edits a te
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config')
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  for (const name of ['Principles', "The chat's rules", 'Work rules', 'Your name', 'Background work', 'Sound', 'Notifications', 'Most work', 'Long legwork', 'Heavy work'])
+  for (const name of ['Principles', "The chat's rules", 'Work rules', 'Your name', 'Background work', 'Sound', 'Notifications', 'Automatic updates', 'Most work', 'Long legwork', 'Heavy work'])
     expect(await config.find({ type: 'Text', text: name })).toBeDefined()
   // Only what differs from what shipped has a Reset: here the name
   expect((await config.findAll({ type: 'Button' })).filter(one => one.props.label === 'Reset').length).toBe(1)
@@ -45,6 +45,11 @@ test('Config lists each thing a person can set with what is in force, edits a te
   await pressed(config, 'config-sound-off')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, sound: false })
   await pressed(config, 'config-sound-back')
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 })
+  // Automatic updates are on as shipped; Off writes updates: false, and On takes the key out again
+  await pressed(config, 'config-updates-off')
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, updates: false })
+  await pressed(config, 'config-updates-on')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 })
   await config.input({ key: 'config-name-input', text: 'Alex' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').name).toBe('Alex')

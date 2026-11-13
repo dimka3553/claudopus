@@ -166,5 +166,10 @@ const configActs = ($: EngineInterface) => ({
     }),
   cancel: () => configAct($, '', async () => void Object.assign(editing, { key: '', draft: '' })),
   putBack: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not reset`, () => putBack($, dir, text.path)),
-  set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) => configAct($, 'Not saved', () => setConfig($, dir, key, value, role)),
+  set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) =>
+    configAct($, 'Not saved', async () => {
+      await setConfig($, dir, key, value, role)
+      // Automatic updates turned back on look at once when a look is due, not at the next quarter hour
+      if (key === 'updates' && value === undefined) void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`))
+    }),
 })

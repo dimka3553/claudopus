@@ -421,7 +421,12 @@ const configActs = ($: EngineInterface) => ({
     }),
   cancel: () => configAct($, '', async () => void Object.assign(editing, { key: '', draft: '' })),
   putBack: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not reset`, () => putBack($, dir, text.path)),
-  set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) => configAct($, 'Not saved', () => setConfig($, dir, key, value, role)),
+  set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) =>
+    configAct($, 'Not saved', async () => {
+      await setConfig($, dir, key, value, role)
+      // Automatic updates turned back on look at once when a look is due, not at the next quarter hour
+      if (key === 'updates' && value === undefined) void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`))
+    }),
 })
 
 // The index: one line per subject, and the subject's brief
@@ -2843,6 +2848,8 @@ let isUpdating = false
 const selfUpdate = async ($: EngineInterface) => {
   const from = installedFrom($.plugin.root)
   if (!from || isUpdating || !dir) return
+  // Automatic updates turned off in Config leave the installed version alone
+  if ((await readConfig($, dir)).updates === false) return
   const stampPath = `${dir}/update.json`
   if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now())) return
   isUpdating = true
@@ -2866,7 +2873,8 @@ const selfUpdate = async ($: EngineInterface) => {
       // Another chat may have looked between this chat's reading and its lock
       const before = stampOf(await readOr($, stampPath))
       const now = await $.clock.now()
-      if (!isUpdateDue(before, now)) return
+      // and the person may have turned automatic updates off while this chat waited for it
+      if (!isUpdateDue(before, now) || (await readConfig($, dir)).updates === false) return
       const engine = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
       const scope = scopeOf(await readOr($, `${from.plugins}/installed_plugins.json`), `${from.plugin}@${from.marketplace}`, $.plugin.root)
       const [refresh, update] = updateSteps(engine, from, scope)
