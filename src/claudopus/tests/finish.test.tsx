@@ -278,7 +278,7 @@ test('work that answered while only its own background work held it, then stoppe
   await pane.unmount()
 })
 
-test('work that answers a question while a copy of its own still runs, with that copy still its to-do, stays at work and says what it waits for; it finishes only when the copy is checked and it reports', async ($, on) => {
+test('work that answers a question while a copy of its own still runs, with that copy still its to-do, stays at work and says what it waits for; it finishes only when the copy is checked and it reports', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const { clock, files, logged } = world(on, { art: true, agents, kinds })

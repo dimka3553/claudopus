@@ -23,6 +23,8 @@
 
 You keep talking while the work runs in the background, and a panel beside the chat shows every job as a card. Its working rules make Claude check its work before it shows you, and the chat stays small, so it spends fewer tokens. It makes Claude Code better; it does not replace it. macOS · free · MIT.
 
+If you pay per token (an API key or other metered billing), know that jobs running at once each spend their own tokens: five at a time spend about five times as fast as one.
+
 ![A chat beside the Claudopus panel: three asks become three cards, one stops to ask a question, one finishes green and the octopus cheers](mods/claudopus/art/panel.gif)
 
 <p align="center"><em>The panel, redrawn. The jobs are made up.</em></p>
@@ -95,6 +97,7 @@ More on each, and on editing the rules, in the [guide](mods/claudopus/docs/guide
 - Everything it keeps is in `~/.claude/claudopus` on your Mac. Delete the folder and it is gone.
 - It sends only to Claude, through Claude Code, and to your own Macs over SSH if you name them. Unless `updates` is off, once an hour it reads a version number from claudopus.ai, and when it changes, Claude Code fetches the new release from GitHub. No telemetry.
 - Passwords and keys stay in this Mac's keychain.
+- The two small notification apps are committed built; `mods/claudopus/notifier/checksums.txt` holds the SHA-256 of each of their files, and every release checks the committed apps still match it; the full account says how to rebuild them and compare, and what differs on another toolchain.
 
 The full account of every file, hook and program is in [What Claudopus does on your Mac](mods/claudopus/docs/privacy.md).
 
