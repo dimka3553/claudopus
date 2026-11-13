@@ -1,6 +1,6 @@
 // Made by src/claudopus/build.mjs from the parts in src/claudopus: change them there and build again, never this file. It is the hooks module hooks.json names.
 import { atom, read, update } from 'claude-code'
-import type { ElementTable, EngineInterface, McpToolResult, On, Register, RenderSurface, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
+import type { ElementTable, EngineInterface, McpToolResult, On, RasterProps, Register, RenderSurface, Timer, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
 import type { Entry, Flow, FlowAgent, Item, Link, Me, Prompt, Report, Server, Shared, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
@@ -1946,7 +1946,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
 // A report opened in its own pane: what it is and when; the question it waits on, with its answers; what it found; its pictures,
 // with the one press that opens them all; the report itself; then how to carry on from it, and the other rounds of its work
 type Thumb = { source: string; width: number; height: number } | null
-const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb) => {
+const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, cells?: Cells | null) => {
   const { Box, Button, Markdown, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   // The other rounds of its work first, as the list shows them as one row; then what it started from or started, and the subject's others
@@ -2008,6 +2008,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
             pictures.length > 1 ? `${at + 1} of ${pictures.length}` : '',
             <Box flexDirection="column" gap={1}>
               {thumb && table.Svg ? <table.Svg key={`report-picture-${r.id}-${at}`} source={thumb.source} alt={pictures[at]?.file ?? 'Picture'} /> : null}
+              {cells ? termPicture(ui, `report-cells-${r.id}-${at}`, cells, pictures[at]?.file ?? 'Picture') : null}
               {/* Shown here, never handed to another app: that would take the person out of Claude and switch their desktop. Where the
                   picture cannot be drawn, its path is given as text */}
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
@@ -2368,7 +2369,7 @@ const versionsOf = async ($: EngineInterface) => {
   const installed = await installedNow($).catch(() => '')
   return { version, installed, isWaiting: Boolean(version && installed && isNewer(installed, version)) }
 }
-const aboutView = async ($: EngineInterface, ui: Ui) => {
+const aboutView = async ($: EngineInterface, ui: Ui, surface?: string) => {
   const { Box, Link, Text } = ui
   const app = await (async () => (await $.session.version()).version)().catch(() => '')
   const { version, installed, isWaiting } = await versionsOf($)
@@ -2385,7 +2386,7 @@ const aboutView = async ($: EngineInterface, ui: Ui) => {
   return (
     <Box key="about" flexDirection="column" gap={1} flexGrow={1}>
       <Box key="about-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-        {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving')}
+        {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving', $, { surface, requestId: ABOUT_PANE })}
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold>Claudopus</Text>
           <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} is installed, new chats use it` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
@@ -2483,17 +2484,455 @@ const momentOf = (key: string, art: keyof typeof ART) => {
   moments.set(key, { art, mark, at })
   return mark
 }
-const octopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, alt: string) => {
+// Where it is drawn, for the terminal, which draws it as cells and repaints them in place as it moves: the engine, the surface and
+// the drawing's site
+const octopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, alt: string, $?: EngineInterface, at?: { surface?: string; requestId?: string }) => {
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number; isInteractive?: boolean }) => JSX.Element }
   const { Box } = ui
   const source = ART[art]
-  if (!source || !table.Svg) return null
+  if (!source) return null
+  // The terminal draws no Svg (its table may name one, drawing nothing): there the octopus is cells
+  if (at?.surface === 'terminal') return termOctopus(ui, key, art, size, alt, $, at.requestId)
+  if (!table.Svg) return null
   const mark = momentOf(key, art)
   return (
     <Box key={key} flexShrink={0}>
       <table.Svg key={`${key}-${art}-${mark}`} source={source.replace('<svg', `<svg data-moment="${mark}"`)} alt={alt} width={size} height={size} isInteractive={art !== 'mark'} />
     </Box>
   )
+}
+
+// The octopus, the marks of work under way and pictures where the terminal draws them: it has no Svg, so each is a Raster, a box
+// of cells that each hold two pixels, one over the other (▀ ▄ █ in one colour over another). Its moving ones are repainted in
+// place a few times a second ($.ui.blit), so nothing else is drawn again; the app's own drawing never comes here
+
+// The terminal's own colour, for a see-through pixel: the octopus sits on a dark terminal as on a light one
+const TERM_DEFAULT = 0x01000000
+type Cells = { columns: number; rows: number; cells: string }
+
+// ---- Cells: pixels two to a cell, packed as the Raster takes them ----
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+const toBase64 = (bytes: Uint8Array) => {
+  let out = ''
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = ((bytes[i] ?? 0) << 16) | ((bytes[i + 1] ?? 0) << 8) | (bytes[i + 2] ?? 0)
+    out += B64.charAt((n >> 18) & 63) + B64.charAt((n >> 12) & 63) + (i + 1 < bytes.length ? B64.charAt((n >> 6) & 63) : '=') + (i + 2 < bytes.length ? B64.charAt(n & 63) : '=')
+  }
+  return out
+}
+const fromBase64 = (text: string) => {
+  const clean = text.replace(/[^A-Za-z0-9+/]/g, '')
+  const out = new Uint8Array(Math.floor((clean.length * 3) / 4))
+  let n = 0
+  let bits = 0
+  let at = 0
+  for (const ch of clean) {
+    n = (n << 6) | B64.indexOf(ch)
+    bits += 6
+    if (bits >= 8) {
+      bits -= 8
+      out[at++] = (n >> bits) & 255
+    }
+  }
+  return out.subarray(0, at)
+}
+// Cells, row by row, each [glyph, foreground, background] as little-endian 32-bit words
+const packed = (words: number[]) => {
+  const bytes = new Uint8Array(words.length * 4)
+  words.forEach((word, i) => {
+    bytes[i * 4] = word & 255
+    bytes[i * 4 + 1] = (word >>> 8) & 255
+    bytes[i * 4 + 2] = (word >>> 16) & 255
+    bytes[i * 4 + 3] = (word >>> 24) & 255
+  })
+  return toBase64(bytes)
+}
+// Pixels (a colour 0xRRGGBB each, or -1 where none is) two rows to a cell: the upper half ▀ in the upper pixel's colour over the
+// lower one's, or the terminal's own where a half has none
+const halfBlocks = (pixels: ArrayLike<number>, width: number, height: number): Cells => {
+  const rows = Math.ceil(height / 2)
+  const words: number[] = []
+  for (let r = 0; r < rows; r += 1)
+    for (let c = 0; c < width; c += 1) {
+      const top = pixels[2 * r * width + c] ?? -1
+      const bottom = 2 * r + 1 < height ? (pixels[(2 * r + 1) * width + c] ?? -1) : -1
+      if (top < 0 && bottom < 0) words.push(0x20, TERM_DEFAULT, TERM_DEFAULT)
+      else if (top === bottom) words.push(0x2588, top, TERM_DEFAULT)
+      else if (bottom < 0) words.push(0x2580, top, TERM_DEFAULT)
+      else if (top < 0) words.push(0x2584, bottom, TERM_DEFAULT)
+      else words.push(0x2580, top, bottom)
+    }
+  return { columns: width, rows, cells: packed(words) }
+}
+// One glyph per cell in one colour, on the terminal's own
+const glyphCells = (glyphs: string, color: number): Cells => ({
+  columns: [...glyphs].length,
+  rows: 1,
+  cells: packed([...glyphs].flatMap(ch => [ch === ' ' ? 0x20 : (ch.codePointAt(0) ?? 0x20), ch === ' ' ? TERM_DEFAULT : color, TERM_DEFAULT])),
+})
+const colorOf = (hex: string) => {
+  const h = hex.replace('#', '')
+  const full = h.length === 3 ? [...h].map(ch => ch + ch).join('') : h.slice(0, 6)
+  const n = Number.parseInt(full, 16)
+  return Number.isFinite(n) ? n : -1
+}
+
+// ---- The octopus's drawings, read from its SVG files: squares of one pixel each, in groups that show and hide in turn ----
+
+// A drawing as the terminal plays it: each picture of it, how long each is shown, and how many times the whole plays (Infinity
+// for one that loops); after its last time the last picture stays
+type Sprite = { width: number; height: number; frames: number[][]; frameMs: number; loops: number }
+const sprites = new Map<string, Sprite | null>()
+const attrsOf = (text: string): Record<string, string | undefined> => Object.fromEntries([...text.matchAll(/([\w:-]+)="([^"]*)"/g)].map(m => [m[1] ?? '', m[2] ?? '']))
+const spriteOf = (svg: string): Sprite | null => {
+  if (sprites.has(svg)) return sprites.get(svg) ?? null
+  type Group = { parent?: Group; fill?: string; vis?: string; anim?: { values: string[]; dur: number; loops: number } }
+  const rects: { x: number; y: number; w: number; h: number; fill?: string; group: Group }[] = []
+  const root: Group = {}
+  const stack: Group[] = [root]
+  let view = [0, 0, 0, 0]
+  for (const m of svg.matchAll(/<(\/?)(svg|g|rect|animate)\b([^>]*?)(\/?)>/g)) {
+    const [, closing, tag, rest = '', selfClosing] = m
+    const a = attrsOf(rest)
+    const top = stack[stack.length - 1] ?? root
+    if (tag === 'svg' && !closing) {
+      const box = (a.viewBox ?? '').split(/[\s,]+/).map(Number)
+      view = box.length === 4 && box.every(Number.isFinite) ? box : [0, 0, Number(a.width) || 0, Number(a.height) || 0]
+      if (a.fill) root.fill = a.fill
+    } else if (tag === 'g') {
+      if (closing) stack.length > 1 && stack.pop()
+      else if (!selfClosing) stack.push({ parent: top, fill: a.fill, vis: a.visibility })
+    } else if (tag === 'animate' && a.attributeName === 'visibility' && a.values) {
+      const dur = Number.parseFloat(a.dur ?? '1') * (/ms$/.test(a.dur ?? '') ? 1 : 1000)
+      top.anim = { values: a.values.split(';').map((one: string) => one.trim()), dur: dur || 1000, loops: a.repeatCount === 'indefinite' ? Infinity : Number(a.repeatCount) || 1 }
+    } else if (tag === 'rect') rects.push({ x: Number(a.x) || 0, y: Number(a.y) || 0, w: Number(a.width) || 0, h: Number(a.height) || 0, fill: a.fill, group: top })
+  }
+  const [vx = 0, vy = 0, width = 0, height = 0] = view.map(Math.round)
+  if (!width || !height || !rects.length) return sprites.set(svg, null), null
+  const anims: NonNullable<Group['anim']>[] = []
+  for (const r of rects) for (let g: Group | undefined = r.group; g; g = g.parent) if (g.anim && !anims.includes(g.anim)) anims.push(g.anim)
+  const lead = anims.reduce<(typeof anims)[number] | undefined>((best, one) => (!best || one.values.length > best.values.length ? one : best), undefined)
+  const count = lead?.values.length ?? 1
+  const shows = (g: Group | undefined, i: number): boolean => {
+    if (!g) return true
+    const v = g.anim ? g.anim.values[Math.min(g.anim.values.length - 1, Math.floor((i * g.anim.values.length) / count))] : g.vis
+    return v !== 'hidden' && shows(g.parent, i)
+  }
+  const fillOf = (r: (typeof rects)[number]) => {
+    if (r.fill) return r.fill
+    for (let g: Group | undefined = r.group; g; g = g.parent) if (g.fill) return g.fill
+    return '#000000'
+  }
+  const frames = Array.from({ length: count }, (_, i) => {
+    const px = new Array<number>(width * height).fill(-1)
+    for (const r of rects) {
+      if (!shows(r.group, i)) continue
+      const color = colorOf(fillOf(r))
+      for (let y = Math.max(r.y, vy); y < Math.min(r.y + r.h, vy + height); y += 1)
+        for (let x = Math.max(r.x, vx); x < Math.min(r.x + r.w, vx + width); x += 1) px[(y - vy) * width + (x - vx)] = color
+    }
+    return px
+  })
+  const sprite = { width, height, frames, frameMs: lead ? lead.dur / count : 0, loops: lead?.loops ?? 1 }
+  sprites.set(svg, sprite)
+  return sprite
+}
+// One picture of a drawing, in the middle of a box of pixels, as cells
+const spriteCells = (sprite: Sprite, frame: number, box: { width: number; height: number }) => {
+  const px = new Array<number>(box.width * box.height).fill(-1)
+  const dx = Math.floor((box.width - sprite.width) / 2)
+  const dy = Math.floor((box.height - sprite.height) / 2)
+  const from = sprite.frames[frame] ?? sprite.frames[0] ?? []
+  for (let y = 0; y < sprite.height; y += 1)
+    for (let x = 0; x < sprite.width; x += 1) {
+      const at = (y + dy) * box.width + x + dx
+      const color = from[y * sprite.width + x] ?? -1
+      if (y + dy >= 0 && y + dy < box.height && x + dx >= 0 && x + dx < box.width && color >= 0) px[at] = color
+    }
+  return halfBlocks(px, box.width, box.height)
+}
+
+// ---- What moves: repainted in place a few times a second, each from its own start ----
+
+// A moving Raster drawn somewhere: its pictures (cells each), how long each is shown, how many times they play, how long it has
+// played, the picture last painted, and how many repaints in a row the terminal refused (one no longer shown is let go)
+type Live = { requestId: string; key: string; frames: string[]; frameMs: number; loops: number; elapsed: number; shown: number; misses: number }
+const lives = new Map<string, Live>()
+// How often the moving ones are looked at; each is repainted only when its picture changes, a few times a second at most
+const LIVE_TICK = 100
+let stopLives: Timer | undefined
+const frameOf = (one: { frames: unknown[]; frameMs: number; loops: number; elapsed: number }) => {
+  if (one.frames.length < 2 || !one.frameMs) return 0
+  const i = Math.floor(one.elapsed / one.frameMs)
+  return i >= one.frames.length * one.loops ? one.frames.length - 1 : i % one.frames.length
+}
+const isOver = (one: { frames: unknown[]; frameMs: number; loops: number; elapsed: number }) =>
+  one.frames.length < 2 || !one.frameMs || one.elapsed >= one.frames.length * one.loops * one.frameMs
+const tickLives = ($: EngineInterface) => {
+  for (const [id, one] of lives) {
+    one.elapsed += LIVE_TICK
+    const frame = frameOf(one)
+    const over = isOver(one)
+    if (frame === one.shown) {
+      if (over) lives.delete(id)
+      continue
+    }
+    one.shown = frame
+    void $.ui
+      .blit({ requestId: one.requestId, key: one.key, cells: one.frames[frame] ?? '' })
+      .then(said => {
+        const denied = Boolean(said && 'deny' in said && said.deny)
+        one.misses = denied ? one.misses + 1 : 0
+        if ((denied && one.misses >= 3) || over) lives.get(id) === one && lives.delete(id)
+      })
+      .catch(() => lives.get(id) === one && lives.delete(id))
+  }
+  if (!lives.size && stopLives) stopLives = (stopLives.cancel(), undefined)
+}
+// A Raster that plays its pictures from the moment given: drawn at the picture of now, then repainted in place as it moves on
+const liveRaster = (
+  ui: Ui,
+  $: EngineInterface | undefined,
+  requestId: string | undefined,
+  key: string,
+  frames: Cells[],
+  frameMs: number,
+  loops: number,
+  elapsed: number,
+) => {
+  const table = ui as Ui & { Raster?: (props: RasterProps) => JSX.Element }
+  if (!table.Raster || !frames.length) return null
+  const one = { frames, frameMs, loops, elapsed: Math.max(0, elapsed) }
+  const frame = frameOf(one)
+  const id = `${requestId}\n${key}`
+  // A site is given only with the engine that repaints it
+  if (requestId && !isOver(one)) {
+    lives.set(id, { requestId, key, frames: frames.map(f => f.cells), frameMs, loops, elapsed: one.elapsed, shown: frame, misses: 0 })
+    if (!stopLives) stopLives = $!.clock.every(LIVE_TICK, () => tickLives($!))
+  } else lives.delete(id)
+  const cells = frames[frame] ?? frames[0]
+  if (!cells) return null
+  return <table.Raster key={key} columns={cells.columns} rows={cells.rows} cells={cells.cells} />
+}
+
+// ---- The octopus in the terminal ----
+
+// Each drawing turned to cells once, by its source and the box it is drawn in
+const spriteFrames = new Map<string, Cells[]>()
+const framesOf = (source: string, box: { width: number; height: number }) => {
+  const id = `${box.width}x${box.height}:${source}`
+  const known = spriteFrames.get(id)
+  if (known) return known
+  const sprite = spriteOf(source)
+  const frames = sprite ? sprite.frames.map((_, i) => spriteCells(sprite, i, box)) : []
+  if (spriteFrames.size > 40) spriteFrames.clear()
+  spriteFrames.set(id, frames)
+  return frames
+}
+// Where each moment of the octopus began, by its mark, so a redraw draws the picture of now and the animation goes on from there
+const momentStarts = new Map<string, number>()
+// The band's octopus, one line tall: three cells of braille dots, each 2 by 4, a tiny octopus of 6 by 4 dots. At work its arms
+// paddle; happy, it lifts them, then rests
+const TINY: Record<'working' | 'happy', string[][]> = {
+  working: [
+    ['.####.', '#.##.#', '######', '#.#.#.'],
+    ['.####.', '#.##.#', '######', '.#.#.#'],
+  ],
+  happy: [
+    ['#.##.#', '##..##', '.####.', '.#..#.'],
+    ['.####.', '#.##.#', '######', '#.#.#.'],
+  ],
+}
+const brailleOf = (rows: string[]) => {
+  let out = ''
+  const bits = [
+    [0x01, 0x08],
+    [0x02, 0x10],
+    [0x04, 0x20],
+    [0x40, 0x80],
+  ]
+  for (let c = 0; c < (rows[0]?.length ?? 0); c += 2) {
+    let n = 0
+    for (let y = 0; y < 4; y += 1) for (let x = 0; x < 2; x += 1) if (rows[y]?.[c + x] === '#') n |= bits[y]?.[x] ?? 0
+    out += String.fromCodePoint(0x2800 + n)
+  }
+  return out
+}
+// How big the octopus is in each place, in pixels (two to a cell, upright): the header's and About's fit the waving octopus,
+// whose arms reach wider than the others', so the words beside it never move; the update screen's is the big jumping one
+const TERM_HEAD = { width: 18, height: 18 }
+const TERM_UPDATE = { width: 24, height: 22 }
+// Which drawing the terminal draws in a place: the header's are the small octopus (the computers of the working one need more
+// cells than a header has), the update screen's the big one; the band's is the tiny one
+const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, alt: string, $?: EngineInterface, requestId?: string) => {
+  if (!('Raster' in ui)) return null
+  const { Box } = ui
+  const mark = momentOf(key, art)
+  const now = Date.now()
+  if (!momentStarts.has(mark)) {
+    if (momentStarts.size > 200) momentStarts.clear()
+    momentStarts.set(mark, now)
+  }
+  const elapsed = now - (momentStarts.get(mark) ?? now)
+  if (size <= BAND_MARK) {
+    const tiny = art === 'happySmall' || art === 'happy' ? TINY.happy : TINY.working
+    const color = art === 'happySmall' || art === 'happy' ? colorOf('#4EBA65') : colorOf(LIVE)
+    const frames = tiny.map(rows => glyphCells(brailleOf(rows), color))
+    // Happy lifts its arms four times over the finish's two seconds, then rests; at work it paddles on
+    const loops = tiny === TINY.happy ? 4 : Infinity
+    return (
+      <Box key={key} flexShrink={0}>
+        {liveRaster(ui, $, requestId, `${key}-${art}-${mark}`, frames, tiny === TINY.happy ? 250 : 300, loops, elapsed)}
+      </Box>
+    )
+  }
+  const small: Partial<Record<keyof typeof ART, string>> = {
+    mark: ART.mark,
+    working: ART.workingSmall,
+    workingSmall: ART.workingSmall,
+    happy: ART.happySmall,
+    happySmall: ART.happySmall,
+    wave: ART.wave,
+    asking: ART.asking,
+    updated: ART.happySmall ? updatedArt(ART.happySmall, FLOW) : '',
+  }
+  const isBig = size > HEAD_MARK
+  const source = isBig ? ART[art] : small[art] || ART[art]
+  const sprite = source ? spriteOf(source) : null
+  if (!sprite) return null
+  const frames = framesOf(source, isBig ? TERM_UPDATE : TERM_HEAD)
+  return (
+    <Box key={key} flexShrink={0}>
+      {liveRaster(ui, $, requestId, `${key}-${art}-${mark}`, frames, sprite.frameMs, sprite.loops, elapsed)}
+    </Box>
+  )
+}
+
+// ---- The marks of work under way, in the terminal ----
+
+// A card's three dots, a brighter one passing along them as the app's pulse does; still once the work is not at work
+const DOT_FRAMES = ['●•·', '•●•', '·•●', '•·•']
+const termDots = (ui: Ui, $: EngineInterface, requestId: string, key: string) =>
+  liveRaster(ui, $, requestId, key, DOT_FRAMES.map(one => glyphCells(one, colorOf(LIVE))), 300, Infinity, Date.now() % 1200)
+// A helper at work: its dot with a ring that grows out of it and fades
+const RING_FRAMES = ['●', '◉', '◎', '○']
+const termRing = (ui: Ui, $: EngineInterface, requestId: string, key: string) =>
+  liveRaster(ui, $, requestId, key, RING_FRAMES.map(one => glyphCells(one, colorOf(LIVE))), 350, Infinity, Date.now() % 1400)
+
+// ---- Pictures in the terminal: a small copy of a few pixels per cell, in its colours ----
+
+// A picture's cells for a width of cells, made once out of the drawing by sips as an uncompressed bitmap (BMP) and read here; the
+// drawing is made again once they are. One that cannot be made is kept as such until its file changes
+const termPictures = new Map<string, Cells | null>()
+const termMaking = new Set<string>()
+// How many rows a picture is at most, so a tall one is narrower, not longer
+const TERM_PIC_ROWS = 36
+// The pixels of a BMP sips wrote: 24 or 32 bits a pixel, rows from the bottom up or the top down; a pixel mostly see-through is none
+const bmpPixels = (bytes: Uint8Array) => {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  if (bytes.length < 54 || view.getUint16(0, true) !== 0x4d42) return null
+  const start = view.getUint32(10, true)
+  const header = view.getUint32(14, true)
+  const width = view.getInt32(18, true)
+  const signed = view.getInt32(22, true)
+  const bpp = view.getUint16(28, true)
+  const compression = view.getUint32(30, true)
+  if (width <= 0 || !signed || (bpp !== 24 && bpp !== 32) || (compression !== 0 && compression !== 3)) return null
+  const height = Math.abs(signed)
+  const masks =
+    compression === 3 && header >= 56
+      ? [view.getUint32(54, true), view.getUint32(58, true), view.getUint32(62, true), view.getUint32(66, true)]
+      : compression === 3
+        ? [view.getUint32(54, true), view.getUint32(58, true), view.getUint32(62, true), 0]
+        : bpp === 32
+          ? [0x00ff0000, 0x0000ff00, 0x000000ff, 0]
+          : [0, 0, 0, 0]
+  const channel = (value: number, mask: number) => {
+    if (!mask) return 255
+    let shift = 0
+    while (!((mask >>> shift) & 1)) shift += 1
+    const max = mask >>> shift
+    return Math.round((((value & mask) >>> shift) * 255) / max)
+  }
+  const stride = Math.ceil((width * bpp) / 32) * 4
+  const px = new Array<number>(width * height).fill(-1)
+  for (let y = 0; y < height; y += 1) {
+    const row = start + (signed > 0 ? height - 1 - y : y) * stride
+    for (let x = 0; x < width; x += 1) {
+      const at = row + (x * bpp) / 8
+      if (at + bpp / 8 > bytes.length) return null
+      let r: number
+      let g: number
+      let b: number
+      let alpha = 255
+      if (bpp === 24) [b, g, r] = [bytes[at] ?? 0, bytes[at + 1] ?? 0, bytes[at + 2] ?? 0]
+      else {
+        const v = view.getUint32(at, true)
+        const [mr = 0, mg = 0, mb = 0, ma = 0] = masks
+        r = channel(v, mr)
+        g = channel(v, mg)
+        b = channel(v, mb)
+        alpha = ma ? channel(v, ma) : 255
+      }
+      px[y * width + x] = alpha < 128 ? -1 : (r << 16) | (g << 8) | b
+    }
+  }
+  return { width, height, px }
+}
+const makeTermPicture = async ($: EngineInterface, path: string, columns: number): Promise<Cells | null> => {
+  const said = (await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path]).catch(() => ({ stdout: '' }))).stdout
+  const width = Number(/pixelWidth:\s*(\d+)/.exec(said)?.[1] ?? 0)
+  const height = Number(/pixelHeight:\s*(\d+)/.exec(said)?.[1] ?? 0)
+  if (!width || !height) return null
+  // Pixels as wide as the cells, as many down as keep its shape (a cell is two pixels tall), a tall one narrowed to fit
+  let w = Math.max(1, Math.min(columns, width))
+  let h = Math.max(1, Math.round((w * height) / width))
+  if (h > TERM_PIC_ROWS * 2) (h = TERM_PIC_ROWS * 2), (w = Math.max(1, Math.round((h * width) / height)))
+  const out = `${dir}/thumbs/term-${Math.random().toString(36).slice(2, 10)}.bmp`
+  try {
+    await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+    const made = await $.process.run(['sips', '-z', String(h), String(w), '-s', 'format', 'bmp', path, '--out', out])
+    if (made.exitCode !== 0) return null
+    const read = (await $.fs.read(out, { as: 'bytes' })) as { base64: string }
+    const pic = bmpPixels(fromBase64(read.base64))
+    return pic ? halfBlocks(pic.px, pic.width, pic.height) : null
+  } finally {
+    await $.process.run(['rm', '-f', out]).catch(() => undefined)
+  }
+}
+// The cells of a picture as wide as the cells given, else nothing yet (being made) or null (it cannot be)
+const termPictureOf = async ($: EngineInterface, path: string, columns: number): Promise<Cells | null | undefined> => {
+  const stat = await $.fs.stat(path).catch(() => undefined)
+  if (!stat || stat.kind !== 'file') return null
+  return termPictureNow($, path, columns, String(stat.mtimeMs))
+}
+// The same for a drawing that cannot wait, by a mark of the file's version it was given: what is made, or it is begun
+const termPictureNow = ($: EngineInterface, path: string, columns: number, version: string): Cells | null | undefined => {
+  const id = `${path}:${version}:${columns}`
+  if (termPictures.has(id)) return termPictures.get(id) ?? null
+  if (!termMaking.has(id)) {
+    termMaking.add(id)
+    // Made from a timer, not from the drawing: what a drawing starts is cut off once it is drawn again
+    $.clock.after(0, () =>
+      void makeTermPicture($, path, columns)
+        .catch(err => (void log($, `terminal picture of ${path} not made: ${String(err)}`), null))
+        .then(cells => {
+          if (termPictures.size >= 30) termPictures.delete(termPictures.keys().next().value ?? '')
+          termPictures.set(id, cells)
+          termMaking.delete(id)
+          $.ui.invalidate('ui.render')
+        }),
+    )
+  }
+  return undefined
+}
+// A picture's cells drawn, or a dim line while they are made
+const termPicture = (ui: Ui, key: string, cells: Cells | null | undefined, alt: string) => {
+  const table = ui as Ui & { Raster?: (props: RasterProps) => JSX.Element }
+  if (!table.Raster || cells === null) return null
+  if (!cells) return <ui.Text key={key} dimColor>{`${alt} · drawing it…`}</ui.Text>
+  return <table.Raster key={key} columns={cells.columns} rows={cells.rows} cells={cells.cells} />
 }
 
 // Pictures a piece of work made, drawn in its chat where it made them
@@ -2671,6 +3110,18 @@ const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui
     </ui.Box>
   )
   if (!stat || stat.kind !== 'file') return said('This picture is no longer kept.')
+  if (e.surface === 'terminal') {
+    // The terminal draws it as cells as wide as the tab
+    const cells = await termPictureOf($, path, Math.max(8, Math.min(160, Number((e as { props?: { bodyColumns?: number } }).props?.bodyColumns ?? 60) - 2)))
+    if (cells === null) return said(`This picture could not be drawn here. It is at ${path}`)
+    return (
+      <ui.Box flexDirection="column" gap={1} width="100%">
+        <ui.Text bold wrap="wrap">{name}</ui.Text>
+        {termPicture(ui, 'large-cells', cells, 'Picture')}
+        <ui.Text dimColor wrap="wrap">{path}</ui.Text>
+      </ui.Box>
+    )
+  }
   if (!('Svg' in ui)) return said(`This screen cannot draw pictures. It is at ${path}`)
   const large = largeOf($, path, `${path}:${stat.mtimeMs}:${stat.size}`)
   if (large === undefined) return said('Making a large copy…')
@@ -3515,14 +3966,14 @@ const olderLine = (ui: Ui, key: string, left: number, onPress?: () => void) =>
 
 // The Changelog tab: every version, newest first, the one this chat runs marked; a very long one ends where the app's limit
 // would, the rest on the site
-const changelogView = async ($: EngineInterface, ui: Ui) => {
+const changelogView = async ($: EngineInterface, ui: Ui, surface?: string) => {
   const versions = await versionsLogged($)
   const { version } = await versionsOf($)
   const { shown, left } = fitted(versions, TAB_BUDGET)
   return (
     <ui.Box key="changelog" flexDirection="column" gap={1} flexGrow={1}>
       <ui.Box key="changelog-head" flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-        {octopus(ui, 'changelog-mark', 'mark', HEAD_MARK, 'Claudopus')}
+        {octopus(ui, 'changelog-mark', 'mark', HEAD_MARK, 'Claudopus', $, { surface })}
         <ui.Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <ui.Text bold>Changelog</ui.Text>
           <ui.Text dimColor wrap="wrap">What changed in each version, newest first.</ui.Text>
@@ -3564,7 +4015,7 @@ const closeScreen = async ($: EngineInterface, version: string) => {
 }
 // The screen, over the panel: the blue happy octopus jumping, the version moved to, the changes of every version after the one seen
 // last, and the way back. Nothing in a copy a newer load of this chat replaced, nor for a version whose changes were seen
-const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: number) => {
+const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: number, surface?: string) => {
   if (!dir || !loaded) return undefined
   const seen = seenIn(await readOr($, seenPath()))
   if (!isScreenDue(loaded, seen) || (await read($, ranVersion)) !== loaded) return undefined
@@ -3582,7 +4033,7 @@ const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: nu
   return (
     <ui.Box key="update-screen" flexDirection="column" gap={1} flexGrow={1}>
       <ui.Box key="update-head" flexDirection="column" alignItems="center" gap={1} backgroundColor={FILL} paddingX={2} paddingY={2} flexShrink={0}>
-        {octopus(ui, 'update-mark', 'updated', UPDATE_MARK, `Claudopus, updated to ${loaded}`)}
+        {octopus(ui, 'update-mark', 'updated', UPDATE_MARK, `Claudopus, updated to ${loaded}`, $, { surface, requestId: LIST })}
         <ui.Text bold color={FLOW}>Claudopus updated</ui.Text>
         <ui.Text dimColor wrap="wrap">{`v${seen} → v${loaded}${count > 1 ? ` · ${count} versions` : ''}`}</ui.Text>
       </ui.Box>
@@ -5819,7 +6270,7 @@ const bandHooks = (on: On) => {
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-        {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work') ?? <Text dimColor>•••</Text>}
+        {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
         <Box flexShrink={1} minWidth={0}>
           <Text dimColor wrap="truncate-end">{oneLine(doing)}</Text>
         </Box>
@@ -5944,7 +6395,7 @@ const panelHooks = (on: On) => {
           <table.Svg key={key} source={LIVE_DOTS} alt="Being done now" width={22} height={LINE} isInteractive />
         </Box>
       ) : (
-        <Text color={LIVE}>▸</Text>
+        (e.surface === 'terminal' ? termDots(table, $, paneId, key) : null) ?? <Text color={LIVE}>▸</Text>
       )
 
     // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button, then
@@ -6100,9 +6551,9 @@ const panelHooks = (on: On) => {
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
           <Text dimColor>{twigText(t)}</Text>
-          <Text color={status === 'working' ? LIVE : status === 'done' ? DONE : status === 'failed' ? 'error' : undefined} dimColor={!status || status === 'stopped'}>
+          {status === 'working' && e.surface === 'terminal' && 'Raster' in table ? termRing(table, $, paneId, `${key}-ring`) : <Text color={status === 'working' ? LIVE : status === 'done' ? DONE : status === 'failed' ? 'error' : undefined} dimColor={!status || status === 'stopped'}>
             {status === 'working' ? '●' : status === 'done' ? '✓' : status === 'failed' ? '✕' : status === 'stopped' ? '■' : '○'}
-          </Text>
+          </Text>}
         </Box>
       )
     // One row of the tree, in the same columns whatever it says: the lines and dot, what a press opens, the time
@@ -6411,7 +6862,10 @@ const panelHooks = (on: On) => {
           <Box key={`pics-${at}`} flexDirection="column" alignItems="flex-start" gap={1} width="100%">
             {made.map((pic, n) => (
               <Box key={`pic-${at}-${n}`} flexDirection="column" alignItems="flex-start" width="100%">
-                {pic.thumb && 'Svg' in drawing ? (
+                {pic.thumb && pic.path && e.surface === 'terminal' ? (
+                  // The terminal's small copy: cells as wide as the tab, at most forty
+                  termPicture(drawing, `pic-cells-${at}-${n}`, termPictureNow($, pic.path, Math.min(40, Math.max(8, e.props.bodyColumns - 4)), String(pic.thumb.source.length)), `Picture: ${pic.name}`)
+                ) : pic.thumb && 'Svg' in drawing ? (
                   <drawing.Svg
                     key={`pic-svg-${at}-${n}`}
                     source={pic.thumb.source}
@@ -6795,7 +7249,7 @@ const panelHooks = (on: On) => {
     const mood = headMood(head)
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
-    const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks)
+    const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
@@ -6807,7 +7261,7 @@ const panelHooks = (on: On) => {
           <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
               {/* Just moved to a newer version: the octopus turns blue and jumps for the moment */}
-              {updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
+              {updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
                 {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
@@ -6922,7 +7376,7 @@ const tabHooks = (on: On) => {
     const { Box } = $.ui.resolve(e)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {await aboutView($, $.ui.resolve(e))}
+        {await aboutView($, $.ui.resolve(e), e.surface)}
       </Box>
     )
   })
@@ -6932,7 +7386,7 @@ const tabHooks = (on: On) => {
     const { Box } = $.ui.resolve(e)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {await changelogView($, $.ui.resolve(e))}
+        {await changelogView($, $.ui.resolve(e), e.surface)}
       </Box>
     )
   })
@@ -6958,9 +7412,11 @@ const tabHooks = (on: On) => {
     const at = Math.min(Math.max(0, pictureAt.get(paneOf(r)) ?? 0), Math.max(0, r.files.length - 1))
     const file = r.files[at] ?? ''
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
+    // The terminal draws it as cells, as wide as the band it is in
+    const cells = e.surface === 'terminal' && (RASTER.test(file) || /\.svg$/i.test(file)) ? await termPictureOf($, `${reportPath(r)}/${file}`, Math.max(8, Math.min(60, e.props.bodyColumns - 6))) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, $.ui.resolve(e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture)}
+        {reportShown($, $.ui.resolve(e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, cells)}
       </Box>
     )
   })

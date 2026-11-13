@@ -812,8 +812,8 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
   expect((await tab.find({ type: 'Text', text: / in all$/ }))?.text).toBe('2 at work · 4 in all')
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
-  // One at work has a dot at the end of its line, one that finished a tick
-  expect((await tab.findAll({ type: 'Text', text: '●' })).length).toBe(2)
+  // One at work has a dot at the end of its line, a ring growing out of it (cells the terminal repaints), one that finished a tick
+  expect((await tab.findAll({ type: 'Raster' })).filter(one => String(one.key).endsWith('-ring')).length).toBe(2)
   expect((await tab.findAll({ type: 'Text', text: '✓' })).length).toBe(2)
   expect(await keyed(tab, 'open-details-a3')).toBeDefined()
   await tab.unmount()

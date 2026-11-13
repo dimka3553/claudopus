@@ -108,7 +108,7 @@ const panelHooks = (on: On) => {
           <table.Svg key={key} source={LIVE_DOTS} alt="Being done now" width={22} height={LINE} isInteractive />
         </Box>
       ) : (
-        <Text color={LIVE}>▸</Text>
+        (e.surface === 'terminal' ? termDots(table, $, paneId, key) : null) ?? <Text color={LIVE}>▸</Text>
       )
 
     // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button, then
@@ -264,9 +264,9 @@ const panelHooks = (on: On) => {
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
           <Text dimColor>{twigText(t)}</Text>
-          <Text color={status === 'working' ? LIVE : status === 'done' ? DONE : status === 'failed' ? 'error' : undefined} dimColor={!status || status === 'stopped'}>
+          {status === 'working' && e.surface === 'terminal' && 'Raster' in table ? termRing(table, $, paneId, `${key}-ring`) : <Text color={status === 'working' ? LIVE : status === 'done' ? DONE : status === 'failed' ? 'error' : undefined} dimColor={!status || status === 'stopped'}>
             {status === 'working' ? '●' : status === 'done' ? '✓' : status === 'failed' ? '✕' : status === 'stopped' ? '■' : '○'}
-          </Text>
+          </Text>}
         </Box>
       )
     // One row of the tree, in the same columns whatever it says: the lines and dot, what a press opens, the time
@@ -575,7 +575,10 @@ const panelHooks = (on: On) => {
           <Box key={`pics-${at}`} flexDirection="column" alignItems="flex-start" gap={1} width="100%">
             {made.map((pic, n) => (
               <Box key={`pic-${at}-${n}`} flexDirection="column" alignItems="flex-start" width="100%">
-                {pic.thumb && 'Svg' in drawing ? (
+                {pic.thumb && pic.path && e.surface === 'terminal' ? (
+                  // The terminal's small copy: cells as wide as the tab, at most forty
+                  termPicture(drawing, `pic-cells-${at}-${n}`, termPictureNow($, pic.path, Math.min(40, Math.max(8, e.props.bodyColumns - 4)), String(pic.thumb.source.length)), `Picture: ${pic.name}`)
+                ) : pic.thumb && 'Svg' in drawing ? (
                   <drawing.Svg
                     key={`pic-svg-${at}-${n}`}
                     source={pic.thumb.source}
@@ -959,7 +962,7 @@ const panelHooks = (on: On) => {
     const mood = headMood(head)
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
-    const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks)
+    const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
@@ -971,7 +974,7 @@ const panelHooks = (on: On) => {
           <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
               {/* Just moved to a newer version: the octopus turns blue and jumps for the moment */}
-              {updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
+              {updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
                 {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}

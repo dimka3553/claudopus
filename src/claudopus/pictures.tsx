@@ -173,6 +173,18 @@ const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui
     </ui.Box>
   )
   if (!stat || stat.kind !== 'file') return said('This picture is no longer kept.')
+  if (e.surface === 'terminal') {
+    // The terminal draws it as cells as wide as the tab
+    const cells = await termPictureOf($, path, Math.max(8, Math.min(160, Number((e as { props?: { bodyColumns?: number } }).props?.bodyColumns ?? 60) - 2)))
+    if (cells === null) return said(`This picture could not be drawn here. It is at ${path}`)
+    return (
+      <ui.Box flexDirection="column" gap={1} width="100%">
+        <ui.Text bold wrap="wrap">{name}</ui.Text>
+        {termPicture(ui, 'large-cells', cells, 'Picture')}
+        <ui.Text dimColor wrap="wrap">{path}</ui.Text>
+      </ui.Box>
+    )
+  }
   if (!('Svg' in ui)) return said(`This screen cannot draw pictures. It is at ${path}`)
   const large = largeOf($, path, `${path}:${stat.mtimeMs}:${stat.size}`)
   if (large === undefined) return said('Making a large copy…')

@@ -1,7 +1,7 @@
 // What the joined file imports: the engine's own helpers and types, the mod's contract, and the mod's pure files. These lines
 // go at the top of mods/claudopus/hooks/register.tsx as they stand; build.mjs makes globals.d.ts from them for the parts
 import { atom, read, update } from 'claude-code'
-import type { ElementTable, EngineInterface, McpToolResult, On, Register, RenderSurface, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
+import type { ElementTable, EngineInterface, McpToolResult, On, RasterProps, Register, RenderSurface, Timer, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
 import type { Entry, Flow, FlowAgent, Item, Link, Me, Prompt, Report, Server, Shared, Stream, Todo, Wait } from '../types'
 import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'

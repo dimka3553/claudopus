@@ -297,7 +297,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
 // A report opened in its own pane: what it is and when; the question it waits on, with its answers; what it found; its pictures,
 // with the one press that opens them all; the report itself; then how to carry on from it, and the other rounds of its work
 type Thumb = { source: string; width: number; height: number } | null
-const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb) => {
+const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, cells?: Cells | null) => {
   const { Box, Button, Markdown, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   // The other rounds of its work first, as the list shows them as one row; then what it started from or started, and the subject's others
@@ -359,6 +359,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
             pictures.length > 1 ? `${at + 1} of ${pictures.length}` : '',
             <Box flexDirection="column" gap={1}>
               {thumb && table.Svg ? <table.Svg key={`report-picture-${r.id}-${at}`} source={thumb.source} alt={pictures[at]?.file ?? 'Picture'} /> : null}
+              {cells ? termPicture(ui, `report-cells-${r.id}-${at}`, cells, pictures[at]?.file ?? 'Picture') : null}
               {/* Shown here, never handed to another app: that would take the person out of Claude and switch their desktop. Where the
                   picture cannot be drawn, its path is given as text */}
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>

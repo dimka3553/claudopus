@@ -25,7 +25,7 @@ const bandHooks = (on: On) => {
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-        {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work') ?? <Text dimColor>•••</Text>}
+        {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
         <Box flexShrink={1} minWidth={0}>
           <Text dimColor wrap="truncate-end">{oneLine(doing)}</Text>
         </Box>

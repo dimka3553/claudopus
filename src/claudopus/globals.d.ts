@@ -17,8 +17,10 @@ declare global {
   export import EngineInterface = M0.EngineInterface
   export import McpToolResult = M0.McpToolResult
   export import On = M0.On
+  export import RasterProps = M0.RasterProps
   export import Register = M0.Register
   export import RenderSurface = M0.RenderSurface
+  export import Timer = M0.Timer
   export import ToolCallInput = M0.ToolCallInput
   export import ToolCallResult = M0.ToolCallResult
   export import SessionMessage = M0.SessionMessage

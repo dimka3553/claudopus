@@ -15,14 +15,14 @@ const hooks = join(here, '../../mods/claudopus/hooks')
 // The parts in the order they are joined: a part that uses another's value while the module loads comes after it
 const PARTS = [
   'common.tsx', 'rules.tsx', 'settings.tsx', 'subjects.tsx', 'cards.tsx', 'talk.tsx', 'servers.tsx', 'reports.tsx', 'welcome.tsx',
-  'results-tab.tsx', 'memory.tsx', 'stats-tab.tsx', 'about.tsx', 'art.tsx', 'pictures.tsx', 'workflows.tsx', 'notify.tsx',
+  'results-tab.tsx', 'memory.tsx', 'stats-tab.tsx', 'about.tsx', 'art.tsx', 'term-art.tsx', 'pictures.tsx', 'workflows.tsx', 'notify.tsx',
   'updating.tsx', 'changelog.tsx', 'asking.tsx', 'sharing.tsx', 'macs.tsx', 'afar.tsx', 'boxes.tsx', 'prompts.tsx', 'chat.tsx', 'stuck.tsx', 'work.tsx', 'commands.tsx', 'tools.tsx', 'band.tsx',
   'panel.tsx', 'tabs.tsx', 'register.tsx',
 ]
 const TEST_PARTS = [
   'world.tsx', 'chat.test.tsx', 'cards.test.tsx', 'finish.test.tsx', 'notify.test.tsx', 'commands.test.tsx', 'servers.test.tsx',
   'reports.test.tsx', 'pictures.test.tsx', 'memory.test.tsx', 'workflows.test.tsx', 'tabs.test.tsx', 'settings.test.tsx',
-  'asking.test.tsx', 'welcome.test.tsx', 'sharing.test.tsx', 'prompts.test.tsx', 'macs.test.tsx', 'stuck.test.tsx',
+  'asking.test.tsx', 'welcome.test.tsx', 'sharing.test.tsx', 'prompts.test.tsx', 'macs.test.tsx', 'stuck.test.tsx', 'term-art.test.tsx',
 ]
 
 const read = path => readFileSync(path, 'utf8')
