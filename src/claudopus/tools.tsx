@@ -72,7 +72,10 @@ const toolHooks = (on: On) => {
     const asked = oneLine(typeof input.text === 'string' ? input.text : '')
     const text = asked.length > ASK_TEXT ? cut(asked, ASK_TEXT) : asked
     const given1 = (typeof input.details === 'string' ? input.details : '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
-    const details = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n').slice(0, ASK_DETAILS)
+    const whole = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n')
+    const details = whole.length > ASK_DETAILS ? cut(whole, ASK_DETAILS) : whole
+    // An ask that points at an explanation it does not carry is not shown: the person would see it before that explanation reaches them
+    if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the ask points at an explanation it does not carry, and ${who()} sees an ask before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
     const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
     // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and one that starts with a
@@ -109,11 +112,13 @@ const toolHooks = (on: On) => {
     const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
     const lost = givenPics.length - pictures.length
     // An ask that points at an explanation it does not carry: the person sees the ask before the work's report, so it is said back
-    const pointsAway = !given1 && POINTS_AWAY.test(asked) ? ` It points at an explanation it does not carry: ${who()} sees this ask before your report, which reaches them only after you finish. Ask it again now with that explanation in \`details\`.` : ''
     const long = text === asked ? '' : ` The question was longer than one line: the card shows it cut at a word, and it is whole at the top of its details.`
+    const tooLong = whole.length > ASK_DETAILS ? ` Its details were longer than ${ASK_DETAILS} letters and were cut at a word: put what matters first.` : ''
+    // A go-ahead asked with nothing to decide it on: said back, since ${who()} sees the ask before the report
+    const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : ''
     const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} named with it, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
-    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${pointsAway} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, and starts you again if you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
+    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, and starts you again if you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides

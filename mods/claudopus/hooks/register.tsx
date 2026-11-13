@@ -369,7 +369,7 @@ const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: stri
   [
     `The work "${title}" needs {name}: ${ask.text}`,
     // The chat's notice is plain text: Markdown's marks for bold would show as they are
-    ask.details ? `What it is about:\n${ask.details.replace(/\*\*|__/g, '')}` : '',
+    ask.details ? `What it is about:\n${ask.details.replaceAll('**', '')}` : '',
     `Answers: ${answers.join(' · ')}, or a reply in {name}'s own words, here or on its card.`,
     ask.copy ? `${ask.isCommand ? 'The command to type' : 'The text to paste'}: ${ask.copy}` : '',
     ask.pictures?.length ? `Pictures: ${ask.pictures.join(', ')}` : '',
@@ -377,7 +377,7 @@ const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: stri
     .filter(Boolean)
     .join('\n')
 const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
-  `The background work "${title}" asked {name}, on its card and in this chat as a notice from the Claudopus panel that {name} sees and you do not: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, shown to {name} with it on the card and in the notice: ${ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} has it already: do not pass it on, do not answer it yourself, and start no work for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
+  `The background work "${title}" asked {name}, on its card and in this chat as a notice from the Claudopus panel that {name} sees and you do not: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, shown to {name} whole with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} has it already: do not pass it on, do not answer it yourself, and start no work for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
 const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks.`
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
@@ -4127,8 +4127,13 @@ const DEFAULT_ANSWERS = ['Done', 'Not now']
 // An ask's question is one line of at most ASK_TEXT letters; what it is about, its details, is kept whole up to ASK_DETAILS
 const ASK_TEXT = 300
 const ASK_DETAILS = 12_000
-// Words by which an ask points at an explanation somewhere else: the chat, a report, a message still to come
-const POINTS_AWAY = /\b(?:as (?:explained|listed|described|shown|set out|summari[sz]ed)|(?:explained|listed|described|shown) (?:in|above|below)|in (?:the|my|this) (?:chat|report|message|result)|see (?:the|my) (?:chat|report|message))/i
+// Words by which an ask points at an explanation somewhere else (the chat, a report, a message still to come), never at something
+// shown, such as a code on a page or a picture
+const POINTS_AWAY = /\b(?:as (?:i |we )?(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out)|(?:explained|described|listed|discussed|mentioned|summari[sz]ed|set out) (?:in (?:the|my|this) (?:chat|report|message|result|explanation)|above|below|earlier|before)|(?:see|per|in) (?:my|the) (?:report|last message|explanation|message above)|(?:the )?(?:differences|explanation|details|summary) (?:above|below))|\(see (?:above|below)\)/i
+// How much of what an ask is about the small card shows; Details shows it whole, as does the chat's notice
+const DETAILS_ON_CARD = 1500
+// How much of it the row the chat's model reads carries: the person has it whole, and the chat stays small
+const DETAILS_IN_RELAY = 2000
 const sentReplies = new Map<string, Sent>()
 // An answer on its way, by the work it was written into: that work's next step reads it, and the card it belongs to says so
 const pending = new Map<string, string>()
@@ -5517,7 +5522,7 @@ const chatHooks = (on: On) => {
         type: 'object',
         properties: {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
-          details: { type: 'string', description: 'What the ask is about, in full: everything needed to decide it, shown with it on the card and in the chat. Short plain lines and "- " lists, no tables or bold: the card is narrow and the chat shows it as plain text. Never "as explained in the chat" or "in my report": they see the ask first' },
+          details: { type: 'string', description: 'What the ask is about, in full: everything needed to decide it, shown with it on the card and in the chat. Short plain lines and "- " lists, no tables or bold, and a blank line after a list: the card is narrow and the chat shows it as plain text. Never "as explained in the chat" or "in my report": they see the ask first' },
           copy: { type: 'string', description: 'Only text they must paste somewhere else, such as a one-time code or a link; leave it out when they only read or press something' },
           choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now (Done and Not now when left out); the one pressed comes back to you as a message' },
           command: { type: 'string', description: 'A command only they can run, never one you can run yourself, one line, whole: shown with a Copy button, and on this Mac a button that opens a terminal with it typed, never run' },
@@ -6332,7 +6337,10 @@ const toolHooks = (on: On) => {
     const asked = oneLine(typeof input.text === 'string' ? input.text : '')
     const text = asked.length > ASK_TEXT ? cut(asked, ASK_TEXT) : asked
     const given1 = (typeof input.details === 'string' ? input.details : '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
-    const details = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n').slice(0, ASK_DETAILS)
+    const whole = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n')
+    const details = whole.length > ASK_DETAILS ? cut(whole, ASK_DETAILS) : whole
+    // An ask that points at an explanation it does not carry is not shown: the person would see it before that explanation reaches them
+    if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the ask points at an explanation it does not carry, and ${who()} sees an ask before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
     const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
     // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and one that starts with a
@@ -6369,11 +6377,13 @@ const toolHooks = (on: On) => {
     const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
     const lost = givenPics.length - pictures.length
     // An ask that points at an explanation it does not carry: the person sees the ask before the work's report, so it is said back
-    const pointsAway = !given1 && POINTS_AWAY.test(asked) ? ` It points at an explanation it does not carry: ${who()} sees this ask before your report, which reaches them only after you finish. Ask it again now with that explanation in \`details\`.` : ''
     const long = text === asked ? '' : ` The question was longer than one line: the card shows it cut at a word, and it is whole at the top of its details.`
+    const tooLong = whole.length > ASK_DETAILS ? ` Its details were longer than ${ASK_DETAILS} letters and were cut at a word: put what matters first.` : ''
+    // A go-ahead asked with nothing to decide it on: said back, since ${who()} sees the ask before the report
+    const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : ''
     const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} named with it, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
-    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${pointsAway} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, and starts you again if you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
+    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, and starts you again if you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides
@@ -6449,6 +6459,7 @@ const bandHooks = (on: On) => {
                 </Text>
               </Box>
             </Box>
+            {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{'    What it is about is in the chat above and on its card'}</Text> : null}
             {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
             <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
               {answers.map((choice, n) => (
@@ -6657,10 +6668,10 @@ const panelHooks = (on: On) => {
         <Box key={key} flexDirection="column" gap={1}>
           {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
           <Text wrap="wrap" color={NEEDS} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
-          {/* What the ask is about, whole on the small card as in Details: the person decides with it in front of them */}
+          {/* What the ask is about, under its question: whole in Details, and on the small card up to DETAILS_ON_CARD */}
           {ask.details ? (
             <Box key={`${key}-details`} flexDirection="column" minWidth={0}>
-              <Markdown text={ask.details} />
+              <Markdown text={isWhole || ask.details.length <= DETAILS_ON_CARD ? ask.details : `${cut(ask.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`} />
             </Box>
           ) : null}
           {ask.copy ? (

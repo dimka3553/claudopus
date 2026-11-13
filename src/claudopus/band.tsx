@@ -47,6 +47,7 @@ const bandHooks = (on: On) => {
                 </Text>
               </Box>
             </Box>
+            {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{'    What it is about is in the chat above and on its card'}</Text> : null}
             {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
             <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
               {answers.map((choice, n) => (
