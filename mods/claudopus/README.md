@@ -56,14 +56,14 @@ That is all. It is on in every chat from then on, and it keeps itself up to date
 
 | Part | What you get |
 | --- | --- |
-| **Background work** | Each message becomes a piece of work run by a background agent. The chat answers in one line and is free for your next message. A message about running work steers it. |
+| **Background work** | Each message becomes a piece of work run by a background agent. The chat answers in one line and is free for your next message. A message about running work steers it. A question a few files answer, the chat answers itself by reading them; it never changes a file or runs a command. |
 | **The panel** | Every job is a card with its to-dos and where it stands. The octopus moves while anything runs. It lists the work of every open chat on this Mac, and of your other Macs if you name them. Work that gets nothing new back for 12 minutes says so, and the chat is told; a step running for minutes shows its time; finished work that left something running says so, with Stop it. |
 | **When it needs you** | The card turns amber, rises to the top and asks, with buttons or a box to answer in. You get a notification and a short sound, and the question also arrives in the chat. |
 | **When it is done** | The card turns green, a chime plays, and a notification names the work. Clicking it opens that chat. |
 | **Memory** | Your messages, the results and a brief per subject are kept as plain files in `~/.claude/claudopus`, so chats can stay small. |
-| **Working rules** | A short set of principles goes into every chat: ask less, show the result, have a second agent check the work. Edit them in the Config tab. |
-| **Models** | Opus for most work, Sonnet for long legwork, Fable only for heavy work. Checks never run on a weaker model than the one that built the work. |
-| **Passwords and keys** | Asked for once in a box at the top of the panel, in every chat, kept in the macOS keychain, never put in a chat or a file. |
+| **Working rules** | A short set of principles goes into every chat: ask less, show the result, have a second agent check the work. They leave the rest to you: edit them in the Config tab, and your copy is the one used. |
+| **Models** | Opus for most work, Sonnet for long legwork, Fable only for heavy work. Checks never run on a weaker model than the one that built the work. An agent named an older model or Haiku is refused, and work the app moves to an older model runs on Fable instead; its card says so. |
+| **Passwords and keys** | Asked for once in a box at the top of the panel, in every chat, kept in the macOS keychain, never put in a chat or a file. The box words itself and work is kept out of its files: this stops slips and common tricks, and is no wall. |
 | **One release at a time** | Work changes a repo only in its own worktree and branch, and reaches main only through one release command that takes its turn, numbers the version, builds, checks and pushes. A push to main by hand is refused. |
 | **Tabs** | Results, Stats (tokens, cost at API prices, time saved), Config and About; Memory opens the memory folder. `/claudopus` reopens a closed panel, `/servers` lists the local servers your chats started. |
 

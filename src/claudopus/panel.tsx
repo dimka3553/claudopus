@@ -74,8 +74,10 @@ const panelHooks = (on: On) => {
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
+    // Work the app sent to an older model says which one it was kept off; work that answers from one all the same says so
+    const offModel = (one: Todo) => (rightModel(one.model ?? '') ? 'not a model work should run on' : one.moved ? `kept off ${one.moved}` : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -108,7 +110,7 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
         )
-      const rest = [one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
+      const rest = [offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
       return (
         <Box flexDirection="row" alignItems="flex-start">
           <Button
@@ -159,7 +161,7 @@ const panelHooks = (on: On) => {
       return (
         <Box key={key} flexDirection="column" gap={1}>
           {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
-          <Text wrap="wrap" color={NEEDS} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
+          <Text wrap="wrap" color={needsPerson(one) ? NEEDS : LIVE} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
           {ask.copy ? (
             <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -263,7 +265,7 @@ const panelHooks = (on: On) => {
                     {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : 'Stopped'}
                   </Text>
                 ) : (
-                  <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || Boolean(one.ask)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? 'Starting' : 'It wrote no line about itself')}</Text>
+                  <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? 'Starting' : 'It wrote no line about itself')}</Text>
                 )}
               </Box>
             </Box>
@@ -289,7 +291,7 @@ const panelHooks = (on: On) => {
     // height, whatever it is; a terminal has no part thinner than a row, so there the edge is whole
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
-      if (one.ask || one.admins?.length || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={one.ask || one.admins?.length ? NEEDS : one.status === 'working' ? LIVE : DONE} />
+      if (needsPerson(one) || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : one.status === 'working' ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
         <Box key={`edge-${one.id}`} width={1} flexShrink={0} flexDirection="column">
@@ -784,9 +786,9 @@ const panelHooks = (on: On) => {
           ) : null}
           {one.ask ? (
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-              <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
+              <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>Needs you now</Text>
+                <Text bold dimColor>{needsPerson(one) ? 'Needs you now' : 'Acting on your reply; it still asks'}</Text>
                 {askBlock(one, `ask-big-${one.id}`, true)}
               </Box>
             </Box>
@@ -1022,12 +1024,12 @@ const panelHooks = (on: On) => {
     const isInline = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
     // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and
     // work that just finished (happy too for a workflow in its pause whose card turned green: it finished and its last round passed)
-    const runningThere = elsewhere.filter(one => one.status === 'working' && !one.ask)
+    const runningThere = elsewhere.filter(one => one.status === 'working' && !needsPerson(one))
     const head = {
-      here: working.filter(one => !one.ask).length + runningFlows.length,
+      here: working.filter(one => !needsPerson(one)).length + runningFlows.length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
-      asks: boxes.length + looseGates.length + own.filter(one => one.ask || one.admins?.length).length + elsewhere.filter(one => !one.ask && one.admins?.length).length + waiting.length + elsewhere.filter(one => one.ask).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
+      asks: boxes.length + looseGates.length + own.filter(needsPerson).length + waiting.length + elsewhere.filter(needsPerson).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)

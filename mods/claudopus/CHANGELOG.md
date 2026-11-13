@@ -2,6 +2,31 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.85 · 13 November 2026
+- A card whose work is acting on your reply to its ask turns purple, as work under way, from the moment you reply until it stops again; its ask and answers stay there to press, and it turns amber again only once the work stops with the ask still open.
+- The header counts that card as at work rather than as waiting on you, and the line above the terminal prompt shows the ask in purple with the working octopus while it acts.
+- In the terminal, work whose turn ends while a command it started in the background still runs stays at work, purple, instead of showing Finished or waiting on you; it finishes when it is actually done.
+
+## 0.2.84 · 13 November 2026
+- The chat answers a question that reading a few files answers, such as what a function does, by reading them itself, with no background work started. Anything that changes a file, runs a command or needs more than a few reads still goes to background work.
+
+## 0.2.83 · 13 November 2026
+- The password and key boxes now say only the panel's own words, made from what the request names (a Mac's admin password or a key, the Mac or the key's name), so a request file with made-up text shows that text nowhere, and one the panel cannot word is not shown at all.
+- Work is refused commands that write into the boxes' folder or read their keychain entries, typed, redirected, in a script or in another language's code; only the admin and secret runners use them. This stops slips and common tricks, and is no wall.
+- What you type in a box still shows as you type it: the app's text field has no hidden mode, in the desktop app or the terminal.
+
+## 0.2.82 · 13 November 2026
+- Work no longer carries on on an older model. When the app moved a piece of work to Opus 4.8 after its safeguards flagged a message, the work stayed there; now each of its steps goes to Fable 5.2 instead, and while that lasts its card says which model it was kept off.
+- An agent named an older model or Haiku is refused, whether the chat or a piece of work starts it, with the models to name. A helper of a kind the app runs on Haiku runs on Sonnet 5.5.
+- A card that still answers from an older model says it is not a model work should run on.
+
+## 0.2.81 · 13 November 2026
+- The shipped principles no longer say that your decisions are deliberate or what done means: those are yours to add in Config.
+- If you already made your own copy of the principles, nothing changes for you: an update leaves it as it is.
+
+## 0.2.80 · 13 November 2026
+- Every pull request to Claudopus, and every release on main, is now checked on GitHub by running all of its tests, so a broken test shows before it reaches you.
+
 ## 0.2.79 · 13 November 2026
 - The README and the guide say that jobs running at once each spend their own tokens, so on metered billing five at a time spend about five times as fast.
 - Stats says what its reply time measures, and measures it: from your message to the chat's last step before the next message, on average, without the background work it started. It used to run on until the next message came in, which counted the wait for background work and idle time.

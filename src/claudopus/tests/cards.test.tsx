@@ -404,7 +404,7 @@ test('work that takes many steps without touching its to-dos is reminded to brin
   expect(appended).toHaveLength(2)
 })
 
-test('work that ends in an error is kept as failed, time lying ended is not counted, and work under way is never forgotten', async ($, on) => {
+test('work that ends in an error is kept as failed, time lying ended is not counted, and work under way is never forgotten', SLOW, async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
@@ -546,6 +546,72 @@ test("a card's title, its line of facts and every line under them start at one l
   await $.turn.complete({ answer: 'Fixed.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(500)
   await expectOneEdge(4)
+})
+
+test('work the app moves to an older model, or a helper it starts on Haiku, has each step sent to a model work runs on, and its card says what it was kept off', async ($, on) => {
+  const { stepped, files } = world(on, { model: 'claude-fable-5-2' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  const step = async (index: number, model: string, agentId: string | undefined = 'a1') => {
+    for await (const _ of $.turn.step({ turnId: 'turn-2', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) void _
+  }
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const line = async () => (await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')
+
+  // On the model it was started on, nothing is changed and the card says nothing more
+  await step(0, 'claude-opus-5-5')
+  expect(stepped).toEqual(['claude-opus-5-5'])
+  expect(await line()).not.toContain('kept off')
+
+  // The app's safeguards flagged a message and the app sends the next steps to Opus 4.8: they go to Fable 5.2
+  await step(1, 'claude-opus-4-8')
+  await step(2, 'claude-opus-4-8')
+  expect(stepped).toEqual(['claude-opus-5-5', 'claude-fable-5-2', 'claude-fable-5-2'])
+  expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Fable 5.2')
+  expect(await line()).toContain('kept off Opus 4.8')
+  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was sent to Opus 4.8 by the app: its steps go to Fable 5.2').length).toBe(2)
+
+  // Once the app sends its steps to a right model again, a newer one too, nothing is changed and the card no longer says so
+  await step(3, 'claude-opus-5-6')
+  expect(stepped.at(-1)).toBe('claude-opus-5-6')
+  expect(await line()).not.toContain('kept off')
+  await step(4, 'claude-opus-4-8')
+  expect(await line()).toContain('kept off Opus 4.8')
+
+  // A helper of an agent type the app runs on Haiku runs on Sonnet 5.5; an older Sonnet too
+  await $.agent.spawn({ ...spawn, description: 'Look it up', prompt: 'look it up', parentAgentId: 'a1' } as never)
+  await step(0, 'claude-haiku-5-5', 'a2')
+  await step(1, 'claude-sonnet-5', 'a2')
+  expect(stepped.slice(-2)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5-5'])
+
+  // The chat's own thread runs on the model the person picked for it, whichever that is
+  await step(0, 'claude-opus-4-8', '')
+  expect(stepped.at(-1)).toBe('claude-opus-4-8')
+
+  // A model the person picks on the card wins over the app's move
+  await pressed(pane, 'model-a1')
+  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
+  await step(5, 'claude-opus-4-8')
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  expect(await line()).not.toContain('kept off')
+
+  // An agent a workflow's script started has no card of its own: its step is moved all the same, and the log says so
+  await step(0, 'claude-haiku-5-5', 'w1')
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  expect(files.get(`${MEMORY}/log.md`)).toContain('work w1 was sent to Haiku 5.5 by the app: its steps go to Sonnet 5.5')
+})
+
+test('work that answers from an older model all the same says so on its card', async ($, on) => {
+  const answered: { by?: string } = { by: 'claude-opus-4-8' }
+  world(on, { model: 'claude-fable-5-2', answered })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  for await (const _ of $.turn.step({ turnId: 'turn-2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Opus 4.8')
+  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')).toContain('not a model work should run on')
 })
 
 test('the model a running work is on is pressed and another chosen: its next step runs on it, its card says so at once, and its chat and the work are told', async ($, on) => {

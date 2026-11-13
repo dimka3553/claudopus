@@ -69,7 +69,9 @@ const joined = (dir, parts, out) => {
   if (unlisted.length) throw new Error(`build.mjs: add ${unlisted.join(', ')} to the list of parts, in its place`)
   const lines = importsOf(join(dir, 'imports.tsx'))
   const bodies = parts.map(name => read(join(dir, name)).replace(/\n+$/, ''))
-  return `${HEAD(dir === here ? 'src/claudopus' : 'src/claudopus/tests', out)}${lines.join('\n')}\n\n${bodies.join('\n\n')}\n`
+  const text = `${HEAD(dir === here ? 'src/claudopus' : 'src/claudopus/tests', out)}${lines.join('\n')}\n\n${bodies.join('\n\n')}\n`
+  // A test's '<shipped: path>' string becomes the text of that file as the mod ships it, so a test can hold the shipped file itself
+  return dir === here ? text : text.replace(/'<shipped: ([\w./-]+)>'/g, (_, path) => JSON.stringify(read(join(hooks, '..', path))))
 }
 
 

@@ -7,6 +7,8 @@ import { timelineRows } from './stats'
 // The world beneath the mod in every test: files in memory, the app's session tools, a cheap model; and small helpers
 
 const HOME = '/home/sam'
+// For the longest tests, near the kit's 5 seconds on GitHub's runner, which runs them about twice as slow as a Mac
+const SLOW = { timeoutMs: 20_000 }
 const MEMORY = `${HOME}/.claude/claudopus`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
@@ -30,11 +32,13 @@ const LIST = {
 declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
+// The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n- If it can run in parallel, it runs in parallel. No ask waits behind other work.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n- Titles, notes, to-dos, asks and results name what is being done, never the model doing it.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong, on a model at least as strong as the one that built it.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Search with rg, and use rg -a for packed app files.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -101,7 +105,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const isShipped = !e.path.startsWith(MEMORY)
     if (isShipped && e.path.endsWith('roles/chat.md')) return { value: options.chatRole ?? 'CHAT ROLE' }
     if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
-    if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: PRINCIPLES }
+    if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: options.shipped ? SHIPPED_PRINCIPLES : PRINCIPLES }
     if (isShipped && options.changelog !== undefined && e.path.endsWith('/CHANGELOG.md')) return { value: options.changelog }
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
@@ -317,6 +321,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.tool === 'SendMessage') sent.push(String((e as { message?: string }).message))
     // A command that prints the key, as one could print it by mistake
     if (e.tool === 'Bash' && String((e as { command?: string }).command).includes('echo $API_KEY')) return { result: { stdout: `token is ${files.get('keychain:API_KEY') ?? 'none'}`, stderr: '', interrupted: false } } as never
+    // A file that holds the key, as a .env does
+    if (e.tool === 'Read' && String((e as { file_path?: string }).file_path).endsWith('/.env')) return { result: { type: 'text', file: { content: `API_KEY=${files.get('keychain:API_KEY') ?? 'none'}` } } } as never
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
     if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
@@ -419,6 +425,44 @@ test('work never starts as a copy of the chat: a fork or an agent with no model 
   expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`)
 })
 
+test('no agent is started on an older model or on Haiku, by the chat or by a piece of work; the three aliases and their newest versions pass', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  const call = (model: string, agentId?: string) => $.tool.call({ tool: 'Agent', tool_use_id: `m-${model}-${agentId ?? ''}`, prompt: 'fix the nose', subagent_type: 'general-purpose', model, ...(agentId ? { agentId } : {}) } as never)
+
+  // A newer version than the mod knows is no older model; nor is an id with a date, a window or a provider around it
+  for (const model of ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5.5', 'claude-opus-5-6', 'claude-opus-6', 'claude-fable-5-3', 'claude-sonnet-6', 'claude-opus-5-5-20261001', 'opus[1m]', 'us.anthropic.claude-opus-5-5-v1:0', 'inherit']) expect((await call(model)).deny).toBeUndefined()
+  for (const model of ['haiku', 'claude-haiku-5-5', 'claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-3-5-sonnet-20241022', 'claude-sonnet-4-5-20250929']) expect((await call(model)).deny).toContain('No work runs on')
+  expect((await call('claude-opus-4-8')).deny).toBe(
+    'No work runs on Opus 4.8. Name the model by its alias: "opus" for most work, "sonnet" for long legwork, "fable" only for heavy or really complicated work, "opus" or "fable" for checking what was built, never weaker than what built it. Never an older version, never Haiku.',
+  )
+  // A helper a piece of work starts is held to the same, and one that names no model keeps its work's
+  expect((await call('haiku', 'a1')).deny).toContain('No work runs on Haiku')
+  expect((await call('claude-opus-4-8', 'a1')).deny).toContain('No work runs on Opus 4.8')
+  expect((await call('sonnet', 'a1')).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'h0', prompt: 'look it up', subagent_type: 'general-purpose', agentId: 'a1' } as never)).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain('refused an Agent call on Opus 4.8')
+})
+
+test('with Haiku named in the settings for a kind of work, an agent on Haiku is let through; an older model still is not', async ($, on) => {
+  const { files } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ models: { legwork: 'haiku' } }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'haiku' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)).deny).toContain('No work runs on Opus 4.8')
+})
+
+test('with the handing-over switched off the mod refuses no model and moves no step', async ($, on) => {
+  const { files, stepped } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ agents: false }))
+  await $.session.start(start)
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'o1', prompt: 'index', subagent_type: 'general-purpose', model: 'haiku' } as never)).deny).toBeUndefined()
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-4-8', messageCount: 2, agentId: 'a1' })) void _
+  expect(stepped).toEqual(['claude-opus-4-8'])
+})
+
 test("the work's rules name where the admin runner is, the one way work uses a Mac's password", async ($, on) => {
   world(on)
   await $.session.start(start)
@@ -451,6 +495,95 @@ test('work uses a kept key without reading it: the keychain is not read, and wha
   const shown = await $.tool.call({ tool: 'Bash', tool_use_id: 'k4', command: 'bin/secret API_KEY here "echo $API_KEY"', agentId: 'w1' } as never)
   expect(JSON.stringify(shown.result)).toContain('token is [hidden API_KEY]')
   expect(JSON.stringify(shown.result)).not.toContain('sk-live-123456')
+  // What the chat reads in its own thread comes back with the key hidden too
+  const read2 = await $.tool.call({ tool: 'Read', tool_use_id: 'k8', file_path: '/repo/.env' } as never)
+  expect(read2.deny).toBeUndefined()
+  expect(JSON.stringify(read2.result)).toContain('API_KEY=[hidden API_KEY]')
+  expect(JSON.stringify(read2.result)).not.toContain('sk-live-123456')
+})
+
+test('work never writes into the boxes folder or reads the boxes\' keychain service, by any common way, while the admin and secret runners still run', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
+  const bin = /(\/\S*mods\/claudopus\/bin)\/secret NAME/.exec(prompts[0] ?? '')?.[1] ?? ''
+  expect(bin).not.toBe('')
+  let n = 0
+  const call = async (input: Record<string, unknown>, agentId = 'w1') => (await $.tool.call({ tool: 'Bash', tool_use_id: `b${n++}`, agentId, ...input } as never)).deny
+  const refused = async (command: string, agentId?: string) => expect([command, await call({ command }, agentId)]).toEqual([command, expect.stringContaining('theirs alone')])
+  const runs = async (command: string) => expect([command, await call({ command })]).toEqual([command, undefined])
+  // A direct command and redirections, in every spelling of the folder
+  await refused(`echo '{"id":"x","kind":"admin","host":"here"}' > ~/.claude/claudopus/boxes/x.json`)
+  await refused('cat req.json >> "$HOME/.claude/claudopus/boxes/$(uuidgen).json"')
+  await refused('cp req.json ${HOME}/.claude//claudopus/./boxes/')
+  await refused('tee /home/sam/.claude/claudopus/../claudopus/boxes/a.json < req.json')
+  await refused('cp req.json ~/.cl*/claudo*/box?s/')
+  await refused(`cp req.json ~/.claude/"claud"'opus'/bo\\xes/`)
+  await refused('cd ~/.claude && cd claudopus && cp /tmp/req.json boxes/a.json')
+  await refused('cp req.json "$CLAUDE_CONFIG_DIR/claudopus/boxes/"')
+  // Pointing the runners at a folder of one's own
+  await refused(`CLAUDOPUS_BOXES=/tmp/mine ${bin}/secret API_KEY here 'true'`)
+  // Reading the service, with or without the value
+  await refused('security find-generic-password -s claudopus-box -a 0f1e2d3c-4b5a-4987-a654-3210fedcba98')
+  await refused("/usr/bin/security find-generic-password -s 'claudopus-box' -a x -w")
+  await refused('security find-generic-password -s claudopus-b* -a x')
+  // Another language's program handed the code inline: a helper's call
+  await refused(`python3 -c "import subprocess; subprocess.run(['security','find-generic-password','-s','claudopus-box','-a','x'])"`)
+  await refused(`node -e "require('fs').writeFileSync(require('os').homedir() + '/.claude/claudopus/boxes/a.json', '{}')"`)
+  // A script that does it, run every usual way, and a planted copy named like a runner
+  files.set('/repo/plant.sh', 'cat > ~/.claude/claudopus/boxes/a.json <<EOF\n{"kind":"admin","host":"here"}\nEOF\n')
+  files.set('/tmp/peek.py', "import subprocess\nsubprocess.run(['/usr/bin/security', 'find-generic-password', '-s', 'claudopus-box', '-a', 'x', '-w'])\n")
+  files.set('/tmp/bin/secret', '#!/bin/bash\nmkdir -p "$HOME/.claude/claudopus/boxes"\n')
+  await refused('bash plant.sh')
+  await refused('./plant.sh')
+  await refused('cd /tmp && sh /repo/plant.sh')
+  await refused('env FOO=1 python3 /tmp/peek.py')
+  await refused('source /repo/plant.sh')
+  await refused("/tmp/bin/secret API_KEY here 'true'")
+  files.set('/work/tree/p.sh', 'cp /tmp/req.json ~/.claude/claudopus/boxes/\n')
+  await refused('cd /work/tree && ./p.sh')
+  await refused('cd ~/.claude && cp req.json claudopus/boxes/')
+  await refused('cd ~/.claude; cp req.json ./claudopus/boxes/a.json')
+  await refused(`zsh -c 'cd /work/tree && ./p.sh'`)
+  await refused('sudo -u sam /work/tree/p.sh')
+  await refused('cat plant.sh | bash')
+  await refused('bash < /repo/plant.sh')
+  await refused('timeout 5 ./plant.sh')
+  await refused('nice -n 5 bash plant.sh')
+  files.set('/repo/plant.ts', "Bun.write(`${process.env.HOME}/.claude/claudopus/boxes/a.json`, '{}')\n")
+  await refused('bun run plant.ts')
+  // Capitals, which this Mac's files take as the same, brace expansion, and another language's keychain library
+  await refused('cp req.json ~/.Claude/Claudopus/Boxes/')
+  await refused('cp req.json ~/.claude/claudopus/box{e,}s/')
+  files.set('/repo/peek.swift', 'import Security\nlet q = [kSecAttrService: "claudopus-box", kSecReturnData: true] as CFDictionary\n')
+  await refused('swift peek.swift')
+  await refused(`python3 -c "import keyring; print(keyring.get_password('claudopus-box', 'x'))"`)
+  // A helper work starts is held to it as the work is
+  await refused('bash /repo/plant.sh', 'helper-1')
+  // A file written or edited into the folder
+  for (const [tool, path] of [['Write', '/home/sam/.claude/claudopus/boxes/a.json'], ['Edit', '~/.claude/claudopus/boxes/b.json'], ['Write', '/home/sam/.claude/claudopus/./boxes'], ['Write', '/home/sam/.Claude/claudopus/Boxes/a.json'], ['Write', '/home/sam/.claude/plugins/cache/claudopus/claudopus/9.9.9/bin/secret']] as const)
+    expect([tool, path, (await $.tool.call({ tool, tool_use_id: `b${n++}`, agentId: 'w1', file_path: path, content: '{}', old_string: 'a', new_string: 'b' } as never)).deny]).toEqual([tool, path, expect.stringContaining('theirs alone')])
+  // The runners themselves, and what only looks near the folder or the service, still run
+  files.set('keychain:API_KEY', 'sk-live-123456')
+  await runs(`${bin}/secret API_KEY here 'curl -H "Authorization: Bearer $API_KEY" https://api.example.com'`)
+  // The admin runner past its own gate, here set never to ask as Config seals it (gate.test.tsx holds the asking)
+  files.set('keychain:gate', 'kept-key')
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ admin: 'never', adminSealed: fakeSeal('kept-key', 'mode\nnever') }))
+  await runs(`${bin}/admin here 'whoami'`)
+  await runs(`bash ${bin}/secret API_KEY here 'true'`)
+  await runs('cat src/claudopus/boxes.tsx && rg -n boxes src/claudopus')
+  await runs('ls ~/.claude/claudopus/*')
+  // Looks that only read, a commit message naming the folder, and work in a worktree kept under a .claude folder of the repo
+  await runs('ls ~/.claude/claudopus/boxes && rg -n boxes ~/.claude/claudopus/rules')
+  await runs('git commit -qm "Refuse writes into ~/.claude/claudopus/boxes" && gh pr create --body "claudopus-box via security"')
+  await runs("rg -n 'security|claudopus-box' mods/claudopus")
+  await runs('cd /code/claudopus/.claude/worktrees/agent-1 && rg -n boxes src && cat src/claudopus/boxes.tsx')
+  await runs(`${bin}/secret --list`)
+  await runs('security find-generic-password -s claudopus-secret -a API_KEY')
+  files.set('/repo/build.sh', 'node src/claudopus/build.mjs\n')
+  await runs('bash build.sh')
+  expect((await $.tool.call({ tool: 'Write', tool_use_id: `b${n++}`, agentId: 'w1', file_path: '/home/sam/.claude/claudopus/streams/x.md', content: 'boxes' } as never)).deny).toBeUndefined()
 })
 
 test('work reaches main only through the release runner: its rules name it, and a push or merge to main by hand is refused', async ($, on) => {
@@ -500,20 +633,46 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
   expect(r.text).toContain('were saved to')
   const saved = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/pastes/`))
   expect(saved?.[1]).toBe(paste)
+  // and the chat does not read it back in: the agent that needs it reads it
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p1', file_path: saved?.[0] } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'p2', pattern: 'end', path: `${MEMORY}/pastes` } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p3', file_path: saved?.[0], agentId: 'w1' } as never)).deny).toBeUndefined()
 })
 
-test("a chat's own thread may only start agents and talk to them; an agent may do the work", async ($, on) => {
+test("a chat's own thread may only read, start agents and talk to them; an agent may do the work", async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
-  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
+  expect(told.context?.join('\n')).toContain('A question answered by reading a few files is answered directly')
+  expect(told.context?.join('\n')).toContain('Anything that changes a file, runs a command or takes more than a few reads')
 
   const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'ls' } as never)
   expect(refused.deny).toContain('Start a fresh agent')
+  expect(refused.deny).toContain('changes no file and runs no command')
   expect(files.get(`${MEMORY}/log.md`)).toContain('refused Bash')
+
+  // It reads for itself: any file, a search, a list of names
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: '/repo/src/nose.ts' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'r2', pattern: 'function nose', path: '/repo' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Glob', tool_use_id: 'r3', pattern: '**/*.ts', path: '/repo' } as never)).deny).toBeUndefined()
+  // and still changes nothing and runs nothing
+  for (const [i, call] of [
+    { tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' },
+    { tool: 'Write', file_path: '/repo/src/new.ts', content: 'x' },
+    { tool: 'MultiEdit', file_path: '/repo/src/nose.ts', edits: [] },
+    { tool: 'NotebookEdit', notebook_path: '/repo/n.ipynb', new_source: 'x' },
+    { tool: 'Bash', command: 'cat /repo/src/nose.ts' },
+    { tool: 'WebFetch', url: 'https://example.com', prompt: 'p' },
+    { tool: 'mcp__other__write_file', path: '/repo/x' },
+  ].entries())
+    expect((await $.tool.call({ ...call, tool_use_id: `n${i}` } as never)).deny).toContain('Start a fresh agent')
 
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 't2', prompt: 'fix the nose', subagent_type: 'general-purpose', model: 'opus' } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', tool_use_id: 't3', recap: 'r' } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't4', command: 'ls', agentId: 'fork-1' } as never)).deny).toBeUndefined()
+  // Work and its helpers are not held to the chat's reading: they read, write and run
+  for (const [i, call] of [{ tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' }, { tool: 'Write', file_path: '/repo/x', content: 'x' }, { tool: 'Grep', pattern: 'nose' }, { tool: 'Bash', command: 'npm test' }].entries())
+    for (const agentId of ['w1', 'helper-1']) expect((await $.tool.call({ ...call, tool_use_id: `w${i}${agentId}`, agentId } as never)).deny).toBeUndefined()
 })
 
 test('a session the person has not typed into does its own work', async ($, on) => {
@@ -1054,7 +1213,7 @@ test('work that takes many steps without touching its to-dos is reminded to brin
   expect(appended).toHaveLength(2)
 })
 
-test('work that ends in an error is kept as failed, time lying ended is not counted, and work under way is never forgotten', async ($, on) => {
+test('work that ends in an error is kept as failed, time lying ended is not counted, and work under way is never forgotten', SLOW, async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
@@ -1196,6 +1355,72 @@ test("a card's title, its line of facts and every line under them start at one l
   await $.turn.complete({ answer: 'Fixed.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(500)
   await expectOneEdge(4)
+})
+
+test('work the app moves to an older model, or a helper it starts on Haiku, has each step sent to a model work runs on, and its card says what it was kept off', async ($, on) => {
+  const { stepped, files } = world(on, { model: 'claude-fable-5-2' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  const step = async (index: number, model: string, agentId: string | undefined = 'a1') => {
+    for await (const _ of $.turn.step({ turnId: 'turn-2', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) void _
+  }
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const line = async () => (await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')
+
+  // On the model it was started on, nothing is changed and the card says nothing more
+  await step(0, 'claude-opus-5-5')
+  expect(stepped).toEqual(['claude-opus-5-5'])
+  expect(await line()).not.toContain('kept off')
+
+  // The app's safeguards flagged a message and the app sends the next steps to Opus 4.8: they go to Fable 5.2
+  await step(1, 'claude-opus-4-8')
+  await step(2, 'claude-opus-4-8')
+  expect(stepped).toEqual(['claude-opus-5-5', 'claude-fable-5-2', 'claude-fable-5-2'])
+  expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Fable 5.2')
+  expect(await line()).toContain('kept off Opus 4.8')
+  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was sent to Opus 4.8 by the app: its steps go to Fable 5.2').length).toBe(2)
+
+  // Once the app sends its steps to a right model again, a newer one too, nothing is changed and the card no longer says so
+  await step(3, 'claude-opus-5-6')
+  expect(stepped.at(-1)).toBe('claude-opus-5-6')
+  expect(await line()).not.toContain('kept off')
+  await step(4, 'claude-opus-4-8')
+  expect(await line()).toContain('kept off Opus 4.8')
+
+  // A helper of an agent type the app runs on Haiku runs on Sonnet 5.5; an older Sonnet too
+  await $.agent.spawn({ ...spawn, description: 'Look it up', prompt: 'look it up', parentAgentId: 'a1' } as never)
+  await step(0, 'claude-haiku-5-5', 'a2')
+  await step(1, 'claude-sonnet-5', 'a2')
+  expect(stepped.slice(-2)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5-5'])
+
+  // The chat's own thread runs on the model the person picked for it, whichever that is
+  await step(0, 'claude-opus-4-8', '')
+  expect(stepped.at(-1)).toBe('claude-opus-4-8')
+
+  // A model the person picks on the card wins over the app's move
+  await pressed(pane, 'model-a1')
+  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
+  await step(5, 'claude-opus-4-8')
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  expect(await line()).not.toContain('kept off')
+
+  // An agent a workflow's script started has no card of its own: its step is moved all the same, and the log says so
+  await step(0, 'claude-haiku-5-5', 'w1')
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  expect(files.get(`${MEMORY}/log.md`)).toContain('work w1 was sent to Haiku 5.5 by the app: its steps go to Sonnet 5.5')
+})
+
+test('work that answers from an older model all the same says so on its card', async ($, on) => {
+  const answered: { by?: string } = { by: 'claude-opus-4-8' }
+  world(on, { model: 'claude-fable-5-2', answered })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  for await (const _ of $.turn.step({ turnId: 'turn-2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Opus 4.8')
+  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')).toContain('not a model work should run on')
 })
 
 test('the model a running work is on is pressed and another chosen: its next step runs on it, its card says so at once, and its chat and the work are told', async ($, on) => {
@@ -1816,7 +2041,7 @@ test('work that answered while only its own background work held it, then stoppe
   await pane.unmount()
 })
 
-test('work that answers a question while a copy of its own still runs, with that copy still its to-do, stays at work and says what it waits for; it finishes only when the copy is checked and it reports', async ($, on) => {
+test('work that answers a question while a copy of its own still runs, with that copy still its to-do, stays at work and says what it waits for; it finishes only when the copy is checked and it reports', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}
   const { clock, files, logged } = world(on, { art: true, agents, kinds })
@@ -2349,7 +2574,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(next.context?.join('\n')).toContain('Results kept')
   expect(next.context?.join('\n')).toContain(`${folder}/report.md`)
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: `${folder}/report.md` } as never)).deny).toBeUndefined()
-  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r2', file_path: '/repo/secrets.md' } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'r2', command: `cat ${folder}/report.md` } as never)).deny).toContain('Start a fresh agent')
 })
 
 test('work started from a report keeps its own report linked to it, beside the older one on the same subject', async ($, on) => {
@@ -3133,6 +3358,41 @@ test('a copy of the principles in the memory folder is the person\'s own: every 
   expect(told.instructionFiles?.some(one => one.content === PRINCIPLES)).toBe(false)
 })
 
+// The two lines that were the author's own and no longer ship, as a person may keep them in their own copy
+const DELIBERATE = 'My decisions are deliberate.'
+const DONE_MEANS = 'Done means'
+
+test('a new install with no copy of its own carries the shipped principles, which leave out the author\'s "decisions are deliberate" and "done means" lines', async ($, on) => {
+  const { files } = world(on, { isNew: true, shipped: true })
+  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
+  await $.session.start(start)
+  expect(files.has(`${MEMORY}/rules/CLAUDE.md`)).toBe(false)
+  const told = await $.prompt.context({ blocks: [], instructionFiles: [] })
+  const ours = told.instructionFiles?.find(one => one.kind === 'user')?.content ?? ''
+  expect(ours).toBe(SHIPPED_PRINCIPLES)
+  expect(ours).toContain('# How I work with Claude')
+  expect(ours).toContain('My words are the spec.')
+  expect(ours).not.toContain(DELIBERATE)
+  expect(ours).not.toContain(DONE_MEANS)
+  expect(ours).not.toContain('A concern is raised')
+})
+
+test('a person\'s own copy that keeps both lines carries both, in their words, in place of the shipped principles', async ($, on) => {
+  const { files } = world(on, { shipped: true })
+  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
+  const MINE = '# How I work with Claude\n\n## Principles\n\n1. My decisions are deliberate. No risk, legal or ethics commentary unless it blocks the task; then one line, once.\n2. Done means committed and pushed, or deployed.\n'
+  files.set(`${MEMORY}/rules/CLAUDE.md`, MINE)
+  await $.session.start(start)
+  const told = await $.prompt.context({ blocks: [], instructionFiles: [] })
+  const ours = told.instructionFiles?.find(one => one.kind === 'user')?.content ?? ''
+  expect(ours).toBe(MINE)
+  expect(ours).toContain(DELIBERATE)
+  expect(ours).toContain(DONE_MEANS)
+  expect(told.instructionFiles?.some(one => one.content === SHIPPED_PRINCIPLES)).toBe(false)
+  // Nothing the mod does writes over it
+  expect(files.get(`${MEMORY}/rules/CLAUDE.md`)).toBe(MINE)
+})
+
 test('Config lists each thing a person can set with what is in force, edits a text as their own copy, changes a setting and puts each back', async ($, on) => {
   const { files, shown, tabs } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', other: 1 }))
@@ -3239,6 +3499,10 @@ test('Check for updates in Config shows it is checking, then what it found; a se
 
 // The asking card: an ask, its Copy, buttons and reply box
 
+const GITHUB_BOX = "Claudopus needs GITHUB_TOKEN. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print."
+const NPM_BOX = "Claudopus needs NPM_TOKEN. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print."
+const ADMIN_BOX = "Claudopus needs the admin password of this Mac to run an admin command. It is kept only in this Mac's keychain, and later admin commands on this Mac run without asking again until it is forgotten."
+
 test('work that needs the person\'s hands asks: its card stands out first with the ask, the text to paste with its Copy, and answers that go back to it', async ($, on) => {
   // Once its run has ended, a work's chat takes no more lines
   const ended = new Set<string>()
@@ -3288,8 +3552,11 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   const toWork = (await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('Where do I do that?')))) ?? ''
   expect(toWork).toContain('Submit it to the plugin directory.')
   expect(toWork).toContain('does not settle your ask, so it stays open')
-  expect(await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' })).toBeDefined()
-  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
+  // At work on the reply, the ask is drawn in the work's purple, not as waiting on the person, its buttons still there
+  expect((await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' }))?.props.color).toBe('#8A63F0')
+  expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeUndefined()
+  expect(await ears.find({ type: 'Text', text: 'Acting on your reply; it still asks' })).toBeDefined()
+  expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Submitted')).toBe(true)
   const fresh = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   expect(fresh?.key).toBe(box?.key)
   expect(fresh?.props.value ?? '').toBe('')
@@ -3480,6 +3747,106 @@ test('a reply in words that does not settle an ask keeps it open, and the card a
   await list.unmount()
 })
 
+test('work acting on a reply in words to an ask it keeps open is purple, in the panel and the terminal, with its ask and buttons; stopped again it is amber: the 13 Nov "Explain to me the exact differences first." to "Release PR 54 to production?"', async ($, on) => {
+  // What the engine lists of the work, as the terminal's engine does: running while it waits on a command it left running
+  const agents: Record<string, string> = {}
+  const { resumed, clock } = world(on, { agents })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'clip wallet versus affiliate', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Clipify affiliate versus clip wallet', prompt: 'clip wallet versus affiliate' } as never)
+  const ASK = 'Release PR 54 to production?'
+  const AMBER = '#E5A50A'
+  const isPurple = (colour: unknown) => /^#(8A63F0|6E3CFF)/i.test(String(colour))
+  const desk = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  // The edge of the card beside its title, in each drawing: amber, purple or green
+  const edges = async (pane: typeof desk) => (await pane.findAll({ type: 'Box' })).map(b => b.props.backgroundColor).filter(c => c === AMBER || isPurple(c))
+  // The terminal's panel and band are drawn afresh for each look, as a terminal draws them
+  const inTerminal = async <T,>(of: typeof BAND | typeof LIST, read: (pane: typeof desk) => Promise<T>) => {
+    const pane = await $.ui.mount({ ...of, surface: 'terminal' } as never)
+    const got = await read(pane)
+    await pane.unmount()
+    return got
+  }
+  const look = async () => ({
+    desk: (await desk.find({ type: 'Text', text: ASK }))?.props.color,
+    term: await inTerminal(LIST, async pane => (await pane.find({ type: 'Text', text: ASK }))?.props.color),
+    // The band's ask is a line of its own inside the line that names the work
+    band: await inTerminal(BAND, async pane => (await pane.findAll({ type: 'Text' })).find(t => t.text === ASK && t.props.color)?.props.color),
+    deskEdges: await edges(desk),
+    termEdges: await inTerminal(LIST, edges),
+    buttons: [await desk.findAll({ type: 'Button' }), await inTerminal(LIST, pane => pane.findAll({ type: 'Button' })), await inTerminal(BAND, pane => pane.findAll({ type: 'Button' }))].map(all => all.map(b => b.props.label)),
+    heading: (await details.find({ type: 'Text', text: 'Needs you now' })) ? 'needs' : (await details.find({ type: 'Text', text: 'Acting on your reply; it still asks' })) ? 'acting' : 'none',
+  })
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Release it', 'Not now'] } as never)
+  await $.turn.complete({ answer: 'Release PR 54 to production? (Answers: Release it / Not now.)', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(60_000)
+  // Before the reply: it waits on the person, amber everywhere
+  const before = await until(async () => {
+    const l = await look()
+    return l.desk === AMBER && l.term === AMBER && l.band === AMBER && l.heading === 'needs' && l.deskEdges.includes(AMBER) && l.termEdges.includes(AMBER) ? l : undefined
+  })
+  expect(before ?? (await look())).toMatchObject({ desk: AMBER, term: AMBER, band: AMBER, heading: 'needs' })
+  // The reply in words starts it again: purple while it acts on it, its ask and both buttons still there to press
+  const box = (await desk.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await desk.input({ key: box?.key ?? '', text: 'Explain to me the exact differences first.' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('Explain to me the exact differences first.')))).toBeDefined()
+  const acting = await until(async () => {
+    const l = await look()
+    return isPurple(l.desk) && isPurple(l.term) && isPurple(l.band) && l.heading === 'acting' ? l : undefined
+  })
+  expect(acting ?? (await look())).toMatchObject({ heading: 'acting' })
+  const now = await look()
+  expect(now.deskEdges.filter(c => c === AMBER)).toEqual([])
+  expect(now.termEdges.filter(c => c === AMBER)).toEqual([])
+  expect(now.deskEdges.some(isPurple)).toBe(true)
+  expect(now.termEdges.some(isPurple)).toBe(true)
+  for (const labels of now.buttons) expect(labels).toEqual(expect.arrayContaining(['Release it', 'Not now']))
+  // Its turn ends while a command it started in the background still runs, the engine listing it as running: it has not stopped,
+  // and stays purple
+  agents.a1 = 'running'
+  await $.turn.complete({ answer: 'Writing up the differences.', durationMs: 1, isAborted: false, turnId: 'turn-2a', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(20_000)
+  const held = await look()
+  expect([isPurple(held.desk), isPurple(held.term), isPurple(held.band), held.heading]).toEqual([true, true, true, 'acting'])
+  agents.a1 = 'completed'
+  // The header counts it as running, not as needing the person
+  expect(await desk.find({ type: 'Text', text: 'Working on 1 thing' })).toBeDefined()
+  // It stops again with the ask still open, the engine listing it as running for a moment as its turn ends: amber again a moment
+  // later, once the engine lists its run as over
+  agents.a1 = 'running'
+  await $.turn.complete({ answer: 'Release PR 54 to production? (Answers: Release it / Not now.) The differences are…', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
+  // Listed as idle after, as the engine lists some ended work
+  agents.a1 = 'idle'
+  await clock.advance(2_000)
+  const after = await until(async () => {
+    const l = await look()
+    return l.desk === AMBER && l.term === AMBER && l.band === AMBER && l.heading === 'needs' && !l.deskEdges.some(isPurple) && !l.termEdges.some(isPurple) ? l : undefined
+  })
+  expect(after ?? (await look())).toMatchObject({ desk: AMBER, term: AMBER, band: AMBER, heading: 'needs' })
+  expect(await desk.find({ type: 'Text', text: '1 thing needs you' })).toBeDefined()
+  // Release it pressed goes back to the work and the ask goes; the card is at work on it, purple, until the work is done
+  await desk.press({ key: (await desk.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()
+  expect(await until(async () => ((await desk.find({ type: 'Text', text: ASK })) ? undefined : true))).toBe(true)
+  const released = await until(async () => {
+    const l = await look()
+    return l.deskEdges.some(isPurple) && !l.deskEdges.includes(AMBER) && l.termEdges.some(isPurple) && !l.termEdges.includes(AMBER) ? l : undefined
+  })
+  expect(released ?? (await look())).toMatchObject({ desk: undefined })
+  expect(released?.heading).toBe('none')
+  // Releasing in the background, its turn ends with the engine still holding it: at work, purple, until it is done
+  agents.a1 = 'running'
+  await $.turn.complete({ answer: 'Releasing in the background.', durationMs: 1, isAborted: false, turnId: 'turn-3a', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(20_000)
+  expect((await edges(desk)).some(isPurple)).toBe(true)
+  agents.a1 = 'completed'
+  await $.turn.complete({ answer: 'Released PR 54.', durationMs: 1, isAborted: false, turnId: 'turn-3', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(60_000)
+  expect(await until(async () => ((await edges(desk)).some(isPurple) ? undefined : true))).toBe(true)
+  for (const pane of [desk, details]) await pane.unmount()
+})
+
 test('every ask also shows in the chat as the mod\'s notice, never as the person\'s message, with its answers and pictures; an answer typed there reaches the work and the card stops asking', async ($, on) => {
   const { appended, submitted, logged, files, clock } = world(on)
   files.set('/w/shots/a.png', 'png')
@@ -3560,25 +3927,25 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   await $.session.start(start)
   await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(1000)
   // The chat is told only the name, and where to type it
   expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('top of the Claudopus panel')
   const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
   expect(field).toBeDefined()
-  expect((await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' }))?.props.color).toBe('#E5A50A')
+  expect((await list.find({ type: 'Text', text: GITHUB_BOX }))?.props.color).toBe('#E5A50A')
   const value = 'ghp_s3cret"with\\quote'
   await list.input({ key: field?.key ?? '', text: value })
   // It goes to the keychain under the box's id, escaped for security's own reading, and the box goes
   expect(await until(async () => keychain.find(one => one.includes(id)))).toBe(`add-generic-password -U -s "claudopus-box" -a "${id}" -l "Claudopus box" -w "ghp_s3cret\\"with\\\\quote"\n`)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Claudopus needs GITHUB_TOKEN for work in this chat.' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: GITHUB_BOX })) ? undefined : true))).toBe(true)
   // Nowhere else: not the chat, its saved words, the log or any file
   expect(logged.some(line => line.includes('s3cret'))).toBe(false)
   expect([...files.values()].some(text => text.includes('s3cret'))).toBe(false)
   // A curly quote from a phone's keyboard, which security would give back as hex, is not sent, and the box says why
   const third = '2f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, text: 'Claudopus needs NPM_TOKEN for work on this Mac.', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, kind: 'secret', name: 'NPM_TOKEN', at: 1_700_000_000_000 }))
   await clock.advance(1000)
   const curly = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`)))
   const before = keychain.length
@@ -3592,7 +3959,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   expect(keychain.length).toBe(before)
   // A box cancelled removes its request, which the runner takes as cancelled
   const other = '1f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, text: 'Claudopus needs the admin password of this Mac to run an admin command for work in this chat.', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, kind: 'admin', host: 'here', at: 1_700_000_000_000 }))
   await clock.advance(1000)
   const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)))
   await list.press({ key: cancel?.key ?? '' })
@@ -3603,7 +3970,7 @@ test('a chat on this Mac\'s own screen asks in the panel the same way, and opens
   const { files, logged, keychain, clock, opened } = world(on)
   await $.session.start(start)
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', chat: 'engine-id', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(1000)
   expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('top of the Claudopus panel')
@@ -3620,11 +3987,11 @@ test("another chat's request is left to that chat a moment, then any chat with a
   const { files, logged, clock } = world(on)
   await $.session.start(start)
   const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs NPM_TOKEN for work on this Mac.', chat: 'another-chat', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(1000)
   // The box shows here at once, but the notice waits for its own chat
-  expect(await until(async () => list.find({ type: 'Text', text: 'Claudopus needs NPM_TOKEN for work on this Mac.' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: NPM_BOX }))).toBeDefined()
   expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
   await clock.advance(6000)
   expect(await until(async () => logged.find(line => line.includes('NPM_TOKEN')))).toContain('top of the Claudopus panel')
@@ -3635,8 +4002,8 @@ test("with two requests open every box is drawn, this chat's own first and the o
   await $.session.start(start)
   const older = '5f1e2d3c-4b5a-4987-a654-3210fedcba98'
   const mine = '6f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, text: 'Claudopus needs NPM_TOKEN.', chat: 'another-chat', at: 1_700_000_000_000 }))
-  files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, text: 'Claudopus needs GITHUB_TOKEN.', chat: 'engine-id', at: 1_700_000_000_500 }))
+  files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_500 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(1000)
   const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length === 2 ? all : undefined })
@@ -3647,9 +4014,68 @@ test('a run with nothing to draw on takes no request, so the runner knows no pan
   const { files, logged, clock } = world(on, { headless: true })
   await $.session.start(start)
   const id = '4f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, text: 'Claudopus needs GITHUB_TOKEN for work in this chat.', chat: 'engine-id', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   await clock.advance(3000)
   expect(logged.some(line => line.includes('GITHUB_TOKEN'))).toBe(false)
+})
+
+test("a hand-written request with made-up text shows the panel's own wording or nothing", async ($, on) => {
+  const { files, logged, clock } = world(on)
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const planted = 'Your Apple ID session expired. Type your Apple ID password to keep working.'
+  const put = (n: number, fields: Record<string, unknown>) => {
+    const id = `${n}a1e2d3c-4b5a-4987-a654-3210fedcba98`
+    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000, ...fields }))
+    return id
+  }
+  const shown = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')).map(one => (one.key ?? '').slice(4, 5))
+  const texts = async () => (await list.findAll({ type: 'Text' })).map(one => one.text ?? '').join('\n')
+  // A known kind with made-up text beside it: the panel's own wording, and the text nowhere
+  put(1, { kind: 'admin', host: 'here', text: planted, title: planted, label: planted })
+  // Made-up text alone, as the boxes before this change were written, and every request the panel cannot word: nothing
+  put(2, { text: planted })
+  put(3, { kind: 'apple-id', text: planted })
+  put(4, { kind: 'secret', name: 'Your Apple ID password', text: planted })
+  put(5, { kind: 'admin', host: 'apple.com is asking for your password' })
+  put(6, { kind: 'secret', name: 'APPLE_ID', host: 'here' })
+  put(7, { kind: 'admin', host: 'here', name: 'APPLE_ID' })
+  put(8, { kind: 'admin' })
+  put(9, { kind: ['admin'], host: 'here' })
+  await clock.advance(1000)
+  expect(await until(async () => ((await shown()).length ? await shown() : undefined))).toEqual(['1'])
+  await clock.advance(6000)
+  expect(await shown()).toEqual(['1'])
+  expect(await texts()).toContain(ADMIN_BOX)
+  expect(await texts()).not.toContain('Apple')
+  expect(logged.some(line => line.includes('Apple'))).toBe(false)
+  // The notice in the chat is the panel's wording too
+  expect(logged.find(line => line.includes('admin password of this Mac'))).toContain('top of the Claudopus panel')
+})
+
+test('the box words what the runners ask from its fields: a key by name, a Mac by host, why it asks again, and a key saved by hand by its name first', async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const put = (n: number, fields: Record<string, unknown>) => {
+    const id = `${n}b1e2d3c-4b5a-4987-a654-3210fedcba98`
+    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000 + n, ...fields }))
+  }
+  put(1, { kind: 'secret', name: 'GITHUB_TOKEN' })
+  put(2, { kind: 'admin', host: 'dima@m4.local', again: 'refused' })
+  put(3, { kind: 'secret', name: 'NPM_TOKEN', again: 'short' })
+  put(4, { kind: 'secret', name: 'OPENAI_KEY', again: 'Type your Apple ID password' })
+  put(5, { kind: 'secret' })
+  await clock.advance(1000)
+  const texts = async () => (await list.findAll({ type: 'Text' })).map(one => one.text ?? '')
+  const all = await until(async () => ((await texts()).filter(one => one.includes('keychain') || one.startsWith('Name of')).length >= 5 ? await texts() : undefined))
+  expect(all).toContain(GITHUB_BOX)
+  expect(all).toContain("That password was refused. Claudopus needs the admin password of dima@m4.local to run an admin command. It is kept only in this Mac's keychain, and later admin commands on dima@m4.local run without asking again until it is forgotten.")
+  expect(all).toContain(`That was shorter than 4 characters. ${NPM_BOX}`)
+  // A reason it does not know is left out
+  expect(all).toContain("Claudopus needs OPENAI_KEY. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print.")
+  expect(all?.join('\n')).not.toContain('Apple')
+  expect(all).toContain('Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.')
 })
 
 test('a copy a reload replaced wakes no work: its timers stop, an answer left for its work stays for the copy in charge, and a press it still gets goes to the chat', async ($, on) => {
@@ -4795,7 +5221,7 @@ test("in a chat over ssh the panel's text stays the same from second to second w
 
 // Work that stops moving: its card says so, the chat is told once, a long step shows on its row, and the log stays plain text
 
-test('work and its helpers that get nothing new back for 12 minutes are flagged on the card and told to the chat once; news clears it, and a wait that only prints a new number is no news', async ($, on) => {
+test('work and its helpers that get nothing new back for 12 minutes are flagged on the card and told to the chat once; news clears it, and a wait that only prints a new number is no news', SLOW, async ($, on) => {
   const { clock, held, logged } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'one merger for all pushes', wait: false, origin: composer })
@@ -4841,7 +5267,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(2)
 })
 
-test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', async ($, on) => {
+test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', SLOW, async ($, on) => {
   const { clock, held } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Lay out the rows', prompt: 'lay out' } as never)
@@ -4863,7 +5289,7 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
   expect(await rows()).toEqual([])
 })
 
-test('work sent a message after a long rest, and work only held by what it left running after its report, are not flagged', async ($, on) => {
+test('work sent a message after a long rest, and work only held by what it left running after its report, are not flagged', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = { a2: 'general-purpose' }
   const { clock, logged, held } = world(on, { agents, kinds })
@@ -4897,7 +5323,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   expect(logged.filter(line => line.includes('has had nothing new'))).toEqual([])
 })
 
-test('work asking the person something waits on them and is never flagged', async ($, on) => {
+test('work asking the person something waits on them and is never flagged', SLOW, async ($, on) => {
   const { clock, logged } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Release it', prompt: 'release it' } as never)

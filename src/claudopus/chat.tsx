@@ -43,6 +43,22 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
   }
 }
 
+
+// Work the engine still listed as running as its turn ended is looked at again this long after: one whose run was over by then is
+// listed as completed, and the look ends its card (sync) and passes on a reply it never read, as the turn's end would have
+const HELD_LOOK = 1500
+const heldLook = async ($: EngineInterface, id: string) => {
+  await sync($)
+  // Listed as idle, or no longer listed, its run is over too: nothing holds it
+  const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
+  if (listed === 'idle' || listed === undefined) {
+    const now = await $.clock.now()
+    await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
+  }
+  if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
+  await replyUnread($, id)
+  if (wakes.length) await sendWakes($)
+}
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
     // A load, first or a reload, starts looking afresh: nothing that ended before it is announced
@@ -339,7 +355,11 @@ const chatHooks = (on: On) => {
       const now = await $.clock.now()
       // A turn that handed back its report with SubagentHandback and says nothing after has that report as its answer
       const answer = ((e.answer ?? '').trim() || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
-      const isHeld = (await $.agent.list().catch(() => [])).some(one => one.id === id && one.status === 'waiting')
+      // Held: the engine keeps it for what it left running, and lists it as waiting. As a turn ends the engine may still list it as
+      // running for a moment, held or not: taken as held then, and looked at again shortly (heldLook)
+      const listed = (await $.agent.list().catch(() => [])).find(one => one.id === id)?.status
+      const isHeld = listed === 'waiting' || listed === 'running'
+      if (listed === 'running') $.clock.after(HELD_LOOK, () => void heldLook($, id).catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
       const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
       // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
       // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers

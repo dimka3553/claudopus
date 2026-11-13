@@ -40,6 +40,44 @@ test('work never starts as a copy of the chat: a fork or an agent with no model 
   expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`)
 })
 
+test('no agent is started on an older model or on Haiku, by the chat or by a piece of work; the three aliases and their newest versions pass', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  const call = (model: string, agentId?: string) => $.tool.call({ tool: 'Agent', tool_use_id: `m-${model}-${agentId ?? ''}`, prompt: 'fix the nose', subagent_type: 'general-purpose', model, ...(agentId ? { agentId } : {}) } as never)
+
+  // A newer version than the mod knows is no older model; nor is an id with a date, a window or a provider around it
+  for (const model of ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5.5', 'claude-opus-5-6', 'claude-opus-6', 'claude-fable-5-3', 'claude-sonnet-6', 'claude-opus-5-5-20261001', 'opus[1m]', 'us.anthropic.claude-opus-5-5-v1:0', 'inherit']) expect((await call(model)).deny).toBeUndefined()
+  for (const model of ['haiku', 'claude-haiku-5-5', 'claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-3-5-sonnet-20241022', 'claude-sonnet-4-5-20250929']) expect((await call(model)).deny).toContain('No work runs on')
+  expect((await call('claude-opus-4-8')).deny).toBe(
+    'No work runs on Opus 4.8. Name the model by its alias: "opus" for most work, "sonnet" for long legwork, "fable" only for heavy or really complicated work, "opus" or "fable" for checking what was built, never weaker than what built it. Never an older version, never Haiku.',
+  )
+  // A helper a piece of work starts is held to the same, and one that names no model keeps its work's
+  expect((await call('haiku', 'a1')).deny).toContain('No work runs on Haiku')
+  expect((await call('claude-opus-4-8', 'a1')).deny).toContain('No work runs on Opus 4.8')
+  expect((await call('sonnet', 'a1')).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'h0', prompt: 'look it up', subagent_type: 'general-purpose', agentId: 'a1' } as never)).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain('refused an Agent call on Opus 4.8')
+})
+
+test('with Haiku named in the settings for a kind of work, an agent on Haiku is let through; an older model still is not', async ($, on) => {
+  const { files } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ models: { legwork: 'haiku' } }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'haiku' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)).deny).toContain('No work runs on Opus 4.8')
+})
+
+test('with the handing-over switched off the mod refuses no model and moves no step', async ($, on) => {
+  const { files, stepped } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ agents: false }))
+  await $.session.start(start)
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'o1', prompt: 'index', subagent_type: 'general-purpose', model: 'haiku' } as never)).deny).toBeUndefined()
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-4-8', messageCount: 2, agentId: 'a1' })) void _
+  expect(stepped).toEqual(['claude-opus-4-8'])
+})
+
 test("the work's rules name where the admin runner is, the one way work uses a Mac's password", async ($, on) => {
   world(on)
   await $.session.start(start)
@@ -72,6 +110,95 @@ test('work uses a kept key without reading it: the keychain is not read, and wha
   const shown = await $.tool.call({ tool: 'Bash', tool_use_id: 'k4', command: 'bin/secret API_KEY here "echo $API_KEY"', agentId: 'w1' } as never)
   expect(JSON.stringify(shown.result)).toContain('token is [hidden API_KEY]')
   expect(JSON.stringify(shown.result)).not.toContain('sk-live-123456')
+  // What the chat reads in its own thread comes back with the key hidden too
+  const read2 = await $.tool.call({ tool: 'Read', tool_use_id: 'k8', file_path: '/repo/.env' } as never)
+  expect(read2.deny).toBeUndefined()
+  expect(JSON.stringify(read2.result)).toContain('API_KEY=[hidden API_KEY]')
+  expect(JSON.stringify(read2.result)).not.toContain('sk-live-123456')
+})
+
+test('work never writes into the boxes folder or reads the boxes\' keychain service, by any common way, while the admin and secret runners still run', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
+  const bin = /(\/\S*mods\/claudopus\/bin)\/secret NAME/.exec(prompts[0] ?? '')?.[1] ?? ''
+  expect(bin).not.toBe('')
+  let n = 0
+  const call = async (input: Record<string, unknown>, agentId = 'w1') => (await $.tool.call({ tool: 'Bash', tool_use_id: `b${n++}`, agentId, ...input } as never)).deny
+  const refused = async (command: string, agentId?: string) => expect([command, await call({ command }, agentId)]).toEqual([command, expect.stringContaining('theirs alone')])
+  const runs = async (command: string) => expect([command, await call({ command })]).toEqual([command, undefined])
+  // A direct command and redirections, in every spelling of the folder
+  await refused(`echo '{"id":"x","kind":"admin","host":"here"}' > ~/.claude/claudopus/boxes/x.json`)
+  await refused('cat req.json >> "$HOME/.claude/claudopus/boxes/$(uuidgen).json"')
+  await refused('cp req.json ${HOME}/.claude//claudopus/./boxes/')
+  await refused('tee /home/sam/.claude/claudopus/../claudopus/boxes/a.json < req.json')
+  await refused('cp req.json ~/.cl*/claudo*/box?s/')
+  await refused(`cp req.json ~/.claude/"claud"'opus'/bo\\xes/`)
+  await refused('cd ~/.claude && cd claudopus && cp /tmp/req.json boxes/a.json')
+  await refused('cp req.json "$CLAUDE_CONFIG_DIR/claudopus/boxes/"')
+  // Pointing the runners at a folder of one's own
+  await refused(`CLAUDOPUS_BOXES=/tmp/mine ${bin}/secret API_KEY here 'true'`)
+  // Reading the service, with or without the value
+  await refused('security find-generic-password -s claudopus-box -a 0f1e2d3c-4b5a-4987-a654-3210fedcba98')
+  await refused("/usr/bin/security find-generic-password -s 'claudopus-box' -a x -w")
+  await refused('security find-generic-password -s claudopus-b* -a x')
+  // Another language's program handed the code inline: a helper's call
+  await refused(`python3 -c "import subprocess; subprocess.run(['security','find-generic-password','-s','claudopus-box','-a','x'])"`)
+  await refused(`node -e "require('fs').writeFileSync(require('os').homedir() + '/.claude/claudopus/boxes/a.json', '{}')"`)
+  // A script that does it, run every usual way, and a planted copy named like a runner
+  files.set('/repo/plant.sh', 'cat > ~/.claude/claudopus/boxes/a.json <<EOF\n{"kind":"admin","host":"here"}\nEOF\n')
+  files.set('/tmp/peek.py', "import subprocess\nsubprocess.run(['/usr/bin/security', 'find-generic-password', '-s', 'claudopus-box', '-a', 'x', '-w'])\n")
+  files.set('/tmp/bin/secret', '#!/bin/bash\nmkdir -p "$HOME/.claude/claudopus/boxes"\n')
+  await refused('bash plant.sh')
+  await refused('./plant.sh')
+  await refused('cd /tmp && sh /repo/plant.sh')
+  await refused('env FOO=1 python3 /tmp/peek.py')
+  await refused('source /repo/plant.sh')
+  await refused("/tmp/bin/secret API_KEY here 'true'")
+  files.set('/work/tree/p.sh', 'cp /tmp/req.json ~/.claude/claudopus/boxes/\n')
+  await refused('cd /work/tree && ./p.sh')
+  await refused('cd ~/.claude && cp req.json claudopus/boxes/')
+  await refused('cd ~/.claude; cp req.json ./claudopus/boxes/a.json')
+  await refused(`zsh -c 'cd /work/tree && ./p.sh'`)
+  await refused('sudo -u sam /work/tree/p.sh')
+  await refused('cat plant.sh | bash')
+  await refused('bash < /repo/plant.sh')
+  await refused('timeout 5 ./plant.sh')
+  await refused('nice -n 5 bash plant.sh')
+  files.set('/repo/plant.ts', "Bun.write(`${process.env.HOME}/.claude/claudopus/boxes/a.json`, '{}')\n")
+  await refused('bun run plant.ts')
+  // Capitals, which this Mac's files take as the same, brace expansion, and another language's keychain library
+  await refused('cp req.json ~/.Claude/Claudopus/Boxes/')
+  await refused('cp req.json ~/.claude/claudopus/box{e,}s/')
+  files.set('/repo/peek.swift', 'import Security\nlet q = [kSecAttrService: "claudopus-box", kSecReturnData: true] as CFDictionary\n')
+  await refused('swift peek.swift')
+  await refused(`python3 -c "import keyring; print(keyring.get_password('claudopus-box', 'x'))"`)
+  // A helper work starts is held to it as the work is
+  await refused('bash /repo/plant.sh', 'helper-1')
+  // A file written or edited into the folder
+  for (const [tool, path] of [['Write', '/home/sam/.claude/claudopus/boxes/a.json'], ['Edit', '~/.claude/claudopus/boxes/b.json'], ['Write', '/home/sam/.claude/claudopus/./boxes'], ['Write', '/home/sam/.Claude/claudopus/Boxes/a.json'], ['Write', '/home/sam/.claude/plugins/cache/claudopus/claudopus/9.9.9/bin/secret']] as const)
+    expect([tool, path, (await $.tool.call({ tool, tool_use_id: `b${n++}`, agentId: 'w1', file_path: path, content: '{}', old_string: 'a', new_string: 'b' } as never)).deny]).toEqual([tool, path, expect.stringContaining('theirs alone')])
+  // The runners themselves, and what only looks near the folder or the service, still run
+  files.set('keychain:API_KEY', 'sk-live-123456')
+  await runs(`${bin}/secret API_KEY here 'curl -H "Authorization: Bearer $API_KEY" https://api.example.com'`)
+  // The admin runner past its own gate, here set never to ask as Config seals it (gate.test.tsx holds the asking)
+  files.set('keychain:gate', 'kept-key')
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ admin: 'never', adminSealed: fakeSeal('kept-key', 'mode\nnever') }))
+  await runs(`${bin}/admin here 'whoami'`)
+  await runs(`bash ${bin}/secret API_KEY here 'true'`)
+  await runs('cat src/claudopus/boxes.tsx && rg -n boxes src/claudopus')
+  await runs('ls ~/.claude/claudopus/*')
+  // Looks that only read, a commit message naming the folder, and work in a worktree kept under a .claude folder of the repo
+  await runs('ls ~/.claude/claudopus/boxes && rg -n boxes ~/.claude/claudopus/rules')
+  await runs('git commit -qm "Refuse writes into ~/.claude/claudopus/boxes" && gh pr create --body "claudopus-box via security"')
+  await runs("rg -n 'security|claudopus-box' mods/claudopus")
+  await runs('cd /code/claudopus/.claude/worktrees/agent-1 && rg -n boxes src && cat src/claudopus/boxes.tsx')
+  await runs(`${bin}/secret --list`)
+  await runs('security find-generic-password -s claudopus-secret -a API_KEY')
+  files.set('/repo/build.sh', 'node src/claudopus/build.mjs\n')
+  await runs('bash build.sh')
+  expect((await $.tool.call({ tool: 'Write', tool_use_id: `b${n++}`, agentId: 'w1', file_path: '/home/sam/.claude/claudopus/streams/x.md', content: 'boxes' } as never)).deny).toBeUndefined()
 })
 
 test('work reaches main only through the release runner: its rules name it, and a push or merge to main by hand is refused', async ($, on) => {
@@ -121,20 +248,46 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
   expect(r.text).toContain('were saved to')
   const saved = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/pastes/`))
   expect(saved?.[1]).toBe(paste)
+  // and the chat does not read it back in: the agent that needs it reads it
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p1', file_path: saved?.[0] } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'p2', pattern: 'end', path: `${MEMORY}/pastes` } as never)).deny).toContain('Start a fresh agent')
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p3', file_path: saved?.[0], agentId: 'w1' } as never)).deny).toBeUndefined()
 })
 
-test("a chat's own thread may only start agents and talk to them; an agent may do the work", async ($, on) => {
+test("a chat's own thread may only read, start agents and talk to them; an agent may do the work", async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
-  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
+  expect(told.context?.join('\n')).toContain('A question answered by reading a few files is answered directly')
+  expect(told.context?.join('\n')).toContain('Anything that changes a file, runs a command or takes more than a few reads')
 
   const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'ls' } as never)
   expect(refused.deny).toContain('Start a fresh agent')
+  expect(refused.deny).toContain('changes no file and runs no command')
   expect(files.get(`${MEMORY}/log.md`)).toContain('refused Bash')
+
+  // It reads for itself: any file, a search, a list of names
+  expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: '/repo/src/nose.ts' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'r2', pattern: 'function nose', path: '/repo' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Glob', tool_use_id: 'r3', pattern: '**/*.ts', path: '/repo' } as never)).deny).toBeUndefined()
+  // and still changes nothing and runs nothing
+  for (const [i, call] of [
+    { tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' },
+    { tool: 'Write', file_path: '/repo/src/new.ts', content: 'x' },
+    { tool: 'MultiEdit', file_path: '/repo/src/nose.ts', edits: [] },
+    { tool: 'NotebookEdit', notebook_path: '/repo/n.ipynb', new_source: 'x' },
+    { tool: 'Bash', command: 'cat /repo/src/nose.ts' },
+    { tool: 'WebFetch', url: 'https://example.com', prompt: 'p' },
+    { tool: 'mcp__other__write_file', path: '/repo/x' },
+  ].entries())
+    expect((await $.tool.call({ ...call, tool_use_id: `n${i}` } as never)).deny).toContain('Start a fresh agent')
 
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 't2', prompt: 'fix the nose', subagent_type: 'general-purpose', model: 'opus' } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__ccd_turn__wrap_up', tool_use_id: 't3', recap: 'r' } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't4', command: 'ls', agentId: 'fork-1' } as never)).deny).toBeUndefined()
+  // Work and its helpers are not held to the chat's reading: they read, write and run
+  for (const [i, call] of [{ tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' }, { tool: 'Write', file_path: '/repo/x', content: 'x' }, { tool: 'Grep', pattern: 'nose' }, { tool: 'Bash', command: 'npm test' }].entries())
+    for (const agentId of ['w1', 'helper-1']) expect((await $.tool.call({ ...call, tool_use_id: `w${i}${agentId}`, agentId } as never)).deny).toBeUndefined()
 })
 
 test('a session the person has not typed into does its own work', async ($, on) => {

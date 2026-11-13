@@ -1,9 +1,35 @@
-// Work starting and running: the chat's own thread kept to handing work over, how full the chat is, each step of work, and new
+// Work starting and running: the chat's own thread kept to reading and handing work over, how full the chat is, each step of work, and new
 // work's card
+
+// A call that writes into the runners' boxes folder or reads their keychain service: a command that names them, a file it runs that
+// does, or a file written or edited there. The runners themselves, the mod's own bin/admin and bin/secret, are what may
+const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<boolean> => {
+  if (!dir) return false
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) {
+    // in small letters, as this Mac's files take any; and a runner of the mod's planted where its copies are let through unread
+    const path = pathOf(String(input.file_path ?? input.notebook_path ?? ''), home, cwd || home).toLowerCase()
+    const boxes = boxesDir().toLowerCase()
+    return path === boxes || path.startsWith(`${boxes}/`) || path.startsWith(`${home.toLowerCase()}/.claude/plugins/cache/claudopus/`)
+  }
+  if (e.tool !== 'Bash') return false
+  const command = String(input.command ?? '')
+  if (touchesBoxes(command)) return true
+  const root = $.plugin.root
+  for (const path of filesRun(command, home, cwd || home)) {
+    const runner = /\/bin\/(admin|secret)$/.exec(path)?.[1]
+    if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret)$`).test(path))) continue
+    const text = (await readOr($, path)).slice(0, 1_000_000)
+    if (runner && text && text === (await readOr($, `${root}/bin/${runner}`))) continue
+    if (touchesBoxes(text)) return true
+  }
+  return false
+}
 
 const workHooks = (on: On) => {
 
-  // A chat's own thread starts agents and talks to them; the work runs in the agents, which carry an agent id
+  // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
   on('tool.call', async ($, e, raw) => {
     // A prompt the call raised goes as the call ends: refused, interrupted, or allowed and run
     const run = async (call: typeof e) => {
@@ -23,6 +49,10 @@ const workHooks = (on: On) => {
       }
     }
     let grants: string[] = []
+    if (await isBoxesTouched($, e)) {
+      await log($, `refused ${e.tool} touching the password and key boxes`)
+      return { deny: NO_BOXES }
+    }
     if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
@@ -156,6 +186,12 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       return r
     }
+    // No agent, the chat's or a work's helper, is started on an older model or on Haiku
+    if (!isOff && e.tool === 'Agent' && rightModel(String((e as { model?: unknown }).model ?? ''))) {
+      const wrong = String((e as { model?: unknown }).model)
+      await log($, `refused an Agent call on ${modelName(wrong)}`)
+      return { deny: WRONG_MODEL(wrong) }
+    }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
     // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
@@ -181,9 +217,11 @@ const workHooks = (on: On) => {
       return r
     }
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
-    // The chat reads a kept report itself, to answer from it
-    const readPath = String((e as { file_path?: unknown }).file_path ?? '')
-    if (e.tool === 'Read' && readPath.startsWith(`${reportsDir()}/`) && !readPath.split('/').includes('..')) return next(e)
+    // The chat reads for itself: a kept report to answer from, or the few files a question needs. A saved paste stays out of it:
+    // the agent that needs it reads it
+    const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
+    const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
+    if (READS.includes(e.tool) && !isPaste) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
 
     return { deny: REFUSED }
@@ -207,7 +245,18 @@ const workHooks = (on: On) => {
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-    const r = yield* next(chosen && modelName(chosen) !== modelName(e.model) ? { ...e, model: chosen } : e)
+    // A step the app sends to an older model or to Haiku (it moves work to an older model after its safeguards flag a message) goes
+    // to a model work runs on instead, and the work's card says which model it was kept off
+    const instead = id !== undefined && !chosen && !isOff ? rightModel(e.model) : undefined
+    if (id !== undefined && instead && !sentElsewhere.has(`${id} ${e.model}`)) {
+      sentElsewhere.add(`${id} ${e.model}`)
+      await log($, `work ${id} was sent to ${modelName(e.model)} by the app: its steps go to ${modelName(instead)}`)
+    }
+    // The card says so only while it holds: not once the app sends its steps to a right model again, or the person picked one
+    const moved = instead ? modelName(e.model) : undefined
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
+    const to = chosen && modelName(chosen) !== modelName(e.model) ? chosen : instead
+    const r = yield* next(to ? { ...e, model: to } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)

@@ -33,8 +33,10 @@ const OLD_PANE = 'agents'
 // Rarely used tools wait behind ToolSearch instead of loading into every chat
 const RARE_TOOLS = ['ReportFindings', 'SuggestPluginInstall', 'SuggestSkills', 'SearchPlugins', 'ScheduleWakeup', 'Workflow']
 const RARE_SERVERS = ['mcp__Claude_Browser__', 'mcp__Claude_Code_iOS_Simulator__', 'mcp__visualize__']
-// What a chat's own thread may call: it starts agents and workflows, and talks to them. An agent may call anything
+// What a chat's own thread may call to hand work over: it starts agents and workflows, and talks to them. An agent may call anything
 const OWN = ['Agent', 'Workflow', 'SendMessage', 'ListAgents', 'TaskStop', 'ToolSearch', 'AskUserQuestion', 'SendUserFile', 'ReadNotifications', 'Skill']
+// And what it reads with, to answer a question a few files answer: none of them changes a file or runs a command
+const READS = ['Read', 'Grep', 'Glob']
 // The mod's own tools, as the chat names them; work recorded before the rename called them by the old name
 const TOOLS = 'mcp__claudopus__'
 const OLD_TOOLS = 'mcp__progress__'
@@ -87,6 +89,11 @@ const RELOAD_GRACE = 30_000
 const pauseFrom = (one: { id: string; endedAt: number }) => Math.max(one.endedAt, lateFrom.get(`${one.id}:${one.endedAt}`) ?? 0)
 // Whether ended work is still in that pause at a time: a card that ended in the future, as from another clock, is not
 const isLingering = (one: { id: string; status: string; endedAt: number }, at: number) => one.status !== 'working' && one.endedAt > 0 && at >= pauseFrom(one) && at - pauseFrom(one) < LINGER
+// Work acting on the person's reply in their own words to an ask it keeps open: at work, drawn in the work's purple, with the ask
+// still there to answer. Only once it stops again with the ask open does it wait on the person
+const isActingOnReply = (one: { status: string; ask?: { replied?: unknown } }) => one.status === 'working' && Boolean(one.ask?.replied)
+// An admin command held for the person's press needs them whatever else the work does
+const needsPerson = (one: { status: string; ask?: { replied?: unknown }; admins?: unknown[] }) => Boolean(one.admins?.length) || (Boolean(one.ask) && !isActingOnReply(one))
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set<string>()
 // The engine's list of agents is read again this often, and the minutes move on
@@ -208,11 +215,33 @@ const share = (tokens: number, window: number) => (window ? `context ${percent(t
 
 // A model's name as the app writes it, from its id or alias: "Opus 5.5". Nothing for a name it cannot read
 const modelName = (id: string) => {
-  const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:-(\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
+  const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:[-.](\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
   return m?.[1] ? `${m[1].charAt(0).toUpperCase()}${m[1].slice(1)}${m[2] ? ` ${m[2]}${m[3] ? `.${m[3]}` : ''}` : ''}` : ''
 }
 // The models the person can move running work to from its card, by the id each step is sent with. Never Haiku
 const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2']
+// The model a step of work is sent to in place of one no work runs on: an older version than the newest above, which the app moves
+// work to after its safeguards flag a message, goes to the newest Fable or Sonnet, and Haiku to Sonnet. Nothing for a model work
+// may run on: the three above or a newer version, a name with no version, which the app reads as the newest, and Haiku when the
+// settings name it for a kind of work
+const INSTEAD: Record<string, string> = { Opus: 'claude-fable-5-2', Fable: 'claude-fable-5-2', Sonnet: 'claude-sonnet-5-5', Haiku: 'claude-sonnet-5-5' }
+const rightModel = (id: string): string | undefined => {
+  const [family = '', version = ''] = modelName(id).split(' ')
+  if (!family) return undefined
+  if (family === 'Haiku') return Object.values(models).includes('haiku') ? undefined : INSTEAD.Haiku
+  if (!version) return undefined
+  const newest = MODELS.map(modelName).find(one => one.startsWith(family))?.split(' ')[1] ?? ''
+  const [major = 0, minor = 0] = version.split('.').map(Number)
+  const [topMajor = 0, topMinor = 0] = newest.split('.').map(Number)
+  // An id that leads with a date or an old numbering ("claude-3-5-sonnet-20241022") is an older model too
+  const isOlder = major > 99 || major < topMajor || (major === topMajor && minor < topMinor)
+  return isOlder ? INSTEAD[family] : undefined
+}
+// The work and helpers whose steps the app sent to such a model, each said in the log once
+const sentElsewhere = new Set<string>()
+// What an Agent call is answered when it names such a model
+const WRONG_MODEL = (named: string) =>
+  `No work runs on ${modelName(named) || named}. Name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
 // The line written into a piece of work's own chat when the person moves it to another model; the panel draws it as a line of its own
 const MODEL_HEAD = 'Model changed to '
 const MODEL_LINE = /^Model changed to (.+?) at (\d{1,2}:\d{2})\./
@@ -291,9 +320,9 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'Answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). Only a message that steers what listed work is already doing (a change to what it builds, an answer it waits for, a stop) goes to that work instead, with SendMessage, in their words. A fault, a question or a new ask gets its own agent even when it is about the same area, code or card as running work, so it never waits behind it; when in doubt, its own agent.'
+  'A question answered by reading a few files is answered directly: read them yourself with Read, Grep and Glob. Anything that changes a file, runs a command or takes more than a few reads goes to an agent: answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). Only a message that steers what listed work is already doing (a change to what it builds, an answer it waits for, a stop) goes to that work instead, with SendMessage, in their words. A fault, a question or a new ask gets its own agent even when it is about the same area, code or card as running work, so it never waits behind it; when in doubt, its own agent. A question a few reads answer is still answered directly.'
 const REFUSED =
-  'This chat\'s own thread does no work itself. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
+  'This chat\'s own thread only reads (Read, Grep, Glob); it changes no file and runs no command. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
 const NO_COPY = () =>
   `Work is never started as a copy of this chat. Start a fresh agent instead: subagent_type "general-purpose", the model named (${modelsShort(models)}), and a brief as the prompt.`
 // A command that would print a password or key the keychain keeps. Work uses a kept key only through `bin/secret`, which reads it itself
@@ -346,6 +375,107 @@ const pushesMain = (command: string): boolean =>
     if (args.includes('--no-verify')) return true
     return args.filter(one => !one.startsWith('-') || one.startsWith('--repo=')).map(one => one.replace(/^--repo=.*/, 'REMOTE')).slice(args.some(one => one.startsWith('--repo=')) ? 0 : 1).some(one => /^\+?(?:[^:]*:)?(?:refs\/heads\/)?(?:main|master)$/.test(one))
   })
+// The boxes of the password and key runners are theirs alone: work never writes into their folder, ~/.claude/claudopus/boxes, nor
+// reads their keychain service, claudopus-box. A command is read as the shell splits it, in small letters (this Mac's files take any),
+// with each simple {a,b} tried each way, then as words split at any sign a path or a program joins words with; a word counts when it
+// is the name itself or a pattern (*, ?, [...]) that matches it, and a lone * matches nothing, so a folder listed whole is not taken
+// for the boxes. The folder is .claude (or the setting that moves it) followed by claudopus (a cd between them aside), then boxes; the
+// service is claudopus-box with security (or a program's keychain library). A command that only reads and writes nothing (a search, a
+// listing, git and gh, which a commit message naming the folder runs through) counts only for what it sends into a file with >.
+// Setting the runners' own folder by hand counts too. This stops slips and common tricks: a name pieced together as the command runs,
+// a link made to the folder, or a script run some other way gets past it, so it is no wall
+const BOX_READERS = ['rg', 'grep', 'egrep', 'fgrep', 'ls', 'du', 'git', 'gh', 'wc', 'head', 'tail', 'less', 'file', 'stat', 'tree']
+const BOX_WRAPPERS = ['env', 'command', 'sudo', 'nohup', 'time', 'exec', 'nice', 'timeout', 'xargs', 'caffeinate']
+// Where a command's own words start, past settings and what runs a command it is handed
+const commandAt = (words: string[]) => {
+  let i = 0
+  for (;;) {
+    while (i < words.length && /^\w+=/.test(words[i]!)) i++
+    const head = (words[i] ?? '').split('/').pop() ?? ''
+    if (!BOX_WRAPPERS.includes(head)) return i
+    i++
+    // its own flags and numbers (nice's -n 5, timeout's duration), and the value sudo's -u and the like take
+    while (i < words.length && (words[i]!.startsWith('-') || /^\d[\d.]*[smhd]?$/.test(words[i]!))) i += head === 'sudo' && /^-[ugCchpUrt]$/.test(words[i]!) ? 2 : 1
+  }
+}
+const BOX_WORDS = (text: string) => text.replace(/["'\\`]/g, '').split(/[^a-z0-9._*?[\]-]+/).filter(Boolean)
+const wordIs = (word: string, name: string) => {
+  // A list's brackets around a word, as a program's code writes it, are not part of it
+  const bare = word.replace(/^\[+(?=[^\]]*$)/, '').replace(/(?<=^[^[]*)\]+$/, '')
+  if (word === name || bare === name) return true
+  if (!/[*?[]/.test(bare) || /^[*?]+$/.test(bare)) return false
+  try {
+    return new RegExp(`^${bare.replace(/[.+^${}()|\\-]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.').replace(/\[!/g, '[^')}$`).test(name)
+  } catch {
+    return false
+  }
+}
+const namesBoxes = (text: string): boolean => {
+  const words = BOX_WORDS(text)
+  const has = (name: string) => words.some(word => wordIs(word, name))
+  const isFolder = words.some((word, i) => {
+    if (!wordIs(word, '.claude') && word !== 'claude_config_dir') return false
+    // claudopus within a few words after it (a cd, or a command started there, between them), then boxes
+    const j = words.slice(i + 1, i + 6).findIndex(one => wordIs(one, 'claudopus'))
+    return j >= 0 && words.slice(i + 2 + j).some(one => wordIs(one, 'boxes'))
+  })
+  return isFolder || (has('claudopus-box') && (has('security') || has('keyring') || has('ksecattrservice')))
+}
+const touchesBoxes = (text: string): boolean => {
+  if (/\bCLAUDOPUS_BOX(?:ES|_TAKEN)\b/.test(text)) return true
+  const kept = shellWords(text.toLowerCase())
+    .map(words => {
+      const part = words.join(' ')
+      if (!BOX_READERS.includes((words[commandAt(words)] ?? '').split('/').pop() ?? '')) return part
+      return part.includes('>') ? part.slice(part.indexOf('>')) : ''
+    })
+    .join('\n')
+  return [0, 1, 2, 3].some(k => namesBoxes(k ? kept.replace(/\{([^{}]*,[^{}]*)\}/g, (_, alts: string) => alts.split(',')[k - 1] ?? '') : kept))
+}
+// A file a command runs, against the folder it runs in (a cd in it moves that): the first word of each of its commands when it is a
+// path, what a shell, source or another language's program is handed to run or reads on its stdin, and a file cat pipes into a
+// shell. The system's own programs are not read
+const RUNNERS = ['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'source', '.', 'python', 'python3', 'node', 'bun', 'deno', 'perl', 'ruby', 'php', 'osascript', 'swift', 'tsx', 'ts-node']
+const filesRun = (command: string, home: string, from: string): string[] => {
+  let folder = from
+  const found: string[] = []
+  const parts = shellWords(command)
+  parts.forEach((words, n) => {
+    const i = commandAt(words)
+    const head = words[i] ?? ''
+    const name = head.split('/').pop() ?? ''
+    if ((name === 'cd' || name === 'pushd') && words[i + 1]) return void (folder = pathOf(words[i + 1]!, home, folder))
+    const take = (path: string) => found.push(pathOf(path, home, folder))
+    if (RUNNERS.includes(name) || /^python3(?:\.\d+)?$/.test(name)) {
+      const rest = words.slice(i + 1).filter(word => word !== 'run')
+      const fed = rest.findIndex(word => word.startsWith('<'))
+      if (fed >= 0) take(rest[fed] === '<' ? (rest[fed + 1] ?? '') : rest[fed]!.slice(1))
+      const at = rest.findIndex(word => !word.startsWith('-') && !word.startsWith('<'))
+      // A program handed its code inline (-c, -e) is read as part of the command already
+      if (at >= 0 && !rest.slice(0, at).some(flag => /^-[cem]$/.test(flag))) take(rest[at]!)
+      // a shell's -c is a command of its own, whose files are looked for the same way
+      if (['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'].includes(name) && at >= 0 && rest[at - 1] === '-c') found.push(...filesRun(rest[at]!, home, folder))
+      // Nothing to run named: what it reads is what the command before it gives, such as a file cat prints
+      const before = parts[n - 1] ?? []
+      if (at < 0 && fed < 0 && (before[commandAt(before)] ?? '').split('/').pop() === 'cat') for (const one of before.slice(commandAt(before) + 1)) if (!one.startsWith('-')) take(one)
+      return
+    }
+    if (head.includes('/') && !/^\/(?:usr|bin|sbin|System|Library\/Apple)\//.test(head)) take(head)
+  })
+  return found
+}
+// A path as written, with ~ and $HOME read and . and .. taken out, against the folder given
+const pathOf = (path: string, home: string, folder: string) => {
+  const full = path.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, home)
+  const parts: string[] = []
+  for (const part of (full.startsWith('/') ? full : `${folder}/${full}`).split('/')) {
+    if (part === '..') parts.pop()
+    else if (part && part !== '.') parts.push(part)
+  }
+  return `/${parts.join('/')}`
+}
+const NO_BOXES =
+  'The boxes of the password and key runners are theirs alone: work never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner and for a key only through the secret runner the work rules name.'
 const NO_PUSH = 'Work never pushes or merges to main itself, so two pieces of work never release at once: commit on your own branch and run the release runner the work rules name, from your worktree.'
 // How long the names of kept keys are trusted before they are asked again
 const SECRETS_MS = 60_000
@@ -5095,7 +5225,38 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
 // and removes it. It never reaches the chat, a notice, the saved words, a file or the log. The chat that asked (the request names it)
 // takes the request first; any other chat with a screen after BOX_GRACE. Taking it leaves the .told mark, which tells the runner a
 // panel asks: with none in its first seconds, nothing on this Mac draws one (a -p run with no chat open) and it falls back to its own
+// The box's wording is the panel's own, made from the request's fields: its kind (admin or secret), the Mac (host) or the key's name
+// (name), and why it asks again (again). A request carries no text that is shown: one with any field the panel does not know how to
+// word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
+// any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
+// it is no wall against code set on getting round it
 type Asked = { id: string; text: string; at: number; chat?: string }
+// What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
+const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
+const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/
+const BOX_AGAIN: Record<string, string> = {
+  refused: 'That password was refused. ',
+  short: 'That was shorter than 4 characters. ',
+  control: 'That held a line break or another control character. ',
+}
+// The wording for a request, or undefined for one the panel does not draw
+const boxWording = (one: Record<string, unknown>): string | undefined => {
+  // A reason it does not know is left out
+  const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
+  if (one.kind === 'admin') {
+    if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined) return undefined
+    const mac = one.host === 'here' ? 'this Mac' : one.host
+    return `${again}Claudopus needs the admin password of ${mac} to run an admin command. It is kept only in this Mac's keychain, and later admin commands on ${mac} run without asking again until it is forgotten.`
+  }
+  if (one.kind === 'secret') {
+    if (one.host !== undefined) return undefined
+    // No name: the first box of a key saved by hand asks its name
+    if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.'
+    if (typeof one.name !== 'string' || !BOX_NAME.test(one.name)) return undefined
+    return `${again}Claudopus needs ${one.name}. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print.`
+  }
+  return undefined
+}
 let boxes: Asked[] = []
 // What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
 const boxDrafts = new Map<string, string>()
@@ -5136,8 +5297,9 @@ const lookBoxes = async ($: EngineInterface) => {
     const id = entry.name.replace(/\.json$/, '')
     if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
     try {
-      const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Partial<Asked>
-      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
+      const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Record<string, unknown>
+      const text = one && typeof one === 'object' ? boxWording(one) : undefined
+      if (one.id === id && text && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text, at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) {
@@ -5737,6 +5899,22 @@ const afterReply = async ($: EngineInterface, text: string, answer: string) => {
   }
 }
 
+
+// Work the engine still listed as running as its turn ended is looked at again this long after: one whose run was over by then is
+// listed as completed, and the look ends its card (sync) and passes on a reply it never read, as the turn's end would have
+const HELD_LOOK = 1500
+const heldLook = async ($: EngineInterface, id: string) => {
+  await sync($)
+  // Listed as idle, or no longer listed, its run is over too: nothing holds it
+  const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
+  if (listed === 'idle' || listed === undefined) {
+    const now = await $.clock.now()
+    await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
+  }
+  if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
+  await replyUnread($, id)
+  if (wakes.length) await sendWakes($)
+}
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
     // A load, first or a reload, starts looking afresh: nothing that ended before it is announced
@@ -6033,7 +6211,11 @@ const chatHooks = (on: On) => {
       const now = await $.clock.now()
       // A turn that handed back its report with SubagentHandback and says nothing after has that report as its answer
       const answer = ((e.answer ?? '').trim() || handedBack.get(id) || '').slice(0, ANSWER_CHARS)
-      const isHeld = (await $.agent.list().catch(() => [])).some(one => one.id === id && one.status === 'waiting')
+      // Held: the engine keeps it for what it left running, and lists it as waiting. As a turn ends the engine may still list it as
+      // running for a moment, held or not: taken as held then, and looked at again shortly (heldLook)
+      const listed = (await $.agent.list().catch(() => [])).find(one => one.id === id)?.status
+      const isHeld = listed === 'waiting' || listed === 'running'
+      if (listed === 'running') $.clock.after(HELD_LOOK, () => void heldLook($, id).catch(err => log($, `work ${id} not looked at again: ${String(err)}`)))
       const how: Todo['status'] = e.isAborted ? 'stopped' : e.reason === 'error' || e.reason === 'refusal' ? 'failed' : 'done'
       // Held only by its own background work, a turn that ends with its report has finished the work: by SubagentHandback, or a
       // reply as long as a report. A short line such as "started it in the background" has not, nor work that waits on its helpers
@@ -6287,12 +6469,38 @@ const waitLine = (one: Todo, at: number) => {
 // What finished work left running says on its card
 const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `It left something running in the background, ${took(at - one.leftSince)}` : '')
 
-// Work starting and running: the chat's own thread kept to handing work over, how full the chat is, each step of work, and new
+// Work starting and running: the chat's own thread kept to reading and handing work over, how full the chat is, each step of work, and new
 // work's card
+
+// A call that writes into the runners' boxes folder or reads their keychain service: a command that names them, a file it runs that
+// does, or a file written or edited there. The runners themselves, the mod's own bin/admin and bin/secret, are what may
+const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<boolean> => {
+  if (!dir) return false
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
+  if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) {
+    // in small letters, as this Mac's files take any; and a runner of the mod's planted where its copies are let through unread
+    const path = pathOf(String(input.file_path ?? input.notebook_path ?? ''), home, cwd || home).toLowerCase()
+    const boxes = boxesDir().toLowerCase()
+    return path === boxes || path.startsWith(`${boxes}/`) || path.startsWith(`${home.toLowerCase()}/.claude/plugins/cache/claudopus/`)
+  }
+  if (e.tool !== 'Bash') return false
+  const command = String(input.command ?? '')
+  if (touchesBoxes(command)) return true
+  const root = $.plugin.root
+  for (const path of filesRun(command, home, cwd || home)) {
+    const runner = /\/bin\/(admin|secret)$/.exec(path)?.[1]
+    if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret)$`).test(path))) continue
+    const text = (await readOr($, path)).slice(0, 1_000_000)
+    if (runner && text && text === (await readOr($, `${root}/bin/${runner}`))) continue
+    if (touchesBoxes(text)) return true
+  }
+  return false
+}
 
 const workHooks = (on: On) => {
 
-  // A chat's own thread starts agents and talks to them; the work runs in the agents, which carry an agent id
+  // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
   on('tool.call', async ($, e, raw) => {
     // A prompt the call raised goes as the call ends: refused, interrupted, or allowed and run
     const run = async (call: typeof e) => {
@@ -6312,6 +6520,10 @@ const workHooks = (on: On) => {
       }
     }
     let grants: string[] = []
+    if (await isBoxesTouched($, e)) {
+      await log($, `refused ${e.tool} touching the password and key boxes`)
+      return { deny: NO_BOXES }
+    }
     if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
@@ -6445,6 +6657,12 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       return r
     }
+    // No agent, the chat's or a work's helper, is started on an older model or on Haiku
+    if (!isOff && e.tool === 'Agent' && rightModel(String((e as { model?: unknown }).model ?? ''))) {
+      const wrong = String((e as { model?: unknown }).model)
+      await log($, `refused an Agent call on ${modelName(wrong)}`)
+      return { deny: WRONG_MODEL(wrong) }
+    }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
     // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
@@ -6470,9 +6688,11 @@ const workHooks = (on: On) => {
       return r
     }
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
-    // The chat reads a kept report itself, to answer from it
-    const readPath = String((e as { file_path?: unknown }).file_path ?? '')
-    if (e.tool === 'Read' && readPath.startsWith(`${reportsDir()}/`) && !readPath.split('/').includes('..')) return next(e)
+    // The chat reads for itself: a kept report to answer from, or the few files a question needs. A saved paste stays out of it:
+    // the agent that needs it reads it
+    const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
+    const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
+    if (READS.includes(e.tool) && !isPaste) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
 
     return { deny: REFUSED }
@@ -6496,7 +6716,18 @@ const workHooks = (on: On) => {
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-    const r = yield* next(chosen && modelName(chosen) !== modelName(e.model) ? { ...e, model: chosen } : e)
+    // A step the app sends to an older model or to Haiku (it moves work to an older model after its safeguards flag a message) goes
+    // to a model work runs on instead, and the work's card says which model it was kept off
+    const instead = id !== undefined && !chosen && !isOff ? rightModel(e.model) : undefined
+    if (id !== undefined && instead && !sentElsewhere.has(`${id} ${e.model}`)) {
+      sentElsewhere.add(`${id} ${e.model}`)
+      await log($, `work ${id} was sent to ${modelName(e.model)} by the app: its steps go to ${modelName(instead)}`)
+    }
+    // The card says so only while it holds: not once the app sends its steps to a right model again, or the person picked one
+    const moved = instead ? modelName(e.model) : undefined
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
+    const to = chosen && modelName(chosen) !== modelName(e.model) ? chosen : instead
+    const r = yield* next(to ? { ...e, model: to } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)
@@ -6749,7 +6980,8 @@ const bandHooks = (on: On) => {
     // numbered. A bare digit typed in an empty prompt presses a band's Button, so the person answers from where they already are.
     // A message may begin with a digit too, so one press only picks the answer and says so; the same digit again sends it
     if (e.surface === 'terminal') {
-      const asking = [...cards.filter(one => !one.parentId && one.ask), ...cardsOf(await read($, others)).filter(one => one.ask && !answeredHere.has(`${one.id}:${one.ask.at}`))]
+      // What waits on the person comes before an ask whose work is acting on their reply, which is drawn in the work's purple
+      const asking = [...cards.filter(one => !one.parentId && one.ask), ...cardsOf(await read($, others)).filter(one => one.ask && !answeredHere.has(`${one.id}:${one.ask.at}`))].sort((a, b) => Number(needsPerson(b)) - Number(needsPerson(a)))
       const [first] = asking
       const ask = first?.ask
       if (first && ask) {
@@ -6766,11 +6998,11 @@ const bandHooks = (on: On) => {
         return (
           <Box flexDirection="column">
             <Box flexDirection="row" gap={1}>
-              {octopus(ui, 'band-mark', 'asking', BAND_MARK, 'Claudopus, something needs you', $, { surface: e.surface, requestId: e.requestId })}
+              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus at work on your reply', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
                 <Text wrap="wrap">
                   <Text dimColor>{`${titleOf(first)}: `}</Text>
-                  <Text color={NEEDS} bold>{cut(oneLine(ask.text), Math.max(80, e.props.bodyColumns * 3))}</Text>
+                  <Text color={needsPerson(first) ? NEEDS : LIVE} bold>{cut(oneLine(ask.text), Math.max(80, e.props.bodyColumns * 3))}</Text>
                 </Text>
               </Box>
             </Box>
@@ -6779,8 +7011,8 @@ const bandHooks = (on: On) => {
               {answers.map((choice, n) => (
                 <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
               ))}
-              <Text dimColor={picked < 0} color={picked < 0 ? undefined : NEEDS}>
-                {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.length > 1 ? ` · ${asking.length - 1} more waiting` : ''} · /claudopus to reply in words`}
+              <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
+                {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to reply in words`}
               </Text>
             </Box>
           </Box>
@@ -6896,8 +7128,10 @@ const panelHooks = (on: On) => {
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
+    // Work the app sent to an older model says which one it was kept off; work that answers from one all the same says so
+    const offModel = (one: Todo) => (rightModel(one.model ?? '') ? 'not a model work should run on' : one.moved ? `kept off ${one.moved}` : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -6930,7 +7164,7 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
         )
-      const rest = [one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
+      const rest = [offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
       return (
         <Box flexDirection="row" alignItems="flex-start">
           <Button
@@ -6981,7 +7215,7 @@ const panelHooks = (on: On) => {
       return (
         <Box key={key} flexDirection="column" gap={1}>
           {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
-          <Text wrap="wrap" color={NEEDS} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
+          <Text wrap="wrap" color={needsPerson(one) ? NEEDS : LIVE} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
           {ask.copy ? (
             <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -7085,7 +7319,7 @@ const panelHooks = (on: On) => {
                     {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : 'Stopped'}
                   </Text>
                 ) : (
-                  <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || Boolean(one.ask)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? 'Starting' : 'It wrote no line about itself')}</Text>
+                  <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? 'Starting' : 'It wrote no line about itself')}</Text>
                 )}
               </Box>
             </Box>
@@ -7111,7 +7345,7 @@ const panelHooks = (on: On) => {
     // height, whatever it is; a terminal has no part thinner than a row, so there the edge is whole
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
-      if (one.ask || one.admins?.length || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={one.ask || one.admins?.length ? NEEDS : one.status === 'working' ? LIVE : DONE} />
+      if (needsPerson(one) || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : one.status === 'working' ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
         <Box key={`edge-${one.id}`} width={1} flexShrink={0} flexDirection="column">
@@ -7606,9 +7840,9 @@ const panelHooks = (on: On) => {
           ) : null}
           {one.ask ? (
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-              <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
+              <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>Needs you now</Text>
+                <Text bold dimColor>{needsPerson(one) ? 'Needs you now' : 'Acting on your reply; it still asks'}</Text>
                 {askBlock(one, `ask-big-${one.id}`, true)}
               </Box>
             </Box>
@@ -7844,12 +8078,12 @@ const panelHooks = (on: On) => {
     const isInline = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
     // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and
     // work that just finished (happy too for a workflow in its pause whose card turned green: it finished and its last round passed)
-    const runningThere = elsewhere.filter(one => one.status === 'working' && !one.ask)
+    const runningThere = elsewhere.filter(one => one.status === 'working' && !needsPerson(one))
     const head = {
-      here: working.filter(one => !one.ask).length + runningFlows.length,
+      here: working.filter(one => !needsPerson(one)).length + runningFlows.length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
-      asks: boxes.length + looseGates.length + own.filter(one => one.ask || one.admins?.length).length + elsewhere.filter(one => !one.ask && one.admins?.length).length + waiting.length + elsewhere.filter(one => one.ask).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
+      asks: boxes.length + looseGates.length + own.filter(needsPerson).length + waiting.length + elsewhere.filter(needsPerson).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
