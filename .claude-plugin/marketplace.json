@@ -1,6 +1,6 @@
 {
   "name": "claudopus",
-  "description": "Claudopus, a Claude Code mod: every chat hands its work to background agents, with a panel that shows how it is going. macOS only",
+  "description": "Claudopus: Claude Code, with eight arms. One chat runs many jobs at once, with a panel beside it showing each one. macOS only",
   "owner": { "name": "dimka3553" },
   "plugins": [{ "name": "claudopus", "source": "./mods/claudopus" }]
 }

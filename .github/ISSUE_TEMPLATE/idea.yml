@@ -1,0 +1,11 @@
+name: An idea
+description: Something Claudopus could do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: What you were trying to do, and what would have made it easier.
+    validations:
+      required: true

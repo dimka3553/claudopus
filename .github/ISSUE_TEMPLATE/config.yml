@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: A question
+    url: https://github.com/dimka3553/claudopus/discussions
+    about: Ask how something works, or share how you use it.
+  - name: The full guide
+    url: https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/docs/guide.md
+    about: Every setting, what you see, and how to turn it off.

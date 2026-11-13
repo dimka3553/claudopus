@@ -145,7 +145,7 @@ test("with another Mac named in config.json, its chats' work shows here under it
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'billing · on m4' })).toBeDefined()
   // Its running time is told on this Mac's clock: a minute and some, not an hour
-  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ done · )?1m \d\ds$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · 1m \d\ds$/ })).toBeDefined()
   const send = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Send')
   await list.press({ key: send?.key ?? '' })
   const sent = await until(async () => sshed.find(([command]) => command?.startsWith('d=')))

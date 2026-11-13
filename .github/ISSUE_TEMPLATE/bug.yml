@@ -1,0 +1,35 @@
+name: Something is wrong
+description: Claudopus did something it should not, or did not do something it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw. A screenshot of the chat or the panel helps most.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Claudopus version
+      description: Shown in the panel's About tab.
+      placeholder: "0.2.50"
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where you run Claude Code
+      options:
+        - Claude desktop app
+        - Desktop app, on another Mac over SSH
+        - Terminal
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.6"
