@@ -101,15 +101,14 @@ export const isReloadDue = (
   const at = typeof before?.at === 'number' && Number.isFinite(before.at) ? before.at : undefined
   return !(at !== undefined && before?.version === copy.version && now >= at && now - at < RELOAD_AGAIN)
 }
-// The moment a chat moves to a newer version: the header's version rolls to the new number and says "Updated" in blue for
-// UPDATED_FOR, drawn again each UPDATED_STEP, then settles to the plain number. A panel first drawn later than UPDATED_LATE after
-// the load shows nothing of it
-export const UPDATED_FOR = 8000
+// The moment a chat moves to a newer version, UPDATED_FOR long, drawn again each UPDATED_STEP: the octopus turns blue and jumps,
+// the name line says "Claudopus updated" in blue and then the new version, and a sound plays once; then all is as before. A panel
+// first drawn later than UPDATED_LATE after the load shows nothing of it
+export const UPDATED_FOR = 5000
 export const UPDATED_STEP = 150
 export const UPDATED_LATE = 10 * 60 * 1000
-const UPDATED_ROLL = 1500
-const UPDATED_SETTLE = 7000
-const UPDATED_WORD = 'Updated'
+const UPDATED_SAYS = 2500
+const UPDATED_WORD = 'updated'
 
 // The version this chat ran before this load, when the load moved it to a newer one: the version the chat last loaded (kept
 // through a reload), else, for a chat whose last copy kept none, the reload it asked for (reloads/<chat>.json) to this very
@@ -121,26 +120,15 @@ export const updatedFrom = (loaded: string, ran: string, mark: { version?: unkno
   return loaded && before && isNewer(loaded, before) ? before : ''
 }
 
-// What the version line shows `t` after the moment began, as pieces in a tone each; nothing once it is over. First the numbers
-// that changed roll like a counter and land one by one, left to right; then "v<to> · Updated" in blue, a glint passing along the
-// word; then both dim for a moment before the plain number comes back
-export type UpdatedPiece = { text: string; tone: 'dim' | 'blue' | 'glint' }
-export const updatedLook = (from: string, to: string, t: number): UpdatedPiece[] | undefined => {
+// What the name line shows `t` after the moment began, as pieces in a tone each; nothing once it is over. First "Claudopus updated"
+// in blue, a glint crossing the word; then "Claudopus v<to>", the version in blue. Only the version moved to is ever shown: no
+// number rolls through others on its way, which read as a version that does not exist (0.2.63 to 0.2.64 showed v0.2.65 to v0.2.69)
+export type UpdatedPiece = { text: string; tone: 'name' | 'blue' | 'glint' }
+export const updatedLook = (to: string, t: number): UpdatedPiece[] | undefined => {
   if (!(t >= 0 && t < UPDATED_FOR) || !to) return undefined
-  const target = `v${to}`
-  if (t < UPDATED_ROLL) {
-    const old = `v${from}`
-    let same = 0
-    while (same < target.length && target[same] === old[same]) same += 1
-    const changing = [...target.slice(same)]
-    const landed = Math.floor((t / UPDATED_ROLL) * (changing.length + 1))
-    const frame = Math.floor(t / UPDATED_STEP)
-    const rolled = changing.map((ch, i) => (i < landed || !/\d/.test(ch) ? ch : String((Number(ch) + frame + i * 3 + 1) % 10))).join('')
-    return [...(same ? [{ text: target.slice(0, same), tone: 'dim' as const }] : []), { text: rolled, tone: 'blue' }]
-  }
-  if (t >= UPDATED_SETTLE) return [{ text: `${target} · ${UPDATED_WORD}`, tone: 'dim' }]
+  if (t >= UPDATED_SAYS) return [{ text: 'Claudopus ', tone: 'name' }, { text: `v${to}`, tone: 'blue' }]
   // The glint crosses the word, rests a little, and crosses again
-  const at = Math.floor((t - UPDATED_ROLL) / UPDATED_STEP) % (UPDATED_WORD.length + 5)
+  const at = Math.floor(t / UPDATED_STEP) % (UPDATED_WORD.length + 4)
   const word: UpdatedPiece[] =
     at < UPDATED_WORD.length
       ? [
@@ -149,9 +137,11 @@ export const updatedLook = (from: string, to: string, t: number): UpdatedPiece[]
           { text: UPDATED_WORD.slice(at + 1), tone: 'blue' },
         ]
       : [{ text: UPDATED_WORD, tone: 'blue' }]
-  const pieces: UpdatedPiece[] = [{ text: target, tone: 'blue' }, { text: ' · ', tone: 'dim' }, ...word]
-  return pieces.filter(piece => piece.text)
+  return [{ text: 'Claudopus ', tone: 'blue' } as UpdatedPiece, ...word].filter(piece => piece.text)
 }
+// The octopus of the moment: the happy one in the workflow blue, its jump played over the whole moment, resting on its last picture
+export const updatedArt = (happy: string, blue: string) =>
+  happy.replaceAll('#4EBA65', blue).replaceAll('dur="2s"', `dur="${UPDATED_FOR / 4000}s" repeatCount="4"`)
 const versionIn = (manifest: string) => {
   try {
     return String(JSON.parse(manifest)?.version ?? '')

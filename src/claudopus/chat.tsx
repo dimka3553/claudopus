@@ -59,6 +59,7 @@ const chatHooks = (on: On) => {
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
     }
     ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
+    ART.updated = updatedArt(ART.happy, FLOW)
     cwd = e.cwd
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press

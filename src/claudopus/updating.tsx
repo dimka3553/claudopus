@@ -186,7 +186,28 @@ const noteLoaded = async ($: EngineInterface) => {
   await update($, tick, n => n + 1)
   await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header says Updated`)
 }
-// The header's version as it stands now (blue in Claudopus's workflow blue, the glint in the text's own bright colour): the moment's pieces while it lasts, drawn again each UPDATED_STEP until it is over
+// The sound of the moment, a file of the mod's: three bright rising notes, 0.9 s, made by mockups/claudopus-sound/updated.py
+const UPDATED_SOUND = 'sounds/updated.wav'
+// The sound plays once for each version on this Mac, however many chats move to it: the first to begin its moment makes the file
+// played/<version> (made only where none is, the shell's noclobber) and plays it; config.json's sound off keeps it silent
+const playUpdated = async ($: EngineInterface, version: string) => {
+  if (!dir || !/^[0-9A-Za-z.+-]{1,40}$/.test(version)) return
+  let config: { sound?: unknown } = {}
+  try {
+    config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
+  } catch {
+    // A config.json being edited leaves the sound on
+  }
+  if (config.sound === false) return
+  const played = `${dir}/updated/${version}`
+  const made = await $.process
+    .run(['sh', '-c', 'mkdir -p "$(dirname "$1")" && set -C && : > "$1"', 'sh', played])
+    .catch(() => ({ exitCode: 1 }))
+  if (made.exitCode !== 0) return
+  await $.audio.play({ asset: UPDATED_SOUND }).catch(err => log($, `updated sound not played: ${String(err)}`))
+}
+// The moment as it stands now, while it lasts, drawn again each UPDATED_STEP until it is over: the name line's pieces (blue in
+// Claudopus's workflow blue, the glint in the text's own bright colour); the panel draws the blue octopus beside them
 const updatedPieces = async ($: EngineInterface, version: string) => {
   const moment = updatedMoment
   if (!moment || moment.to !== version) return undefined
@@ -194,6 +215,7 @@ const updatedPieces = async ($: EngineInterface, version: string) => {
   if (!moment.startedAt) {
     if (now - moment.loadedAt > UPDATED_LATE) return void (updatedMoment = undefined)
     moment.startedAt = now
+    void playUpdated($, moment.to)
     let left = Math.ceil(UPDATED_FOR / UPDATED_STEP) + 2
     const step = () =>
       void $.clock.after(UPDATED_STEP, () => {
@@ -202,16 +224,18 @@ const updatedPieces = async ($: EngineInterface, version: string) => {
       })
     step()
   }
-  const look = updatedLook(moment.from, moment.to, now - moment.startedAt)
+  const look = updatedLook(moment.to, now - moment.startedAt)
   if (!look && updatedMoment === moment) updatedMoment = undefined
   return look
 }
-const versionLine = (ui: Ui, pieces: ReturnType<typeof updatedLook>) => (
-  <ui.Box key="head-version" flexDirection="row" flexShrink={1} minWidth={0}>
-    {(pieces ?? []).map((piece, i) => (
-      <ui.Text key={`head-version-${i}`} wrap="truncate-end" dimColor={piece.tone === 'dim'} color={piece.tone === 'blue' ? FLOW : undefined} bold={piece.tone !== 'dim'}>
-        {piece.text}
-      </ui.Text>
+const nameLine = (ui: Ui, pieces: NonNullable<ReturnType<typeof updatedLook>>) => (
+  <ui.Box key="head-name" flexDirection="row" minWidth={0}>
+    {pieces.map((piece, i) => (
+      <ui.Box key={`head-name-${i}`} flexShrink={piece.tone === 'blue' && i ? 1 : 0} minWidth={0}>
+        <ui.Text wrap="truncate-end" color={piece.tone === 'blue' ? FLOW : undefined} bold>
+          {piece.text}
+        </ui.Text>
+      </ui.Box>
     ))}
   </ui.Box>
 )
