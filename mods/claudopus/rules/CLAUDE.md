@@ -22,6 +22,7 @@ These are my principles. Every chat and every piece of work carries them.
 
 - Short replies and short rules. Say it once, in general terms, without examples.
 - Before starting, say back what I want to find out and what you will show me.
+- Titles, notes, to-dos, asks and results name what is being done, never the model doing it.
 
 ## Checking
 
