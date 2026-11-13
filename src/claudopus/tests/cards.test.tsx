@@ -404,7 +404,7 @@ test('work that takes many steps without touching its to-dos is reminded to brin
   expect(appended).toHaveLength(2)
 })
 
-test('work that ends in an error is kept as failed, time lying ended is not counted, and work under way is never forgotten', async ($, on) => {
+test('work that ends in an error is kept as failed, time lying ended is not counted, and work under way is never forgotten', SLOW, async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
