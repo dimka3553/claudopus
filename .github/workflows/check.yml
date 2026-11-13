@@ -22,6 +22,6 @@ jobs:
         run: |
           test "$(jq -r .version mods/claudopus/.claude-plugin/plugin.json)" = "$(jq -r .version site/version.json)"
       # Every test, as the release runs them: Claude Code's own test kit, from its public npm package, pinned to a version that
-      # passes them all. The desktop app's engine is newer, and the release still runs the tests with it
+      # passes them all. The release runs them again with the desktop app's engine
       - name: The mod's tests pass
         run: npx --yes @anthropic-ai/claude-code@2.1.325 plugin test mods/claudopus
