@@ -252,6 +252,7 @@ const chatHooks = (on: On) => {
       await holdOldCopies($).catch(() => undefined)
       $.clock.every(HOLD_EVERY, () => holdOldCopies($).catch(err => log($, `old copies not held: ${String(err)}`)))
     }
+    await tidyLog($)
     await log($, `start ${id} in ${e.cwd}${isOff ? ' (handing over is off)' : ''}`)
 
     return begun

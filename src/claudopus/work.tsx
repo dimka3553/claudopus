@@ -7,9 +7,15 @@ const workHooks = (on: On) => {
   on('tool.call', async ($, e, raw) => {
     // A prompt the call raised goes as the call ends: refused, interrupted, or allowed and run
     const run = async (call: typeof e) => {
+      // What work runs, and what comes back of it, tells the stuck check whether it moves
+      const isWatched = e.agentId !== undefined && Boolean(dir)
+      if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool).catch(() => undefined)
+      let r: Awaited<ReturnType<typeof raw>> | undefined
       try {
-        return await raw(call)
+        r = await raw(call)
+        return r
       } finally {
+        if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(() => undefined)
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool)
       }
@@ -88,6 +94,7 @@ const workHooks = (on: On) => {
       // What this work starts with the Agent tool is its helper, which the engine's own record does not always say
       if (e.tool === 'Agent') helperCalls.set(e.tool_use_id, id)
       endedByHandback.delete(id)
+      stoppedHere.delete(id)
       // Work that calls a tool is working: a card that had ended is back. Its steps are counted: to place a steer among them,
       // to see that a steer got its decision, and to see that its to-dos are still being kept
       if (dir) {
@@ -140,8 +147,9 @@ const workHooks = (on: On) => {
       const r = await next(e)
       const stopId = String((e as { task_id?: unknown }).task_id ?? '')
       if (!r.deny && stopId) {
+        stoppedHere.add(stopId)
         const now = await $.clock.now()
-        await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one)))
+        await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
         await keepStoppedReports($, now)
         await lookEnds($)
       }

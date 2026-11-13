@@ -41,7 +41,7 @@ const panelHooks = (on: On) => {
     const at = await $.clock.now()
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask)
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.leftSince)
     // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of the chat always does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
@@ -189,11 +189,15 @@ const panelHooks = (on: On) => {
               {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} done` : '')}
             </Box>
             {one.ask ? askBlock(one, `ask-${one.id}`) : null}
+            {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
+            {one.stuckAt && one.status === 'working' ? (
+              <Text key={`stuck-${one.id}`} color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
+            ) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden">
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
-                {lingers(one, at) ? (
+                {lingers(one, at) || leftLine(one, at) ? (
                   <Text wrap="truncate-end" color={one.status === 'done' ? DONE : undefined} dimColor={one.status !== 'done'}>
                     {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : 'Stopped'}
                   </Text>
@@ -202,6 +206,15 @@ const panelHooks = (on: On) => {
                 )}
               </Box>
             </Box>
+            {/* Finished, with something it started still running: what, how long, and a way to stop it */}
+            {leftLine(one, at) && !one.chat ? (
+              <Box key={`left-${one.id}`} flexDirection="column" gap={1}>
+                <Text color={NEEDS} wrap="wrap">{leftLine(one, at)}</Text>
+                <Box flexDirection="row">
+                  <Button key={`left-stop-${one.id}-${presses}`} label="Stop it" onPress={() => void stop($, one.id)} />
+                </Box>
+              </Box>
+            ) : null}
             {/* Its helpers, inside the card: its coloured edge runs down beside them */}
             {tree.length ? <Box key={`tree-${one.id}`} flexDirection="column">{tree}</Box> : null}
           </Box>
@@ -278,7 +291,9 @@ const panelHooks = (on: On) => {
       const time = took((one.endedAt || at) - one.startedAt)
       const model = modelName(one.model ?? '')
       const width = perRow - 4 - t.depth * 2
-      const side = [[model, one.tokens ? thousands(one.tokens) : '', time], [model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
+      // A call it has run for minutes says so in place of the model and context, so a long step does not look like a hang
+      const busy = [runningLine(one, at), runningLine(one, at).replace(/^.* running · /, 'running · ')].find(text => text && width - text.length >= 12)
+      const side = busy ? busy : [[model, one.tokens ? thousands(one.tokens) : '', time], [model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
       return twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
     }
     // In a small card: the helpers at work now or just ended, and any that one of those runs under; the rest are one closing
