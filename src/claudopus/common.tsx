@@ -34,6 +34,11 @@ const OPEN_DONE = -1_000_003
 // How much of a piece of work's chat the panel draws, the newest: this many lines, and this many characters, which one drawing has room for
 const TALK_KEPT = 300
 const TALK_CHARS = 40_000
+// The most characters the app draws in one tab: it counts every text and every picture's source, and a drawing of more is thrown
+// away whole, so the tab keeps its old drawing, or after a switch away and back says "Nothing to show yet". The pictures a tab draws
+// keep well under it, with room for its text
+const DRAWING_CHARS = 262_144
+const PICTURES_CHARS = 150_000
 // How long one message of that chat may be
 const SAID_CHARS = 8000
 // How much of a long message to the work is drawn before it is opened

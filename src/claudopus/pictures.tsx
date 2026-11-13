@@ -54,10 +54,20 @@ const pictureBack = ($: EngineInterface, pane: string) => {
 }
 // The large copy the tab draws, as wide as a wide sidebar on a sharp screen. An Svg carries at most 131072 characters, too few for
 // a large screenshot to stay readable, so the copy is cut into bands across, each an Svg of its own drawn under the one before.
-// A width that needs too many bands gives way to a narrower one. A picture with see-through parts keeps them as PNG, else JPEG
-const LARGE_WIDTHS = [2000, 1400, 1000]
+// The whole copy fits in one drawing the app accepts (DRAWING_CHARS): a size that needs more gives way to a lower JPEG quality,
+// then a narrower one. 0.2.46 to 0.2.55 let it reach 600000, which the app threw away, so the tab stayed on "Making a large copy"
+// and went blank once left and come back to. A picture with see-through parts keeps them as PNG, else JPEG
+const LARGE_SIZES: [number, number][] = [
+  [2000, 70],
+  [1400, 70],
+  [1400, 55],
+  [1000, 70],
+  [1000, 55],
+  [800, 60],
+  [600, 60],
+]
 const LARGE_CHARS = 130_000
-const LARGE_TOTAL = 600_000
+const LARGE_TOTAL = 200_000
 type Large = { bands: string[]; width: number; height: number } | null
 const larges = new Map<string, Large>()
 const making = new Map<string, Promise<Large>>()
@@ -81,8 +91,10 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
   const base = `${dir}/thumbs/large-${Math.round(await $.clock.now())}-${largeMade}`
   await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
   try {
+    // Each size once: a picture narrower than a width is taken at its own width
+    const sizes = [...new Map(LARGE_SIZES.map(([w, quality]) => [`${Math.min(w, width)}:${quality}`, [Math.min(w, width), quality] as const])).values()]
     for (const format of formats)
-    for (const most of [...new Set(LARGE_WIDTHS.map(w => Math.min(w, width)))]) {
+    for (const [most, quality] of format === 'png' ? [...new Map(sizes.map(([w]) => [w, [w, 0] as const])).values()] : sizes) {
       // The picture at this width, then cut into bands down it, each as tall as fits
       const wide = `${base}-${most}.png`
       const sized = await $.process.run(['sips', '--resampleWidth', String(most), '-s', 'format', 'png', path, '--out', wide]).catch(() => ({ exitCode: 1 }))
@@ -95,11 +107,12 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
       if (padded.exitCode !== 0) continue
       const bands: string[] = []
       let band = Math.min(tall, 400)
+      let total = 0
       let isTooMany = false
       for (let y = 0; y < tall; ) {
         const rows = Math.min(band, tall - y)
         const out = `${base}-band.${format === 'png' ? 'png' : 'jpg'}`
-        await $.process.run(['sips', '-c', String(rows), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', '70'] : []), wide, '--out', out])
+        await $.process.run(['sips', '-c', String(rows), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', String(quality)] : []), wide, '--out', out])
         const cutTo = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run(['sips', '-g', 'pixelHeight', out]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
         const read = cutTo === rows ? ((await $.fs.read(out, { as: 'bytes' }).catch(() => undefined)) as { base64: string } | undefined) : undefined
         const source = read ? `<svg xmlns="http://www.w3.org/2000/svg" width="${most}" height="${rows}" viewBox="0 0 ${most} ${rows}"><image href="data:image/${format};base64,${read.base64}" width="${most}" height="${rows}"/></svg>` : ''
@@ -109,12 +122,14 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
           band = Math.max(16, Math.floor((rows * LARGE_CHARS * 0.9) / source.length))
           continue
         }
-        bands.push(source)
-        y += rows
-        if (bands.reduce((sum, one) => sum + one.length, 0) > LARGE_TOTAL && y < tall) {
+        // The whole copy, this band too, fits in one drawing, else this size is too large
+        total += source.length
+        if (total > LARGE_TOTAL) {
           isTooMany = true
           break
         }
+        bands.push(source)
+        y += rows
       }
       if (!isTooMany && bands.length) {
         const whole = bands.reduce((sum, one) => sum + Number(/height="(\d+)"/.exec(one)?.[1] ?? 0), 0)
@@ -236,10 +251,13 @@ const picturesIn = async ($: EngineInterface, lines: Line[], one: Todo, kept: Re
   const order = [...last.entries()].slice(-PICS_LISTED)
   const byStep = new Map<number, Pic[]>()
   let drawnCount = 0
+  // The small copies together keep the tab's drawing under what the app accepts; one past that is a row that opens it
+  let drawnChars = 0
   for (const [path, { at, isSeen }] of order.reverse()) {
-    const pic = await picOf($, path, one, isSeen, kept, canDraw && drawnCount < CHAT_THUMBS).catch(() => null)
-    if (!pic) continue
-    if (pic.thumb) drawnCount += 1
+    const found = await picOf($, path, one, isSeen, kept, canDraw && drawnCount < CHAT_THUMBS).catch(() => null)
+    if (!found) continue
+    const pic = found.thumb && drawnChars + found.thumb.source.length > PICTURES_CHARS ? { ...found, thumb: null } : found
+    if (pic.thumb) (drawnCount += 1), (drawnChars += pic.thumb.source.length)
     byStep.set(at, [pic, ...(byStep.get(at) ?? [])])
   }
   return byStep

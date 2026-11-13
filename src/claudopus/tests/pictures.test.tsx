@@ -83,3 +83,82 @@ test("in a chat the app runs on another Mac over ssh, a picture's row in Details
   expect(logged).toEqual([])
 })
 
+// The most characters the app draws in one tab (its renderer throws a larger drawing away whole)
+const APP_DRAWING_CHARS = 262_144
+// How many characters a tab's drawing holds, as the app counts them before it draws one: its texts, labels and pictures' sources
+const drawnChars = async (tab: Awaited<ReturnType<EngineInterface['ui']['mount']>>) =>
+  (await tab.findAll({ type: 'Svg' })).reduce((sum, one) => sum + String(one.props.source).length + String(one.props.alt ?? '').length, 0) +
+  (await tab.findAll({ type: 'Text' })).reduce((sum, one) => sum + String(one.text ?? '').length, 0) +
+  (await tab.findAll({ type: 'Button' })).reduce((sum, one) => sum + String(one.props.label ?? '').length, 0)
+
+test("in a chat the app runs on another Mac over ssh, a large screenshot opened large fits in one drawing the app accepts: smaller or narrower until it does, drawn whole", async ($, on) => {
+  const png = '/tmp/work/shot.png'
+  const talk = [
+    { role: 'user', text: 'Shoot.', toolUses: [] },
+    { role: 'assistant', text: 'Shot.', toolUses: [{ tool_use_id: 'u1', tool: 'SendUserFile', input: { files: [png], status: 'normal' } }] },
+  ]
+  // A 2300 × 2300 screenshot: as JPEG at quality 70 its base64 is about 0.156 characters a pixel, at 55 about 0.12, as the real one measured
+  let wide = 2300
+  let cut = { rows: 0, quality: 70 }
+  const sips = (argv: string[]) => {
+    const line = argv.join(' ')
+    if (line.includes('hasAlpha')) return 'pixelWidth: 2300\npixelHeight: 2300\nhasAlpha: no'
+    if (line.startsWith('sips --resampleWidth ')) wide = Number(argv[2])
+    if (line.startsWith('sips -c ')) cut = { rows: Number(argv[2]), quality: Number(argv[argv.indexOf('formatOptions') + 1]) }
+    if (line.startsWith('sips -g pixelHeight') && line.includes('-band.')) return `pixelHeight: ${cut.rows}`
+    if (line.startsWith('sips -g pixelHeight')) return `pixelHeight: ${wide}`
+    return line.startsWith('sips -g') ? undefined : ''
+  }
+  const bytes = (path: string) => (path.includes('-band.') ? 'A'.repeat(Math.round(wide * cut.rows * (cut.quality >= 70 ? 0.156 : 0.12))) : undefined)
+  const { files, logged } = world(on, { talk, env: { CLAUDE_SSH_DAEMON_CHILD: '1' }, sips, bytes })
+  files.set(png, 'png')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'shoot', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Shoot.' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'open-a1')
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  await pressed(tab, 'pic-open-1-0')
+  // The copy is made out of the drawing, which is drawn again once it is ready
+  for (let tries = 0; tries < 50 && !(await tab.findAll({ type: 'Svg' })).length; tries += 1) await new Promise(done => setTimeout(done, 20))
+  const svgs = await tab.findAll({ type: 'Svg' })
+  expect(svgs.length).toBeGreaterThan(0)
+  // The bands, one under the other, are the whole picture at one width
+  const widths = new Set(svgs.map(one => Number(/width="(\d+)"/.exec(String(one.props.source))?.[1])))
+  expect(widths.size).toBe(1)
+  const width = [...widths][0] ?? 0
+  expect(svgs.reduce((sum, one) => sum + Number(/height="(\d+)"/.exec(String(one.props.source))?.[1] ?? 0), 0)).toBe(width)
+  // 2000 wide would be about 620000 characters, which the app throws away whole; this is the widest that fits
+  expect(width).toBe(1000)
+  expect(await drawnChars(tab)).toBeLessThan(APP_DRAWING_CHARS)
+  await tab.unmount()
+  await pane.unmount()
+  expect(logged).toEqual([])
+})
+
+test("a Details tab's small pictures together stay under what the app draws in one tab; one past that is a row that opens it", async ($, on) => {
+  const shots = [1, 2, 3, 4, 5, 6].map(n => `/tmp/work/shot-${n}.png`)
+  const talk = [
+    { role: 'user', text: 'Shoot.', toolUses: [] },
+    ...shots.map((path, n) => ({ role: 'assistant', text: `Shot ${n + 1}.`, toolUses: [{ tool_use_id: `u${n}`, tool: 'SendUserFile', input: { files: [path], status: 'normal' } }] })),
+  ]
+  // Each small copy as large as one may be: 36000 bytes, 48000 characters of base64
+  const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 360\npixelHeight: 240' : '')
+  const bytes = (path: string) => (path.includes('/thumbs/') ? 'A'.repeat(48_000) : undefined)
+  const { files, logged } = world(on, { talk, sips, bytes })
+  for (const path of shots) files.set(path, 'png')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'shoot', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Shoot.' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'open-a1')
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  const small = (await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))
+  // Three fit; the other three are rows that open them
+  expect(small.length).toBe(3)
+  expect((await tab.findAll({ type: 'Button' })).filter(one => String(one.props.label).startsWith('⤢')).length).toBe(6)
+  expect(await drawnChars(tab)).toBeLessThan(APP_DRAWING_CHARS)
+  await tab.unmount()
+  await pane.unmount()
+  expect(logged).toEqual([])
+})

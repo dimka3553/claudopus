@@ -27,7 +27,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[] } = {}) => {
+const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[] } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -71,6 +71,9 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return <Text>the engine's own</Text>
   })
   on('fs.read', (_, e) => {
+    // A picture's bytes, as base64, where the test gives them
+    const bytes = options.bytes?.(e.path)
+    if (bytes !== undefined) return { value: { base64: bytes } as never }
     // The octopus drawings, each an SVG naming its file, when a test asks for them
     const drawing = options.art ? /\/art\/([\w-]+)\.svg$/.exec(e.path)?.[1] : undefined
     if (drawing) return { value: `<svg xmlns="http://www.w3.org/2000/svg"><title>${drawing}</title></svg>` }
@@ -149,6 +152,9 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   // What the Mac answers: a dev server on 3100 started by a chat, and the system's own listener, which is not the person's
   on('process.run', (_, e) => {
     const [tool, ...rest] = e.argv
+    // What sips says of a picture, where the test gives it
+    const sipsSaid = tool === 'sips' ? options.sips?.([...e.argv]) : undefined
+    if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'osascript') osa.push([...e.argv])
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
