@@ -21,8 +21,9 @@ const DONE = 'success'
 // file of the mod's, art/<name>.svg, read when the session starts: a drawing is swapped by replacing its file. Happy is the
 // octopus in the finished green, bouncing with its arms up once over the two seconds finished work pauses, then still
 // Asking is the wave in the amber of work that needs the person: it waves once as something starts to wait, then rests amber
-const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '', asking: '' }
-const ART_FILES: Record<Exclude<keyof typeof ART, 'asking'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
+// Updated is the happy octopus in the workflow blue, jumping through the moment a chat moves to a newer version
+const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '', asking: '', updated: '' }
+const ART_FILES: Record<Exclude<keyof typeof ART, 'asking' | 'updated'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
 // Whether the octopus is happy at a time: work of this chat's that finished, not stopped or failed, is in its pause. A new drawing
 // starts its animation, so it plays from the first finish and holds its last picture through any finish that follows in the pause
 const isHappy = (cards: { id: string; parentId?: string; status: string; endedAt: number }[], at: number) =>
@@ -39,7 +40,7 @@ const moments = new Map<string, { art: keyof typeof ART; mark: string; at: numbe
 const MOMENT_GAP = 5000
 // The happy drawings last only a finish's short pause, so one drawn again after a gap is a new finish and plays anew; the wave
 // rests on its last picture for as long as something waits, and plays again only when the octopus turns to it anew
-const ONCE = new Set<keyof typeof ART>(['happy', 'happySmall'])
+const ONCE = new Set<keyof typeof ART>(['happy', 'happySmall', 'updated'])
 const RUN_MARK = Math.random().toString(36).slice(2, 8)
 let momentCount = 0
 const momentOf = (key: string, art: keyof typeof ART) => {
