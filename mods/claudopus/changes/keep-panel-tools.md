@@ -1,0 +1,2 @@
+- Work you answer on its card after it finished now keeps its notes, asks and to-dos when it starts again. Before, all of them failed, so a new question from it never reached its card.
+- An answer that arrives while nothing else runs in the chat still starts the work again; if its panel does not answer, the work puts its question in its report, and the chat asks you.
