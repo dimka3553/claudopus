@@ -5,16 +5,16 @@
 
 <p align="center">
   <a href="#install">Install</a> ·
-  <a href="#what-you-see">What you see</a> ·
+  <a href="#what-it-does">What it does</a> ·
   <a href="#settings">Settings</a> ·
-  <a href="#memory">Memory</a> ·
   <a href="#privacy">Privacy</a> ·
+  <a href="docs/guide.md">Full guide</a> ·
   <a href="https://www.claudopus.ai">claudopus.ai</a>
 </p>
 
-A mod for Claude Code. Each chat hands its work to background agents, so you keep talking while the work runs.
-A panel beside the chat shows each piece of work with its to-dos, and an octopus moves while anything runs.
-Your messages, the results and a brief per subject are kept in a memory folder, so chats can stay small.
+**Claude Code, with eight arms.** One chat runs many jobs at once, on your own Mac.
+
+You keep talking while the work runs in the background, and a panel beside the chat shows every job as a card. Its working rules make Claude check its work before it shows you, and the chat stays small, so it spends fewer tokens. It makes Claude Code better; it does not replace it. macOS · free · MIT.
 
 ![A chat beside the Claudopus panel: three asks become three cards, one stops to ask a question, one finishes green and the octopus cheers](art/panel.gif)
 
@@ -22,83 +22,73 @@ Your messages, the results and a brief per subject are kept in a memory folder, 
 
 ## Install
 
-**In a terminal**, at the Claude Code prompt:
+At the Claude Code prompt:
 
 ```
 /plugin marketplace add dimka3553/claudopus
 /plugin install claudopus@claudopus
 ```
 
-- Answer `y` to add the marketplace, then pick the user scope (the first one, Enter).
-- If the short form fails over SSH, use `https://github.com/dimka3553/claudopus.git` in its place.
-- From a shell, the same two steps are `claude plugin marketplace add dimka3553/claudopus` and `claude plugin install claudopus@claudopus`.
+Answer `y` to add the marketplace, then pick the user scope (the first one, Enter).
 
-**In the Claude desktop app**: click + next to the prompt box, then Plugins, Add marketplace with `dimka3553/claudopus`, then add the plugin `claudopus`.
+In the desktop app: **+** next to the prompt box, **Plugins**, **Add marketplace** `dimka3553/claudopus`, then add `claudopus`.
 
-That is all. Nothing has to be typed in each chat.
+That is all. It is on in every chat from then on, and it keeps itself up to date.
 
-Claudopus keeps itself up to date. Every hour one chat reads the version page on claudopus.ai (`https://www.claudopus.ai/version.json`), and when it names a version other than the one installed, asks Claude Code to fetch the newest release, as `/plugin` would. Every open chat then moves to the new version by itself, with Claude Code's own `/reload-plugins`, as soon as it has no turn of its own running; background work carries on through it. When a chat moves to a newer version, the version in the panel's header rolls to the new number and says "Updated" in blue for a few seconds, then settles back to the plain number. A chat looks for a newer installed copy every 20 seconds, reading Claude Code's own record of what is installed. To stay on the version you have, turn Automatic updates off in the Config tab. A copy loaded from a folder of its code (`--plugin-dir`) is never updated.
+<details>
+<summary>If that fails</summary>
 
-## What you see
+- Over SSH, use `https://github.com/dimka3553/claudopus.git` in place of the short form.
+- From a shell: `claude plugin marketplace add dimka3553/claudopus`, then `claude plugin install claudopus@claudopus`.
 
-- The mod is on in every chat you open from then on, in every folder.
-- You send a message. The chat answers in one line and starts a background agent for it, then is free for your next message.
-- The panel opens beside the chat by itself the first time work starts in that chat. Each piece of work is a card with its to-dos and a line saying where it stands. When a piece of work starts helpers of its own, they hang inside its card as a tree joined by lines: each is one slim row with a dot that is purple while it works and green once it finished, its name and its time, and a click on a row opens that helper's own Details. Helpers that have ended fold into one row, and the work's Details lists every one. Once it is open in one chat it opens in every chat on this Mac, including chats that start later. Close it in one chat and it closes in all of them, and new work does not bring it back until `/claudopus` opens it again. Right after you install, it opens once by itself with a welcome that offers to index your old chats.
-- The panel lists the running work of every open chat on this Mac, each chat's cards under that chat's name, this chat's first. You can answer another chat's question from here, and the answer reaches that chat's work. Stop, the model choice and the full record stay in the chat that runs the work. Work that ends in another chat turns green there for a moment and then folds into Finished, as in its own chat. Work that leaves the file of a chat still open without a word of how it ended (a chat on an older version) turns green for that moment too, then is gone. With `macs` set, every panel on each of your Macs lists the same chats, from all of them, each marked with the Mac it runs on. A chat is listed only while it has something going on (running work, a question or a prompt); chats with nothing going on are not listed at all, however many are open, since the app's own list of chats has them. Press a listed chat's name to open that chat in the Claude app, as its sidebar does: a chat this Mac's app holds (one of this Mac's, or one it runs on another Mac over SSH) opens by the app's own link, any other by its Remote Control link when Remote Control is on in it. A chat of another Mac's own app with Remote Control off opens only there. In a chat your Mac's app runs on another Mac over SSH, a press on a name is left for your Mac, which opens that chat on your screen within about two seconds. Beside the name, the header shows the version this chat loaded (dim), and for the few seconds before the chat reloads, the newer one your Mac has already installed (read from Claude Code's own record), so chats on two Macs on different versions are told apart at a glance. The header's line counts every chat the panel lists, so it says what the cards under it say: what needs you first (in amber, the octopus amber too, though happy for the moment any work finishes), then what runs here and in other chats, then "Just finished" for a moment, else "Nothing is running".
-- When work needs your hands, its card turns amber and rises to the top with what to do, any text to paste beside a Copy button (a command to type also has Open in Terminal, which opens Terminal with it typed at the prompt in its folder, never run, and only when you press it), and three ways to answer right there: the work's own buttons (or Done and Not now when it gave none), and a box to reply in your own words. Any answer clears the amber at once, the card says what you answered, and the work carries on from it at its next step; it turns amber again only if it asks again. An ask stays until you answer it, even after the work that made it has finished; then your answer goes to the chat as a message from the panel. The ask also arrives in the chat that started the work, as a message from Claudopus with its answers and any pictures it is about, and the chat shows it to you; answer there in your own words and the chat passes it to the work, which counts as an answer on the card. An answer pressed on the card is said in the chat too. It also raises a notification with the amber octopus, from a second small app of the mod's, Claudopus Asks, and a short "needs you" sound (two quick notes, then a higher one) that is part of the notification, so macOS plays it as you set Claudopus Asks in System Settings, Notifications, and stays silent under a Focus that holds it back. One ask is heard once, and asks that arrive within five seconds of each other on one Mac are heard as one; the first one makes macOS ask you once to allow Claudopus Asks, and is heard by the mod's own chime while macOS asks.
-- When a chat stops on the app's own prompt (allow a command or a tool, answer its question, approve its plan), the panel in every chat shows it in amber at the top, under that chat's name, in the prompt's own few words. It goes once the call it asked about ends or, for a command, as soon as the command is seen running. A prompt still open when the app itself says it is waiting, a few seconds on, raises a notification, as a question from work does. Wherever a press on its name opens that chat, Open that chat takes you there to answer it; the panel never answers a prompt itself.
-- A short band above the prompt says what is being done right now.
-- A message about work that is already running goes to that work as a steer instead of starting new work.
-- When work finishes, its card turns green with the happy octopus for a moment, then the chat passes on its result and the panel lists it under Finished. Work that gave its report while something it started in the background still ran counts as finished when it is stopped after; work stopped or failed before that does not turn green. Work that ends while the mod reloads gets its green moment once the panel draws again. What the work left for you to read is listed under Results.
-- Stats, beside Results, adds up what the work came to, for this chat or every chat with kept work, today or all time: tokens by model, work finished, to-dos done, your messages, the time saved by running work side by side, a timeline, what the tokens would cost at API prices, and what the memory holds.
-- Memory, at the top of the panel, opens Finder at the folder where Claudopus keeps what it remembers.
-- About, beside Memory, waves hello once, says what Claudopus is and shows its version and Claude Code's, the website, the licence and the GitHub repo.
-- A finish plays a short quiet chime, and a notification, with the purple octopus, names the work and the first words of its result, so you hear and see it when you are elsewhere. It comes from Claudopus with its octopus icon, and clicking it opens that chat in the Claude app (in a terminal, it brings the terminal forward). The first one makes macOS ask you once to allow Claudopus notifications.
-- When work needs an admin command, a box asks you once for that Mac's password, hiding what you type; it stays in this Mac's keychain and is never put in a chat, a command line, a file or a log. Once it is kept, every later admin command any agent runs on that Mac goes through without asking you again, until you remove it with `bin/admin <mac> --forget`.
-- When work needs a key, token or password, a box asks you once for it by name, hiding what you type; it stays in this Mac's keychain, work uses it as an environment variable, and the value is hidden where a command prints it by accident. A command that changes the value before printing it is not stopped, and the hook that refuses keychain reads catches the usual commands, not every way there is.
-- `/servers` shows the local servers running on your machine and which chat started each.
+</details>
 
-The mod also adds a short set of working principles ([rules/CLAUDE.md](rules/CLAUDE.md)) to every chat. They shape how Claude answers; change them to fit you in the Config tab.
+## What it does
 
-The chat picks a model for each piece of work: Opus for most, Sonnet for long legwork, Fable only for heavy work. A check of finished work runs on Opus, or on Fable for work built on Fable, never on Sonnet. Your account needs access to the model it picks.
+| Part | What you get |
+| --- | --- |
+| **Background work** | Each message becomes a piece of work run by a background agent. The chat answers in one line and is free for your next message. A message about running work steers it. |
+| **The panel** | Every job is a card with its to-dos and where it stands. The octopus moves while anything runs. It lists the work of every open chat on this Mac, and of your other Macs if you name them. |
+| **When it needs you** | The card turns amber, rises to the top and asks, with buttons or a box to answer in. You get a notification and a short sound, and the question also arrives in the chat. |
+| **When it is done** | The card turns green, a chime plays, and a notification names the work. Clicking it opens that chat. |
+| **Memory** | Your messages, the results and a brief per subject are kept as plain files in `~/.claude/claudopus`, so chats can stay small. |
+| **Working rules** | A short set of principles goes into every chat: ask less, show the result, have a second agent check the work. Edit them in the Config tab. |
+| **Models** | Opus for most work, Sonnet for long legwork, Fable only for heavy work. Checks never run on a weaker model than the one that built the work. |
+| **Passwords and keys** | Asked for once in a hidden box, kept in the macOS keychain, never put in a chat or a file. |
+| **Tabs** | Results, Stats (tokens, cost at API prices, time saved), Config and About; Memory opens the memory folder. `/claudopus` reopens a closed panel, `/servers` lists the local servers your chats started. |
 
-## Needs
-
-- Claude Code 2.1.287 or newer in the terminal, or the desktop app 2.1.286 or newer. The panel draws in VS Code from 2.1.299.
-- Does not work on Windows under WSL (plugins do not load there) or where your organization's admins block mods. In `claude -p` print mode and cloud sessions there is no panel.
-- macOS only (12 or newer): the password and key boxes, the keychain, thumbnails and notifications use `osascript`, `security`, `sips`, `open` and two small apps of the mod's, `notifier/Claudopus.app` and `notifier/ClaudopusAsks.app`, which are copied to `~/Library/Application Support/Claudopus` on its first notification. If you turn Claudopus Asks off in System Settings, Notifications, what needs you comes as Claudopus, purple, with the mod's own chime instead of the notification's sound; if you turn Claudopus off, macOS's plain notification is used instead, which cannot show the icon or open the chat.
-- Stats reads Claude's records with `jq`, which macOS 15 and later include.
-- Seen working in the macOS desktop app. The terminal and VS Code have not been tried yet.
+Every detail is in the [full guide](docs/guide.md#what-you-see).
 
 ## Settings
 
-The panel's Config tab lists everything you can set, shows what is in force, and puts each back to what shipped. Edit on the principles, the chat's rules or the work rules makes your own copy at the same path under `~/.claude/claudopus` (`rules/CLAUDE.md`, `roles/chat.md`, `roles/work.md`); the mod uses your copy when there is one, and an update never touches it.
+Everything is set in the panel's **Config** tab, which shows what is in force and puts each back to what shipped. It writes `~/.claude/claudopus/config.json`, where every key is optional:
 
-The settings are `~/.claude/claudopus/config.json`. Every key is optional:
+| Key | Default | What it does |
+| --- | --- | --- |
+| `name` | "the person" | What the agents call you |
+| `agents` | `true` | `false` stops the handing over; each chat does its own work again |
+| `sound` | `true` | `false` silences the chime and the "needs you" sound |
+| `notifications` | `true` | `false` stops the notifications when work is ready, stopped or failed |
+| `updates` | `true` | `false` keeps the version you have |
+| `models` | `work` opus, `legwork` sonnet, `heavy` fable | The models for most work, long legwork and heavy work |
+| `macs` | none | Up to four other Macs over SSH whose chats the panel lists |
 
-```json
-{
-  "name": "Sam",
-  "agents": true,
-  "sound": true,
-  "notifications": true,
-  "updates": true,
-  "models": { "work": "opus", "legwork": "sonnet", "heavy": "fable" },
-  "macs": ["sam@other-mac.local"]
-}
-```
+More on each, and on editing the rules, in the [guide](docs/guide.md#settings).
 
-| Key | What it does |
-| --- | --- |
-| `name` | What the agents call you. Left out, they say "the person". |
-| `agents` | `false` stops the handing over; every chat then does its own work again. |
-| `sound` | `false` silences the short chime played when work is ready, and the "needs you" sound of a notification that work needs you. |
-| `notifications` | `false` stops the notification that names work when it is ready, stopped or failed. |
-| `updates` | `false` stops Claudopus updating itself; it stays on the version you have until you update it with `/plugin`. |
-| `models` | Which model runs most work, long legwork and helpers, and heavy work (`opus`, `sonnet`, `fable` or `haiku`). Checks of finished work run on the most-work or heavy-work model, never on legwork's. |
-| `macs` | Up to four other Macs, as `user@host` or a `Host` of `~/.ssh/config`, that this Mac's panel lists the chats of. It uses your own SSH, which must log in without asking; each Mac needs Claudopus of this version or newer. That Mac's panels list this Mac's chats in turn, with nothing to set there: each visit hands it this Mac's chats and brings back the answers pressed there for them. Results are kept the same on both, about every two minutes: each Mac gets the results it lacks, with paths moved onto its own home, and what you did to a result (archived, brought back, answered) reaches the other; nothing is deleted or overwritten. |
+## Needs
 
-`name`, `agents` and `macs` are read when a chat starts; `sound` and `notifications` each time work ends or needs you; `updates` before each look for a new version.
+- macOS 12 or newer. Stats needs `jq`, which macOS 15 and later include.
+- Claude Code 2.1.287 or newer, or the desktop app 2.1.286 or newer (VS Code from 2.1.299).
+- Not under WSL, nor where your organization blocks mods. No panel in `claude -p` or cloud sessions.
+- Seen working in the macOS desktop app; the terminal and VS Code have not been tried yet. [More](docs/guide.md#needs)
+
+## Privacy
+
+- Everything it keeps is in `~/.claude/claudopus` on your Mac. Delete the folder and it is gone.
+- It sends only to Claude, through Claude Code, and to your own Macs over SSH if you name them. Unless `updates` is off, once an hour it reads a version number from claudopus.ai, and when it changes, Claude Code fetches the new release from GitHub. No telemetry.
+- Passwords and keys stay in this Mac's keychain.
+
+The full account of every file, hook and program is in [What Claudopus does on your Mac](docs/privacy.md).
 
 ## Turn it off
 
@@ -106,90 +96,7 @@ The settings are `~/.claude/claudopus/config.json`. Every key is optional:
 /plugin disable claudopus@claudopus
 ```
 
-`/plugin enable claudopus@claudopus` turns it back on; `/plugin uninstall claudopus@claudopus` removes it. Your memory folder is left in place.
-
-## Memory
-
-Everything the mod keeps is in `~/.claude/claudopus`, as plain files:
-
-| Path | What it holds |
-| --- | --- |
-| `index.md` | The subjects of your work, one line each |
-| `streams/` | One brief per subject |
-| `words/` | Your messages, word for word, and Claude's answers, one file per chat |
-| `asks/` | What you asked in each chat and what was done, one file per chat |
-| `reports/` | What finished work left for you, one dated folder each, with copies of the pictures it named and small thumbnails |
-| `finished/` | The Finished list of each chat |
-| `flows/` | Each workflow run the panel follows |
-| `pastes/` | A message over 12,000 characters, kept here while the chat gets its start, its end and this path |
-| `stats/`, `thumbs/` | Sums Stats made of Claude Code's records, and small copies of pictures shown in the panel |
-| `servers.json` | The servers `/servers` last saw |
-| `config.json` | Your settings, written by the Config tab |
-| `welcome.json` | Whether the first-run welcome still shows |
-| `panel.json` | Whether you last opened or closed the panel, which every chat follows |
-| `live/` | Each open chat's running work and its Remote Control and app ids, rewritten at least every 20 seconds, for the other chats' panels and the panels of other Macs; answers left for a chat from another panel; and, with `macs`, what was last fetched from each of those Macs; on a Mac named by another, the chats that Mac handed over (`live/pushed/`) and the answers waiting for it (`live/outbox/`). A chat removes its own file when it closes |
-| `rules/CLAUDE.md`, `roles/chat.md`, `roles/work.md` | Your own copies of the three texts, written only when you edit or save one in the Config tab; Reset moves your copy aside as `.old` |
-| `update.json`, `reloads/` | What the last look for a new version found, and each chat's last reload to a newer installed version, so none reloads twice for the same one within ten minutes |
-| `log.md` | The mod's own log |
-
-Delete the folder to start over. The mod writes nowhere else: no build, start-up or settings file of Claude Code or your projects.
-
-## Privacy
-
-- **What it keeps.** The files listed under [Memory](#memory), in `~/.claude/claudopus` on your own machine; delete the folder and they are gone. Passwords and keys you type in its boxes are kept in this Mac's keychain instead, and stay there until you remove them.
-- **What it sends.** Only to Claude, through Claude Code: the texts it adds to prompts (its rules, your subjects, briefs and results not yet passed on), and after each reply one short call with the start of your message and of the reply, to title the chat and note what was asked and done. With `macs` set, to those Macs only, over your own SSH: it reads their open chats and their work, hands them this Mac's, leaves your answers there, and copies results each lacks to it, marks included. Every hour it reads `https://www.claudopus.ai/version.json`, which holds only the current version number, and when that differs from yours has Claude Code fetch the newer Claudopus from this marketplace on GitHub. No telemetry, no other network calls of its own.
-- **Keys and passwords.** What you type in its password and key boxes stays in this Mac's keychain and is used only for the commands work runs, on this Mac or over SSH to the host named. [What you see](#what-you-see) says what that allows and where the hiding stops.
-
-The full account is below.
-
-## What it does, for the plugin directory
-
-Everything stays on your machine, apart from what Claude Code itself sends to Claude.
-
-### What it sends, and where
-
-After each reply, one short call through Claude Code (`$.model.complete`, Sonnet) sends the start of your message and of the reply to Claude, to title the chat and note what was asked and done. It sets that title, and reads the chat's own id, through the Claude desktop app's built-in session server (`ccd_session_mgmt`: `get_session`, `set_session_title`). With Macs named under `macs`, it runs `ssh` to each (key login only, never asking for a password): every 10 seconds one chat on this Mac reads the files under `~/.claude/claudopus/live` there that changed in the last three minutes, leaves there this Mac's own such files (`live/pushed/`), and brings back the answers pressed there for this Mac's chats (`live/outbox/`); every two seconds one chat takes from there the names pressed for this Mac to open (`live/outbox/<this Mac>/o-*.json`), over one connection kept open a minute after its last use (`ControlMaster`, its socket in `/tmp`); an answer you press for one of their chats is written into that Mac's `live/answers`. At most every two minutes one chat reads the `meta.json` of each result under `~/.claude/claudopus/reports` there, brings over with `tar` the result folders this Mac lacks and hands that Mac those it lacks (each put in place whole, only where no folder has its name, with its home path in `meta.json` and `report.md` changed to the other Mac's), and writes a result's `meta.json` on either Mac only to carry over an archive, a bring back or an answer, there only when it is unchanged since it was read. Each chat reads its own entry in `~/.claude/sessions` every 20 seconds for its Remote Control and app ids, which a press on its name in another panel opens; and, while another Mac's chats are listed, the Claude app's own session files in `~/Library/Application Support/Claude/claude-code-sessions`, listed at most every 30 seconds and each read once, for only its app id and chat id, to know which of those chats this Mac's app holds. Unless `updates` is `false`, at most every hour one chat fetches `https://www.claudopus.ai/version.json` (`$.http.fetch`, a plain GET with nothing of yours in it), and only when the version there differs from the one installed runs Claude Code's own `plugin marketplace update` and `plugin update` for Claudopus (the engine the chat runs on, `$CLAUDE_CODE_EXECPATH`, else `claude`), which fetch the marketplace from where it was added, GitHub for most; it keeps what it learnt in `~/.claude/claudopus/update.json`. Each chat reads Claude Code's `installed_plugins.json` every 20 seconds, and when a newer Claudopus is installed than the one it runs, runs `/reload-plugins` once (`$.command.run`), noting it in `~/.claude/claudopus/reloads/<chat>.json`. No telemetry, no other network calls.
-
-### What it puts in prompts
-
-Into every chat: the working principles (`rules/CLAUDE.md`, or your copy), as one more instruction file. With your first message in a chat, after a compaction and when the text changes: the chat's rules (`roles/chat.md`), the list of your subjects with the path of each brief, how full each running piece of work is, and the results not yet passed on. Into each agent the chat starts, after its brief: the work rules (`roles/work.md`), the path of the chat's saved words and the panel's to-do rule. Into a compaction: a line asking it to keep what you asked for and the work under way. Into a running agent's chat: your steer or answer from the panel, and a short reminder when it has gone many steps without updating its card. A message over 12,000 characters is sent as its start, its end and the path where it was kept.
-
-### The prompts it submits
-
-When you press an answer or send a reply on a card whose work has already ended, the panel submits it to the chat as a message from the mod, saying what you pressed and what it answers, so the chat carries the work on.
-
-### What its hooks do
-
-- `prompt.submit`, `prompt.context`, `session.compact`, `agent.spawn`: add the texts above. `agent.spawn` adds only to the prompt of an agent the chat itself starts; it changes no permission mode, model or tools.
-- `tool.call` (every tool): in a chat's own thread, while the handing-over is on, it lets through only the tools that start and talk to agents and workflows (`Agent`, `Workflow`, `SendMessage`, `ListAgents`, `TaskStop`, `ToolSearch`, `AskUserQuestion`, `SendUserFile`, `ReadNotifications`, `Skill`, the mod's own tools, the app's `mcp__ccd_` tools, and `Read` of a kept result), and refuses the rest with a line saying to hand the work to an agent. An `Agent` call from the chat that copies the chat (`fork`) or names no model is refused the same way. A `Bash` command in one of the usual forms that read a password from the keychain is refused everywhere; it is a guard against slips, not a wall. Once you have kept a key, what any other tool returns has every kept value replaced by its name. Agents' calls are otherwise passed on unchanged; the hook counts their steps for the cards.
-- `tool.call` on `Workflow`: passed on unchanged; a run it started is followed on a card.
-- `tool.call` on the mod's own tools (`mcp__claudopus__note`, `todo`, `ask`, `waits`, `update`, `recall`): answers them itself; it stands in for no other tool.
-- `tool.check` and `classic.PermissionRequest`: read which call the app is about to put to you as a prompt, to show it in the panels; the verdict and the request are passed on unchanged, and the mod never answers a prompt.
-- `tool.describe`: rarely used tools (`ReportFindings`, `SuggestPluginInstall`, `SuggestSkills`, `SearchPlugins`, `ScheduleWakeup`, `Workflow`, and the browser, iOS simulator and visualize servers) wait behind ToolSearch instead of loading into every chat.
-- `turn.step`: when you pick another model for a piece of work in its card, its next steps ask for that model; the request and response are otherwise untouched, and only the token count and model name are read.
-- `turn.complete`, `session.measure`, `session.start`, `command.run` (`/claudopus`, `/servers`), `ui.render`: keep the cards, the band above the prompt and the panel's tabs.
-- From any of them it may show a notification through the app (`$.ui.notify`), play its own `sounds/ready.wav` (for what needs you, only where the notification could not carry its own sound), or put text you pressed Copy on onto the clipboard (`$.ui.copy`).
-
-### Tools it runs itself
-
-`TaskStop`, when you press Stop on a card or a workflow.
-
-### Programs it runs, and why
-
-Each by name with its arguments in the call: `lsof` and `ps` to list servers for `/servers`, and `ps` as a command waits on your OK and every two seconds after, to see that it started; `kill` when you stop one there; `jq` (looked for in `/usr/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, then the path) and `du` for Stats; `head` and `tail` to read the ends of a work's record; `sips` for thumbnails; `mkdir`, `cp` and `find` to copy a result's pictures into its folder and drop old thumbnails; `mv` to set aside your copy of a text on Reset and to put an answer for another chat in place whole; `rm` to remove a chat's own file in `live/` as it closes and the answers it has read; `scutil --get LocalHostName` for this Mac's name on the other Macs; `ssh` to the Macs named under `macs`, with `sh`, `date`, `find`, `tr`, `mkdir`, `cat`, `mv`, `rm` and `basename` run there to read their chats' files, leave this Mac's, and leave and collect answers, and `tar` and `cksum` there and here to copy results each Mac lacks and to write a result's marks only when unchanged; `open` (or `xdg-open`) to show the memory folder, a picture or a text in your editor, and to open another chat in the Claude app (`claude://code/` with its Remote Control id, or `claude://code/continue?session=` with the app's id for a chat this Mac's app holds, here or run on another Mac over SSH); `grep` to search the memory for `recall`; its own `bin/secret` with `--list` and `--hide` to hide kept keys; Claude Code itself (`plugin marketplace update <marketplace>`, then `plugin update claudopus@<marketplace>`) to update Claudopus, with `mkdir` and `rm` for the lock that keeps two chats from doing it at once; and its own `bin/notify` with the notification's title, text and what a click opens (`claude://code/continue?session=` with this chat's id in the Claude app, else the app it runs in), which starts `notifier/Claudopus.app`, or for what needs you `--asks` (and `--chime` unless `sound` is off) to start `notifier/ClaudopusAsks.app` with its sound first, then `osascript` if none may notify.
-
-### What it does not run by itself
-
-`bin/admin` and `bin/secret` are shell scripts the work rules point agents to: an agent runs one with Bash when a step needs an admin command or a key, and it asks you in a macOS dialog (`osascript`), keeps the value in this Mac's keychain (`security`), and runs only the command it is handed, on this Mac or over SSH to the host named. No box asks about each command: once a Mac's password is kept, `bin/admin` runs whatever command an agent hands it as root on that Mac. The key itself is asked for at that moment and never read from a file. `workflows/rounds.js` is a workflow script the chat starts through the Workflow tool as `claudopus:rounds`. `onboard/` (a Python script and a brief) loads old chats into the memory: it runs only when you press Index my old chats on the welcome a new install shows once, which asks the chat to run it as background work.
-
-### Files that will be held for a reviewer, and why they stay
-
-- The hooks module itself: the panel, the cards and every behaviour above are this code.
-- `bin/admin` and `bin/secret`: the only way work gets an admin command or a key without the value passing through a chat.
-- `bin/notify` and `notifier/`: the notifications' own two apps, purple Claudopus and amber Claudopus Asks with its sound (made by `notifier/sound.py`), built from `notifier/main.swift` by `notifier/build.sh` and signed ad hoc; macOS takes a notification's icon from the app that sends it, and opens what a click names only for an app.
-- `workflows/rounds.js`: the maker-and-checker workflow the chat starts.
-- `onboard/extract.py`: reads your past chats under `~/.claude/projects` into the memory; it runs only after you press Index my old chats.
-- `sounds/ready.wav`, `art/panel.gif` and the icon: the chime, the README's picture and the listing icon.
+`enable` turns it back on, `uninstall` removes it. Your memory folder is left in place.
 
 ## Licence
 
