@@ -68,6 +68,7 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect((told.context ?? []).join('\n')).toContain('Long legwork such as indexing runs on Opus 5.5, `model: "opus"`.')
   await $.agent.spawn({ ...spawn, prompt: 'index the photos' } as never)
   expect(prompts[0]).not.toContain('{helpers}')
+  expect(prompts[0]).not.toContain('{checker}')
   // Picking what shipped takes the key out again
   await config.select({ key: 'config-model-legwork-pick', value: 'sonnet' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})

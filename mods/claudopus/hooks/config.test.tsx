@@ -12,6 +12,13 @@ test('as shipped, the models rule says what the chat was told before Config exis
   expect(fillModels('It runs on {checker}.', m)).toBe(
     'It runs on Opus 5.5, `model: "opus"`, or Fable 5.2, `model: "fable"`, when what it checks was built on Fable 5.2: never on a model weaker than the one that built what it checks, so never on Sonnet 5.5.',
   )
+  // Never two names for one model, and never a check on Sonnet even when most work runs on it
+  expect(fillModels('{checker}', modelsOf({ models: { work: 'fable' } }))).toBe(
+    'Fable 5.2, `model: "fable"`: never on a model weaker than the one that built what it checks, so never on Sonnet 5.5',
+  )
+  expect(fillModels('{checker}', modelsOf({ models: { work: 'sonnet', legwork: 'opus' } }))).toBe(
+    'Opus 5.5, `model: "opus"`, or Fable 5.2, `model: "fable"`, when what it checks was built on Fable 5.2: never on a model weaker than the one that built what it checks',
+  )
   // A model picked is named; with Haiku picked the rules no longer forbid it; a name it does not know is as shipped
   const picked = modelsOf({ models: { legwork: 'haiku', heavy: 'nonsense' } })
   expect(fillModels('{helpers}', picked)).toBe('Haiku 5.5')

@@ -2363,7 +2363,7 @@ const ROUNDS = `export const meta = {
   description: 'A maker builds it, a separate checker holds it to the bar',
   phases: [
     { title: 'Make', detail: 'the maker builds it', model: 'opus' },
-    { title: 'Check', detail: 'the checker tests it against the bar', model: 'sonnet' },
+    { title: 'Check', detail: 'the checker tests it against the bar', model: 'opus' },
   ],
 }
 phase('Make')`
@@ -2378,9 +2378,9 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(call.deny).toBeUndefined()
   // Its agents belong to its card, each with the model it was asked for
   await $.agent.spawn({ ...spawn, description: 'maker', model: 'opus', prompt: 'p', workflow: { runId: 'wf_1', agentIndex: 1 } } as never)
-  await $.agent.spawn({ ...spawn, description: 'checker', model: 'sonnet', prompt: 'p', workflow: { runId: 'wf_1', agentIndex: 2 } } as never)
+  await $.agent.spawn({ ...spawn, description: 'checker', model: 'opus', prompt: 'p', workflow: { runId: 'wf_1', agentIndex: 2 } } as never)
   await $.agent.spawn({ ...spawn, description: 'maker', model: 'opus', prompt: 'p', workflow: { runId: 'wf_1', agentIndex: 3 } } as never)
-  for await (const _ of $.turn.step({ turnId: 'turn-9', index: 0, model: 'claude-sonnet-5-5', messageCount: 2, agentId: 'a2' })) void _
+  for await (const _ of $.turn.step({ turnId: 'turn-9', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a2' })) void _
   files.set(
     '/t/wf_1/journal.jsonl',
     journal(
@@ -2452,7 +2452,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   await pressed(pane, 'flow-open-wf_1')
   expect(await until(async () => tabs.includes('flow-wf_1: Roman numerals') || undefined)).toBe(true)
   const tab = await $.ui.mount({ ...LIST, requestId: 'flow-wf_1', surface: 'desktop' } as never)
-  expect(await tab.find({ type: 'Text', text: /^the checker tests it against the bar · Sonnet 5.5 · 1 agent$/ })).toBeDefined()
+  expect(await tab.find({ type: 'Text', text: /^the checker tests it against the bar · Opus 5.5 · 1 agent$/ })).toBeDefined()
   expect(await tab.find({ type: 'Text', text: /^Round 1: failed: to_roman\(True\) is not refused$/ })).toBeDefined()
   // Each failed round lists what the checker found, and each round has its own squares
   expect(await tab.find({ type: 'Text', text: /^– to_roman\(True\) returns I$/ })).toBeDefined()
@@ -2664,6 +2664,7 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect((told.context ?? []).join('\n')).toContain('Long legwork such as indexing runs on Opus 5.5, `model: "opus"`.')
   await $.agent.spawn({ ...spawn, prompt: 'index the photos' } as never)
   expect(prompts[0]).not.toContain('{helpers}')
+  expect(prompts[0]).not.toContain('{checker}')
   // Picking what shipped takes the key out again
   await config.select({ key: 'config-model-legwork-pick', value: 'sonnet' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
