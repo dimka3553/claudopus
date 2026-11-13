@@ -3171,6 +3171,20 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   // Nowhere else: not the chat, its saved words, the log or any file
   expect(logged.some(line => line.includes('s3cret'))).toBe(false)
   expect([...files.values()].some(text => text.includes('s3cret'))).toBe(false)
+  // A curly quote from a phone's keyboard, which security would give back as hex, is not sent, and the box says why
+  const third = '2f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, text: 'Claudopus needs NPM_TOKEN for work on this Mac.', at: 1_700_000_000_000 }))
+  await clock.advance(1000)
+  const curly = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`)))
+  const before = keychain.length
+  await list.input({ key: curly?.key ?? '', text: 'it’s-mine' })
+  expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => (one.text ?? '').startsWith('That held a line break, a curly quote')))).toBeDefined()
+  // and one whose runner has stopped takes nothing
+  files.delete(`${MEMORY}/boxes/${third}.json`)
+  const again = (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`))
+  await list.input({ key: again?.key ?? '', text: 'plain-value-1234' })
+  await clock.advance(1000)
+  expect(keychain.length).toBe(before)
   // A box cancelled removes its request, which the runner takes as cancelled
   const other = '1f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, text: 'Claudopus needs the admin password of this Mac to run an admin command for work in this chat.', at: 1_700_000_000_000 }))

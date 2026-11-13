@@ -14,13 +14,16 @@ const boxSaid = new Map<string, string>()
 const boxSent = new Set<string>()
 let boxPresses = 0
 const BOX_EVERY = 1000
-// A request older than the runner's own wait (900 s) is one whose runner is gone
-const BOX_OLD = 16 * 60_000
+// A request older than the runner's own wait there (590 s, under the longest a Bash call may run) is one whose runner is gone
+const BOX_OLD = 11 * 60_000
+// What security reads as one line (it cuts a line at about 4095, seen), and gives back as typed: plain printable characters (others it
+// prints as hex). The longest value, escaped, leaves room for the rest of the line
+const BOX_LONGEST = 3800
 const BOX_SERVICE = 'claudopus-box'
 const BOX_ID = /^[0-9a-f-]{36}$/
 const boxesDir = () => `${dir}/boxes`
 // In the chat only the name of what is asked, once per box, in whichever chat sees it first
-const BOX_TOLD = (text: string) => `${text}\n\nType it in the box at the top of the Claudopus panel. What is typed there goes only into this Mac's keychain, never into this chat.`
+const BOX_TOLD = (text: string) => `${text}\n\nType it in the box at the top of the Claudopus panel. What is typed there goes only into this Mac's keychain, never into a chat.`
 
 const lookBoxes = async ($: EngineInterface) => {
   if (!dir || !isRunFromAfar) return
@@ -32,6 +35,8 @@ const lookBoxes = async ($: EngineInterface) => {
     try {
       const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Partial<Asked>
       if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at })
+      // A runner killed outright leaves its request: it goes once it is stale, with its mark
+      else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`]).catch(() => undefined)
     } catch {
       // A request being written is read at the next look
     }
@@ -53,17 +58,25 @@ const lookBoxes = async ($: EngineInterface) => {
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
   boxDrafts.delete(id)
   if (!value) return
-  if (/[\p{Cc}]/u.test(value)) {
-    boxSaid.set(id, 'That held a line break or another control character, so it was not sent. Type it again.')
+  const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That was longer than ${BOX_LONGEST} characters, so it was not sent.` : /[^\x20-\x7E]/.test(value) ? 'That held a line break, a curly quote or another character outside plain letters, digits and signs, so it was not sent. Type it again.' : ''
+  if (refused) {
+    boxSaid.set(id, refused)
     boxPresses += 1
     return void $.ui.invalidate('ui.render')
   }
+  const request = `${boxesDir()}/${id}.json`
+  // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
+  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id))
   const escaped = value.replace(/[\\"]/g, '\\$&')
   const r = await $.process
     .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
     .catch(() => ({ exitCode: -1 }))
+  // security -i can end well when the add failed: the entry is looked for by its attributes, never its value
+  const isKept = r.exitCode === 0 && (await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
+  // and one whose runner stopped meanwhile is taken out again
+  if (isKept && !(await $.fs.exists(request).catch(() => false))) await $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => undefined)
   boxPresses += 1
-  if (r.exitCode !== 0) {
+  if (!isKept) {
     boxSaid.set(id, 'It could not be put in this Mac\'s keychain. Try again.')
     await log($, `box ${id} not kept: security ended ${r.exitCode}`)
   } else {
@@ -85,17 +98,17 @@ const cancelBox = async ($: EngineInterface, id: string) => {
 
 const boxesPart = ($: EngineInterface, ui: Ui) => {
   if (!boxes.length || !('Input' in ui)) return null
-  return boxes.map(one => (
+  return boxes.map((one, n) => (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
-      <ui.Text dimColor wrap="wrap">What you type here shows as you type it. It goes only into this Mac's keychain, never into the chat.</ui.Text>
+      <ui.Text dimColor wrap="wrap">What you type here shows as you type it, on your screen only. It goes only into this Mac's keychain, never into a chat.</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
           key={`box-${one.id}-field-${boxPresses}`}
           placeholder="Type or paste it here"
           value={boxDrafts.get(one.id) ?? ''}
           submitLabel="send"
-          autoFocus
+          autoFocus={n === 0}
           onInput={value => void boxDrafts.set(one.id, value)}
           onSubmit={value => void sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`))}
         />
