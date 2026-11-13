@@ -9,7 +9,8 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(first.context?.join('\n')).toContain('Subjects so far')
   expect(first.context?.join('\n')).toContain(`This chat's saved words: ${MEMORY}/words/engine-id.md`)
   expect(first.context?.join('\n')).toContain('start a fresh agent')
-  expect(first.context?.join('\n')).toContain('goes to the agent that has that work')
+  expect(first.context?.join('\n')).toContain('Only a message that steers what listed work is already doing')
+  expect(first.context?.join('\n')).toContain('A fault, a question or a new ask gets its own agent')
 
   // One sent while the chat is mid-turn is its own piece of work too
   const second = await $.prompt.submit({ text: 'and the nose', wait: false, origin: composer, turnId: 'turn-1' })

@@ -37,7 +37,7 @@ Your messages, the results and a brief per subject are kept in a memory folder, 
 
 That is all. Nothing has to be typed in each chat.
 
-Claudopus keeps itself up to date. Every hour one chat reads the version page on claudopus.ai (`https://www.claudopus.ai/version.json`), and when it names a version other than the one installed, asks Claude Code to fetch the newest release, as `/plugin` would. Every open chat then moves to the new version by itself, with Claude Code's own `/reload-plugins`, as soon as it has no turn of its own running; background work carries on through it. A chat looks for a newer installed copy every 20 seconds, reading Claude Code's own record of what is installed. To stay on the version you have, turn Automatic updates off in the Config tab. A copy loaded from a folder of its code (`--plugin-dir`) is never updated.
+Claudopus keeps itself up to date. Every hour one chat reads the version page on claudopus.ai (`https://www.claudopus.ai/version.json`), and when it names a version other than the one installed, asks Claude Code to fetch the newest release, as `/plugin` would. Every open chat then moves to the new version by itself, with Claude Code's own `/reload-plugins`, as soon as it has no turn of its own running; background work carries on through it. When a chat moves to a newer version, the version in the panel's header rolls to the new number and says "Updated" in blue for a few seconds, then settles back to the plain number. A chat looks for a newer installed copy every 20 seconds, reading Claude Code's own record of what is installed. To stay on the version you have, turn Automatic updates off in the Config tab. A copy loaded from a folder of its code (`--plugin-dir`) is never updated.
 
 ## What you see
 

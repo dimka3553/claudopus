@@ -157,8 +157,13 @@ declare global {
   export import stampOf = M7.stampOf
   export import UPDATE_AFTER = M7.UPDATE_AFTER
   export import UPDATE_LOOK = M7.UPDATE_LOOK
+  export import updatedFrom = M7.updatedFrom
+  export import updatedLook = M7.updatedLook
   export import updatedTo = M7.updatedTo
   export import updateSteps = M7.updateSteps
+  export import UPDATED_FOR = M7.UPDATED_FOR
+  export import UPDATED_LATE = M7.UPDATED_LATE
+  export import UPDATED_STEP = M7.UPDATED_STEP
   export import VERSION_PAGE = M7.VERSION_PAGE
   export import VERSION_WAIT = M7.VERSION_WAIT
   export import versionOnPage = M7.versionOnPage
