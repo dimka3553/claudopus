@@ -279,8 +279,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     // A command that prints the key, as one could print it by mistake
     if (e.tool === 'Bash' && String((e as { command?: string }).command).includes('echo $API_KEY')) return { result: { stdout: `token is ${files.get('keychain:API_KEY') ?? 'none'}`, stderr: '', interrupted: false } } as never
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
-    // A command sent to the background answers at once with its task, which wakes the work that owns it as it ends; a watch the same
-    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, backgroundTaskId: `bg-${e.tool_use_id}`, backgroundWakesOwner: true } } as never
+    // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
+    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
     if (e.tool === 'Monitor') return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: 0, persistent: true } } as never
     if (e.tool === 'Workflow') return { result: { status: 'async_launched', taskId: 'wt1', runId: 'wf_1', taskType: 'local_workflow', workflowName: 'rounds', transcriptDir: '/t/wf_1', scriptPath: '/t/wf_1.js' } } as never
     return { result: 'ran' } as never

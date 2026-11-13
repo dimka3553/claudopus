@@ -120,9 +120,10 @@ const BG_KEPT = 20
 // stops goes. A command the engine ends with its final response wakes nothing and is not kept
 const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown }, result: unknown) => {
   if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')])
-  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown; backgroundWakesOwner?: unknown }
-  // A command is kept only when the engine says it wakes the work that owns it as it ends
-  const id = call.tool === 'Bash' && r.backgroundWakesOwner === true ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
+  const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown }
+  // A command the engine ends with the work's final response wakes nothing and is not kept (the engine does not always say that
+  // one it keeps wakes its owner, so its silence is no sign)
+  const id = call.tool === 'Bash' ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
   if (typeof id !== 'string' || !id || r.backgroundEndsWithFinalResponse) return
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
   const now = await $.clock.now()
