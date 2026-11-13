@@ -1,0 +1,3 @@
+- The password and key boxes now say only the panel's own words, made from what the request names (a Mac's admin password or a key, the Mac or the key's name), so a request file with made-up text shows that text nowhere, and one the panel cannot word is not shown at all.
+- Work is refused commands that write into the boxes' folder or read their keychain entries, typed, redirected, in a script or in another language's code; only the admin and secret runners use them. This stops slips and common tricks, and is no wall.
+- What you type in a box still shows as you type it: the app's text field has no hidden mode, in the desktop app or the terminal.
