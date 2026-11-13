@@ -365,8 +365,8 @@ const commandAt = (words: string[]) => {
     const head = (words[i] ?? '').split('/').pop() ?? ''
     if (!BOX_WRAPPERS.includes(head)) return i
     i++
-    // its own flags and numbers: nice's -n 5, timeout's duration
-    while (i < words.length && (words[i]!.startsWith('-') || /^\d[\d.]*[smhd]?$/.test(words[i]!))) i++
+    // its own flags and numbers (nice's -n 5, timeout's duration), and the value sudo's -u and the like take
+    while (i < words.length && (words[i]!.startsWith('-') || /^\d[\d.]*[smhd]?$/.test(words[i]!))) i += head === 'sudo' && /^-[ugCchpUrt]$/.test(words[i]!) ? 2 : 1
   }
 }
 const BOX_WORDS = (text: string) => text.replace(/["'\\`]/g, '').split(/[^a-z0-9._*?[\]-]+/).filter(Boolean)
@@ -386,9 +386,9 @@ const namesBoxes = (text: string): boolean => {
   const has = (name: string) => words.some(word => wordIs(word, name))
   const isFolder = words.some((word, i) => {
     if (!wordIs(word, '.claude') && word !== 'claude_config_dir') return false
-    let j = i + 1
-    while (['.', '..', 'cd', 'pushd'].includes(words[j] ?? '')) j++
-    return wordIs(words[j] ?? '', 'claudopus') && words.slice(j + 1).some(one => wordIs(one, 'boxes'))
+    // claudopus within a few words after it (a cd, or a command started there, between them), then boxes
+    const j = words.slice(i + 1, i + 6).findIndex(one => wordIs(one, 'claudopus'))
+    return j >= 0 && words.slice(i + 2 + j).some(one => wordIs(one, 'boxes'))
   })
   return isFolder || (has('claudopus-box') && (has('security') || has('keyring') || has('ksecattrservice')))
 }
@@ -424,6 +424,8 @@ const filesRun = (command: string, home: string, from: string): string[] => {
       const at = rest.findIndex(word => !word.startsWith('-') && !word.startsWith('<'))
       // A program handed its code inline (-c, -e) is read as part of the command already
       if (at >= 0 && !rest.slice(0, at).some(flag => /^-[cem]$/.test(flag))) take(rest[at]!)
+      // a shell's -c is a command of its own, whose files are looked for the same way
+      if (['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish'].includes(name) && at >= 0 && rest[at - 1] === '-c') found.push(...filesRun(rest[at]!, home, folder))
       // Nothing to run named: what it reads is what the command before it gives, such as a file cat prints
       const before = parts[n - 1] ?? []
       if (at < 0 && fed < 0 && (before[commandAt(before)] ?? '').split('/').pop() === 'cat') for (const one of before.slice(commandAt(before) + 1)) if (!one.startsWith('-')) take(one)
