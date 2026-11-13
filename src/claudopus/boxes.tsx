@@ -1,10 +1,11 @@
-// The hidden boxes of bin/secret and bin/admin, in a chat the app runs on another Mac over ssh
+// The hidden boxes of bin/secret and bin/admin, in every chat: on this Mac's own screen and from another Mac over ssh alike
 
-// There a box on this Mac's screen is one nobody sees, so the runner leaves a request in boxes/ instead: what it needs, never a
-// value. The panel draws it at its top with a field; what is typed there goes from the field straight into this Mac's keychain on
-// security's stdin, under the request's id, where the runner takes it and removes it. It never reaches the chat, a notice, the saved
-// words, a file or the log. A chat on this Mac's own screen draws none: there the runner shows its own box
-type Asked = { id: string; text: string; at: number }
+// The runner leaves a request in boxes/: what it needs, never a value. The panel draws it at its top with a field; what is typed
+// there goes from the field straight into this Mac's keychain on security's stdin, under the request's id, where the runner takes it
+// and removes it. It never reaches the chat, a notice, the saved words, a file or the log. The chat that asked (the request names it)
+// takes the request first; any other chat with a screen after BOX_GRACE. Taking it leaves the .told mark, which tells the runner a
+// panel asks: with none in its first seconds, nothing on this Mac draws one (a -p run with no chat open) and it falls back to its own
+type Asked = { id: string; text: string; at: number; chat?: string }
 let boxes: Asked[] = []
 // What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
 const boxDrafts = new Map<string, string>()
@@ -13,7 +14,6 @@ const boxSaid = new Map<string, string>()
 // Sent from here: the box goes at once, before the runner removes its request
 const boxSent = new Set<string>()
 let boxPresses = 0
-const BOX_EVERY = 1000
 // A request older than the runner's own wait there (590 s, under the longest a Bash call may run) is one whose runner is gone
 const BOX_OLD = 11 * 60_000
 // What security reads as one line (it cuts a line at about 4095, seen), and gives back as typed: plain printable characters (others it
@@ -22,32 +22,61 @@ const BOX_LONGEST = 3800
 const BOX_SERVICE = 'claudopus-box'
 const BOX_ID = /^[0-9a-f-]{36}$/
 const boxesDir = () => `${dir}/boxes`
-// In the chat only the name of what is asked, once per box, in whichever chat sees it first
-const BOX_TOLD = (text: string) => `${text}\n\nType it in the box at the top of the Claudopus panel. What is typed there goes only into this Mac's keychain, never into a chat.`
+// Another chat's request is left to it this long, so its own chat tells it, when that chat is open
+const BOX_GRACE = 5000
+// In the chat only the name of what is asked, once per box, in the chat that asked or else whichever chat sees it first
+const BOX_TOLD = (text: string) => `${text} Click in the box at the top of the Claudopus panel and type it there, never in this chat's prompt (/claudopus opens the panel). What is typed in the box goes only into this Mac's keychain.`
+// This chat's own id, as the runner reads it from CLAUDE_CODE_SESSION_ID, read at each look (a /clear can change it)
+let boxChat = ''
+// Requests this chat has told or seen told
+const boxTold = new Set<string>()
 
 const lookBoxes = async ($: EngineInterface) => {
-  if (!dir || !isRunFromAfar) return
+  if (!dir) return
+  // A chat with nothing to draw on (a -p run) takes no request: one it took would wait on a panel nobody sees
+  if (!(await $.session.surfaces().catch(() => [])).length) return
+  boxChat = await $.session.id().catch(() => '')
   const now = await $.clock.now()
   const found: Asked[] = []
-  for (const entry of await $.fs.list(boxesDir()).catch(() => [])) {
+  const entries = await $.fs.list(boxesDir()).catch(() => [])
+  for (const entry of entries) {
+    // A mark left after its request went (a chat that marked it as the runner ended) goes too
+    const marked = entry.name.replace(/\.told$/, '')
+    if (entry.name.endsWith('.told') && BOX_ID.test(marked) && !entries.some(other => other.name === `${marked}.json`)) await $.process.run(['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined)
     const id = entry.name.replace(/\.json$/, '')
     if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
     try {
       const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Partial<Asked>
-      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at })
+      if (one.id === id && typeof one.text === 'string' && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text: one.text.slice(0, 600), at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
-      else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`]).catch(() => undefined)
+      // and a value typed into it meanwhile leaves the keychain with it
+      else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) {
+        await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`]).catch(() => undefined)
+        await $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => undefined)
+      }
     } catch {
       // A request being written is read at the next look
     }
   }
   found.sort((a, b) => a.at - b.at)
   for (const one of found) {
-    if (boxes.some(b => b.id === one.id)) continue
-    // The first chat to make the mark tells it
+    if (boxTold.has(one.id)) continue
+    // Another chat's request waits for that chat a moment (and every request does, in a chat that cannot read its own id)
+    if (one.chat !== undefined && one.chat !== boxChat && now - one.at < BOX_GRACE) continue
+    boxTold.add(one.id)
+    // The first chat to make the mark brings its panel up with the field ready to type in (focus is given only over an empty
+    // prompt), and tells it. A panel that cannot be drawn here gives the mark back, so another chat or the runner's own box asks
     const mark = await $.process.run(['sh', '-c', 'set -C; : > "$1"', 'sh', `${boxesDir()}/${one.id}.told`]).catch(() => ({ exitCode: 1 }))
-    if (mark.exitCode === 0) $.ui.log(BOX_TOLD(one.text))
+    if (mark.exitCode !== 0) continue
+    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, focus: true }).catch(err => (log($, `panel not opened for a box: ${String(err)}`), undefined))
+    if (!opened?.isPlaced) {
+      await $.process.run(['rm', '-f', `${boxesDir()}/${one.id}.told`]).catch(() => undefined)
+      await log($, `box ${one.id} given back: the panel is not drawn here${opened && !opened.isPlaced ? ` (${opened.reason})` : ''}`)
+      continue
+    }
+    $.ui.log(BOX_TOLD(one.text))
   }
+  for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of [...boxDrafts.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxDrafts.delete(id), boxSaid.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
@@ -98,17 +127,19 @@ const cancelBox = async ($: EngineInterface, id: string) => {
 
 const boxesPart = ($: EngineInterface, ui: Ui) => {
   if (!boxes.length || !('Input' in ui)) return null
-  return boxes.map((one, n) => (
+  // This chat's own requests first, the first of them with the keys, so a value typed for the notice it told goes to its own box
+  const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
+  return shown.map((one, n) => (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
-      <ui.Text dimColor wrap="wrap">What you type here shows as you type it, on your screen only. It goes only into this Mac's keychain, never into a chat.</ui.Text>
+      <ui.Text dimColor wrap="wrap">What you type here shows as you type it. It goes only into this Mac's keychain, never into a chat.</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
           key={`box-${one.id}-field-${boxPresses}`}
           placeholder="Type or paste it here"
           value={boxDrafts.get(one.id) ?? ''}
           submitLabel="send"
-          autoFocus={n === 0}
+          autoFocus={n === 0 ? true : undefined}
           onInput={value => void boxDrafts.set(one.id, value)}
           onSubmit={value => void sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`))}
         />
