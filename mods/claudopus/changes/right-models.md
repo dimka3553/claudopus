@@ -1,0 +1,3 @@
+- Work no longer carries on on an older model. When the app moved a piece of work to Opus 4.8 after its safeguards flagged a message, the work stayed there; now each of its steps goes to Fable 5.2 instead, and while that lasts its card says which model it was kept off.
+- An agent named an older model or Haiku is refused, whether the chat or a piece of work starts it, with the models to name. A helper of a kind the app runs on Haiku runs on Sonnet 5.5.
+- A card that still answers from an older model says it is not a model work should run on.
