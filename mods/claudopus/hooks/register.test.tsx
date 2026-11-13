@@ -2,6 +2,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { headLine, headMood, OFF_LOOK, offOf, openTake, opensOf, shareable, stuckOf, trip } from './shared'
+import { timelineRows } from './stats'
 
 // The world beneath the mod in every test: files in memory, the app's session tools, a cheap model; and small helpers
 
@@ -32,7 +33,7 @@ const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; headless?: boolean } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -67,6 +68,8 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
   const own: string[][] = []
   // What was handed to open: a folder shown in Finder
   const shown: string[][] = []
+  // What was handed to Tailscale to send to another device
+  const dropped: string[][] = []
   // What was run over ssh, with what it was handed
   const sshed: string[][] = []
   prompts.length = 0
@@ -85,6 +88,9 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     // The octopus drawings, each an SVG naming its file, when a test asks for them
     const drawing = options.art ? /\/art\/([\w-]+)\.svg$/.exec(e.path)?.[1] : undefined
     if (drawing) return { value: `<svg xmlns="http://www.w3.org/2000/svg"><title>${drawing}</title></svg>` }
+    // Or drawn as the mod's own are, where the test gives them
+    const drawn = options.drawings?.(/\/art\/([\w-]+)\.svg$/.exec(e.path)?.[1] ?? '')
+    if (drawn !== undefined) return { value: drawn }
     // The texts the mod ships; a copy of one in the memory folder is the person's own, kept in files
     const isShipped = !e.path.startsWith(MEMORY)
     if (isShipped && e.path.endsWith('roles/chat.md')) return { value: options.chatRole ?? 'CHAT ROLE' }
@@ -180,6 +186,12 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
       return { value: { exitCode: (rest[0] === '--asks' ? options.app?.asks : options.app?.claudopus) ?? 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (tool === 'open') shown.push([...e.argv])
+    // Tailscale's file sending, where the test says this Mac has it: the devices it reaches, and what was sent
+    if (tool === 'tailscale' || tool?.endsWith('/Tailscale')) {
+      if (options.tailscale === undefined) return { value: { exitCode: 127, stdout: '', stderr: 'not found', isStdoutTruncated: false, isStderrTruncated: false } }
+      if (!rest.includes('--targets')) dropped.push([...e.argv])
+      return { value: { exitCode: 0, stdout: rest.includes('--targets') ? options.tailscale : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (tool === 'kill') killed.push(String(rest[0]))
     // Another Mac over ssh: what it answers is laid by the test as ssh:<what>; an answer sent there is kept as it was handed over
     if (tool === 'ssh') {
@@ -286,6 +298,9 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     // A command that prints the key, as one could print it by mistake
     if (e.tool === 'Bash' && String((e as { command?: string }).command).includes('echo $API_KEY')) return { result: { stdout: `token is ${files.get('keychain:API_KEY') ?? 'none'}`, stderr: '', interrupted: false } } as never
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
+    // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
+    if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
+    if (e.tool === 'Monitor') return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: 0, persistent: true } } as never
     if (e.tool === 'Workflow') return { result: { status: 'async_launched', taskId: 'wt1', runId: 'wf_1', taskType: 'local_workflow', workflowName: 'rounds', transcriptDir: '/t/wf_1', scriptPath: '/t/wf_1.js' } } as never
     return { result: 'ran' } as never
   })
@@ -321,7 +336,7 @@ const world = (on: On, options: { reply?: string; tokens?: number; agents?: Reco
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, terminals, sshed, events, held, keychain }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain }
 }
 
 // A button of the open card by its key less the count of presses the card adds to it
@@ -685,8 +700,9 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   // Its edge is its to-dos, one part each: the one being done lighter than a done one, the rest a dim tint; a terminal's edge is whole
   const edgeOf = async (of: typeof pane) => (await of.findAll({ type: 'Box' })).map(b => String(b.props.backgroundColor)).filter(colour => colour.startsWith('#8A63F0'))
   expect(await edgeOf(pane)).toEqual(['#8A63F0AD', '#8A63F05C'])
+  // in a purple that a terminal of 256 colours rounds to the octopus's own (no COLORTERM here)
   const flat = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
-  expect(await edgeOf(flat)).toEqual(['#8A63F0'])
+  expect((await flat.findAll({ type: 'Box' })).map(b => String(b.props.backgroundColor)).filter(colour => colour === '#6E3CFF')).toEqual(['#6E3CFF'])
   await flat.unmount()
   // The title opens its Details, with no mark beside it, and Stop is plain text on the same row: the card has no filled button
   expect(await keyed(pane, 'go-a1')).toBeUndefined()
@@ -1425,8 +1441,8 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
   expect((await tab.find({ type: 'Text', text: / in all$/ }))?.text).toBe('2 at work · 4 in all')
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
-  // One at work has a dot at the end of its line, one that finished a tick
-  expect((await tab.findAll({ type: 'Text', text: '●' })).length).toBe(2)
+  // One at work has a dot at the end of its line, a ring growing out of it (cells the terminal repaints), one that finished a tick
+  expect((await tab.findAll({ type: 'Raster' })).filter(one => String(one.key).endsWith('-ring')).length).toBe(2)
   expect((await tab.findAll({ type: 'Text', text: '✓' })).length).toBe(2)
   expect(await keyed(tab, 'open-details-a3')).toBeDefined()
   await tab.unmount()
@@ -1728,6 +1744,122 @@ test('work that answered while only its own background work held it, then stoppe
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't6', reason: 'error', agentId: 'a10' } as never)
   expect(await drawn(pane)).toEqual(['mark'])
   expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  await pane.unmount()
+})
+
+test('work that answers a question while a copy of its own still runs, with that copy still its to-do, stays at work and says what it waits for; it finishes only when the copy is checked and it reports', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const { clock, files, logged } = world(on, { art: true, agents, kinds })
+  on('classic.SubagentStop', () => ({ value: {} }) as never)
+  await $.session.start(start)
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const kept = () => [...files.keys()].filter(key => /\/reports\/[^/]+-3d-work-ready-to-continue-on-m4\/report\.md$/.test(key))
+  const call = (tool: string, id: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, tool_use_id: id, agentId: 'a1', ...input } as never)
+  const todo = (item: string, state: string, id: string) => call('mcp__claudopus__todo', id, { item, state })
+
+  // As it ran on 13 Nov: told to send the big pieces, it marks that to-do, starts the copy in the background and a watch on it
+  await $.prompt.submit({ text: 'Yes, send them', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: '3D work ready to continue on M4', prompt: 'send them' } as never)
+  kinds.a1 = 'general-purpose'
+  await todo('Report with the big pieces waiting on your yes', 'done', 't0')
+  await todo('Send CT fits, CTs, iPhone scans and photogrammetry to the M4', 'doing', 't1')
+  await call('Bash', 'b1', { command: 'zsh sendbig.sh', description: 'Send the four big pieces to the M4, never overwriting', run_in_background: true })
+  await call('Monitor', 'm1', { command: 'tail -f bkdhmu6sf.output', description: 'big data copy to the M4: steps and failures', timeout_ms: 0 })
+  // Its turn ends with a line of words while the engine holds it on the copy: it is at work, waiting for the copy
+  agents.a1 = 'waiting'
+  await $.turn.complete({ answer: 'Sending the 14.5 GB now; it takes about four hours.', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
+  expect(await drawn(pane)).toEqual(['working'])
+  const wait = () => pane.find({ type: 'Text', text: /^Still at work: it waits for its background command to finish/ })
+  expect((await wait())?.text).toMatch(/running .*: Send the four big pieces to the M4, never overwriting$/)
+  // Forty minutes with nothing new is a long copy, not stuck work
+  await clock.advance(40 * 60_000)
+  expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
+  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(0)
+  expect((await wait())?.text).toMatch(/running 40m /)
+
+  // The chat passes on "has everything already been copied?": it answers with SubagentHandback while the copy still runs
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Has everything already been copied?' } as never)
+  await call('mcp__claudopus__note', 'n1', { text: 'Not yet. 5.2 of the 6.3 GB of CT fits are there.' })
+  await call('SubagentHandback', 'h1', { message: "No, not yet. The copy keeps running on this Mac; I'll check each piece and report when it's done." })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a1' } as never)
+  // Still at work: not green, not under Finished, not said to have left something running, and its answer is no result
+  expect(await drawn(pane)).toEqual(['working'])
+  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined()
+  expect(await wait()).toBeDefined()
+  await clock.advance(20_000)
+  expect(await drawn(pane)).toEqual(['working'])
+  expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined()
+  expect(kept()).toHaveLength(0)
+
+  // The copy ends: the engine, as it stops, lists only the watch in flight, and the work's next step brings the card on
+  await $.classic.SubagentStop({ agent_id: 'a1', agent_type: 'general-purpose', agent_transcript_path: '', stop_hook_active: false, background_tasks: [{ id: 'mon-m1', type: 'monitor', status: 'running', description: 'big data copy to the M4: steps and failures' }] } as never)
+  // The card lets go of the copy at once, before any step: it no longer says it waits for it
+  expect(await wait()).toBeUndefined()
+  expect(await drawn(pane)).toEqual(['working'])
+  await call('Bash', 'b2', { command: 'shasum -a 256 -c sums.txt' })
+  // It stops its watch, ticks the to-do and reports: now it has finished, green, with its report kept
+  await call('TaskStop', 'k1', { task_id: 'mon-m1' })
+  await todo('Send CT fits, CTs, iPhone scans and photogrammetry to the M4', 'done', 't2')
+  const report = `All four pieces are on the M4 and every file matches by hash. ${'The CT fits, your CTs, the iPhone scans and the photogrammetry run open there as they do here. '.repeat(6)}`.trim()
+  await call('SubagentHandback', 'h2', { message: report })
+  agents.a1 = 'completed'
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w3', reason: 'answer', agentId: 'a1' } as never)
+  expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  expect(await drawn(pane)).toEqual(['happy'])
+  await clock.advance(10)
+  expect(await until(async () => kept()[0])).toBeDefined()
+  expect(files.get(kept()[0] ?? '')).toBe(`${report}\n`)
+  await pane.unmount()
+})
+
+test('work that reports with everything it set out to do done, leaving a server of its own running, has finished: green, and its card says it left something running', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const { clock } = world(on, { art: true, agents, kinds })
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const call = (tool: string, id: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, tool_use_id: id, agentId: 'a1', ...input } as never)
+  await $.prompt.submit({ text: 'run the site for me', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Run the site', prompt: 'run it' } as never)
+  kinds.a1 = 'general-purpose'
+  await call('mcp__claudopus__todo', 't1', { item: 'Start the site', state: 'doing' })
+  await call('Bash', 'b1', { command: 'npm run dev', description: 'Serve the site', run_in_background: true })
+  await call('mcp__claudopus__todo', 't2', { item: 'Start the site', state: 'done' })
+  await call('SubagentHandback', 'h1', { message: 'The site runs at http://localhost:3000.' })
+  agents.a1 = 'waiting'
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
+  expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  expect(await pane.find({ type: 'Text', text: /^Still at work/ })).toBeUndefined()
+  await clock.advance(20_000)
+  expect(await pane.find({ type: 'Text', text: /^It left something running in the background, / })).toBeDefined()
+  await pane.unmount()
+})
+
+test('work that answers on the way while a helper of its still works, with its to-do still being done, stays at work', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const { clock } = world(on, { art: true, agents, kinds })
+  await $.session.start(start)
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.prompt.submit({ text: 'index the scans', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Index the scans', prompt: 'index them', resume: { agentId: 'w1' } } as never)
+  await $.agent.spawn({ ...spawn, description: 'Read every scan', prompt: 'read', parentAgentId: 'w1', resume: { agentId: 'w2' } } as never)
+  kinds.w1 = 'general-purpose'
+  await $.tool.call({ tool: 'mcp__claudopus__todo', tool_use_id: 't1', agentId: 'w1', item: 'Index every scan', state: 'doing' } as never)
+  agents.w1 = 'waiting'
+  agents.w2 = 'running'
+  await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'w1', message: 'Half of the scans are read so far.' } as never)
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'x1', reason: 'answer', agentId: 'w1' } as never)
+  expect(await drawn(pane)).toEqual(['working'])
+  expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeUndefined()
+  await clock.advance(20_000)
+  expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined()
   await pane.unmount()
 })
 
@@ -4653,4 +4785,206 @@ test('the log is added to, never rewritten whole, and the empty bytes earlier ve
   expect(text).not.toContain('\u0000')
   expect(text.startsWith('2026-01-01T00:00:00.000Z start one2026-01-01T00:00:01.000Z start two\n')).toBe(true)
   expect(text).toMatch(/Z start engine-id in \/repo\n$/)
+})
+
+// The terminal's octopus and marks of work under way: cells (a Raster), repainted in place as they move; and its pictures, which
+// are rows that open where the person is
+
+// Two drawings in the octopus's own form, squares of one pixel in groups that show and hide in turn: one still, one of two pictures
+const STILL_ART = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"><g fill="#8A63F0"><rect x="1" y="0" width="2" height="2"/><rect x="0" y="2" width="4" height="2"/></g></svg>'
+const MOVING_ART =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 4"><g fill="#8A63F0"><rect x="1" y="0" width="2" height="2"/>' +
+  '<g visibility="visible"><animate attributeName="visibility" values="visible;hidden" dur="0.6s" calcMode="discrete" repeatCount="indefinite"/><rect x="0" y="2" width="1" height="2"/></g>' +
+  '<g visibility="hidden"><animate attributeName="visibility" values="hidden;visible" dur="0.6s" calcMode="discrete" repeatCount="indefinite"/><rect x="3" y="2" width="1" height="2"/></g></g></svg>'
+test('in the terminal the octopus and the marks of work are cells that move in place, and the app still draws its Svg', async ($, on) => {
+  const { clock } = world(on, { drawings: name => (!name ? undefined : name.startsWith('working') ? MOVING_ART : STILL_ART) })
+  const blits: { requestId: string; key: string; cells: string }[] = []
+  on('ui.blit', (_, e) => (blits.push(e as never), { value: {} }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose.' } as never)
+
+  const pane = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  // The header's octopus at work: three rows tall beside the header's three lines, four pixels to a cell
+  const head = (await pane.findAll({ type: 'Raster' })).find(one => String(one.key).startsWith('head-mark-working-'))
+  expect(head?.props.columns).toBe(7)
+  expect(head?.props.rows).toBe(3)
+  // The card's three dots, a bright one passing along them
+  const dots = (await pane.findAll({ type: 'Raster' })).find(one => String(one.key) === 'live-a1')
+  expect(dots?.props.columns).toBe(3)
+  // Both are repainted in place as they move, each picture once, nothing drawn again
+  await clock.advance(700)
+  const headCells = blits.filter(one => one.requestId === 'claudopus' && one.key === head?.key).map(one => one.cells)
+  expect(headCells.length).toBeGreaterThan(0)
+  expect(headCells.some(cells => cells !== head?.props.cells)).toBe(true)
+  expect(blits.some(one => one.key === 'live-a1' && one.cells !== dots?.props.cells)).toBe(true)
+  await pane.unmount()
+
+  // Above the prompt: the tiny octopus, one line of three cells
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  const tiny = (await band.findAll({ type: 'Raster' })).find(one => String(one.key).startsWith('band-mark-workingSmall-'))
+  expect([tiny?.props.columns, tiny?.props.rows]).toEqual([3, 1])
+  await band.unmount()
+
+  // The app's drawing is as it was: its Svg, and no cells
+  const app = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await app.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Claudopus at work')).toBe(true)
+  expect(await app.findAll({ type: 'Raster' })).toEqual([])
+  await app.unmount()
+})
+
+// A piece of work that drew one picture, its Details open in a terminal
+const pictured = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, options: { env?: Record<string, string>; tailscale?: string }) => {
+  const svg = '/tmp/work/chart.svg'
+  const talk = [
+    { role: 'user', text: 'Draw the chart.', toolUses: [] },
+    { role: 'assistant', text: 'Drawing it.', toolUses: [{ tool_use_id: 'u1', tool: 'Write', input: { file_path: svg, content: '<svg/>' } }] },
+  ]
+  const made = world(on, { talk, ...options })
+  made.files.set(svg, '<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'draw the chart', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Draw the chart.' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  await pressed(pane, 'open-a1')
+  await pane.unmount()
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'terminal' } as never)
+  await until(async () => keyed(tab, 'pic-open-1-0'))
+  return { ...made, tab, svg }
+}
+
+test('in the terminal a picture is not drawn: its row, pressed, opens it in the viewer of the Mac the person is at', async ($, on) => {
+  const { tab, shown, svg } = await pictured($, on, {})
+  expect(await tab.findAll({ type: 'Raster' }).then(all => all.filter(one => String(one.key).startsWith('pic-')))).toEqual([])
+  await pressed(tab, 'pic-open-1-0')
+  await until(async () => (shown.some(argv => argv.includes(svg)) ? true : undefined))
+  await tab.unmount()
+})
+
+test('in a terminal reached over ssh a picture pressed is sent to the device it is watched from, by Tailscale where both have it', async ($, on) => {
+  const { tab, shown, dropped, svg } = await pictured($, on, { env: { SSH_CONNECTION: '100.72.19.2 65204 100.97.255.107 22', USER: 'sam' }, tailscale: '100.72.19.2\tsams-laptop\n100.86.184.91\tphone\toffline; last seen 4h ago\n' })
+  await pressed(tab, 'pic-open-1-0')
+  await until(async () => tab.find({ type: 'Text', text: /Sent to sams-laptop by Tailscale/ }))
+  expect(dropped.map(argv => argv.slice(1))).toEqual([['file', 'cp', svg, '100.72.19.2:']])
+  // Nothing opens on this Mac, where nobody looks
+  expect(shown.some(argv => argv.includes(svg))).toBe(false)
+  await tab.unmount()
+})
+
+test('over ssh without Tailscale the row gives the one command that fetches the picture and opens it on the device', async ($, on) => {
+  const { tab, shown, svg } = await pictured($, on, { env: { SSH_CONNECTION: '192.168.1.20 65204 192.168.1.7 22', USER: 'sam' } })
+  await pressed(tab, 'pic-open-1-0')
+  await until(async () => tab.find({ type: 'Text', text: "scp 'sam@192.168.1.7:/tmp/work/chart.svg' ~/Downloads/ && open ~/Downloads/'chart.svg'" }))
+  expect((await tab.findAll({ type: 'Button' })).some(one => one.props.label === 'Copy the command')).toBe(true)
+  expect(shown.some(argv => argv.includes(svg))).toBe(false)
+  await tab.unmount()
+})
+
+// The terminal's look: no grey bars from the app's see-through tint, a key for each button and a line that says how to reach them,
+// Memory as a tab, and the Stats timeline drawn in cells
+
+test('in the terminal no Box carries the faint tint the app draws, and the app keeps it', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose.' } as never)
+  const tinted = (boxes: { props: Record<string, unknown> }[]) => boxes.filter(one => one.props.backgroundColor === '#80808024')
+  const seeThrough = (color: unknown) => typeof color === 'string' && /^#[0-9a-f]{6}(?!ff)[0-9a-f]{2}$/i.test(color)
+
+  const terminal = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  const termBoxes = await terminal.findAll({ type: 'Box' })
+  expect(tinted(termBoxes as never)).toEqual([])
+  // Nor any other colour a terminal cannot see through
+  expect(termBoxes.filter(one => seeThrough(one.props.backgroundColor))).toEqual([])
+  await terminal.unmount()
+
+  const desktop = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(tinted((await desktop.findAll({ type: 'Box' })) as never).length).toBeGreaterThan(0)
+  await desktop.unmount()
+})
+
+test('in the terminal each header button has a key, and a line says how to reach them, before and after the panel takes the keys', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  const keysOf = async (pane: { findAll: (q: { type: string }) => Promise<{ props: Record<string, unknown> }[]> }) =>
+    Object.fromEntries((await pane.findAll({ type: 'Button' })).filter(one => one.props.hotkey).map(one => [String(one.props.label).split(' ')[0], one.props.hotkey]))
+  const textOf = async (pane: { findAll: (q: { type: string }) => Promise<{ text: string }[]> }) =>
+    (await pane.findAll({ type: 'Text' })).map(one => one.text).join('\n')
+
+  const idle = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  expect(await keysOf(idle as never)).toMatchObject({ Stats: 's', Memory: 'm', Config: 'c', About: 'a' })
+  expect(await textOf(idle as never)).toContain('ctrl+x Tab')
+  await idle.unmount()
+
+  const held = await $.ui.mount({ ...LIST, props: { ...LIST.props, isFocused: true }, surface: 'terminal' } as never)
+  expect(await textOf(held as never)).toContain('Esc: back to the chat')
+  await held.unmount()
+
+  // The app has its own pointer and keys: no such line there
+  const app = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await textOf(app as never)).not.toContain('ctrl+x Tab')
+  await app.unmount()
+})
+
+test('the Stats timeline in cells: a row a lane, each run of cells in its model, the times under it', () => {
+  const h = 3_600_000
+  const at = Date.UTC(2026, 10, 13, 9)
+  const piece = (id: string, from: number, to: number, model: string) => ({ id, title: id, isFlow: false, isFinished: true, spans: [[from, to]] as [number, number][], bars: [{ from, to, model }], calls: [], ended: to })
+  const { rows, from, to } = timelineRows([piece('a', at, at + 2 * h, 'claude-opus-5-5'), piece('b', at + h, at + 3 * h, 'claude-sonnet-5-5')] as never, 30)
+  expect(rows.length).toBe(2)
+  expect(rows.every(row => row.length === 30)).toBe(true)
+  expect(rows[0]?.[0]).toBe('claude-opus-5-5')
+  expect(rows[1]?.[0]).toBe('')
+  expect(rows[1]?.[29]).toBe('claude-sonnet-5-5')
+  expect(from).not.toBe('')
+  expect(to).not.toBe('')
+})
+
+test('in the terminal an ask is above the prompt with its answers numbered, and the number answers it; the app keeps its band', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Release it', prompt: 'release it' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] } as never)
+
+  const band = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  expect(await band.find({ type: 'Text', text: 'Release it?' })).toBeDefined()
+  const answers = (await band.findAll({ type: 'Button' })).map(one => [one.props.label, one.props.hotkey, one.props.plain])
+  expect(answers).toEqual([['Approve', '1', true], ['Not now', '2', true]])
+  // A message may begin with a digit: the first press only picks the answer and says so, the same number again sends it
+  await band.press({ key: String((await band.findAll({ type: 'Button' }))[0]?.key) })
+  await until(async () => band.find({ type: 'Text', text: /Press 1 again to answer “Approve”/ }))
+  expect(await band.find({ type: 'Text', text: 'Release it?' })).toBeDefined()
+  await band.press({ key: String((await band.findAll({ type: 'Button' }))[0]?.key) })
+  await until(async () => ((await band.find({ type: 'Text', text: 'Release it?' })) ? undefined : true))
+  await band.unmount()
+
+  const app = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect((await app.findAll({ type: 'Button' })).filter(one => one.props.hotkey)).toEqual([])
+  await app.unmount()
+})
+
+test('in the terminal each card has a number that opens it, Finished has f, and every tab has p back to the panel', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose.' } as never)
+
+  const pane = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  const card = await keyed(pane, 'open-a1')
+  expect([card?.props.hotkey, card?.props.plain]).toEqual(['1', true])
+  await pane.unmount()
+
+  // A tab of the mod's in the terminal: its first row goes back to the panel on p
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'terminal' } as never)
+  const back = (await tab.findAll({ type: 'Button' })).find(one => one.key === 'tab-back')
+  expect([back?.props.label, back?.props.hotkey]).toEqual(['Panel', 'p'])
+  await tab.unmount()
+
+  // The app has its own pointer: no numbers, no row back
+  const app = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await keyed(app, 'open-a1'))?.props.hotkey).toBeUndefined()
+  await app.unmount()
+  const appTab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  expect((await appTab.findAll({ type: 'Button' })).find(one => one.key === 'tab-back')).toBeUndefined()
+  await appTab.unmount()
 })

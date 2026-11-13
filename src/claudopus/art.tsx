@@ -56,11 +56,16 @@ const momentOf = (key: string, art: keyof typeof ART) => {
   moments.set(key, { art, mark, at })
   return mark
 }
-const octopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, alt: string) => {
+// Where it is drawn, for the terminal, which draws it as cells and repaints them in place as it moves: the engine, the surface and
+// the drawing's site
+const octopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, alt: string, $?: EngineInterface, at?: { surface?: string; requestId?: string }) => {
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number; isInteractive?: boolean }) => JSX.Element }
   const { Box } = ui
   const source = ART[art]
-  if (!source || !table.Svg) return null
+  if (!source) return null
+  // The terminal draws no Svg (its table may name one, drawing nothing): there the octopus is cells
+  if (at?.surface === 'terminal') return termOctopus(ui, key, art, size, alt, $, at.requestId)
+  if (!table.Svg) return null
   const mark = momentOf(key, art)
   return (
     <Box key={key} flexShrink={0}>

@@ -2,6 +2,7 @@
 import * as M0 from 'claude-code/testing'
 import * as M1 from 'claude-code'
 import * as M2 from '../../../mods/claudopus/hooks/shared'
+import * as M3 from '../../../mods/claudopus/hooks/stats'
 
 declare global {
   export import expect = M0.expect
@@ -17,4 +18,5 @@ declare global {
   export import shareable = M2.shareable
   export import stuckOf = M2.stuckOf
   export import trip = M2.trip
+  export import timelineRows = M3.timelineRows
 }

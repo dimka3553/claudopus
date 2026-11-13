@@ -123,8 +123,8 @@ const openStats = async ($: EngineInterface) => {
   void statsRead($, statsShown.scope).catch(err => log($, `stats not read: ${String(err)}`))
   await front($, STATS_PANE, STATS_TITLE)
 }
-const statsButton = ($: EngineInterface, ui: Ui) => (
+const statsButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   <ui.Box key="stats-button" flexShrink={0}>
-    <ui.Button key={`stats-open-${presses}`} label="Stats" onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
+    <ui.Button key={`stats-open-${presses}`} label="Stats" hotkey={isKeyed ? 's' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openStats($).catch(err => log($, `stats not opened: ${String(err)}`))} />
   </ui.Box>
 )

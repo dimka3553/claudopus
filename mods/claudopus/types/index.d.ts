@@ -80,6 +80,12 @@ export type Todo = {
   stuckAt?: number
   // Finished work that its own background work still holds: since when the mod has seen it so. Absent once nothing holds it
   leftSince?: number
+  // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
+  // in its own words, and since when. Dropped as it ends or is stopped
+  bg?: { id: string; what: string; at: number; isWatch?: boolean }[]
+  // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
+  // so. It is still at work, and its card says what it waits for
+  waitsSince?: number
   // Only work that is working has a card; one that has ended is kept, so a message to it brings its card back as it was
   status: 'working' | 'done' | 'stopped' | 'failed'
   // Set on a card another chat shares: that chat, the Mac it runs on when another (empty for this one), and the card's own id there.

@@ -18,9 +18,18 @@ const started = (id: string, parentId: string, title: string, words: string, at:
   status: 'working',
 })
 // Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at })
+// What it kept of its own background work goes with it: started again, it keeps what it starts from then
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => ({ ...one, status, endedAt: at, bg: undefined, waitsSince: undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
+// Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
+// a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
+// such command: it may run until stopped
+const goesOn = (list: Todo[], id: string) => {
+  const one = list.find(card => card.id === id)
+  const isRunning = Boolean(one?.bg?.some(b => !b.isWatch)) || list.some(kid => kid.parentId === id && kid.status === 'working')
+  return Boolean(one && isRunning && one.items.some(item => item.state === 'doing'))
+}
 // How work that is stopped ends: done when its turn had already ended with its report and only its own background work held it
 // (the chat stops such work once its report is in), stopped otherwise
 const stoppedAs = (one: Todo): Todo['status'] => (one.answeredAt ? 'done' : 'stopped')
@@ -232,7 +241,7 @@ const followPanel = async ($: EngineInterface) => {
   if (!choice || seenOf(choice) === panelSeen) return choice
   const isOpen = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
   if (choice.isOpen && !isOpen) {
-    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => (log($, `panel not opened with the others: ${String(err)}`), undefined))
+    const opened = await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => (log($, `panel not opened with the others: ${String(err)}`), undefined))
     if (!opened) return choice
     await update($, me, one => ({ ...one, isListOpened: true }))
     await update($, paneShown, () => true)
@@ -251,7 +260,7 @@ const openList = async ($: EngineInterface) => {
   if (!choice) await choosePanel($, true)
   await update($, me, one => ({ ...one, isListOpened: true }))
   await update($, paneShown, () => true)
-  await $.ui.open({ id: LIST, title: LIST_TITLE }).catch(err => log($, `panel not opened: ${String(err)}`))
+  await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS }).catch(err => log($, `panel not opened: ${String(err)}`))
 }
 
 // Keeps the list true while work runs: the engine's list, and the minutes
@@ -368,7 +377,7 @@ const loadFinished = async ($: EngineInterface) => {
   if (!Array.isArray(kept) || !kept.length) return
   await update($, todos, list => {
     // What it left running is looked at afresh: the record of how it ended does not outlive the load
-    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined }))
+    const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined, bg: undefined, waitsSince: undefined }))
     return fresh.length ? capped(byEnd([...fresh, ...list])) : list
   })
 }
