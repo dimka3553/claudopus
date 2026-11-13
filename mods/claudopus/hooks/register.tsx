@@ -11,7 +11,7 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
-import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_STEP, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
+import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_STEP, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
 // helpers, the log and the chat's saved words
@@ -324,11 +324,11 @@ const KEEP =
 const KEEP_AGENTS = 'Keep the name or id of each background agent with its subject and where it stands.'
 // What every piece of background work is told as it starts: it keeps its own to-do in the panel true
 const PANEL_RULE =
-  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, the full paths of any pictures it is about in `pictures`, a command for {name} to type in `command` (the card opens a terminal for it on their press, so open none yourself); clear it with empty `text` once you have seen it done. If a panel tool answers that no hook answered it, the panel did not get it: carry on without the panel for notes and to-dos, but for an ask end your turn at once with a report whose first line is the ask, so the chat puts it to {name}.'
+  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, the exact text to copy in `copy`, buttons to answer with in `choices`, the full paths of any pictures it is about in `pictures`, a command only {name} can run, never one you can run yourself, in `command` with its folder in `cwd` (open no terminal for it yourself); clear it with empty `text` once you have seen it done. If a panel tool answers that no hook answered it, the panel did not get it: carry on without the panel for notes and to-dos, but for an ask end your turn at once with a report whose first line is the ask, so the chat puts it to {name}.'
 // What every conversation of a chat the app runs on another Mac over ssh carries after the principles, the chat's, its work's and
 // their helpers' alike: the person cannot see this Mac, so nothing waits on their hands here
 const AFAR_RULE =
-  "## This chat runs on another Mac\n\n- I work from my own device and cannot see this Mac's screen. Anything that needs my hands is done from my own device: a sign-in by device code or a link that works opened on my device, never a browser, window, dialog or keychain prompt on this Mac, and nothing that needs seeing its screen."
+  "## This chat runs on another Mac\n\n- I work from my own device and cannot see this Mac's screen. Anything that needs my hands is done from my own device: a sign-in by device code or a link that works opened on my device, never a browser, window, dialog or keychain prompt on this Mac, and nothing that needs seeing its screen. A command only I can run is given whole, with its folder and full paths, to run as it is in my own SSH session to this Mac; nothing opens a terminal on this Mac for it."
 // What the chat shows when its work asks the person something: the ask as the mod's own notice in the chat, with its answers and
 // pictures, never a message in the person's place; its model reads the ask in a row of its own, with how to pass an answer on.
 // An answer typed in the chat goes to the work as a press on the card does
@@ -352,16 +352,18 @@ const ANSWER_FOR_CHAT = (title: string, asked: string, said: string) => `{Name} 
 const ANSWER_FOR_CHAT_RELAY = `With {name}'s next message here, carry that work on with this answer as you would with their own words, beside whatever that message asks.`
 const ASK_CLEARED = (title: string) => `The work "${title}" no longer asks {name} anything.`
 // What the work is told when the chat passes on the person's answer to its ask, typed in the chat
-const ANSWERED_IN_CHAT = (asked: string) =>
-  `The message sent to you just now is {name}'s reply, typed in the chat, to your ask: "${asked}". Their card no longer asks it. If it answers the ask, take it as their answer and carry on, and ask again if it leaves something waiting. If it asks for something else, it is a steer: decide whether it is more for this work, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
+const ANSWERED_IN_CHAT = (asked: string, words: string) =>
+  `The message sent to you just now that carries {name}'s words "${words}" is {name}'s own reply, typed by them in the chat, to your ask: "${asked}". Their card no longer asks it. If it answers the ask, take it as their answer and carry on, and ask again if it leaves something waiting. If it asks for something else, it is a steer: decide whether it is more for this work, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
 // What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
 // own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
-const STEER =
-  'The message sent to you just now is from {name}, in their words, sent while you work. Stop: take no other step until you have thought about it. Decide which of three it is. More for this work: add it to your to-do list. A new task of its own: do not do it; hand it back with the `note` tool, its `task` set to the ask in one line, and the chat starts it. A change in how you are working: change your to-dos to match. Then say with the `note` tool, in one plain line, what you did with their message, such as that you added it to your to-do list, and carry on. Call it {name}\'s message, by no other name.'
+const STEER = (words: string) =>
+  `The message sent to you just now that carries {name}'s words "${words}" is from {name}, in their own words, typed by them in the chat. Stop: take no other step until you have thought about it. Decide which of three it is. More for this work: add it to your to-do list. A new task of its own: do not do it; hand it back with the \`note\` tool, its \`task\` set to the ask in one line, and the chat starts it. A change in how you are working: change your to-dos to match. Then say with the \`note\` tool, in one plain line, what you did with their message, such as that you added it to your to-do list, and carry on. Call it {name}'s message, by no other name.`
 // What the work is told when it has gone on after a steer without saying what it decided
+// What work that had ended is told of the person's words that started it again: whose they are, nothing more
+const WOKE = (words: string) => `The message that started you again, carrying {name}'s words "${words}", is from {name}, in their own words, typed by them in the chat.`
 // What the work is told when a message under way is not the person's: who sent it, and that it is no steer of theirs
-const FROM = (sender: string) =>
-  `The message sent to you just now is from ${sender}, not from {name}: it is not theirs. Take it as ${sender}'s and carry on.`
+const FROM = (sender: string, start: string) =>
+  `The message sent to you just now that begins "${start}" is from ${sender}, not from {name}: that one is not theirs. Take it as ${sender}'s and carry on; a message that carries {name}'s own words stays theirs.`
 // The chat sends a steer in the person's words: a message carries them when it holds a stretch of what they wrote, word for word
 const STRETCH = 40
 const carries = (message: string, words: string) => {
@@ -2443,8 +2445,9 @@ const DONE = 'success'
 // file of the mod's, art/<name>.svg, read when the session starts: a drawing is swapped by replacing its file. Happy is the
 // octopus in the finished green, bouncing with its arms up once over the two seconds finished work pauses, then still
 // Asking is the wave in the amber of work that needs the person: it waves once as something starts to wait, then rests amber
-const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '', asking: '' }
-const ART_FILES: Record<Exclude<keyof typeof ART, 'asking'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
+// Updated is the happy octopus in the workflow blue, jumping through the moment a chat moves to a newer version
+const ART = { mark: '', working: '', workingSmall: '', happy: '', happySmall: '', wave: '', asking: '', updated: '' }
+const ART_FILES: Record<Exclude<keyof typeof ART, 'asking' | 'updated'>, string> = { mark: 'mark.svg', working: 'working.svg', workingSmall: 'working-small.svg', happy: 'happy.svg', happySmall: 'happy-small.svg', wave: 'wave.svg' }
 // Whether the octopus is happy at a time: work of this chat's that finished, not stopped or failed, is in its pause. A new drawing
 // starts its animation, so it plays from the first finish and holds its last picture through any finish that follows in the pause
 const isHappy = (cards: { id: string; parentId?: string; status: string; endedAt: number }[], at: number) =>
@@ -2461,7 +2464,7 @@ const moments = new Map<string, { art: keyof typeof ART; mark: string; at: numbe
 const MOMENT_GAP = 5000
 // The happy drawings last only a finish's short pause, so one drawn again after a gap is a new finish and plays anew; the wave
 // rests on its last picture for as long as something waits, and plays again only when the octopus turns to it anew
-const ONCE = new Set<keyof typeof ART>(['happy', 'happySmall'])
+const ONCE = new Set<keyof typeof ART>(['happy', 'happySmall', 'updated'])
 const RUN_MARK = Math.random().toString(36).slice(2, 8)
 let momentCount = 0
 const momentOf = (key: string, art: keyof typeof ART) => {
@@ -3390,9 +3393,34 @@ const noteLoaded = async ($: EngineInterface) => {
   updatedMoment = { from, to: loaded, loadedAt: now, startedAt: 0 }
   // A panel drawn while this load was still reading has no moment yet: it is drawn again now
   await update($, tick, n => n + 1)
-  await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header says Updated`)
+  await log($, `Claudopus moved from ${from} to ${loaded} in this chat: the header's octopus turns blue and says so`)
 }
-// The header's version as it stands now (blue in Claudopus's workflow blue, the glint in the text's own bright colour): the moment's pieces while it lasts, drawn again each UPDATED_STEP until it is over
+// The sound of the moment, a file of the mod's: three bright rising notes, 0.9 s, made by mockups/claudopus-sound/updated.py
+const UPDATED_SOUND = 'sounds/updated.wav'
+// The sound plays once for each version on this Mac, however many chats move to it: the first to begin its moment makes the file
+// updated/<version> (made only where none is, the shell's noclobber) and plays it; config.json's sound off keeps it silent
+const playUpdated = async ($: EngineInterface, version: string) => {
+  if (!dir || !/^[0-9A-Za-z.+-]{1,40}$/.test(version)) return
+  let config: { sound?: unknown } = {}
+  try {
+    config = JSON.parse((await readOr($, `${dir}/config.json`)) || '{}') as typeof config
+  } catch {
+    // A config.json being edited leaves the sound on
+  }
+  if (config.sound === false) return
+  const played = `${dir}/updated/${version}`
+  const made = await $.process
+    .run(['sh', '-c', 'mkdir -p "$(dirname "$1")" && set -C && : > "$1"', 'sh', played])
+    .catch(() => ({ exitCode: 1 }))
+  if (made.exitCode !== 0) return
+  // A sound that could not play leaves the version free for the next chat that moves to it
+  await $.audio.play({ asset: UPDATED_SOUND }).catch(async err => {
+    await $.process.run(['rm', '-f', played]).catch(() => undefined)
+    await log($, `updated sound not played: ${String(err)}`)
+  })
+}
+// The moment as it stands now, while it lasts, drawn again each UPDATED_STEP until it is over: the name line's pieces (blue in
+// Claudopus's workflow blue, the glint in a light blue); the words are pieces of their own, a space between each; the panel draws the blue octopus beside them
 const updatedPieces = async ($: EngineInterface, version: string) => {
   const moment = updatedMoment
   if (!moment || moment.to !== version) return undefined
@@ -3400,6 +3428,7 @@ const updatedPieces = async ($: EngineInterface, version: string) => {
   if (!moment.startedAt) {
     if (now - moment.loadedAt > UPDATED_LATE) return void (updatedMoment = undefined)
     moment.startedAt = now
+    void playUpdated($, moment.to)
     let left = Math.ceil(UPDATED_FOR / UPDATED_STEP) + 2
     const step = () =>
       void $.clock.after(UPDATED_STEP, () => {
@@ -3408,19 +3437,29 @@ const updatedPieces = async ($: EngineInterface, version: string) => {
       })
     step()
   }
-  const look = updatedLook(moment.from, moment.to, now - moment.startedAt)
+  const look = updatedLook(moment.to, now - moment.startedAt)
   if (!look && updatedMoment === moment) updatedMoment = undefined
   return look
 }
-const versionLine = (ui: Ui, pieces: ReturnType<typeof updatedLook>) => (
-  <ui.Box key="head-version" flexDirection="row" flexShrink={1} minWidth={0}>
-    {(pieces ?? []).map((piece, i) => (
-      <ui.Text key={`head-version-${i}`} wrap="truncate-end" dimColor={piece.tone === 'dim'} color={piece.tone === 'blue' ? FLOW : undefined} bold={piece.tone !== 'dim'}>
-        {piece.text}
-      </ui.Text>
-    ))}
-  </ui.Box>
-)
+// The glint: a light blue letter passing along the blue word, bright in either theme
+const GLINT = '#A9CDFF'
+const nameLine = (ui: Ui, pieces: NonNullable<ReturnType<typeof updatedLook>>) => {
+  // "Claudopus" first, then the word or version beside it, its pieces together
+  const words = [pieces.slice(0, 1), pieces.slice(1)].filter(word => word.length)
+  return (
+    <ui.Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
+      {words.map((word, w) => (
+        <ui.Box key={`head-name-${w}`} flexDirection="row" flexShrink={w ? 1 : 0} minWidth={0}>
+          {word.map((piece, i) => (
+            <ui.Text key={`head-name-${w}-${i}`} wrap="truncate-end" color={piece.tone === 'glint' ? GLINT : FLOW} bold>
+              {piece.text}
+            </ui.Text>
+          ))}
+        </ui.Box>
+      ))}
+    </ui.Box>
+  )
+}
 
 // The asking card: an ask's text to copy, its buttons and reply box, and the answer reaching the work
 
@@ -4720,13 +4759,14 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
-    // A load that moved this chat to a newer version has the header say so
-    await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
       const text = await readOr($, `${$.plugin.root}/art/${file}`)
       ART[art] = text.slice(Math.max(0, text.indexOf('<svg')))
     }
     ART.asking = ART.wave.replaceAll('#8A63F0', NEEDS)
+    ART.updated = updatedArt(ART.happy, FLOW)
+    // A load that moved this chat to a newer version has the header say so, once its octopus is read
+    await noteLoaded($).catch(err => log($, `version moved not looked at: ${String(err)}`))
     cwd = e.cwd
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press
@@ -4800,7 +4840,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and shows the ask in the chat as a notice, where {name} can answer it too. `text` says what to do, in one plain line; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need (without them the card offers Done and Not now); {name} can always reply in their own words instead; `pictures` are the picture files the ask is about, such as the options to pick from; `command` is a command {name} types themselves, shown with a button that opens a terminal with it typed when they press it: open none yourself. The ask stays until {name} answers, even after you finish. An answer clears it and arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Ask again if the answer leaves something waiting. Call it again with empty `text` only once you have seen it done.",
+        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and shows the ask in the chat as a notice, where {name} can answer it too. `text` says what to do, in one plain line; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need (without them the card offers Done and Not now); {name} can always reply in their own words instead; `pictures` are the picture files the ask is about, such as the options to pick from; `command` is a command only {name} can run, never one you can run yourself: given whole, with its folder in `cwd` or full paths, it is shown with a Copy button and, in a chat on this Mac, a button that opens a terminal with it typed when they press it: open none yourself. The ask stays until {name} answers, even after you finish. An answer clears it and arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Ask again if the answer leaves something waiting. Call it again with empty `text` only once you have seen it done.",
       ),
       inputSchema: {
         type: 'object',
@@ -4808,8 +4848,8 @@ const chatHooks = (on: On) => {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
           copy: { type: 'string', description: 'Only text they must paste somewhere else, such as a one-time code or a link; leave it out when they only read or press something' },
           choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now (Done and Not now when left out); the one pressed comes back to you as a message' },
-          command: { type: 'string', description: 'A command for them to type themselves, one line, shown with a Copy button and a button that opens a terminal with it typed, never run' },
-          cwd: { type: 'string', description: 'The folder the command runs in, a full path; the chat\'s folder when left out' },
+          command: { type: 'string', description: 'A command only they can run, never one you can run yourself, one line, whole: shown with a Copy button, and on this Mac a button that opens a terminal with it typed, never run' },
+          cwd: { type: 'string', description: 'The folder the command runs in, a full path; the command is shown starting there. Needed when the command has a relative path' },
           pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the picture files the ask is about, such as the options to pick from; shown with the ask in the chat' },
         },
         required: ['text'],
@@ -5249,11 +5289,14 @@ const workHooks = (on: On) => {
     let from = ''
     let answered = ''
     let answer: { card: Todo; ask: NonNullable<Todo['ask']>; key: string; words: string; at: number } | undefined
+    let message = ''
+    let woke = ''
+    let words = ''
     if (dir && e.tool === 'SendMessage') {
       const to = String((e as { to?: unknown }).to ?? '')
-      const message = String((e as { message?: unknown }).message ?? '')
+      message = String((e as { message?: unknown }).message ?? '')
       const theirs = e.agentId === undefined ? heard.findLast(one => carries(message, one)) : undefined
-      const words = theirs ? quoted(theirs, 600) : ''
+      words = theirs ? quoted(theirs, 600) : ''
       const now = await $.clock.now()
       const list = await read($, todos)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
@@ -5268,7 +5311,9 @@ const workHooks = (on: On) => {
       }
       if (target) {
         woken = target.id
+        // Their words are theirs whether the work is under way or is started again by them: ended work is told whose they are
         const isSteer = target.status === 'working' && Boolean(words) && !answered
+        if (target.status !== 'working' && words && !answered) woke = words
         if (target.status === 'working' && message && !isSteer) {
           const sender = list.find(one => one.id === e.agentId)
           const title = (one?: Todo) => (one?.title ? ` "${cut(oneLine(one.title), 60)}"` : '')
@@ -5292,7 +5337,7 @@ const workHooks = (on: On) => {
                 },
           ),
         )
-        if (isSteer || from || answered) steered = target.id
+        if (isSteer || from || answered || woke) steered = target.id
       }
     }
     if (e.agentId !== undefined) {
@@ -5328,7 +5373,9 @@ const workHooks = (on: On) => {
       if (answer) await answeredInChat($, answer, steered, !sent.deny && !sent.isError)
       // Work that had ended is started again by the message, and may not be running yet to take a row: it gets the line as a
       // message of its own instead, read once it reaches it
-      const line = named(answered ? ANSWERED_IN_CHAT(answered) : from ? FROM(from) : STEER)
+      // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
+      // chat's own note that landed after the person's words once marked their words as not theirs
+      const line = named(answered ? ANSWERED_IN_CHAT(answered, words) : woke ? WOKE(woke) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words))
       if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? $.session.send({ to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
       return sent
     }
@@ -5541,7 +5588,14 @@ const toolHooks = (on: On) => {
     const input = e as unknown as { text?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown }
     if (e.agentId === undefined) return { result: `Only background work asks through the panel; a chat's own thread asks ${who()} in its reply.` }
     const text = oneLine(typeof input.text === 'string' ? input.text : '').slice(0, 300)
-    const command = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
+    const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
+    const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
+    // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and one that starts with a
+    // path relative to a folder never named is refused, since the person types it somewhere else
+    if (given0 && !hasFolder && /^(?:\.{1,2}\/|[\w-][\w.-]*\/)/.test(given0)) {
+      return { result: 'Not shown: the command starts with a path relative to a folder it does not name. Give `cwd`, the full path of the folder it runs in, or a full path, so it runs as it is wherever it is typed.' }
+    }
+    const command = given0 && hasFolder && !/^cd\s/.test(given0) ? `cd ${zshQuoted(String(input.cwd))} && ${given0}` : given0
     // Copy is for text pasted elsewhere: a sentence of instructions, or the ask's own words, gets none
     const given = (typeof input.copy === 'string' ? input.copy : '').trim().slice(0, 4000)
     const isProse = given.split(/\s+/).length > 8 && /[a-z]{3,} [a-z]{3,} [a-z]{3,}/i.test(given) && !/[\/=_$`@]|https?:/.test(given)
@@ -5566,8 +5620,8 @@ const toolHooks = (on: On) => {
     if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
     if (card) await askInChat($, card)
     // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
-    const terminal = command ? ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.` : ''
-    const shown = [command ? 'the command, a Copy button and an Open in Terminal button' : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
+    const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
+    const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
     const lost = givenPics.length - pictures.length
     const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} named with it, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
@@ -6609,16 +6663,21 @@ const panelHooks = (on: On) => {
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off
           <Box key="head" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
             <Box flexDirection="row" alignItems="center" gap={2}>
-              {octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
+              {/* Just moved to a newer version: the octopus turns blue and jumps for the moment */}
+              {updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood])}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
-                <Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
-                  <Box flexShrink={0}>
-                    <Text bold>Claudopus</Text>
+                {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}
+                {updated ? (
+                  nameLine(ui, updated)
+                ) : (
+                  <Box key="head-name" flexDirection="row" gap={1} minWidth={0}>
+                    <Box flexShrink={0}>
+                      <Text bold>Claudopus</Text>
+                    </Box>
+                    {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
                   </Box>
-                  {/* Just moved to a newer version: it rolls to the new number and says Updated in blue for a moment */}
-                  {updated ? versionLine(ui, updated) : versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
-                </Box>
+                )}
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap="truncate-end">{headLine(head)}</Text>
                 <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>
               </Box>

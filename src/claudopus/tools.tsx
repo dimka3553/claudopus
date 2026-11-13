@@ -67,7 +67,14 @@ const toolHooks = (on: On) => {
     const input = e as unknown as { text?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown }
     if (e.agentId === undefined) return { result: `Only background work asks through the panel; a chat's own thread asks ${who()} in its reply.` }
     const text = oneLine(typeof input.text === 'string' ? input.text : '').slice(0, 300)
-    const command = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
+    const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
+    const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
+    // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and one that starts with a
+    // path relative to a folder never named is refused, since the person types it somewhere else
+    if (given0 && !hasFolder && /^(?:\.{1,2}\/|[\w-][\w.-]*\/)/.test(given0)) {
+      return { result: 'Not shown: the command starts with a path relative to a folder it does not name. Give `cwd`, the full path of the folder it runs in, or a full path, so it runs as it is wherever it is typed.' }
+    }
+    const command = given0 && hasFolder && !/^cd\s/.test(given0) ? `cd ${zshQuoted(String(input.cwd))} && ${given0}` : given0
     // Copy is for text pasted elsewhere: a sentence of instructions, or the ask's own words, gets none
     const given = (typeof input.copy === 'string' ? input.copy : '').trim().slice(0, 4000)
     const isProse = given.split(/\s+/).length > 8 && /[a-z]{3,} [a-z]{3,} [a-z]{3,}/i.test(given) && !/[\/=_$`@]|https?:/.test(given)
@@ -92,8 +99,8 @@ const toolHooks = (on: On) => {
     if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
     if (card) await askInChat($, card)
     // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
-    const terminal = command ? ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.` : ''
-    const shown = [command ? 'the command, a Copy button and an Open in Terminal button' : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
+    const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
+    const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
     const lost = givenPics.length - pictures.length
     const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} named with it, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''

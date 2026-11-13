@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, RELOAD_AGAIN, isUpdateDue, scopeOf, stampOf, UPDATE_EVERY, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, VERSION_PAGE, versionOnPage } from './update'
+import { copyOf, installedFrom, installedVersionOf, isNewer, isReloadDue, RELOAD_AGAIN, isUpdateDue, scopeOf, stampOf, UPDATE_EVERY, updatedArt, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, VERSION_PAGE, versionOnPage } from './update'
 
 test('only a copy installed from a marketplace is updated, read off its cache folder', async () => {
   expect(installedFrom('/Users/sam/.claude/plugins/cache/claudopus/claudopus/0.2.25')).toEqual({ plugins: '/Users/sam/.claude/plugins', marketplace: 'claudopus', plugin: 'claudopus' })
@@ -125,22 +125,37 @@ test('a chat that moved to a newer version knows the one it ran before; the same
   expect(updatedFrom('0.2.40', '0.2.40', mark, 2000)).toBe('')
 })
 
-test('the version rolls to the new number, says Updated in blue, settles dim, then is plain again', async () => {
-  const text = (t: number) => updatedLook('0.2.39', '0.2.40', t)?.map(p => p.text).join('')
-  // Only what changed rolls; the same start stays dim
-  const first = updatedLook('0.2.39', '0.2.40', 0)!
-  expect(first[0]).toEqual({ text: 'v0.2.', tone: 'dim' })
-  expect(first[1].tone).toBe('blue')
-  expect(first[1].text).toHaveLength(2)
-  expect(text(1400)).toBe('v0.2.40')
-  const mid = updatedLook('0.2.39', '0.2.40', 3000)!
-  expect(mid.map(p => p.text).join('')).toBe('v0.2.40 · Updated')
-  expect(mid[0]).toEqual({ text: 'v0.2.40', tone: 'blue' })
-  expect(mid.some(p => p.tone === 'glint') || mid.at(-1)?.tone === 'blue').toBe(true)
-  expect(updatedLook('0.2.39', '0.2.40', 7500)).toEqual([{ text: 'v0.2.40 · Updated', tone: 'dim' }])
-  expect(updatedLook('0.2.39', '0.2.40', UPDATED_FOR)).toBeUndefined()
-  expect(updatedLook('0.2.39', '0.2.40', -1)).toBeUndefined()
-  // A longer number, as 0.2.99 to 0.3.0
-  expect(text(1499)).toBe('v0.2.40')
-  expect(updatedLook('0.2.99', '0.3.0', 1499)!.map(p => p.text).join('')).toBe('v0.3.0')
+test('the moment says Claudopus updated in blue, then the new version, then is over', async () => {
+  const text = (t: number) => updatedLook('0.2.40', t)?.map(p => p.text).join('')
+  expect(text(0)).toBe('Claudopusupdated')
+  expect(updatedLook('0.2.40', 0)![0]).toEqual({ text: 'Claudopus', tone: 'blue' })
+  // The glint crosses "updated" once, and is gone before the version shows
+  expect(updatedLook('0.2.40', 600)!.some(p => p.tone === 'glint')).toBe(true)
+  expect(updatedLook('0.2.40', 2400)!.some(p => p.tone === 'glint')).toBe(false)
+  expect(text(4900)).toBe('Claudopusv0.2.40')
+  expect(updatedLook('0.2.40', 4900)!.at(-1)).toEqual({ text: 'v0.2.40', tone: 'blue' })
+  expect(updatedLook('0.2.40', UPDATED_FOR)).toBeUndefined()
+  expect(updatedLook('0.2.40', -1)).toBeUndefined()
+  expect(UPDATED_FOR).toBe(5000)
+})
+
+test('the moment never shows a version but the one moved to', async () => {
+  // The rolling number of 0.2.40 to 0.2.64 showed v0.2.65 to v0.2.69 on its way from 0.2.63 to 0.2.64
+  for (const [from, to] of [['0.2.63', '0.2.64'], ['0.2.59', '0.2.61'], ['0.2.99', '0.3.0']]) {
+    for (let t = 0; t < UPDATED_FOR; t += 10) {
+      const shown = (updatedLook(to, t) ?? []).map(p => p.text).join('').match(/v?\d+(\.\d+)+/g) ?? []
+      expect({ from, t, shown: shown.filter(one => one.replace(/^v/, '') !== to) }).toEqual({ from, t, shown: [] })
+    }
+  }
+})
+
+test('the octopus of the moment is the happy one in blue, jumping all through it', async () => {
+  // Shaped as art/happy.svg is: two pictures taking turns, each on a timed animate (the tests cannot read the mod's files)
+  const happy = '<svg viewBox="0 0 24 24"><g fill="#4EBA65"><g><animate attributeName="visibility" values="visible;hidden" dur="2s" calcMode="discrete" fill="freeze"/></g><g><animate attributeName="visibility" values="hidden;visible" dur="2s" calcMode="discrete" fill="freeze"/></g></g></svg>'
+  const art = updatedArt(happy, '#4E93EF')
+  expect(art).not.toContain('#4EBA65')
+  expect(art).toContain('fill="#4E93EF"')
+  expect(art).toContain('viewBox="1 -1 22 22"')
+  expect(art).not.toMatch(/dur="(?!1\.25s")/)
+  expect(art.match(/repeatCount="4"/g)?.length).toBe(happy.match(/<animate /g)?.length)
 })
