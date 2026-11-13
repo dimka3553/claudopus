@@ -6003,8 +6003,8 @@ const panelHooks = (on: On) => {
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
-    // A desktop draws a plain Button's label inside its smallest padding step, so a line a card starts with text is moved in by
-    // that same step: the title, the line of facts and the line under them share one left edge. A terminal draws the label alone
+    // A desktop draws a plain Button's label inside its smallest padding step, so a line a small card starts with text is moved in
+    // by that same step: the title, the line of facts and the lines under them share one left edge. A terminal draws the label alone
     const lead = e.surface === 'terminal' ? 0 : 'xs'
     // On a small card the line also counts its to-dos, before the time
     const facts = (one: Todo, isWhole: boolean, count = '') => {
@@ -6012,7 +6012,7 @@ const panelHooks = (on: On) => {
       // Another chat's work is moved to another model in that chat
       if (one.status !== 'working' || !name || one.chat)
         return (
-          <Box paddingLeft={lead}>
+          <Box paddingLeft={isWhole ? 0 : lead}>
             <Text dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{glance(one, count)}</Text>
           </Box>
         )
@@ -6665,9 +6665,7 @@ const panelHooks = (on: On) => {
             {one.status === 'working' ? <Box width={1} flexShrink={0} backgroundColor={LIVE} /> : null}
             <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
               <Box flexDirection="column">
-                <Box paddingLeft={lead}>
-                  <Text bold wrap="wrap">{titleOf(one)}</Text>
-                </Box>
+                <Text bold wrap="wrap">{titleOf(one)}</Text>
                 {facts(one, true)}
               </Box>
               {parent ? (
@@ -6675,7 +6673,7 @@ const panelHooks = (on: On) => {
                   <Button key={`open-parent-${one.id}-${presses}`} label={`↑ A helper of: ${cut(titleOf(parent), Math.max(20, room - 16))}`} plain dimColor hover={{ scope: `parent-${one.id}`, underline: true }} onPress={() => openWork($, parent.id)} />
                 </Box>
               ) : null}
-              {one.chat ? <Box paddingLeft={lead}><Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat, selfName()) ? `, ${chatSide(one.chat, selfName())}` : ''}`}</Text></Box> : null}
+              {one.chat ? <Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat, selfName()) ? `, ${chatSide(one.chat, selfName())}` : ''}`}</Text> : null}
               {(one.status === 'working' && !one.chat) || left(one) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
@@ -6742,7 +6740,7 @@ const panelHooks = (on: On) => {
                   {label}
                 </Button>
               ) : (
-                <Box paddingLeft={lead}>{label}</Box>
+                <Box flexShrink={1} minWidth={0} paddingLeft={lead}>{label}</Box>
               )}
             </Box>
             {side ? (
