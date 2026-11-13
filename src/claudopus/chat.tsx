@@ -384,16 +384,20 @@ const chatHooks = (on: On) => {
   })
 
   // The person's principles and working rules ship with the mod: every conversation, a chat's and each piece of work's, carries them
-  // word for word as an instruction file of the person's own, and the same text loaded from elsewhere is not sent twice
+  // word for word as an instruction file of the person's own, and the same text loaded from elsewhere is not sent twice. In a chat
+  // the app runs on another Mac over ssh they end with the rule for what needs the person's hands there
   on('prompt.context', async ($, e, next) => {
     const r = await next(e)
     const files = r.instructionFiles ?? e.instructionFiles
     // The person's own copy in the memory folder when there is one, the shipped principles otherwise
     const { path, text: content } = await inForce($, $.plugin.root, dir, 'rules/CLAUDE.md')
     if (!files || !content.trim()) return r
-    const others = files.filter(one => one.content.trim() !== content.trim())
+    // Another copy of the mod loaded beside this one sends the same principles, with the rule for afar after them or not
+    const others = files.filter(one => !one.content.trim().startsWith(content.trim()))
     const at = others.findIndex(one => one.kind !== 'managed')
-    const ours = { path, kind: 'user' as const, content }
+    // Read here, not from the flag the chat's start sets, so a context made before that start ends still carries the rule
+    const isAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
+    const ours = { path, kind: 'user' as const, content: isAfar ? `${content.trimEnd()}\n\n${named(AFAR_RULE)}\n` : content }
 
     return { ...r, instructionFiles: at < 0 ? [...others, ours] : [...others.slice(0, at), ours, ...others.slice(at)] }
   })
