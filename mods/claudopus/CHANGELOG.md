@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.85 · 13 November 2026
+- A card whose work is acting on your reply to its ask turns purple, as work under way, from the moment you reply until it stops again; its ask and answers stay there to press, and it turns amber again only once the work stops with the ask still open.
+- The header counts that card as at work rather than as waiting on you, and the line above the terminal prompt shows the ask in purple with the working octopus while it acts.
+- In the terminal, work whose turn ends while a command it started in the background still runs stays at work, purple, instead of showing Finished or waiting on you; it finishes when it is actually done.
+
 ## 0.2.84 · 13 November 2026
 - The chat answers a question that reading a few files answers, such as what a function does, by reading them itself, with no background work started. Anything that changes a file, runs a command or needs more than a few reads still goes to background work.
 
