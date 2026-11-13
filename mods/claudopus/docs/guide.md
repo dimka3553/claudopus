@@ -40,6 +40,8 @@ The mod also adds a short set of working principles ([rules/CLAUDE.md](../rules/
 
 The chat picks a model for each piece of work: Opus for most, Sonnet for long legwork, Fable only for heavy work. A check of finished work runs on Opus, or on Fable for work built on Fable, never on Sonnet. Your account needs access to the model it picks.
 
+No work runs on an older model or on Haiku (unless you name Haiku in `models`). An agent started on one, by the chat or by a piece of work, is refused. When the app itself moves running work to an older model, as it does after its safeguards flag a message (its setting "Switch models when a message is flagged"), each step of that work goes to Fable 5.2 instead (an older Sonnet, or Haiku, goes to Sonnet 5.5), and while that lasts the work's own card says which model it was kept off; a helper's says so once opened, and `log.md` has a line for each. If the model it goes to flags the message too, the work stops. A card's model is the one that really answered its last step; if that is still an older model, the card says it is not a model work should run on. The chat's own thread stays on the model you picked for it, and with `agents` off none of this applies.
+
 ## Needs
 
 - Claude Code 2.1.287 or newer in the terminal, or the desktop app 2.1.286 or newer. The panel draws in VS Code from 2.1.299.

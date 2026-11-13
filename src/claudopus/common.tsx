@@ -190,11 +190,33 @@ const share = (tokens: number, window: number) => (window ? `context ${percent(t
 
 // A model's name as the app writes it, from its id or alias: "Opus 5.5". Nothing for a name it cannot read
 const modelName = (id: string) => {
-  const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:-(\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
+  const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:[-.](\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
   return m?.[1] ? `${m[1].charAt(0).toUpperCase()}${m[1].slice(1)}${m[2] ? ` ${m[2]}${m[3] ? `.${m[3]}` : ''}` : ''}` : ''
 }
 // The models the person can move running work to from its card, by the id each step is sent with. Never Haiku
 const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2']
+// The model a step of work is sent to in place of one no work runs on: an older version than the newest above, which the app moves
+// work to after its safeguards flag a message, goes to the newest Fable or Sonnet, and Haiku to Sonnet. Nothing for a model work
+// may run on: the three above or a newer version, a name with no version, which the app reads as the newest, and Haiku when the
+// settings name it for a kind of work
+const INSTEAD: Record<string, string> = { Opus: 'claude-fable-5-2', Fable: 'claude-fable-5-2', Sonnet: 'claude-sonnet-5-5', Haiku: 'claude-sonnet-5-5' }
+const rightModel = (id: string): string | undefined => {
+  const [family = '', version = ''] = modelName(id).split(' ')
+  if (!family) return undefined
+  if (family === 'Haiku') return Object.values(models).includes('haiku') ? undefined : INSTEAD.Haiku
+  if (!version) return undefined
+  const newest = MODELS.map(modelName).find(one => one.startsWith(family))?.split(' ')[1] ?? ''
+  const [major = 0, minor = 0] = version.split('.').map(Number)
+  const [topMajor = 0, topMinor = 0] = newest.split('.').map(Number)
+  // An id that leads with a date or an old numbering ("claude-3-5-sonnet-20241022") is an older model too
+  const isOlder = major > 99 || major < topMajor || (major === topMajor && minor < topMinor)
+  return isOlder ? INSTEAD[family] : undefined
+}
+// The work and helpers whose steps the app sent to such a model, each said in the log once
+const sentElsewhere = new Set<string>()
+// What an Agent call is answered when it names such a model
+const WRONG_MODEL = (named: string) =>
+  `No work runs on ${modelName(named) || named}. Name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
 // The line written into a piece of work's own chat when the person moves it to another model; the panel draws it as a line of its own
 const MODEL_HEAD = 'Model changed to '
 const MODEL_LINE = /^Model changed to (.+?) at (\d{1,2}:\d{2})\./

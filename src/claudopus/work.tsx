@@ -172,6 +172,12 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       return r
     }
+    // No agent, the chat's or a work's helper, is started on an older model or on Haiku
+    if (!isOff && e.tool === 'Agent' && rightModel(String((e as { model?: unknown }).model ?? ''))) {
+      const wrong = String((e as { model?: unknown }).model)
+      await log($, `refused an Agent call on ${modelName(wrong)}`)
+      return { deny: WRONG_MODEL(wrong) }
+    }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
     // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
@@ -223,7 +229,18 @@ const workHooks = (on: On) => {
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-    const r = yield* next(chosen && modelName(chosen) !== modelName(e.model) ? { ...e, model: chosen } : e)
+    // A step the app sends to an older model or to Haiku (it moves work to an older model after its safeguards flag a message) goes
+    // to a model work runs on instead, and the work's card says which model it was kept off
+    const instead = id !== undefined && !chosen && !isOff ? rightModel(e.model) : undefined
+    if (id !== undefined && instead && !sentElsewhere.has(`${id} ${e.model}`)) {
+      sentElsewhere.add(`${id} ${e.model}`)
+      await log($, `work ${id} was sent to ${modelName(e.model)} by the app: its steps go to ${modelName(instead)}`)
+    }
+    // The card says so only while it holds: not once the app sends its steps to a right model again, or the person picked one
+    const moved = instead ? modelName(e.model) : undefined
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
+    const to = chosen && modelName(chosen) !== modelName(e.model) ? chosen : instead
+    const r = yield* next(to ? { ...e, model: to } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)

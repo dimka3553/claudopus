@@ -208,11 +208,33 @@ const share = (tokens: number, window: number) => (window ? `context ${percent(t
 
 // A model's name as the app writes it, from its id or alias: "Opus 5.5". Nothing for a name it cannot read
 const modelName = (id: string) => {
-  const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:-(\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
+  const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:[-.](\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
   return m?.[1] ? `${m[1].charAt(0).toUpperCase()}${m[1].slice(1)}${m[2] ? ` ${m[2]}${m[3] ? `.${m[3]}` : ''}` : ''}` : ''
 }
 // The models the person can move running work to from its card, by the id each step is sent with. Never Haiku
 const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2']
+// The model a step of work is sent to in place of one no work runs on: an older version than the newest above, which the app moves
+// work to after its safeguards flag a message, goes to the newest Fable or Sonnet, and Haiku to Sonnet. Nothing for a model work
+// may run on: the three above or a newer version, a name with no version, which the app reads as the newest, and Haiku when the
+// settings name it for a kind of work
+const INSTEAD: Record<string, string> = { Opus: 'claude-fable-5-2', Fable: 'claude-fable-5-2', Sonnet: 'claude-sonnet-5-5', Haiku: 'claude-sonnet-5-5' }
+const rightModel = (id: string): string | undefined => {
+  const [family = '', version = ''] = modelName(id).split(' ')
+  if (!family) return undefined
+  if (family === 'Haiku') return Object.values(models).includes('haiku') ? undefined : INSTEAD.Haiku
+  if (!version) return undefined
+  const newest = MODELS.map(modelName).find(one => one.startsWith(family))?.split(' ')[1] ?? ''
+  const [major = 0, minor = 0] = version.split('.').map(Number)
+  const [topMajor = 0, topMinor = 0] = newest.split('.').map(Number)
+  // An id that leads with a date or an old numbering ("claude-3-5-sonnet-20241022") is an older model too
+  const isOlder = major > 99 || major < topMajor || (major === topMajor && minor < topMinor)
+  return isOlder ? INSTEAD[family] : undefined
+}
+// The work and helpers whose steps the app sent to such a model, each said in the log once
+const sentElsewhere = new Set<string>()
+// What an Agent call is answered when it names such a model
+const WRONG_MODEL = (named: string) =>
+  `No work runs on ${modelName(named) || named}. Name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
 // The line written into a piece of work's own chat when the person moves it to another model; the panel draws it as a line of its own
 const MODEL_HEAD = 'Model changed to '
 const MODEL_LINE = /^Model changed to (.+?) at (\d{1,2}:\d{2})\./
@@ -6266,6 +6288,12 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       return r
     }
+    // No agent, the chat's or a work's helper, is started on an older model or on Haiku
+    if (!isOff && e.tool === 'Agent' && rightModel(String((e as { model?: unknown }).model ?? ''))) {
+      const wrong = String((e as { model?: unknown }).model)
+      await log($, `refused an Agent call on ${modelName(wrong)}`)
+      return { deny: WRONG_MODEL(wrong) }
+    }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
     // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
@@ -6317,7 +6345,18 @@ const workHooks = (on: On) => {
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-    const r = yield* next(chosen && modelName(chosen) !== modelName(e.model) ? { ...e, model: chosen } : e)
+    // A step the app sends to an older model or to Haiku (it moves work to an older model after its safeguards flag a message) goes
+    // to a model work runs on instead, and the work's card says which model it was kept off
+    const instead = id !== undefined && !chosen && !isOff ? rightModel(e.model) : undefined
+    if (id !== undefined && instead && !sentElsewhere.has(`${id} ${e.model}`)) {
+      sentElsewhere.add(`${id} ${e.model}`)
+      await log($, `work ${id} was sent to ${modelName(e.model)} by the app: its steps go to ${modelName(instead)}`)
+    }
+    // The card says so only while it holds: not once the app sends its steps to a right model again, or the person picked one
+    const moved = instead ? modelName(e.model) : undefined
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
+    const to = chosen && modelName(chosen) !== modelName(e.model) ? chosen : instead
+    const r = yield* next(to ? { ...e, model: to } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)
@@ -6717,8 +6756,10 @@ const panelHooks = (on: On) => {
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
+    // Work the app sent to an older model says which one it was kept off; work that answers from one all the same says so
+    const offModel = (one: Todo) => (rightModel(one.model ?? '') ? 'not a model work should run on' : one.moved ? `kept off ${one.moved}` : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -6751,7 +6792,7 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
         )
-      const rest = [one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
+      const rest = [offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took(at - one.startedAt)].filter(Boolean).join(' · ')
       return (
         <Box flexDirection="row" alignItems="flex-start">
           <Button
