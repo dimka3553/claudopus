@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.79 · 13 November 2026
+- The README and the guide say that jobs running at once each spend their own tokens, so on metered billing five at a time spend about five times as fast.
+- Stats says what its reply time measures, and measures it: from your message to the chat's last step before the next message, on average, without the background work it started. It used to run on until the next message came in, which counted the wait for background work and idle time.
+- The two notification apps come with a SHA-256 of each of their files, checked before every release, and the guide says how to rebuild them and compare.
+
 ## 0.2.78 · 13 November 2026
 - A reply in your own words that isn't one of an ask's buttons, such as "Show me images first.", no longer clears the ask: it stays open on the card with your reply under it, and the card stays among the running cards while the work acts on it, even after the work has handed in its report.
 - Only a button, a reply in a button's words, or the work clearing or replacing its ask settles it. A card whose work has ended but still asks says "Waits for your answer" instead of "Finished", and never shows under Finished.
