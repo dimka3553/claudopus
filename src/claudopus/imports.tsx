@@ -21,3 +21,5 @@ import { detachedOf, DOWNLOAD_CMD, foldJobs, isOutputEnded, isPausedProc, isPid,
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
+import { FOOTPRINT_EVERY, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
+import type { UsageFigures, UsageKept } from './usage'

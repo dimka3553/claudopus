@@ -18,7 +18,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   expect(await drawn(pane)).toEqual(['working'])
   expect(await drawn(band)).toEqual(['working-small'])
 
-  // One finishes while another works: both octopuses are happy, the band still says what the other is doing
+  // One finishes while another works: both octopuses are happy
   await clock.advance(400)
   await end('a1', 't1')
   expect(await drawn(pane)).toEqual(['happy'])
@@ -27,7 +27,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   const firstBand = await moment(band)
   expect(first).toBeDefined()
   expect(firstBand).toBeDefined()
-  expect(await band.find({ type: 'Text', text: /Check the ears/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /Check the ears/ })).toBeUndefined()
   // The other finishes in the pause: the same drawing stays, with nothing else running, and the band stays for the pause
   await clock.advance(1_000)
   await end('a2', 't2')
@@ -35,7 +35,6 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   expect(await drawn(band)).toEqual(['happy-small'])
   expect(await moment(pane)).toBe(first)
   expect(await moment(band)).toBe(firstBand)
-  expect((await band.find({ type: 'Text', text: '✓ Finished' }))?.props.dimColor).toBe(true)
   // The first pause ends but the second has not: still happy, the same drawing; once both are over, at rest and the band gone
   await clock.advance(1_100)
   expect(await drawn(pane)).toEqual(['happy'])

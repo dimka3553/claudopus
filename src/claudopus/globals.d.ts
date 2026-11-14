@@ -10,6 +10,7 @@ import * as M7 from '../../mods/claudopus/hooks/update'
 import * as M8 from '../../mods/claudopus/hooks/changelog'
 import * as M9 from '../../mods/claudopus/hooks/tabmoves'
 import * as M10 from '../../mods/claudopus/hooks/jobs'
+import * as M11 from '../../mods/claudopus/hooks/usage'
 
 declare global {
   export import atom = M0.atom
@@ -214,4 +215,20 @@ declare global {
   export import Job = M10.Job
   export import JobKind = M10.JobKind
   export import TabMove = M9.TabMove
+  export import FOOTPRINT_EVERY = M11.FOOTPRINT_EVERY
+  export import gbText = M11.gbText
+  export import isMemoryHigh = M11.isMemoryHigh
+  export import keptOf = M11.keptOf
+  export import meterOf = M11.meterOf
+  export import nextKept = M11.nextKept
+  export import pctText = M11.pctText
+  export import rateText = M11.rateText
+  export import USAGE_AMBER = M11.USAGE_AMBER
+  export import USAGE_EVERY = M11.USAGE_EVERY
+  export import USAGE_LINUX = M11.USAGE_LINUX
+  export import USAGE_PURPLE = M11.USAGE_PURPLE
+  export import usageMac = M11.usageMac
+  export import usageSvg = M11.usageSvg
+  export import UsageFigures = M11.UsageFigures
+  export import UsageKept = M11.UsageKept
 }

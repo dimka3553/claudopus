@@ -20,6 +20,8 @@ import { detachedOf, DOWNLOAD_CMD, foldJobs, isOutputEnded, isPausedProc, isPid,
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
+import { FOOTPRINT_EVERY, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
+import type { UsageFigures, UsageKept } from './usage'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
 // helpers, the log and the chat's saved words
@@ -6612,6 +6614,8 @@ const chatHooks = (on: On) => {
       const isFlowing = (await read($, flows)).some(f => f.status === 'working')
       // Held while the person types into a reply box (holdTimes)
       if (!isTyping && (isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length))) await update($, tick, n => n + 1)
+      // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
+      if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
       const now = await $.clock.now()
       for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)].filter(card => isLingering(card, now))) {
@@ -8177,14 +8181,131 @@ const toolHooks = (on: On) => {
 
 }
 
-// Above the prompt: the small octopus while work runs
+// How Claude uses this computer, for the line above the prompt: looked at every few seconds while work runs, shared by every chat
+// through one small file, so a computer with many chats open still looks once. The measuring and the drawings are in hooks/usage.ts
+
+let usageKept: UsageKept | undefined
+let usageBusy = false
+// When this chat last tried a look, whether or not it gave figures: a look that fails waits as long as one that works
+let usageTriedAt = 0
+// When this chat last asked top, whether or not the look came back: top costs half a second of the processor
+let usageTopTriedAt = 0
+let usageFile = ''
+// The shared file, in the person's own temporary folder (on Linux, their cache folder: /tmp is everyone's)
+const usagePathOf = async ($: EngineInterface) => {
+  if (usageFile) return usageFile
+  const tmp = isLinux ? '' : ((await $.env.get('TMPDIR')) ?? '').replace(/\/+$/, '')
+  const home = (await $.env.get('HOME')) ?? ''
+  usageFile = tmp ? `${tmp}/claudopus-usage.json` : `${home}/.cache/claudopus-usage.json`
+  return usageFile
+}
+
+// One look when the last is due: a fresh one another chat left is taken as it is, and a chat that is looking says so first in a
+// small file beside it, so chats that fall due together look once
+const lookUsage = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  const isFresh = (at: number) => now >= at && now - at < USAGE_EVERY - 500
+  if (usageBusy || isFresh(usageTriedAt) || (usageKept && isFresh(usageKept.at))) return
+  usageBusy = true
+  usageTriedAt = now
+  try {
+    const path = await usagePathOf($)
+    const shared = keptOf(await $.fs.read(path).catch(() => ''))
+    if (shared && isFresh(shared.at)) return void (usageKept = shared)
+    const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
+    if (taking && now >= taking && now - taking < USAGE_EVERY / 2) return
+    await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
+    const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.at) ? shared : usageKept
+    // top, the costly part, at most once a minute, answered or not
+    const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
+    const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
+    if (isTop) usageTopTriedAt = now
+    const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
+    const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
+    if (!kept) return
+    usageKept = kept
+    await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
+  } finally {
+    usageBusy = false
+  }
+}
+// The figures to show, when a look has been had lately
+const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)
+
+// What each figure says in words, for a reader that cannot see the drawings
+const usageWords = (f: UsageFigures) => ({
+  memory: `Memory: ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use, Claude ${gbText(f.memClaude)} GB`,
+  cpu: f.cpu === undefined ? '' : `Processor: ${pctText(f.cpu)}% busy, Claude ${pctText(f.cpuClaude ?? 0)}% of the whole`,
+  disk: f.disk === undefined ? '' : `Disk: ${rateText(f.disk).join(' ')} read and written`,
+  net: f.net === undefined ? '' : `Network: ${rateText(f.net).join(' ')} in and out`,
+})
+
+// The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
+// for the disk and the network
+const usageDrawn = (ui: Ui, f: UsageFigures) => {
+  const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
+  const { Box, Text } = ui
+  if (!table.Svg) return null
+  const Svg = table.Svg
+  const isHigh = isMemoryHigh(f)
+  const words = usageWords(f)
+  const one = (key: string, svg: { source: string; width: number; height: number }, alt: string, value: string, unit: string, color?: string) => (
+    <Box key={key} flexDirection="row" flexShrink={0} alignItems="center">
+      <Svg key={`${key}-${svg.source.length}-${hashOf(svg.source)}`} source={svg.source} alt={alt} width={svg.width} height={svg.height} />
+      <Text color={color} wrap="truncate-end">
+        {value}
+        <Text dimColor={!color} color={color}>{unit}</Text>
+      </Text>
+    </Box>
+  )
+  return [
+    one('usage-memory', usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),
+    f.cpu === undefined ? null : one('usage-cpu', usageSvg('cpu', { claude: f.cpuClaude ?? 0, used: f.cpu }), words.cpu, pctText(f.cpu), '%'),
+    f.disk === undefined ? null : one('usage-disk', usageSvg('disk'), words.disk, rateText(f.disk)[0], ` ${rateText(f.disk)[1]}`),
+    f.net === undefined ? null : one('usage-net', usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
+  ]
+}
+// The line as text, for the terminal, in a phone's 50 columns with the octopus: a word for each, units cut to G and M/s, and three-cell meters with Claude's cells purple
+const USAGE_CELLS = 3
+const usageText = (ui: Ui, f: UsageFigures) => {
+  const { Text } = ui
+  const isHigh = isMemoryHigh(f)
+  const meter = (claude: number, used: number, color?: string) => {
+    const { mine, rest } = meterOf(claude, used, USAGE_CELLS)
+    return [
+      <Text key="mine" color={USAGE_PURPLE}>{'▰'.repeat(mine)}</Text>,
+      <Text key="rest" color={color} dimColor={!color}>{'▰'.repeat(rest)}</Text>,
+      <Text key="free" dimColor>{'▱'.repeat(USAGE_CELLS - mine - rest)}</Text>,
+    ]
+  }
+  const amber = isHigh ? USAGE_AMBER : undefined
+  return (
+    <Text wrap="truncate-end">
+      <Text color={amber} dimColor={!amber}>mem</Text>
+      {meter(f.memClaude / f.memTotal, f.memUsed / f.memTotal, amber)}
+      <Text color={amber}>{` ${gbText(f.memUsed)}`}</Text>
+      <Text color={amber} dimColor={!amber}>G</Text>
+      {f.cpu === undefined ? null : [<Text key="c" dimColor>{' cpu'}</Text>, ...meter(f.cpuClaude ?? 0, f.cpu), <Text key="cv">{` ${pctText(f.cpu)}`}</Text>, <Text key="cu" dimColor>%</Text>]}
+      {f.disk === undefined ? null : [<Text key="d" dimColor>{' disk '}</Text>, <Text key="dv">{rateText(f.disk)[0]}</Text>, <Text key="du" dimColor>{rateText(f.disk)[1].replace('B/s', '/s')}</Text>]}
+      {f.net === undefined ? null : [<Text key="n" dimColor>{' net '}</Text>, <Text key="nv">{rateText(f.net)[0]}</Text>, <Text key="nu" dimColor>{rateText(f.net)[1].replace('B/s', '/s')}</Text>]}
+    </Text>
+  )
+}
+// A short mark of a drawing, so a new drawing is a new picture to the app
+const hashOf = (text: string) => {
+  let h = 0
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0
+  return (h >>> 0).toString(36)
+}
+
+// Above the prompt: the small octopus while work runs, and how Claude uses this computer
 
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
 let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
 const bandHooks = (on: On) => {
 
-  // Above the prompt, while work runs: a small mark that it does, and nothing of what it is doing
+  // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const cards = await read($, todos)
@@ -8253,25 +8374,18 @@ const bandHooks = (on: On) => {
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
-    // What the work that last said something is doing, in a few whole words: the to-do it is on (a to-do is written in a few
-    // words), else its title. Never cut with an ellipsis: the band is one line
-    const latest = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')
-    const [lead] = [...working].sort((a, b) => (latest(b)?.at ?? b.startedAt) - (latest(a)?.at ?? a.startedAt))
-    const doing = lead ? lead.items.find(item => item.state === 'doing')?.text || lead.title || 'Working' : '✓ Finished'
-    const more = working.length - 1
+    // How Claude uses this computer: memory in use and Claude's part, how busy the processor is and Claude's part, the disk's and the
+    // network's speed, looked at every few seconds while work runs. The second's tick redraws it as the figures move
+    await read($, tick)
+    const figures = usageNow(await $.clock.now())
+    if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
         {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
-        <Box flexShrink={1} minWidth={0}>
-          <Text dimColor wrap="truncate-end">{oneLine(doing)}</Text>
-        </Box>
-        {more > 0 ? (
-          <Box flexShrink={0}>
-            <Text dimColor>{`· +${more} more`}</Text>
-          </Box>
-        ) : null}
-        {isPanelAway ? (
+        {figures ? (e.surface === 'terminal' ? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box> : usageDrawn(ui, figures) ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box>) : null}
+        {/* The figures fill a phone's terminal: the hint shows until they come */}
+        {isPanelAway && !figures ? (
           <Box flexShrink={0}>
             <Text dimColor>· /claudopus shows the panel</Text>
           </Box>

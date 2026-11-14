@@ -39,7 +39,7 @@ const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my pri
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: () => string; wroteAt: () => number } } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: () => string; wroteAt: () => number }; usage?: (script: string) => string } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -204,6 +204,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       files.set(rest[3], `${files.get(rest[3]) ?? ''}${rest[4] ?? ''}`)
       return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // How the computer is used, as the line above the prompt looks at it: what the test gives, else nothing to read
+    if (tool === 'sh' && String(rest[1]).startsWith('echo "@@SELF@@')) return ok(options.usage?.(String(rest[1])) ?? '')
     // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
     // says, last written when it says, and every detached process it names still runs
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {
@@ -880,9 +882,8 @@ test('what I ask for becomes a box in the panel, the panel opens once, and the c
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const band = await $.ui.mount({ ...BAND, surface } as never)
-    // One short line: what the work that last moved is doing, and how many others run
-    expect((await band.find({ type: 'Text', text: /more$/ }))?.text).toBe('· +1 more')
-    expect((await band.find({ type: 'Text', text: /Check the ears|Fix the nose/ }))?.props.wrap).toBe('truncate-end')
+    // One short line, and never what a piece of work is doing: that is on its card
+    expect(await band.find({ type: 'Text', text: /more$|Check the ears|Fix the nose/ })).toBeUndefined()
     expect(await band.findAll({ type: 'Button' })).toHaveLength(0)
     await band.unmount()
   }
@@ -1961,7 +1962,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   expect(await drawn(pane)).toEqual(['working'])
   expect(await drawn(band)).toEqual(['working-small'])
 
-  // One finishes while another works: both octopuses are happy, the band still says what the other is doing
+  // One finishes while another works: both octopuses are happy
   await clock.advance(400)
   await end('a1', 't1')
   expect(await drawn(pane)).toEqual(['happy'])
@@ -1970,7 +1971,7 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   const firstBand = await moment(band)
   expect(first).toBeDefined()
   expect(firstBand).toBeDefined()
-  expect(await band.find({ type: 'Text', text: /Check the ears/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /Check the ears/ })).toBeUndefined()
   // The other finishes in the pause: the same drawing stays, with nothing else running, and the band stays for the pause
   await clock.advance(1_000)
   await end('a2', 't2')
@@ -1978,7 +1979,6 @@ test('the octopus turns happy and green when work finishes, for its pause, then 
   expect(await drawn(band)).toEqual(['happy-small'])
   expect(await moment(pane)).toBe(first)
   expect(await moment(band)).toBe(firstBand)
-  expect((await band.find({ type: 'Text', text: '✓ Finished' }))?.props.dimColor).toBe(true)
   // The first pause ends but the second has not: still happy, the same drawing; once both are over, at rest and the band gone
   await clock.advance(1_100)
   expect(await drawn(pane)).toEqual(['happy'])
@@ -6856,4 +6856,97 @@ test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper
   await lapse('t2')
   expect(files.has(`${KEEP_AT}.handover`)).toBe(true)
   expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ ids: ['a1'] })
+})
+
+// The line above the prompt while work runs: how Claude uses the computer, drawn on the desktop and written in the terminal
+
+// A Mac's look as its commands print it, with Claude's app and chat, another app, and how much has moved by the nth look
+const psTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}.00`
+const lookAt = (n: number, anon = 1583261) =>
+  [
+    '@@SELF@@ 1423',
+    '@@PS@@',
+    `  852     1 686704   ${psTime(10 + n * 10)} /Applications/Claude.app/Contents/MacOS/Claude`,
+    ' 1423   852 1745264   1:00.00 /Users/sam/Library/Application Support/Claude/claude-code/2.1.325/x/claude.app/Contents/MacOS/claude',
+    `  700     1 400000   ${psTime(10 + n * 15)} /Applications/Safari.app/Contents/MacOS/Safari`,
+    '@@VM@@',
+    'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
+    'Pages wired down:                             207303.',
+    'Pages purgeable:                               42324.',
+    `Anonymous pages:                             ${anon}.`,
+    'Pages occupied by compressor:                 125152.',
+    '@@SYS@@',
+    '68719476736',
+    '10',
+    '@@IO@@',
+    '              disk0 ',
+    '    KB/t xfrs   MB ',
+    `   19.03 42547108 ${1000 + n * 300} `,
+    '@@NET@@',
+    `en0        1500  <Link#15>   02:00:00:00:00:01 1     0 ${n * 5_000_000} 2     0 0     0`,
+    '@@TOP@@',
+    'PID    MEM',
+    '852    3000M',
+    '1423   400M',
+    '',
+  ].join('\n')
+
+test('while work runs, the line above the prompt shows memory, the processor, the disk and the network, and nothing of what the work does', async ($, on) => {
+  let n = 0
+  let anon = 1583261
+  const { clock } = world(on, { usage: () => lookAt((n += 1), anon) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  // Two looks five seconds apart give the speeds
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const shown = await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  expect(shown).toBe(true)
+  // Memory used of the Mac's whole, the processor busy, the disk's and the network's speed, each beside its drawing
+  expect((await desk.find({ type: 'Text', text: /^29 GB$/ }))?.text).toBe('29 GB')
+  expect((await desk.find({ type: 'Text', text: /^50%$/ }))?.text).toBe('50%')
+  expect((await desk.find({ type: 'Text', text: /^1 MB\/s$/ }))?.text).toBe('1 MB/s')
+  const drawings = await desk.findAll({ type: 'Svg' })
+  // The octopus, then memory and the processor with Claude's part in purple, the disk and the network
+  expect(drawings.length).toBeGreaterThanOrEqual(4)
+  const memory = drawings.find(d => String(d.props.alt).startsWith('Memory'))
+  expect(memory?.props.alt).toBe('Memory: 29 of 64 GB in use, Claude 3.3 GB')
+  expect(String(memory?.props.source)).toContain('#8A63F0')
+  expect(drawings.find(d => String(d.props.alt).startsWith('Processor'))?.props.alt).toBe('Processor: 50% busy, Claude 20% of the whole')
+  expect(await desk.find({ type: 'Text', text: /fix the nose|Fix the nose/ })).toBeUndefined()
+  await desk.unmount()
+
+  // The terminal draws no pictures: the same line in words, with small meters of cells
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  const line = await term.find({ type: 'Text', text: /^mem/ })
+  expect(line?.text).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% disk 63M\/s net 1M\/s$/)
+  expect(line?.props.wrap).toBe('truncate-end')
+  await term.unmount()
+
+  // Memory past nine tenths of the whole turns amber
+  anon = 3_600_000
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const high = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const amber = await until(async () => (await high.find({ type: 'Text', text: /^59 GB$/ })) ?? undefined)
+  expect(amber?.props.color).toBe('#E5A50A')
+  await high.unmount()
+})
+
+test('a look that gives nothing waits as long as one that works, so a broken look is not tried each second', async ($, on) => {
+  const asked: string[] = []
+  let isBroken = true
+  const { clock } = world(on, { usage: script => (asked.push(script), isBroken ? '' : lookAt(asked.length)) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  for (let s = 0; s < 9; s++) await clock.advance(1000)
+  // Nine seconds of a broken look: tried twice, five seconds apart, not each second, and top asked only the first time
+  expect(asked.length).toBe(2)
+  expect(asked.map(script => script.includes('top -l'))).toEqual([true, false])
+  isBroken = false
+  for (let s = 0; s < 6; s++) await clock.advance(1000)
+  expect(asked.length).toBe(3)
+  expect(asked[2]?.includes('top -l')).toBe(false)
 })
