@@ -34,7 +34,7 @@ const lookEnds = async ($: EngineInterface) => {
   if (!was) return
   for (const one of all) {
     const before = was.get(one.id)
-    if (one.status === 'working' || before === undefined || before === standing(one.status, one.endedAt)) continue
+    if (one.status === 'working' || before === undefined || before === standing(one.status, one.endedAt) || cutPending.has(one.id)) continue
     if (now - one.endedAt > STALE_END || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
     announced.set(one.id, now)
     if (pressed.delete(one.id)) continue

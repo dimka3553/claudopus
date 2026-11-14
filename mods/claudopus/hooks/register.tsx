@@ -963,7 +963,7 @@ const sync = async ($: EngineInterface) => {
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
           ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
           : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
-            card.status === 'working' && !card.steps && !card.entries.length && !card.words && one.status === 'idle'
+            card.status === 'working' && !card.steps && !card.entries.length && !card.words && one.status === 'idle' && !cutPending.has(card.id)
             ? ended(card, 'done', now)
           : // Work that handed in its report and that the engine still holds on its own background work left something running;
             // once nothing does, or it was stopped, not
@@ -3632,7 +3632,7 @@ const lookEnds = async ($: EngineInterface) => {
   if (!was) return
   for (const one of all) {
     const before = was.get(one.id)
-    if (one.status === 'working' || before === undefined || before === standing(one.status, one.endedAt)) continue
+    if (one.status === 'working' || before === undefined || before === standing(one.status, one.endedAt) || cutPending.has(one.id)) continue
     if (now - one.endedAt > STALE_END || now - (announced.get(one.id) ?? -Infinity) < AGAIN) continue
     announced.set(one.id, now)
     if (pressed.delete(one.id)) continue
@@ -6611,6 +6611,8 @@ const readCut = async ($: EngineInterface, id: string) => {
   const cutAt = typeof state.backAt === 'number' ? state.backAt : typeof state.cutAt === 'number' ? state.cutAt : 0
   return { ids, cutAt, state, handled }
 }
+// Cut-off work not yet looked at again: Claude Code may be starting it again, so it is neither ended nor announced meanwhile
+const cutPending = new Set<string>()
 const markCut = ($: EngineInterface, id: string, handled: CutHandled) => $.fs.write(keepFile(id, 'cut'), JSON.stringify(handled)).catch(err => log($, `cut-off work not noted: ${String(err)}`))
 // The words the work is started again with
 const CUT_TELL = (cutAt: number, here: boolean) =>
@@ -6630,6 +6632,7 @@ const noteCut = async ($: EngineInterface, id: string) => {
   if (now - cut.cutAt > CUT_OLD) return void log($, `work cut off at ${hhmm(cut.cutAt)} is too old to start again: ${cut.ids.join(', ')}`)
   const isCopy = await isKeptCopy($)
   await markCut($, id, { at: cut.cutAt, pid: enginePid, isDone: false })
+  for (const one of cut.ids) cutPending.add(one)
   await log($, `work cut off at ${hhmm(cut.cutAt)}${isCopy ? ', the chat going on here as a copy' : ''}: ${cut.ids.join(', ')}`)
   $.clock.after(CUT_LOOK, () => void bringBack($, id, cut.ids, cut.cutAt, isCopy).catch(err => log($, `cut-off work not started again: ${String(err)}`)))
 }
@@ -6640,6 +6643,7 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   const handled = parsedOr<CutHandled>(await readOr($, keepFile(id, 'cut')), {})
   if (handled.at === cutAt && handled.isDone) return
   await markCut($, id, { at: cutAt, pid: enginePid, isDone: true })
+  for (const one of ids) cutPending.delete(one)
   await sync($).catch(() => undefined)
   const live = await $.agent.list().catch(() => [])
   const back: string[] = []
