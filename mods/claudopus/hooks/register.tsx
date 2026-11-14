@@ -6937,7 +6937,7 @@ const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = fals
   const seen = jobLog.get(id)
   const wait = isWatch ? undefined : waitOf(cmd)
   const kind: JobKind = isWatch ? 'watch' : wait ? 'wait' : jobKindOf(cmd, what)
-  return { id, label: labelOf(what || cmd, cmd), cmd, kind, at, ...(seen ?? {}), ...(wait ? { waitsFor: wait.what } : {}), port: portOf(cmd) ?? seen?.port }
+  return { id, label: labelOf(what || cmd, cmd), cmd, kind, at, ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
 }
 // The jobs a card has running: what it sent to the background, and a command it has waited on a while; jobs alike are one
 const jobsOf = (one: Todo, at: number): Job[] =>
@@ -7005,6 +7005,7 @@ const lookJobs = async ($: EngineInterface) => {
   ]
   for (const id of jobLog.keys()) if (!owned.some(o => o.id === id)) jobLog.delete(id)
   for (const owner of jobNews.keys()) if (!owned.some(o => o.owner === owner)) jobNews.delete(owner)
+  for (const id of shellMissed.keys()) if (!owned.some(o => o.id === id)) shellMissed.delete(id)
   if (!owned.length) return
   const sid = await $.session.id().catch(() => '')
   if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
@@ -7024,14 +7025,14 @@ const lookJobs = async ($: EngineInterface) => {
   const pids = owned.flatMap(o => (o.pid ? [o.pid] : []))
   // One go: the end of each output with when it last changed, when each polled file last changed, which detached processes still
   // run, and now and then every process with its state
-  const mtime = 'm=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)'
+  const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
   const home = 'case $f in "~/"*) f="$HOME/${f#\\~/}";; esac'
-  const script = `n=$1; shift; i=0; for f; do i=$((i+1)); ${home}; ${mtime}; if [ $i -le $n ]; then printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; else printf '\\n@@AT@@ %s %s' "$m" "$f"; fi; done; printf '\\n@@ALIVE@@'; for p in ${pids.map(p => p.replace(/\D/g, '')).join(' ')}; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; printf '\\n'${isPs ? "; printf '@@PS@@\\n'; ps -axww -o pid=,ppid=,stat=,command=" : ''}`
+  const script = `n=$1; shift; i=0; for f; do i=$((i+1)); o=$f; ${home}; ${mtime}; if [ $i -le $n ]; then printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; else printf '\\n@@AT@@ %s %s' "$m" "$o"; fi; done; printf '\\n@@ALIVE@@'; for p in ${pids.map(p => p.replace(/\D/g, '')).join(' ')}; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; printf '\\n'${isPs ? "; printf '@@PS@@\\n'; ps -axww -o pid=,ppid=,stat=,etime=,command=" : ''}`
   const r = await $.process.run(['sh', '-c', script, 'sh', String(files.length), ...files, ...targets], { timeoutMs: 5000 }).catch(() => undefined)
   if (!r) return
   const [body = '', tail = ''] = r.stdout.split('\n@@ALIVE@@')
   const [aliveText = '', psText] = tail.split('@@PS@@\n')
-  if (psText !== undefined) ((jobProcs = procsOf(psText)), (jobProcsAt = now))
+  if (psText !== undefined) ((jobProcs = procsOf(psText, now)), (jobProcsAt = now))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
   // A detached job whose process ended leaves its card
@@ -7043,10 +7044,11 @@ const lookJobs = async ($: EngineInterface) => {
   // Each background command's shell, found by its words among the engine's shells: paused when any of its processes is, and gone
   // when no shell has been found for it twice in a row while others were (so a way of running the engine has not changed), as one the engine never said ended (only once a minute has passed)
   const bgs = list.flatMap(one => (one.bg ?? []).filter(b => !b.isWatch).map(b => ({ id: b.id, cmd: b.cmd ?? '', at: b.at })))
-  const shells = jobProcs.length ? shellsOf(jobProcs, bgs) : new Map<string, string | null>()
+  const shells = jobProcs.length ? shellsOf(jobProcs, bgs) : new Map<string, string | true | null>()
   const states = new Map<string, boolean>()
   for (const [id, pid] of shells) {
-    if (pid) ((states.set(id, treeOf(jobProcs, pid).some(isPausedProc))), shellMissed.delete(id))
+    if (typeof pid === 'string') states.set(id, treeOf(jobProcs, pid).some(isPausedProc))
+    if (pid) shellMissed.delete(id)
     else if (psText !== undefined && [...shells.values()].some(Boolean)) shellMissed.set(id, (shellMissed.get(id) ?? 0) + 1)
   }
   for (const o of owned) if (o.pid) states.set(o.id, treeOf(jobProcs, o.pid).some(isPausedProc))
@@ -7054,7 +7056,7 @@ const lookJobs = async ($: EngineInterface) => {
   // How what each wait waits for stands: a run it waits on paused or gone, a file it polls still for long
   const targetOf = (wait: NonNullable<ReturnType<typeof waitOf>>) => {
     const runs = wait.pattern
-      ? jobProcs.filter(p => p.command.includes(wait.pattern ?? '') && !/\b(pgrep|eval)\b/.test(p.command))
+      ? jobProcs.filter(p => isLike(p.command, wait.pattern ?? '') && !/shell-snapshots\/snapshot-/.test(p.command) && !/^(\S*\/)?pgrep\s/.test(p.command))
       : wait.pid
         ? jobProcs.filter(p => p.pid === wait.pid)
         : undefined
@@ -7062,7 +7064,7 @@ const lookJobs = async ($: EngineInterface) => {
       if (!runs.length) return wait.isStart ? '' : 'what it waits for has ended'
       if (runs.some(p => treeOf(jobProcs, p.pid).some(isPausedProc))) return 'what it waits for is paused'
     }
-    const at = wait.file ? [...changed].find(([f]) => f === wait.file || f.endsWith(`/${wait.file}`))?.[1] : undefined
+    const at = wait.file ? changed.get(wait.file) : undefined
     return at && now - at >= JOB_QUIET ? `${wait.file?.split('/').at(-1)} unchanged ${shortAgo(now - at)}` : ''
   }
   const parts = body.split(/\n@@JOB@@ ([^\n]*)\n/)
@@ -7101,6 +7103,14 @@ const lookJobs = async ($: EngineInterface) => {
 const shortAgo = (ms: number) => {
   const all = Math.max(0, Math.floor(ms / 1000))
   return all < 60 ? `${all}s` : all < 3600 ? `${Math.floor(all / 60)}m` : `${Math.floor(all / 3600)}h ${String(Math.floor(all / 60) % 60).padStart(2, '0')}m`
+}
+// A process's command against a pattern as pgrep -f reads it: a regular expression, or the words themselves when it is none
+const isLike = (command: string, pattern: string) => {
+  try {
+    return new RegExp(pattern).test(command)
+  } catch {
+    return command.includes(pattern)
+  }
 }
 
 // Steps that could have gone out together: after each step of work, a line in its next request when the step shows a pattern that
@@ -8606,7 +8616,7 @@ const panelHooks = (on: On) => {
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait', JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
         </Box>
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
@@ -8670,7 +8680,7 @@ const panelHooks = (on: On) => {
       if (jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
       const more = jobs.length - JOBS_SHOWN + 1
       const shown = jobs.slice(-(JOBS_SHOWN - 1))
-      const rest: Job = { id: `more-${card.id}`, label: `${more} more jobs`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
+      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (job.count ?? 1), 0)} more jobs`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
       return [...shown, rest].map(job => ({ one: card, job, kids: [] }))
     }
     const withJobs = (branches: Branch[]): Branch[] => branches.map(b => (b.job ? b : { ...b, kids: [...jobBranches(b.one), ...withJobs(b.kids)] }))

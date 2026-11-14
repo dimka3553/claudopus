@@ -47,6 +47,11 @@ test('a score a command prints is no progress: the 14 Nov "99.2%" was a coverage
   expect(latestOf('HEADLINE two-way mean: 0.804 mm (coverage 99.2% within 2 mm)\n').pct).toBeUndefined()
   expect(latestOf('flame.pkl:  47%|####   | 1.41G/3.00G [01:18<01:28, 18.0MB/s]\n').pct).toBe('47%')
   expect(latestOf('Training:  96%| 4800/5000 [12:01<00:30]\n').pct).toBe('96%')
+  expect(latestOf('Training: 96%|███| 4800/5000 [12:01<00:30, acc=95.1%]\n').pct).toBe('96%')
+  expect(latestOf('Computing coverage: 45%|████| 45/100\n').pct).toBe('45%')
+  expect(latestOf('step 120 of 2000 (6%)\n').pct).toBe('6%')
+  expect(latestOf('| model A | 99.2% |\n').pct).toBeUndefined()
+  expect(latestOf('95% of tests passed\n').pct).toBeUndefined()
   expect(isOutputEnded('1794640530\n\n[exited with code 0]\n')).toBe(true)
   expect(isOutputEnded('frame 81/120\n')).toBe(false)
 })
@@ -54,7 +59,11 @@ test('a score a command prints is no progress: the 14 Nov "99.2%" was a coverage
 test('a command that only polls is a wait that says what for; one that does real work after its loop is not', async () => {
   const rerun = 'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date'
   expect(waitOf(rerun)).toEqual({ what: 'RERUN_DONE in rerun.log', file: '/Users/x/contest/work/5/rerun.log' })
-  expect(waitOf('cd /x/work/2 && until [ -s run1/train_b.out ] ; do sleep 20; done; date; tail -2 /tmp/contest-queue.log')?.what).toBe('train_b.out')
+  expect(waitOf('cd /x/work/2 && until [ -s run1/train_b.out ] ; do sleep 20; done; date; tail -2 /tmp/contest-queue.log')).toEqual({ what: 'train_b.out', file: '/x/work/2/run1/train_b.out' })
+  // As the live ones read: a quoted alternation and a cd after the loop only report
+  expect(waitOf('until grep -q "RERUN_DONE" /x/5/rerun.log; do sleep 15; done; grep "frames placed\\|RERUN_DONE\\|Traceback" /x/5/rerun.log; date; uptime')?.what).toBe('RERUN_DONE in rerun.log')
+  expect(waitOf('until grep -q "RERUN_DONE" /x/5/rerun.log; do sleep 15; done; cd /x/5; grep "HEADLINE" rerun.log; date')?.what).toBe('RERUN_DONE in rerun.log')
+  expect(waitOf('until grep -q X /x/f; do sleep 15; done; grep X /x/f / python summarize.py')).toBeUndefined()
   expect(waitOf("until ! pgrep -f 'src/sfm.py run/s2' >/dev/null; do sleep 10; done; date")).toMatchObject({ what: 'src/sfm.py run/s2 to end', pattern: 'src/sfm.py run/s2' })
   expect(waitOf("until ! pgrep -f 'src/sfm.py run/s2' >/dev/null; do sleep 10; done; date; ../../turn.sh python src/dense.py run/s2 run/d4 > run/d4.log 2>&1")).toBeUndefined()
   expect(waitOf('python run_all.py')).toBeUndefined()
@@ -71,15 +80,15 @@ test('six alike waits are one row that says six; different jobs stay apart', asy
 test("a background command is found in the engine's shells by its words: paused when a process under it is, missing when none runs it", async () => {
   const snap = "/bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1-a.sh 2>/dev/null || true && eval "
   const procs = procsOf([
-    `11021 94084 Ss   ${snap}'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date'`,
-    `74000 94084 Ss   ${snap}'cd /Users/x/contest/work/1 && for d in 8 9 10; do python src/poisson.py run/d1/dense.ply run/d1/poisson$d.ply $d; done'`,
-    '74030 74000 S    /bin/zsh -c x',
-    '77569 74030 T    /Users/x/env/bin/python src/poisson.py run/d1/dense.ply run/d1/poisson10.ply 10',
-  ].join('\n'))
+    `11021 94084 Ss   00:10 ${snap}'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date'`,
+    `74000 94084 Ss   00:09 ${snap}'cd /Users/x/contest/work/1 && for d in 8 9 10; do python src/poisson.py run/d1/dense.ply run/d1/poisson$d.ply $d; done'`,
+    '74030 74000 S    00:09 /bin/zsh -c x',
+    '77569 74030 T    00:08 /Users/x/env/bin/python src/poisson.py run/d1/dense.ply run/d1/poisson10.ply 10',
+  ].join('\n'), 1_000_000)
   const shells = shellsOf(procs, [
-    { id: 'wait', cmd: 'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date', at: 1 },
-    { id: 'mesh', cmd: 'cd /Users/x/contest/work/1 && for d in 8 9 10; do python src/poisson.py run/d1/dense.ply run/d1/poisson$d.ply $d; done', at: 2 },
-    { id: 'gone', cmd: 'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date', at: 3 },
+    { id: 'wait', cmd: 'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date', at: 990_000 },
+    { id: 'mesh', cmd: 'cd /Users/x/contest/work/1 && for d in 8 9 10; do python src/poisson.py run/d1/dense.ply run/d1/poisson$d.ply $d; done', at: 991_000 },
+    { id: 'gone', cmd: 'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date', at: 995_000 },
   ])
   expect(shells.get('wait')).toBe('11021')
   expect(shells.get('mesh')).toBe('74000')

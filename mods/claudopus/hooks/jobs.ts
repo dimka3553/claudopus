@@ -17,6 +17,7 @@ export type Job = {
   isPaused?: boolean
   count?: number
   waitsFor?: string
+  waitFile?: string
   target?: string
 }
 
@@ -29,7 +30,7 @@ export const JOBS_SHOWN = 4
 export const JOB_TAIL = 4000
 
 // Purple and a round dot are a helper's alone: a job has its own colour and shape, and its kind in words at the head of its row
-export const JOB_COLOR: Record<JobKind, string> = { server: '#4EBA65', download: '#5AA7E6', script: '#E0913A', watch: '#9A9A9A', wait: '#9A9A9A' }
+export const JOB_COLOR: Record<JobKind, string> = { server: '#4EBA65', download: '#5AA7E6', script: '#36B5A8', watch: '#9A9A9A', wait: '#9A9A9A' }
 export const JOB_GLYPH: Record<JobKind, string> = { server: '◆', download: '▼', script: '■', watch: '◇', wait: '◇' }
 export const JOB_WORD: Record<JobKind, string> = { server: 'Server running', download: 'Downloading', script: 'Command running', watch: 'Watching', wait: 'Waiting' }
 export const JOB_HEAD: Record<JobKind, string> = { server: 'Server', download: 'Download', script: 'Command', watch: 'Watch', wait: 'Wait' }
@@ -51,9 +52,14 @@ export const jobKindOf = (cmd: string, label: string): JobKind =>
 export const portOf = (text: string) =>
   text.match(/(?:--port[= ]|-p |localhost:|127\.0\.0\.1:|0\.0\.0\.0:|\[::\]:|\bport )(\d{2,5})\b/i)?.[1] ?? text.match(/http\.server (\d{2,5})\b/)?.[1]
 
-const isProgress = (line: string) =>
-  /[█▉▊▋▌▍▎▏░▒▓#=]{2,}|\|[^|]*\||\b\d+(\.\d+)?\s?[kMG]?i?B\s?\/\s?\d|\d+\/\d+\b|\b(it|s)\/s\b|[kMG]B\/s\b|\beta\b|^\W*\d{1,3}(\.\d+)?\s?%/i.test(line) &&
-  !/\b(coverage|accuracy|score|mean|recall|precision|iou|loss)\b[^%]*\d\s?%/i.test(line)
+// A percent is progress when a bar follows it (tqdm and the like), whatever words the line holds; else the first percent on a line
+// that also counts toward a total, a rate or a time left. A score, a coverage figure or a table cell is not
+const pctOf = (line: string) => {
+  const bar = line.match(/(\d{1,3}(?:\.\d+)?)\s?%\s*(\|[█▉▊▋▌▍▎▏░▒▓#\s]*\||\[[=#>.\s-]*\]|[█▉▊▋▌▍▎▏░▒▓])/)
+  if (bar) return `${bar[1]}%`
+  const counts = /\b\d+\s?\/\s?\d+\b|\b\d+ of \d+\b|\b(it|s)\/s\b|[kMG]i?B\/s\b|\beta\b/i.test(line)
+  return counts ? line.match(/\b(\d{1,3}(?:\.\d+)?)\s?%/)?.[1]?.concat('%') : undefined
+}
 // The engine's own last line on the output of a background command that has ended
 export const isOutputEnded = (text: string) => /\[exited with code [^\]\n]*\]\s*$/.test(text)
 
@@ -66,9 +72,7 @@ export const latestOf = (text: string) => {
     .map(line => line.split('\r').map(part => part.trim()).filter(Boolean).at(-1) ?? '')
     .filter(Boolean)
   const last = lines.at(-1) ?? ''
-  // A percent is progress only on a line that reads as progress (a bar, a count of a total, a rate, a percent at its head);
-  // a score or a coverage figure a line reports is not
-  const pct = isProgress(last) ? last.match(/\b\d{1,3}(?:\.\d+)?\s?%/g)?.at(-1)?.replace(/\s/g, '') : undefined
+  const pct = pctOf(last)
   // A web server's access line says only the request and its answer
   const hit = last.match(/"(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) (\S+) HTTP\/[\d.]+" (\d{3})/)
   const line = hit ? `${hit[1]} ${hit[2]} ${hit[3]}` : last
@@ -104,19 +108,25 @@ export const labelOf = (what: string, cmd: string) => {
 // A command that only waits for something, polling until it is so: what it waits for, in a few words, and what can be looked at to
 // tell how that stands (a process by its pattern or number, a file). Undefined for a command that does more than wait and report
 export type Wait = { what: string; pattern?: string; pid?: string; file?: string; isStart?: boolean }
-const LIGHT = /^(date|tail|head|grep|rg|ls|cat|echo|printf|cut|wc|stat|du|sort|uniq|awk|sed|jq|true|python3? -c ['"]import json)\b/
+// A quoted word, blanked so what it holds splits nothing
+const unquoted = (text: string) => text.replace(/"(\\.|[^"\\])*"|'[^']*'/g, '""')
+const LIGHT = /^(date|tail|head|grep|rg|ls|cat|echo|printf|cut|wc|stat|du|sort|uniq|awk|sed|jq|true|cd|uptime|pwd|python3? -c ""|python3? -c ''|python3? -c ['"]import json)\b/
 const nameOf = (path: string) => path.replace(/^["']|["']$/g, '').split('/').filter(Boolean).at(-1) ?? path
 export const waitOf = (cmd: string): Wait | undefined => {
+  const cd = cmd.match(/^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&/)?.[1]?.replace(/^["']|["']$/g, '')
   const body = cmd.replace(/^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&\s*/, '').replace(/^\s*end=\$\(\([^;]*\)\);\s*/, '')
   const loop = body.match(/^\s*(until|while)\s+(.+?);\s*do\s+sleep\s+[\d.]+\s*;?\s*done\s*(.*)$/s)
   if (!loop) return undefined
   const [, word, cond = '', after = ''] = loop
   // What comes after the loop only reports
-  const steps = after.split(/\s*(?:;|&&|\|\|?)\s*/).map(step => step.trim()).filter(Boolean)
+  // (a pipe a command's one line shows as " / ")
+  const steps = unquoted(after).split(/\s*(?:;|&&|\|\|?|\s\/\s)\s*/).map(step => step.trim()).filter(Boolean)
   if (!steps.every(step => LIGHT.test(step) || /^\d?>/.test(step))) return undefined
   const isUntil = word === 'until'
-  const grep = cond.match(/\b(?:grep|rg)\s+-\w*q\w*\s+(?:-\w+\s+)*("[^"]+"|'[^']+'|\S+)\s+("[^"]+"|'[^']+'|\S+)/)
-  if (grep) return { what: `${grep[1]?.replace(/^["']|["']$/g, '')} in ${nameOf(grep[2] ?? '')}`, file: grep[2]?.replace(/^["']|["']$/g, '') }
+  // A file named from the folder a leading cd moved to is named whole
+  const whole = (path: string) => (path.startsWith('/') || path.startsWith('~/') || !cd ? path : `${cd.replace(/\/$/, '')}/${path}`)
+  const grep = cond.match(/\b(?:grep|rg)\s+(?:-\w+\s+)*-\w*q\w*\s+(?:-\w+\s+)*("[^"]+"|'[^']+'|\S+)\s+("[^"]+"|'[^']+'|\S+)/)
+  if (grep) return { what: `${grep[1]?.replace(/^["']|["']$/g, '').replace(/\\\|/g, ' or ')} in ${nameOf(grep[2] ?? '')}`, file: whole(grep[2]?.replace(/^["']|["']$/g, '') ?? '') }
   const pg = cond.match(/(!\s*)?pgrep\s+(?:-\w+\s+)*("[^"]+"|'[^']+'|\S+)/)
   if (pg) {
     const pattern = pg[2]?.replace(/^["']|["']$/g, '') ?? ''
@@ -126,14 +136,14 @@ export const waitOf = (cmd: string): Wait | undefined => {
   const kill = cond.match(/(!\s*)?kill\s+-0\s+(\d+)/)
   if (kill) return { what: `process ${kill[2]} to end`, pid: kill[2] }
   const file = cond.match(/\[\s+(!\s+)?-[fsed]\s+("[^"]+"|'[^']+'|[^\s\]]+)\s*\]/)
-  if (file) return { what: nameOf(file[2] ?? ''), file: file[2]?.replace(/^["']|["']$/g, '') }
+  if (file) return { what: nameOf(file[2] ?? ''), file: whole(file[2]?.replace(/^["']|["']$/g, '') ?? '') }
   return { what: cond.replace(/\s+/g, ' ').trim().slice(0, 80) }
 }
 
 // Jobs alike (the same kind, words and command, or the same wait) are one row that says how many they are, from the first one's
 // start; the newest one's output stands for them
 export const foldJobs = (jobs: Job[]): Job[] => {
-  const keyOf = (job: Job) => (job.kind === 'wait' ? `wait|${job.label}|${job.waitsFor ?? ''}` : `${job.kind}|${job.label}|${job.cmd}`)
+  const keyOf = (job: Job) => (job.kind === 'wait' ? `wait|${job.label}|${job.waitsFor ?? ''}|${job.waitFile ?? ''}` : `${job.kind}|${job.label}|${job.cmd}`)
   const groups = new Map<string, Job[]>()
   for (const job of jobs) groups.set(keyOf(job), [...(groups.get(keyOf(job)) ?? []), job])
   return [...groups.values()].map(group => {
@@ -150,12 +160,17 @@ export const foldJobs = (jobs: Job[]): Job[] => {
   })
 }
 
-// The processes on this Mac as `ps -axww -o pid=,ppid=,stat=,command=` lists them
-export type Proc = { pid: string; ppid: string; stat: string; command: string }
-export const procsOf = (text: string): Proc[] =>
+// The processes on this Mac as `ps -axww -o pid=,ppid=,stat=,etime=,command=` lists them, each with when it started, from the
+// time it has run ([[dd-]hh:]mm:ss) and when they were listed
+export type Proc = { pid: string; ppid: string; stat: string; startAt: number; command: string }
+const secondsOf = (etime: string) => {
+  const [days, rest = ''] = etime.includes('-') ? etime.split('-') : ['0', etime]
+  return Number(days) * 86400 + rest.split(':').reduce((sum, part) => sum * 60 + Number(part), 0)
+}
+export const procsOf = (text: string, now: number): Proc[] =>
   text.split('\n').flatMap(line => {
-    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/)
-    return m ? [{ pid: m[1] ?? '', ppid: m[2] ?? '', stat: m[3] ?? '', command: m[4] ?? '' }] : []
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+((?:\d+-)?[\d:]+)\s+(.*)$/)
+    return m ? [{ pid: m[1] ?? '', ppid: m[2] ?? '', stat: m[3] ?? '', startAt: now - secondsOf(m[4] ?? '0') * 1000, command: m[5] ?? '' }] : []
   })
 // A process and everything it started
 export const treeOf = (procs: Proc[], pid: string): Proc[] => {
@@ -172,18 +187,23 @@ const fragmentsOf = (cmd: string) =>
   [...new Set(cmd.replace(/\s+\S*$/, '').split(/[\s'"\\$`;|&()<>]+/).filter(word => word.length >= 6 && /^[\w./:=,@%+-]+$/.test(word)))]
     .sort((a, b) => b.length - a.length)
     .slice(0, 3)
-// The shells the engine runs background commands in, matched to the commands: each shell to one command, the oldest command to the
-// oldest shell. A command whose words are too few to tell it by is not matched (undefined), not taken as gone
+// The shells the engine runs background commands in, matched to the commands by their words and by when they started: each shell to
+// the command kept nearest its start (a command kept as it went to the background may have started up to its time limit before).
+// A command left without a shell when some other shell still holds its words is taken as running (true), as is one whose words
+// are too few to tell it by (not listed); only one no shell holds is missing (null)
+const SHELL_BEFORE = 11 * 60_000
+const SHELL_AFTER = 15_000
 export const shellsOf = (procs: Proc[], jobs: { id: string; cmd: string; at: number }[]) => {
-  const shells = procs.filter(p => /shell-snapshots\/snapshot-/.test(p.command) && /\beval\b/.test(p.command)).sort((a, b) => Number(a.pid) - Number(b.pid))
+  const shells = procs.filter(p => /shell-snapshots\/snapshot-/.test(p.command) && /\beval\b/.test(p.command) && p.ppid !== '1')
+  const found = new Map<string, string | true | null>()
+  const told = jobs.map(job => ({ job, words: fragmentsOf(job.cmd) })).filter(one => one.words.length >= 2)
+  const pairs = told
+    .flatMap(({ job, words }) =>
+      shells.filter(p => words.every(word => p.command.includes(word)) && p.startAt >= job.at - SHELL_BEFORE && p.startAt <= job.at + SHELL_AFTER).map(p => ({ id: job.id, pid: p.pid, gap: Math.abs(job.at - p.startAt) })),
+    )
+    .sort((a, b) => a.gap - b.gap)
   const taken = new Set<string>()
-  const found = new Map<string, string | null>()
-  for (const job of [...jobs].sort((a, b) => a.at - b.at)) {
-    const words = fragmentsOf(job.cmd)
-    if (words.length < 2) continue
-    const shell = shells.find(p => !taken.has(p.pid) && p.ppid !== '1' && words.every(word => p.command.includes(word)))
-    if (shell) taken.add(shell.pid)
-    found.set(job.id, shell ? shell.pid : null)
-  }
+  for (const pair of pairs) if (!found.has(pair.id) && !taken.has(pair.pid)) (found.set(pair.id, pair.pid), taken.add(pair.pid))
+  for (const { job, words } of told) if (!found.has(job.id)) found.set(job.id, shells.some(p => !taken.has(p.pid) && words.every(word => p.command.includes(word))) ? true : null)
   return found
 }
