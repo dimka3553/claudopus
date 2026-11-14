@@ -3018,6 +3018,58 @@ test("a Details tab's small pictures together stay under what the app draws in o
   expect(logged).toEqual([])
 })
 
+test("an ask's pictures are drawn small on its card, in the list and in Details, each with a row that opens it large; together they stay under what the app draws in one drawing; the terminal has the rows alone", async ($, on) => {
+  const shots = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(n => `/w/designs/${n}.png`)
+  // Each small copy as made, 600 wide
+  const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 600\npixelHeight: 375' : '')
+  // Each ask copy as large as one may be, 25000 bytes; the chat's own copies, of the same pictures it sent, as large as theirs may be
+  const bytes = (path: string) => (path.includes('/thumbs/ask-') ? 'A'.repeat(33_400) : path.includes('/thumbs/') ? 'A'.repeat(48_000) : undefined)
+  const talk = [
+    { role: 'user', text: 'Draw the designs.', toolUses: [] },
+    { role: 'assistant', text: 'Here they are.', toolUses: [{ tool_use_id: 'u1', tool: 'SendUserFile', input: { files: shots, status: 'normal' } }] },
+  ]
+  const { files, logged, shown } = world(on, { sips, bytes, talk })
+  for (const path of shots) files.set(path, 'png')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'pick a design', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Pick a design', prompt: 'Draw the designs.' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Pick one of the designs', details: 'Each picture is one design.', choices: ['A', 'B'], pictures: shots } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // Made out of the drawing, which is drawn again once they are
+  for (let tries = 0; tries < 50 && !(await list.findAll({ type: 'Svg' })).some(one => String(one.props.alt).startsWith('Picture:')); tries += 1) await new Promise(done => setTimeout(done, 20))
+  const small = (await list.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))
+  // Four fit in what every ask's pictures may take; the rest are rows that open them
+  expect(small.map(one => String(one.props.alt))).toEqual(['Picture: a.png', 'Picture: b.png', 'Picture: c.png', 'Picture: d.png'])
+  // Each drawn at most 300 across, from a copy twice as wide
+  expect(small.map(one => [one.props.width, one.props.height])).toEqual(Array(4).fill([300, 188]))
+  const rows = (await list.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => label.startsWith('⤢'))
+  expect(rows).toEqual(['⤢ Open large: a.png', '⤢ Open large: b.png', '⤢ Open large: c.png', '⤢ Open large: d.png', '⤢ Open: e.png', '⤢ Open: f.png', '⤢ Open: g.png'])
+  expect(await drawnChars(list)).toBeLessThan(APP_DRAWING_CHARS)
+  // Pressed, one opens whole in the Mac's own viewer
+  shown.length = 0
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(one => one.props.label === '⤢ Open large: b.png')?.key ?? '' })
+  expect(shown).toEqual([['open', '/w/designs/b.png']])
+  // In Details too, under what it is about
+  await pressed(list, 'open-a1')
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  const drawnIn = async () => (await tab.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).filter(alt => alt.startsWith('Picture:'))
+  // Once the chat's own small copies are read: its newest three fill what the tab keeps for pictures, and of the ask's the first
+  // alone still fits; the rest are rows that open them
+  for (let tries = 0; tries < 100 && !(await drawnIn()).includes('Picture: g.png'); tries += 1) await new Promise(done => setTimeout(done, 20))
+  expect((await drawnIn()).sort()).toEqual(['Picture: a.png', 'Picture: e.png', 'Picture: f.png', 'Picture: g.png'])
+  expect(await drawnChars(tab)).toBeLessThan(APP_DRAWING_CHARS)
+  await tab.unmount()
+  await list.unmount()
+  // The terminal draws no pictures: a row each that opens it
+  const term = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  expect((await term.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))).toEqual([])
+  expect((await term.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => label.startsWith('⤢')).length).toBe(7)
+  expect(await term.find({ type: 'Text', text: /Making its pictures small/ })).toBeUndefined()
+  await term.unmount()
+  // Only the ask's notice in the chat is logged: nothing failed
+  expect(logged.filter(line => !line.startsWith('The work "Pick a design" needs the person'))).toEqual([])
+})
+
 // Memory files in the mod's tabs, and the Memory button
 
 test('a memory path in a reply opens in a tab of the mod on the desktop, never the app file pane; the terminal keeps its own', async ($, on) => {
@@ -3907,7 +3959,7 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which logo do you want?', choices: ['A', 'B'], pictures: ['/w/shots/a.png', '/w/shots/b.png', '/w/shots/gone.png', 'rel.png'] } as never)
   expect(String(asked.result)).toContain('shown in the chat as a notice from the panel')
-  expect(String(asked.result)).toContain('Its 2 pictures are named with it')
+  expect(String(asked.result)).toContain('Its 2 pictures are drawn small on the card')
   expect(String(asked.result)).toContain('2 of the pictures given are no picture file found here')
   // The chat shows the ask as the mod's notice, never a prompt in the person's place, with what it asks, its answers and its pictures
   await clock.advance(10)
