@@ -165,8 +165,8 @@ test("a Details tab's small pictures together stay under what the app draws in o
 
 test("an ask's pictures are drawn small on its card, in the list and in Details, each with a row that opens it large; together they stay under what the app draws in one drawing; the terminal has the rows alone", async ($, on) => {
   const shots = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(n => `/w/designs/${n}.png`)
-  const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 480\npixelHeight: 300' : '')
-  // Each small copy as large as an ask's may be: 22000 bytes, about 29400 characters of base64
+  // Each small copy as made, 600 wide
+  const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 600\npixelHeight: 375' : '')
   // Each ask copy as large as one may be, 25000 bytes; the chat's own copies, of the same pictures it sent, as large as theirs may be
   const bytes = (path: string) => (path.includes('/thumbs/ask-') ? 'A'.repeat(33_400) : path.includes('/thumbs/') ? 'A'.repeat(48_000) : undefined)
   const talk = [
@@ -197,9 +197,11 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   // In Details too, under what it is about
   await pressed(list, 'open-a1')
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
-  for (let tries = 0; tries < 50 && (await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:')).length < 4; tries += 1) await new Promise(done => setTimeout(done, 20))
-  // The chat's own small copies of the same pictures and the ask's together stay under what the app draws in one tab
-  expect((await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:')).length).toBeGreaterThanOrEqual(4)
+  const drawnIn = async () => (await tab.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).filter(alt => alt.startsWith('Picture:'))
+  // Once the chat's own small copies are read: its newest three fill what the tab keeps for pictures, and of the ask's the first
+  // alone still fits; the rest are rows that open them
+  for (let tries = 0; tries < 100 && !(await drawnIn()).includes('Picture: g.png'); tries += 1) await new Promise(done => setTimeout(done, 20))
+  expect((await drawnIn()).sort()).toEqual(['Picture: a.png', 'Picture: e.png', 'Picture: f.png', 'Picture: g.png'])
   expect(await drawnChars(tab)).toBeLessThan(APP_DRAWING_CHARS)
   await tab.unmount()
   await list.unmount()

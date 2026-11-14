@@ -394,8 +394,9 @@ const askPicOf = async ($: EngineInterface, path: string): Promise<Pic | null> =
       // Its own size, from its width and height or its viewBox, so it is drawn within the card like any other
       const head = /<svg[^>]*>/i.exec(text.slice(from))?.[0] ?? ''
       const box = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(head)
-      const width = Number(/\swidth="([\d.]+)(px)?"/i.exec(head)?.[1] ?? box?.[1] ?? 0)
-      const height = Number(/\sheight="([\d.]+)(px)?"/i.exec(head)?.[1] ?? box?.[2] ?? 0)
+      // Both from its width and height, else both from its viewBox: one of each could be in different units
+      const given = [/\swidth="([\d.]+)(px)?"/i.exec(head)?.[1], /\sheight="([\d.]+)(px)?"/i.exec(head)?.[1]]
+      const [width, height] = (given[0] && given[1] ? given : [box?.[1], box?.[2]]).map(one => Number(one ?? 0))
       thumb = { source: text.slice(from), width: width && height ? width : 0, height: width && height ? height : 0 }
     }
   } else if (RASTER.test(path)) {
