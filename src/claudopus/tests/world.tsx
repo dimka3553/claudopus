@@ -32,7 +32,7 @@ const SHIPPED_PRINCIPLES: string = '<shipped: rules/CLAUDE.md>'
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: () => string; wroteAt: () => number }; usage?: () => string } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: () => string; wroteAt: () => number }; usage?: (script: string) => string } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -198,7 +198,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     // How the computer is used, as the line above the prompt looks at it: what the test gives, else nothing to read
-    if (tool === 'sh' && String(rest[1]).startsWith('echo "@@SELF@@')) return ok(options.usage?.() ?? '')
+    if (tool === 'sh' && String(rest[1]).startsWith('echo "@@SELF@@')) return ok(options.usage?.(String(rest[1])) ?? '')
     // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
     // says, last written when it says, and every detached process it names still runs
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {

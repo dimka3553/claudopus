@@ -61,7 +61,7 @@ test('while work runs, the line above the prompt shows memory, the processor, th
   // The terminal draws no pictures: the same line in words, with small meters of cells
   const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
   const line = await term.find({ type: 'Text', text: /^mem/ })
-  expect(line?.text).toMatch(/^mem[▰▱]{3} 29GB cpu[▰▱]{3} 50% disk 63MB\/s net 1MB\/s$/)
+  expect(line?.text).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% disk 63M\/s net 1M\/s$/)
   expect(line?.props.wrap).toBe('truncate-end')
   await term.unmount()
 
@@ -76,15 +76,17 @@ test('while work runs, the line above the prompt shows memory, the processor, th
 })
 
 test('a look that gives nothing waits as long as one that works, so a broken look is not tried each second', async ($, on) => {
-  const asked: boolean[] = []
+  const asked: string[] = []
   let isBroken = true
-  const { clock } = world(on, { usage: () => (asked.push(true), isBroken ? '' : lookAt(asked.length)) })
+  const { clock } = world(on, { usage: script => (asked.push(script), isBroken ? '' : lookAt(asked.length)) })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   for (let s = 0; s < 9; s++) await clock.advance(1000)
-  // Nine seconds of a broken look: tried twice, five seconds apart, not each second
-  expect(asked.length).toBeLessThanOrEqual(2)
+  // Nine seconds of a broken look: tried twice, five seconds apart, not each second, and top asked only the first time
+  expect(asked.length).toBe(2)
+  expect(asked.map(script => script.includes('top -l'))).toEqual([true, false])
   isBroken = false
   for (let s = 0; s < 6; s++) await clock.advance(1000)
-  expect(asked.length).toBeLessThanOrEqual(3)
+  expect(asked.length).toBe(3)
+  expect(asked[2]?.includes('top -l')).toBe(false)
 })

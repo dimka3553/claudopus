@@ -181,12 +181,12 @@ export const gbText = (bytes: number) => {
   const gb = bytes / GB
   return gb < 10 ? `${gb.toFixed(1).replace(/\.0$/, '')}` : `${Math.round(gb)}`
 }
-// A speed in the fewest characters: MB/s, a tenth under ten, GB/s past a thousand megabytes
+// A speed in the fewest characters, so the line fits a phone: whole MB/s, a tenth under one, GB/s past a thousand megabytes
 export const rateText = (perSecond: number): [string, string] => {
   const mb = perSecond / 1e6
   if (mb >= 999.5) return [(mb / 1000).toFixed(1).replace(/\.0$/, ''), 'GB/s']
-  if (mb >= 9.95) return [String(Math.round(mb)), 'MB/s']
-  return [mb.toFixed(1).replace(/\.0$/, ''), 'MB/s']
+  if (mb >= 0.95) return [String(Math.round(mb)), 'MB/s']
+  return [mb.toFixed(1).replace(/\.0$/, '').replace(/^0\.0$/, '0'), 'MB/s']
 }
 export const pctText = (part: number) => `${Math.round(part * 100)}`
 export const isMemoryHigh = (f: UsageFigures) => f.memTotal > 0 && f.memUsed / f.memTotal > MEMORY_WARN

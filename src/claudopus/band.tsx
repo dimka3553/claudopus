@@ -81,13 +81,13 @@ const bandHooks = (on: On) => {
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
     return (
-      <Box flexDirection="row" alignItems="center" gap={e.surface === 'terminal' ? 1 : 2} height={1} overflow="hidden">
+      <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
         {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
         {figures ? (e.surface === 'terminal' ? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box> : usageDrawn(ui, figures) ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box>) : null}
-        {/* Beside the figures the hint is the command alone, so the line still fits a phone's terminal */}
-        {isPanelAway ? (
+        {/* The figures fill a phone's terminal: the hint shows until they come */}
+        {isPanelAway && !figures ? (
           <Box flexShrink={0}>
-            <Text dimColor>{figures ? '· /claudopus' : '· /claudopus shows the panel'}</Text>
+            <Text dimColor>· /claudopus shows the panel</Text>
           </Box>
         ) : null}
       </Box>

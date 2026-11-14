@@ -5,6 +5,8 @@ let usageKept: UsageKept | undefined
 let usageBusy = false
 // When this chat last tried a look, whether or not it gave figures: a look that fails waits as long as one that works
 let usageTriedAt = 0
+// When this chat last asked top, whether or not the look came back: top costs half a second of the processor
+let usageTopTriedAt = 0
 let usageFile = ''
 // The shared file, in the person's own temporary folder (on Linux, their cache folder: /tmp is everyone's)
 const usagePathOf = async ($: EngineInterface) => {
@@ -32,7 +34,9 @@ const lookUsage = async ($: EngineInterface) => {
     await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
     const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.at) ? shared : usageKept
     // top, the costly part, at most once a minute, answered or not
-    const isTop = !isLinux && (base?.topAt === undefined || now < base.topAt || now - base.topAt >= FOOTPRINT_EVERY)
+    const topAt = Math.max(base?.topAt ?? 0, usageTopTriedAt)
+    const isTop = !isLinux && (!topAt || now < topAt || now - topAt >= FOOTPRINT_EVERY)
+    if (isTop) usageTopTriedAt = now
     const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
     const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
     if (!kept) return
@@ -78,7 +82,7 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
     f.net === undefined ? null : one('usage-net', usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
   ]
 }
-// The line as text, for the terminal, short enough for a phone's: a word for each, and three-cell meters with Claude's cells purple
+// The line as text, for the terminal, in a phone's 50 columns with the octopus: a word for each, units cut to G and M/s, and three-cell meters with Claude's cells purple
 const USAGE_CELLS = 3
 const usageText = (ui: Ui, f: UsageFigures) => {
   const { Text } = ui
@@ -97,10 +101,10 @@ const usageText = (ui: Ui, f: UsageFigures) => {
       <Text color={amber} dimColor={!amber}>mem</Text>
       {meter(f.memClaude / f.memTotal, f.memUsed / f.memTotal, amber)}
       <Text color={amber}>{` ${gbText(f.memUsed)}`}</Text>
-      <Text color={amber} dimColor={!amber}>GB</Text>
+      <Text color={amber} dimColor={!amber}>G</Text>
       {f.cpu === undefined ? null : [<Text key="c" dimColor>{' cpu'}</Text>, ...meter(f.cpuClaude ?? 0, f.cpu), <Text key="cv">{` ${pctText(f.cpu)}`}</Text>, <Text key="cu" dimColor>%</Text>]}
-      {f.disk === undefined ? null : [<Text key="d" dimColor>{' disk '}</Text>, <Text key="dv">{rateText(f.disk)[0]}</Text>, <Text key="du" dimColor>{rateText(f.disk)[1]}</Text>]}
-      {f.net === undefined ? null : [<Text key="n" dimColor>{' net '}</Text>, <Text key="nv">{rateText(f.net)[0]}</Text>, <Text key="nu" dimColor>{rateText(f.net)[1]}</Text>]}
+      {f.disk === undefined ? null : [<Text key="d" dimColor>{' disk '}</Text>, <Text key="dv">{rateText(f.disk)[0]}</Text>, <Text key="du" dimColor>{rateText(f.disk)[1].replace('B/s', '/s')}</Text>]}
+      {f.net === undefined ? null : [<Text key="n" dimColor>{' net '}</Text>, <Text key="nv">{rateText(f.net)[0]}</Text>, <Text key="nu" dimColor>{rateText(f.net)[1].replace('B/s', '/s')}</Text>]}
     </Text>
   )
 }

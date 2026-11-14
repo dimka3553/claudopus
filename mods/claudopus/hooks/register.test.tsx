@@ -39,7 +39,7 @@ const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my pri
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: () => string; wroteAt: () => number }; usage?: () => string } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: () => string; wroteAt: () => number }; usage?: (script: string) => string } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -205,7 +205,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     // How the computer is used, as the line above the prompt looks at it: what the test gives, else nothing to read
-    if (tool === 'sh' && String(rest[1]).startsWith('echo "@@SELF@@')) return ok(options.usage?.() ?? '')
+    if (tool === 'sh' && String(rest[1]).startsWith('echo "@@SELF@@')) return ok(options.usage?.(String(rest[1])) ?? '')
     // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
     // says, last written when it says, and every detached process it names still runs
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {
@@ -6921,7 +6921,7 @@ test('while work runs, the line above the prompt shows memory, the processor, th
   // The terminal draws no pictures: the same line in words, with small meters of cells
   const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
   const line = await term.find({ type: 'Text', text: /^mem/ })
-  expect(line?.text).toMatch(/^mem[▰▱]{3} 29GB cpu[▰▱]{3} 50% disk 63MB\/s net 1MB\/s$/)
+  expect(line?.text).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% disk 63M\/s net 1M\/s$/)
   expect(line?.props.wrap).toBe('truncate-end')
   await term.unmount()
 
@@ -6936,15 +6936,17 @@ test('while work runs, the line above the prompt shows memory, the processor, th
 })
 
 test('a look that gives nothing waits as long as one that works, so a broken look is not tried each second', async ($, on) => {
-  const asked: boolean[] = []
+  const asked: string[] = []
   let isBroken = true
-  const { clock } = world(on, { usage: () => (asked.push(true), isBroken ? '' : lookAt(asked.length)) })
+  const { clock } = world(on, { usage: script => (asked.push(script), isBroken ? '' : lookAt(asked.length)) })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   for (let s = 0; s < 9; s++) await clock.advance(1000)
-  // Nine seconds of a broken look: tried twice, five seconds apart, not each second
-  expect(asked.length).toBeLessThanOrEqual(2)
+  // Nine seconds of a broken look: tried twice, five seconds apart, not each second, and top asked only the first time
+  expect(asked.length).toBe(2)
+  expect(asked.map(script => script.includes('top -l'))).toEqual([true, false])
   isBroken = false
   for (let s = 0; s < 6; s++) await clock.advance(1000)
-  expect(asked.length).toBeLessThanOrEqual(3)
+  expect(asked.length).toBe(3)
+  expect(asked[2]?.includes('top -l')).toBe(false)
 })
