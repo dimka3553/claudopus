@@ -165,10 +165,13 @@ let models: Models = modelsOf({})
 // The settings read again: at a session's start, and after a change in the Config tab
 // Whether the person turned automatic updates on in Config: off as shipped, a chat then switches to a newer version only when typed
 let isAutoUpdate = false
+let macosKeptLooked = false
 const loadSettings = async ($: EngineInterface) => {
   const config = await readConfig($, dir)
   isOff = config.agents === false
   isAutoUpdate = config.updates === true
+  // "Let macOS ask" chosen before it was kept beside the gate's key is kept there as the mod loads, before anything can drop it
+  if (config.adminPassword === 'macos' && !macosKeptLooked) (macosKeptLooked = true), void keepMacos($).catch(() => undefined)
   person = typeof config.name === 'string' ? config.name.trim() : ''
   models = modelsOf(config)
   macs = (Array.isArray((config as { macs?: unknown }).macs) ? ((config as { macs: unknown[] }).macs) : []).filter(isMac).slice(0, 4)

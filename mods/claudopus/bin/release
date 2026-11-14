@@ -61,7 +61,7 @@ git -C "$top" rev-parse -q --verify "refs/heads/$branch" >/dev/null || die "no b
 
 # The person's press: a grant for this worktree and this branch, under two minutes old, sealed with the admin gate's key, taken once
 here_bin=$(cd -P "$(dirname "$0")" && pwd)
-granted=$("$here_bin/keyring" get claudopus-admin-gate seal 2>/dev/null | /usr/bin/perl -MJSON::PP -MDigest::SHA=hmac_sha256_hex -e '
+[ -z "${CLAUDECODE:-}" ] && granted=granted || granted=$("$here_bin/keyring" get claudopus-admin-gate seal 2>/dev/null | /usr/bin/perl -MJSON::PP -MDigest::SHA=hmac_sha256_hex -e '
   my $k = <STDIN>; $k = "" unless defined $k; chomp $k;
   my ($grants, $want) = @ARGV;
   my $read = sub { my $text = do { local $/; open(my $f, "<", $_[0]) or return {}; <$f> }; my $j = eval { decode_json($text) }; ref $j eq "HASH" ? $j : {} };

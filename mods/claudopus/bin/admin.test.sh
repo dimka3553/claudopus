@@ -167,6 +167,8 @@ mkdir -p "$r" && git init -q --bare "$r/origin.git" && git clone -q "$r/origin.g
 # A branch whose .release would run code of its own as it is read, push somewhere else, run a step after and replace bash
 (cd "$r/work" && git checkout -q -b fix-it && printf 'touch %q\nREMOTE=elsewhere\nAFTER="touch %q"\nbash() { touch %q; }\nCHECK=true\n' "$r/read" "$r/after" "$r/bash" >.release && echo two >file && git commit -q -am two)
 export RELEASE_LOCKS=$tmp/locks
+# Inside Claude Code, as work runs it, a release needs the press; a person's own release from their terminal does not
+export CLAUDECODE=1
 top=$(git -C "$r/work" rev-parse --show-toplevel)
 # release_grant <id> <seal word> <branch>
 release_grant() {
@@ -197,6 +199,11 @@ for mark in read after bash; do
   n=$((n + 1))
   [ ! -e "$r/$mark" ] && echo "ok $n - the branch's .release did not run its $mark" || { echo "NOT OK $n - the branch's .release ran its $mark"; failed=1; }
 done
+(cd "$r/work" && echo three >file && git commit -q -am three)
+expect "a person's own release, outside Claude Code: released with no press" 0 'released' -- env -u CLAUDECODE bash -c 'cd "$1" && "$2"' sh "$r/work" "$here/release"
+n=$((n + 1))
+[ "$(git -C "$r/origin.git" show main:file)" = three ] && echo "ok $n - main has the person's release" || { echo "NOT OK $n - main does not have the person's release"; failed=1; }
+unset CLAUDECODE
 expect 'forgetting a password needs no grant' 0 'No password was kept' -- "$admin" here --forget
 expect 'with no command it says how it is used' 2 'usage' -- "$admin" here
 

@@ -57,12 +57,49 @@ test('F-004 F-013 · an answer left in a file reaches work only for the ask open
   expect(told('"Send"')).toHaveLength(1)
 })
 
-test('F-006 F-008 · with "Let macOS ask" kept beside the gate\'s key, a config.json that no longer says so still lets macOS ask', async ($, on) => {
+test('F-008 · with "Let macOS ask" kept beside the gate\'s key, a config.json that no longer says so still lets macOS ask', async ($, on) => {
   const { bash, files } = await gated($, on)
   files.set('keyring:claudopus-admin-gate/password', 'macos')
   // config.json says nothing of it: the kept setting holds, so another Mac is refused as under "Let macOS ask"
   const r = (await bash('m1', `${ADMIN} m4 'id -u'`)) as { deny?: string }
   expect(r.deny).toContain('let macOS ask for the password')
+})
+
+test('F-008 · "Let macOS ask" chosen before it was kept beside the gate\'s key is kept there as the mod loads', async ($, on) => {
+  const { files } = await gated($, on, { adminPassword: 'macos' })
+  expect(await until(async () => files.get('keyring:claudopus-admin-gate/password'))).toBe('macos')
+})
+
+test('F-007 F-017 · a runner run with another home or data folder, or with Claude Code\'s mark taken away, is refused, typed or in a script', async ($, on) => {
+  const { bash, files, grants } = await gated($, on)
+  files.set('/repo/rel.sh', 'unset CLAUDECODE\n/plug/claudopus/bin/release\n')
+  for (const command of [
+    'HOME=/tmp/h /plug/claudopus/bin/release',
+    'export HOME=/tmp/h; cd /repo/wt && /plug/claudopus/bin/release',
+    'env -u CLAUDECODE /plug/claudopus/bin/release',
+    'CLAUDECODE= /plug/claudopus/bin/release',
+    `XDG_DATA_HOME=/tmp/d ${ADMIN} here 'id -u'`,
+    `env -i PATH=/usr/bin ${ADMIN} here 'id -u'`,
+    'bash /repo/rel.sh',
+  ])
+    expect(((await bash(`h${command.length}`, command)) as { deny?: string }).deny).toContain("Claudopus's runners")
+  expect(grants()).toEqual([])
+  // A command that only reads the home folder's name runs as before
+  expect(((await bash('h-ok', 'echo $HOME && /plug/claudopus/bin/release --status')) as { result?: unknown }).result).toBe('ran')
+})
+
+test('F-007 F-012 F-017 F-021 · a script a command runs is held to the same guards: it never writes settings, what chats answer through, or pushes main', async ($, on) => {
+  const { bash, files } = await gated($, on)
+  files.set('/repo/settings.sh', `echo '{"admin":"never"}' > ~/.claude/claudopus/config.json\n`)
+  expect(((await bash('s1', 'bash /repo/settings.sh')) as { deny?: string }).deny).toContain('only with the Edit or Write tool')
+  files.set('/repo/answer.sh', `echo '{"card":"a1","choice":"yes"}' > ~/.claude/claudopus/live/answers/engine-id/1-a.json\n`)
+  expect(((await bash('s2', 'sh /repo/answer.sh')) as { deny?: string }).deny).toContain("are the mod's alone")
+  files.set('/repo/push.sh', 'git checkout main\ngit push origin main\n')
+  expect(((await bash('s3', 'bash /repo/push.sh')) as { deny?: string }).deny).toContain('never pushes or merges to main')
+  files.set('/repo/grant.sh', 'cp g.json ~/.claude/claudopus/admin-grants/\n')
+  expect(((await bash('s4', 'bash /repo/grant.sh')) as { deny?: string }).deny).toContain('never read or written by work')
+  files.set('/repo/fine.sh', 'echo hello\n')
+  expect(((await bash('s5', 'bash /repo/fine.sh')) as { result?: unknown }).result).toBe('ran')
 })
 
 test("F-007 F-009 · a command that names the admin gate's key or a kept admin password is refused however it is quoted, and so is a script that reads one", async ($, on) => {

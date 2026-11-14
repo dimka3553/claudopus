@@ -190,10 +190,13 @@ let models: Models = modelsOf({})
 // The settings read again: at a session's start, and after a change in the Config tab
 // Whether the person turned automatic updates on in Config: off as shipped, a chat then switches to a newer version only when typed
 let isAutoUpdate = false
+let macosKeptLooked = false
 const loadSettings = async ($: EngineInterface) => {
   const config = await readConfig($, dir)
   isOff = config.agents === false
   isAutoUpdate = config.updates === true
+  // "Let macOS ask" chosen before it was kept beside the gate's key is kept there as the mod loads, before anything can drop it
+  if (config.adminPassword === 'macos' && !macosKeptLooked) (macosKeptLooked = true), void keepMacos($).catch(() => undefined)
   person = typeof config.name === 'string' ? config.name.trim() : ''
   models = modelsOf(config)
   macs = (Array.isArray((config as { macs?: unknown }).macs) ? ((config as { macs: unknown[] }).macs) : []).filter(isMac).slice(0, 4)
@@ -5941,10 +5944,18 @@ const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new', message
 const PASSWORD_ACCOUNT = 'password'
 const isMacosKept = async ($: EngineInterface) =>
   (await $.process.run([`${$.plugin.root}/bin/keyring`, 'get', GATE_SERVICE, PASSWORD_ACCOUNT], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout.trim() === 'macos'
+// An install that chose it before it was kept there has it only in config.json: kept there too the first time it is read (a
+// config.json that says so only ever adds it, never takes it away)
+const keepMacos = async ($: EngineInterface) => {
+  if (await isMacosKept($)) return
+  const r = await $.process.run([`${$.plugin.root}/bin/keyring`, 'set', GATE_SERVICE, PASSWORD_ACCOUNT, 'Claudopus admin password'], { stdin: 'macos\n', timeoutMs: 15_000 }).catch(() => undefined)
+  if (r?.exitCode !== 0) await log($, '"Let macOS ask" not kept beside the gate\'s key')
+}
 // What is in force: "work" or "never" only as Config sealed it, every command asked otherwise; and where the password comes from
 const gateOf = async ($: EngineInterface) => {
   const config = await readConfig($, dir)
   const said: 'each' | 'work' | 'never' = config.admin === 'work' || config.admin === 'never' ? config.admin : 'each'
+  if (config.adminPassword === 'macos') await keepMacos($)
   const password = config.adminPassword === 'macos' || (await isMacosKept($)) ? ('macos' as const) : ('keep' as const)
   if (said === 'each') return { mode: 'each' as const, unsealed: '', password }
   const seal = (await sealed($, 'read', [`mode\n${said}`]))?.[0]
@@ -6047,6 +6058,13 @@ const dropGrants = async ($: EngineInterface, names: string[]) => {
 // the shell reads it. Any command that names the keychain's admin services (the gate's key and what Config chose, and the kept admin
 // passwords) with security or the keyring runner counts, whatever it does with them
 const unquoted = (command: string) => command.replace(/["'\\]/g, '')
+// The runners find their key, grants and settings under the home folder, and release asks for a press only inside Claude Code: a
+// command that names one and sets another home or data folder, or takes Claude Code's mark away, would have it read the caller's own
+const RUNNER_NAMED = /\bbin\/(?:admin|secret|release|keyring)\b/
+const RUNNER_MOVED = /(?:^|[\s;&|(`'"])(?:HOME|XDG_DATA_HOME|CLAUDECODE)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:HOME|XDG_DATA_HOME|CLAUDECODE)\b|\benv\b[^;&|\n]*\s(?:-u\s*|--unset[= ])CLAUDECODE\b|\benv\s+(?:-\w+\s+)*-i\b|\benv\b[^;&|\n]*\s-i\b/
+const movesRunner = (command: string) => [command, unquoted(command)].some(one => RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one))
+const NO_RUNNER_MOVED =
+  "This command did not run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the marks Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or takes CLAUDECODE away, is refused. Run the runner as it is."
 const touchesGate = (e: ToolCallInput) => {
   if (e.tool === 'Bash') {
     const command = String((e as { command?: unknown }).command ?? '')
@@ -7918,13 +7936,15 @@ const readsKept = async ($: EngineInterface, command: string) =>
   [command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
 // A tool call that writes a file of the memory folder only the mod writes (refused outright), or the person's own settings and texts
 // by a command (refused: work changes those with Edit or Write, which wait for the person's press)
-const writesOwnFiles = (e: { tool: string }): string => {
+const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
+    // The command as written and unquoted, and each script it runs
     const command = String(input.command ?? '')
-    if ([command, unquoted(command)].some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
-    if ([command, unquoted(command)].some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
+    const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
+    if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
+    if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
     return ''
   }
   if (!['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return ''
@@ -7994,20 +8014,24 @@ const workHooks = (on: On) => {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
     }
-    const ownFiles = writesOwnFiles(e)
+    const ownFiles = await writesOwnFiles($, e)
     if (ownFiles) {
       await log($, `refused ${e.tool} writing the memory folder's own files`)
       return { deny: ownFiles }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
-    if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
+    if (e.tool === 'Bash' && (pushesMain(String((e as { command?: unknown }).command ?? '')) || (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(pushesMain))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
     // The list of admin commands always allowed, and what seals it, are the person's alone
-    if (touchesGate(e)) {
+    if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {
       await log($, `refused ${e.tool} on the admin gate's own files`)
       return { deny: NO_GATE_TOUCH() }
+    }
+    if (e.tool === 'Bash' && [String((e as { command?: unknown }).command ?? ''), ...(await scriptsRun($, String((e as { command?: unknown }).command ?? '')))].some(movesRunner)) {
+      await log($, `refused ${e.tool} running a runner of the mod with another home or without Claude Code's mark`)
+      return { deny: NO_RUNNER_MOVED }
     }
     // An admin command waits for the person's press on its card, unless they chose never to be asked; a release always does, and so
     // does a change to the person's own settings and texts. Never for a call the chat's own thread is refused below: nothing is asked
@@ -8024,7 +8048,7 @@ const workHooks = (on: On) => {
       }
       grants = [...grants, ...released.grants]
       // A command that runs a runner may ask for a password or key in a box: the box is drawn only while one runs
-      if (/\bbin\/(?:admin|secret)\b/.test(String((e as { command?: unknown }).command ?? ''))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now())
+      if ([String((e as { command?: unknown }).command ?? ''), ...(await scriptsRun($, String((e as { command?: unknown }).command ?? '')))].some(text => /\bbin\/(?:admin|secret)\b/.test(text))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now())
     }
     if (!isRefusedHere) {
       const fileSaid = await gateOwnFile($, e, raw as never)

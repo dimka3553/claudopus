@@ -120,10 +120,18 @@ const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new', message
 const PASSWORD_ACCOUNT = 'password'
 const isMacosKept = async ($: EngineInterface) =>
   (await $.process.run([`${$.plugin.root}/bin/keyring`, 'get', GATE_SERVICE, PASSWORD_ACCOUNT], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout.trim() === 'macos'
+// An install that chose it before it was kept there has it only in config.json: kept there too the first time it is read (a
+// config.json that says so only ever adds it, never takes it away)
+const keepMacos = async ($: EngineInterface) => {
+  if (await isMacosKept($)) return
+  const r = await $.process.run([`${$.plugin.root}/bin/keyring`, 'set', GATE_SERVICE, PASSWORD_ACCOUNT, 'Claudopus admin password'], { stdin: 'macos\n', timeoutMs: 15_000 }).catch(() => undefined)
+  if (r?.exitCode !== 0) await log($, '"Let macOS ask" not kept beside the gate\'s key')
+}
 // What is in force: "work" or "never" only as Config sealed it, every command asked otherwise; and where the password comes from
 const gateOf = async ($: EngineInterface) => {
   const config = await readConfig($, dir)
   const said: 'each' | 'work' | 'never' = config.admin === 'work' || config.admin === 'never' ? config.admin : 'each'
+  if (config.adminPassword === 'macos') await keepMacos($)
   const password = config.adminPassword === 'macos' || (await isMacosKept($)) ? ('macos' as const) : ('keep' as const)
   if (said === 'each') return { mode: 'each' as const, unsealed: '', password }
   const seal = (await sealed($, 'read', [`mode\n${said}`]))?.[0]
@@ -226,6 +234,13 @@ const dropGrants = async ($: EngineInterface, names: string[]) => {
 // the shell reads it. Any command that names the keychain's admin services (the gate's key and what Config chose, and the kept admin
 // passwords) with security or the keyring runner counts, whatever it does with them
 const unquoted = (command: string) => command.replace(/["'\\]/g, '')
+// The runners find their key, grants and settings under the home folder, and release asks for a press only inside Claude Code: a
+// command that names one and sets another home or data folder, or takes Claude Code's mark away, would have it read the caller's own
+const RUNNER_NAMED = /\bbin\/(?:admin|secret|release|keyring)\b/
+const RUNNER_MOVED = /(?:^|[\s;&|(`'"])(?:HOME|XDG_DATA_HOME|CLAUDECODE)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:HOME|XDG_DATA_HOME|CLAUDECODE)\b|\benv\b[^;&|\n]*\s(?:-u\s*|--unset[= ])CLAUDECODE\b|\benv\s+(?:-\w+\s+)*-i\b|\benv\b[^;&|\n]*\s-i\b/
+const movesRunner = (command: string) => [command, unquoted(command)].some(one => RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one))
+const NO_RUNNER_MOVED =
+  "This command did not run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the marks Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or takes CLAUDECODE away, is refused. Run the runner as it is."
 const touchesGate = (e: ToolCallInput) => {
   if (e.tool === 'Bash') {
     const command = String((e as { command?: unknown }).command ?? '')

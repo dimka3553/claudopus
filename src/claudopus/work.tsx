@@ -39,13 +39,15 @@ const readsKept = async ($: EngineInterface, command: string) =>
   [command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
 // A tool call that writes a file of the memory folder only the mod writes (refused outright), or the person's own settings and texts
 // by a command (refused: work changes those with Edit or Write, which wait for the person's press)
-const writesOwnFiles = (e: { tool: string }): string => {
+const writesOwnFiles = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
   if (e.tool === 'Bash') {
+    // The command as written and unquoted, and each script it runs
     const command = String(input.command ?? '')
-    if ([command, unquoted(command)].some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
-    if ([command, unquoted(command)].some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
+    const texts = [command, ...(await scriptsRun($, command))].flatMap(one => [one, unquoted(one)])
+    if (texts.some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
+    if (texts.some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
     return ''
   }
   if (!['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return ''
@@ -115,20 +117,24 @@ const workHooks = (on: On) => {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
     }
-    const ownFiles = writesOwnFiles(e)
+    const ownFiles = await writesOwnFiles($, e)
     if (ownFiles) {
       await log($, `refused ${e.tool} writing the memory folder's own files`)
       return { deny: ownFiles }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
-    if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
+    if (e.tool === 'Bash' && (pushesMain(String((e as { command?: unknown }).command ?? '')) || (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(pushesMain))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
     // The list of admin commands always allowed, and what seals it, are the person's alone
-    if (touchesGate(e)) {
+    if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {
       await log($, `refused ${e.tool} on the admin gate's own files`)
       return { deny: NO_GATE_TOUCH() }
+    }
+    if (e.tool === 'Bash' && [String((e as { command?: unknown }).command ?? ''), ...(await scriptsRun($, String((e as { command?: unknown }).command ?? '')))].some(movesRunner)) {
+      await log($, `refused ${e.tool} running a runner of the mod with another home or without Claude Code's mark`)
+      return { deny: NO_RUNNER_MOVED }
     }
     // An admin command waits for the person's press on its card, unless they chose never to be asked; a release always does, and so
     // does a change to the person's own settings and texts. Never for a call the chat's own thread is refused below: nothing is asked
@@ -145,7 +151,7 @@ const workHooks = (on: On) => {
       }
       grants = [...grants, ...released.grants]
       // A command that runs a runner may ask for a password or key in a box: the box is drawn only while one runs
-      if (/\bbin\/(?:admin|secret)\b/.test(String((e as { command?: unknown }).command ?? ''))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now())
+      if ([String((e as { command?: unknown }).command ?? ''), ...(await scriptsRun($, String((e as { command?: unknown }).command ?? '')))].some(text => /\bbin\/(?:admin|secret)\b/.test(text))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now())
     }
     if (!isRefusedHere) {
       const fileSaid = await gateOwnFile($, e, raw as never)
