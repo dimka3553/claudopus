@@ -8,8 +8,9 @@ export const changelogOf = (text: string): Version[] => {
   const versions: Version[] = []
   for (const line of text.split('\n')) {
     const head = /^## (\d+\.\d+\.\d+)(?:\s+·\s+(.+))?\s*$/.exec(line)
-    if (head) versions.push({ version: head[1], date: (head[2] ?? '').trim(), changes: [] })
-    else if (versions.length && /^- \S/.test(line)) versions[versions.length - 1].changes.push(line.slice(2).trim())
+    const last = versions.at(-1)
+    if (head) versions.push({ version: head[1] ?? '', date: (head[2] ?? '').trim(), changes: [] })
+    else if (last && /^- \S/.test(line)) last.changes.push(line.slice(2).trim())
   }
   return versions
 }

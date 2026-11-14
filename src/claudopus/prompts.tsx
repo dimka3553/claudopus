@@ -11,8 +11,8 @@ type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: n
 let waiting: Waiting[] = []
 // The tool calls whose permission check asked, newest last, so the prompt that follows is known by its call's id: the one of the same
 // loop, tool and input, else the newest of the same loop and tool
-type Asked = { agent: string; tool: string; input: string; id: string }
-let asked: Asked[] = []
+type AskedCall = { agent: string; tool: string; input: string; id: string }
+let asked: AskedCall[] = []
 const inputKey = (input: unknown) => JSON.stringify(input ?? null).slice(0, 2000)
 const askedFor = (agent: string | undefined, tool: string, input: unknown) => {
   const same = asked.filter(one => one.agent === (agent ?? '') && one.tool === tool)

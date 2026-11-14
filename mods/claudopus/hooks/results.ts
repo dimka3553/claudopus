@@ -34,7 +34,7 @@ const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 export const rehome = (text: string, from: string, to: string) => (from === to ? text : text.replace(new RegExp(`${escaped(from)}(?![A-Za-z0-9_-]|\\.[A-Za-z0-9_-])`, 'g'), () => to))
 
 // What the person did to a result, kept beside it: when it was put away, when it was last brought back, their answers to what it waits on
-type Marked = { archived?: unknown; broughtBack?: unknown; waiting?: unknown; answer?: unknown }
+export type Marked = { archived?: unknown; broughtBack?: unknown; waiting?: unknown; answer?: unknown }
 type Wait = { text: string; answer?: string }
 const at = (one: unknown) => (typeof one === 'number' && Number.isFinite(one) && one > 0 ? one : 0)
 const waitsIn = (one: unknown): Wait[] | undefined => (Array.isArray(one) ? one.filter((w): w is Wait => Boolean(w) && typeof (w as Wait).text === 'string') : undefined)

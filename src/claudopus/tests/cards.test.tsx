@@ -528,7 +528,7 @@ test("a card's title, its line of facts and every line under them start at one l
     await pane.unmount()
     const column = (card?.children ?? []).filter(one => one && typeof one === 'object').at(-1) as Drawn
     const [head, ...rest] = (column.children ?? []).filter(one => one && typeof one === 'object') as Drawn[]
-    return [...(head.children ?? []), ...rest].filter(one => one && typeof one === 'object').map(line => insetOf(line, surface).join('+'))
+    return [...(head?.children ?? []), ...rest].filter(one => one && typeof one === 'object').map(line => insetOf(line, surface).join('+'))
   }
   const expectOneEdge = async (lines: number) => {
     // A desktop moves every line in by the step a plain Button pads its label with; a terminal draws each at the card's edge

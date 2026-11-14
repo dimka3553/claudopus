@@ -52,7 +52,7 @@ const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
 // Opens a pane from a press, in front: the app leaves a pane already open where it is, behind another tab, so one open but not
 // shown is opened again
 // The tabs as the engine lists them, one word each: id, then s shown, f holding the keyboard, p drawn, for the log
-const rosterOf = (panes: { id: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }[]) =>
+const rosterOf = (panes: readonly { id: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }[]) =>
   panes.map(pane => `${pane.id}:${pane.isShown ? 's' : ''}${pane.isFocused ? 'f' : ''}${pane.isPlaced ? 'p' : ''}`).join(' ') || 'none'
 // A button's onPress runs with the handle of the drawing it sits in, which the engine never counts as the person asking: a narrow
 // terminal (under 144 columns, a phone over ssh) left every tab a press opened undrawn, and the panel, opened again to take back the
