@@ -1912,6 +1912,8 @@ const paneOf = (r: Report) => {
 }
 // Which picture each open report shows, by its pane
 const pictureAt = new Map<string, number>()
+// A mark of what one drawing shows, in digits, for its buttons' keys
+const drawingMark = (shown: unknown[]) => mark(JSON.stringify(shown)).replace(/\D/g, '')
 const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
 // Opens a pane from a press, in front: the app leaves a pane already open where it is, behind another tab, so one open but not
 // shown is opened again
@@ -2129,11 +2131,15 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
   const waiting = entries.filter(entry => isOpenQuestion(entry[0] as Report))
   const rest = entries.filter(entry => !isOpenQuestion(entry[0] as Report))
   const [recent, earlier] = [rest.slice(0, RECENT), rest.slice(RECENT)]
+  // The app keeps each button it drew by its key, with the handle of its first drawing; the engine gives every button a new handle
+  // whenever anything in the drawing changes (a result arriving, a fold, a time). A key that stayed then pressed a dead handle and
+  // nothing opened, press after press. So every key here carries a mark of what the drawing shows, which moves whenever it changes
+  const gen = drawingMark([presses, line, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui, ...[waiting, recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
   const fold = (key: string, label: string, isOpen: boolean, onPress: () => void) => (
     <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
       {/* In the rows' title column */}
       <Box width={1} flexShrink={0} />
-      <Button key={`${key}-${presses}`} label={`${isOpen ? '▾' : '▸'} ${label}`} plain dimColor onPress={() => void ((presses += 1), onPress(), redraw($))} />
+      <Button key={`${key}-${gen}`} label={`${isOpen ? '▾' : '▸'} ${label}`} plain dimColor onPress={() => void ((presses += 1), onPress(), redraw($))} />
     </Box>
   )
   // One row, one line: the title pressed opens it; when and Archive sit at the right, the same width on every row
@@ -2150,13 +2156,13 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
           {/* In the column the folded rows' labels start in */}
           <Box width={1} flexShrink={0} />
           <Box flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
-            <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - (digit ? 25 : 22))} plain hotkey={digit} onPress={() => openReport($, r.id)} />
+            <Button key={`report-${r.id}-${gen}`} label={cut(r.title, line - (digit ? 25 : 22))} plain hotkey={digit} onPress={() => openReport($, r.id)} />
           </Box>
         </Box>
         <Box width={6} flexShrink={0} justifyContent="flex-end">
           <Text dimColor>{when(r.at, now)}</Text>
         </Box>
-        <Button key={`archive-${r.id}-${presses}`} label="Archive" plain dimColor onPress={() => archiveReport($, r, true)} />
+        <Button key={`archive-${r.id}-${gen}`} label="Archive" plain dimColor onPress={() => archiveReport($, r, true)} />
       </Box>
     )
   }
@@ -2172,7 +2178,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
           <Text bold>Results</Text>
           <Text dimColor>{`${entries.length}`}</Text>
         </Box>
-        {fresh ? <Button key={`reports-fresh-${presses}`} label={`Show ${fresh} new`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
+        {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
       </Box>
       {!shown.length && !gone.length ? <Text dimColor>Nothing yet.</Text> : null}
       {waiting.length ? band(ui, 'reports-waiting', 'Waiting on you', `${waiting.length}`, rows(waiting)) : null}
@@ -2190,12 +2196,12 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
                   <Box key={`archived-${r.id}`} flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden" flexShrink={0}>
                     <Box flexDirection="row" gap={1} flexGrow={1} flexShrink={1} minWidth={0} alignItems="flex-start">
                       <Box width={1} flexShrink={0} />
-                      <Button key={`report-${r.id}-${presses}`} label={cut(r.title, line - 24)} plain dimColor onPress={() => openReport($, r.id)} />
+                      <Button key={`report-${r.id}-${gen}`} label={cut(r.title, line - 24)} plain dimColor onPress={() => openReport($, r.id)} />
                     </Box>
                     <Box width={6} flexShrink={0} justifyContent="flex-end">
                       <Text dimColor>{when(r.at, now)}</Text>
                     </Box>
-                    <Button key={`unarchive-${r.id}-${presses}`} label="Bring back" plain onPress={() => archiveReport($, r, false)} />
+                    <Button key={`unarchive-${r.id}-${gen}`} label="Bring back" plain onPress={() => archiveReport($, r, false)} />
                   </Box>
                 )
               })
@@ -2220,6 +2226,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
   const how = (one: Report) =>
     [one.id === r.from ? 'this started from it' : one.from === r.id ? 'started from this' : rounds.includes(one) ? (one.at < r.at ? 'earlier round' : 'later round') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
+  // As in the list: each key carries a mark of what this drawing shows, so the app never keeps a button whose handle is gone
+  const gen = drawingMark([presses, r, mark(text), at, Boolean(thumb), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
   const show = (to: number) => void ((presses += 1), pictureAt.set(pane, to), redraw($))
   return (
     <Box key={`report-${r.id}`} flexDirection="column" gap={1} flexGrow={1}>
@@ -2229,7 +2237,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
           <Text bold wrap="wrap">{r.title}</Text>
           <Text dimColor wrap="wrap">{[dated(r.at, now), r.subject && slug(r.subject) !== slug(r.title) ? r.subject : '', r.archived ? 'archived' : answeredOf(r)].filter(Boolean).join(' · ')}</Text>
         </Box>
-        <Button key={`report-archive-${presses}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
+        <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)} />
       </Box>
       {isOpenQuestion(r)
         ? band(
@@ -2245,7 +2253,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
                     <Text wrap="wrap">{wait.text}</Text>
                     <Box flexDirection="row" flexWrap="wrap" gap={1}>
                       {(['Yes', 'No', 'Not now'] as const).map(said => (
-                        <Button key={`report-say-${index}-${said}-${presses}`} label={said} onPress={() => void ((presses += 1), answerWait($, r, index, said, now).catch(err => log($, `answer not kept: ${String(err)}`)))} />
+                        <Button key={`report-say-${index}-${said}-${gen}`} label={said} onPress={() => void ((presses += 1), answerWait($, r, index, said, now).catch(err => log($, `answer not kept: ${String(err)}`)))} />
                       ))}
                     </Box>
                   </Box>
@@ -2288,8 +2296,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
               {pictures.length > 1 ? (
                 <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-                  <Button key={`report-prev-${presses}`} label="‹ Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
-                  <Button key={`report-next-${presses}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)} />
+                  <Button key={`report-prev-${gen}`} label="‹ Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
+                  <Button key={`report-next-${gen}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)} />
                 </Box>
               ) : null}
             </Box>
@@ -2318,11 +2326,11 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         '',
         <Box flexDirection="column" alignItems="flex-start" gap={1}>
           <Text dimColor wrap="wrap">Puts a line naming this result in the chat's box, for you to finish and send.</Text>
-          <Button key={`report-carry-${presses}`} label="Carry on from this" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
+          <Button key={`report-carry-${gen}`} label="Carry on from this" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
           {kin.length ? (
             <Box flexDirection="column" alignItems="flex-start">
               {kin.map(one => (
-                <Button key={`report-kin-${one.id}-${presses}`} label={[dated(one.at, now), one.title, how(one)].filter(Boolean).join(' · ')} plain dimColor onPress={() => openReport($, one.id)} />
+                <Button key={`report-kin-${one.id}-${gen}`} label={[dated(one.at, now), one.title, how(one)].filter(Boolean).join(' · ')} plain dimColor onPress={() => openReport($, one.id)} />
               ))}
             </Box>
           ) : null}
