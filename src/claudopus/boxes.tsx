@@ -25,15 +25,15 @@ const boxWording = (one: Record<string, unknown>): string | undefined => {
   const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
   if (one.kind === 'admin') {
     if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined) return undefined
-    const mac = one.host === 'here' ? 'this Mac' : one.host
-    return `${again}Claudopus needs the admin password of ${mac} to run an admin command. It is kept only in this Mac's keychain, and later admin commands on ${mac} run without asking again until it is forgotten.`
+    const mac = one.host === 'here' ? thisMac() : one.host
+    return `${again}Claudopus needs the admin password of ${mac} to run an admin command. It is kept only in ${keptWhere()}, and later admin commands on ${mac} run without asking again until it is forgotten.`
   }
   if (one.kind === 'secret') {
     if (one.host !== undefined) return undefined
     // No name: the first box of a key saved by hand asks its name
     if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.'
     if (typeof one.name !== 'string' || !BOX_NAME.test(one.name)) return undefined
-    return `${again}Claudopus needs ${one.name}. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print.`
+    return `${again}Claudopus needs ${one.name}. It is kept only in ${keptWhere()}, and work uses it by name, hidden in what its commands print.`
   }
   return undefined
 }
@@ -87,7 +87,7 @@ const boxesDir = () => `${dir}/boxes`
 // Another chat's request is left to it this long, so its own chat tells it, when that chat is open
 const BOX_GRACE = 5000
 // In the chat only the name of what is asked, once per box, in the chat that asked or else whichever chat sees it first
-const BOX_TOLD = (text: string) => `${text} Click in the box at the top of the Claudopus panel and type it there, never in this chat's prompt (/claudopus opens the panel). What is typed in the box goes only into this Mac's keychain.`
+const BOX_TOLD = (text: string) => `${text} Click in the box at the top of the Claudopus panel and type it there, never in this chat's prompt (/claudopus opens the panel). What is typed in the box goes only into ${keptWhere()}.`
 // This chat's own id, as the runner reads it from CLAUDE_CODE_SESSION_ID, read at each look (a /clear can change it)
 let boxChat = ''
 // Requests this chat has told or seen told
@@ -115,7 +115,7 @@ const lookBoxes = async ($: EngineInterface) => {
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) {
         await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`]).catch(() => undefined)
-        await $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => undefined)
+        await boxKeyring($, 'delete', id)
       }
     } catch {
       // A request being written is read at the next look
@@ -146,6 +146,14 @@ const lookBoxes = async ($: EngineInterface) => {
   $.ui.invalidate('ui.render')
 }
 
+// A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
+// which sendBox calls as before for set and has, so only delete goes through here
+const boxKeyring = ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
+  isLinux
+    ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+    : what === 'delete'
+      ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+      : Promise.resolve({ exitCode: -1 })
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
   boxDrafts.delete(id)
@@ -160,23 +168,25 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
   if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'It was no longer waiting · nothing was saved'))
   const escaped = value.replace(/[\\"]/g, '\\$&')
-  const r = await $.process
-    .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
-    .catch(() => ({ exitCode: -1 }))
+  const r = isLinux
+    ? await boxKeyring($, 'set', id, `${value}\n`)
+    : await $.process
+        .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
+        .catch(() => ({ exitCode: -1 }))
   // security -i can end well when the add failed: the entry is looked for by its attributes, never its value
-  const isKept = r.exitCode === 0 && (await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
+  const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
   // and one whose runner stopped meanwhile is taken out again
-  if (isKept && !(await $.fs.exists(request).catch(() => false))) await $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => undefined)
+  if (isKept && !(await $.fs.exists(request).catch(() => false))) await boxKeyring($, 'delete', id)
   boxPresses += 1
   if (!isKept) {
-    boxSaid.set(id, 'It could not be put in this Mac\'s keychain. Try again.')
+    boxSaid.set(id, `It could not be put in ${keptWhere()}. Try again.`)
     await log($, `box ${id} not kept: security ended ${r.exitCode}`)
   } else {
     boxSent.add(id)
     boxSaid.delete(id)
     const one = boxes.find(other => other.id === id)
     boxes = boxes.filter(other => other.id !== id)
-    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: "You gave it · it is in this Mac's keychain, and what asked for it goes on now", what: '', isOn: true })
+    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   $.ui.invalidate('ui.render')
@@ -199,7 +209,7 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
   return shown.map((one, n) => (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
-      <ui.Text dimColor wrap="wrap">What you type here shows as you type it. It goes only into this Mac's keychain, never into a chat.</ui.Text>
+      <ui.Text dimColor wrap="wrap">What you type here shows as you type it. It goes only into {keptWhere()}, never into a chat.</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
           key={`box-${one.id}-field-${boxPresses}`}

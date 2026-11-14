@@ -1,0 +1,66 @@
+#!/bin/bash -p
+# Where the runners keep a password or key: this Mac's keychain, or on Linux a folder only this user can read.
+#
+#   keyring get SERVICE ACCOUNT        prints the value; 1 when none is kept
+#   keyring has SERVICE ACCOUNT        0 when one is kept, printing nothing
+#   keyring set SERVICE ACCOUNT LABEL  keeps the value read from stdin (one line), replacing a kept one
+#   keyring delete SERVICE ACCOUNT     removes it; 1 when none was kept
+#   keyring list SERVICE               the accounts kept under SERVICE, one a line, never their values
+#
+# On a Mac each is the keychain's own `security` command, as the runners used before. Linux has no keychain a runner can use
+# without a desktop signed in, so there each value is a file of its own under $XDG_DATA_HOME/claudopus/keyring (by default
+# ~/.local/share/claudopus/keyring), the folders 700 and the files 600: as on a Mac, any program running as this user can read it.
+# A value only travels through pipes, never a command line.
+case $- in *p*) ;; *) exec /bin/bash -p "$0" "$@" ;; esac
+set -u
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+what=${1:-} service=${2:-} account=${3:-}
+usage() { echo "usage: keyring get|has|delete SERVICE ACCOUNT | set SERVICE ACCOUNT LABEL | list SERVICE" >&2; exit 2; }
+# Names are plain: a service or account never climbs out of its folder
+plain() { [[ $1 =~ ^[A-Za-z0-9_.@-]+$ ]] && [ "$1" != . ] && [ "$1" != .. ]; }
+[ -n "$what" ] && plain "$service" || usage
+[ "$what" = list ] || plain "$account" || usage
+
+if [ "$(uname -s)" = Darwin ]; then
+  case $what in
+    get) exec security find-generic-password -s "$service" -a "$account" -w 2>/dev/null ;;
+    has) exec security find-generic-password -s "$service" -a "$account" >/dev/null 2>&1 ;;
+    delete) exec security delete-generic-password -s "$service" -a "$account" >/dev/null 2>&1 ;;
+    set)
+      IFS= read -r value || [ -n "$value" ] || exit 1
+      # On security's stdin, whose own prompt would cut a value at 128 characters
+      printf 'add-generic-password -U -s "%s" -a "%s" -l "%s" -w "%s"\n' "$service" "$account" "${4:-Claudopus}" "$(printf '%s' "$value" | sed 's/[\\"]/\\&/g')" | security -i >/dev/null 2>&1
+      unset value
+      exec security find-generic-password -s "$service" -a "$account" >/dev/null 2>&1
+      ;;
+    list)
+      security dump-keychain 2>/dev/null | awk -v s="\"svce\"<blob>=\"$service\"" '
+        /^keychain:/ { if (hit && acct != "") print acct; hit = 0; acct = "" }
+        index($0, s) { hit = 1 }
+        /"acct"<blob>="/ { a = $0; sub(/.*"acct"<blob>="/, "", a); sub(/"$/, "", a); acct = a }
+        END { if (hit && acct != "") print acct }' | sort -u
+      exit 0
+      ;;
+    *) usage ;;
+  esac
+fi
+
+umask 077
+data=${XDG_DATA_HOME:-$HOME/.local/share}
+[ "${data#/}" != "$data" ] || data=$HOME/.local/share
+root=$data/claudopus/keyring
+file=$root/$service/$account
+case $what in
+  get) [ -f "$file" ] && [ ! -L "$file" ] || exit 1; exec cat -- "$file" ;;
+  has) [ -f "$file" ] && [ ! -L "$file" ] ;;
+  delete) [ -f "$file" ] || [ -L "$file" ] || exit 1; exec rm -f -- "$file" ;;
+  set)
+    IFS= read -r value || [ -n "$value" ] || exit 1
+    mkdir -p -- "$root/$service" && chmod 700 -- "$data/claudopus" "$root" "$root/$service" || exit 1
+    tmp=$(mktemp "$root/$service/.new.XXXXXX") || exit 1
+    printf '%s' "$value" >"$tmp" && mv -f -- "$tmp" "$file" || { rm -f -- "$tmp"; exit 1; }
+    unset value
+    ;;
+  list) [ -d "$root/$service" ] || exit 0; ls -1 -- "$root/$service" | grep -v '^\.' | sort -u; exit 0 ;;
+  *) usage ;;
+esac

@@ -280,7 +280,7 @@ const openChat = async ($: EngineInterface, c: Shared) => {
   if (url) await openHere($, c, url)
 }
 const openHere = async ($: EngineInterface, c: { chat: string; host: string }, url: string) => {
-  const r = await $.process.run(['open', url]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  const r = await openOn($, url)
   await log($, `chat ${c.chat}${c.host ? ` on ${c.host}` : ''} ${r.exitCode === 0 ? `opened: ${url}` : `not opened: ${r.stderr.trim().slice(0, 160)}`}`)
 }
 // Whether this chat runs here for another Mac's Claude app, over SSH: the app's own runner says so, once, at the start

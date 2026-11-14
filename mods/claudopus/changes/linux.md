@@ -1,0 +1,2 @@
+- Claudopus works on Linux, in Claude Code in a terminal, installed with the same lines as on a Mac. Passwords and keys are kept there in files only you can read, as Linux has no keychain to use; notifications use the desktop's own where there is one; small copies of pictures are made with ImageMagick; what only a Mac can do (Let macOS ask, Open in Terminal, the notification apps) is not offered there and says so. The guide's On Linux says what differs.
+- The tests run on Linux and on a Mac on every push.

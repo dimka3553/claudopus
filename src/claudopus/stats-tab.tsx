@@ -82,7 +82,7 @@ async function loadStats($: EngineInterface, scope: Scope, home: string, memory:
     const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat()
     held.set(scope, { runs, at: now })
   } catch (err) {
-    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? 'Stats reads Claude’s records with jq, and jq was not found on this Mac.' : `The records could not be read: ${String(err)}` })
+    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Stats reads Claude’s records with jq, and jq was not found on ${thisMac()}.` : `The records could not be read: ${String(err)}` })
   } finally {
     reading.delete(scope)
     $.ui.invalidate('ui.render')

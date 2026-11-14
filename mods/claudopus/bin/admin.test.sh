@@ -4,7 +4,8 @@
 # kept passwords are never touched; no command is run as admin (each case stops at the gate, or at the password it does not have).
 #   sh mods/claudopus/bin/admin.test.sh
 set -u
-[ "$(uname)" = Darwin ] || { echo "admin.test.sh: skipped, it needs a Mac's keychain"; exit 0; }
+# On a Mac it runs under a keychain of its own; on Linux bin/keyring keeps its files under this test's own home
+[ "$(uname)" = Darwin ] && mac=1 || mac=
 here=$(cd "$(dirname "$0")" && pwd)
 admin=$here/admin
 real_home=$HOME
@@ -12,10 +13,14 @@ tmp=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-admin-test.XXXXXX") || exit 1
 trap 'rm -rf "$tmp"' EXIT
 export HOME=$tmp/home
 memory=$HOME/.claude/claudopus
-mkdir -p "$HOME/Library/Keychains" "$HOME/Library/Preferences" "$memory/admin-grants"
-keychain=$HOME/Library/Keychains/login.keychain-db
-security create-keychain -p "" "$keychain" && security list-keychains -s "$keychain" && security default-keychain -s "$keychain" || { echo "admin.test.sh: no keychain could be made under $HOME"; exit 1; }
-security unlock-keychain -p "" "$keychain" 2>/dev/null
+mkdir -p "$memory/admin-grants"
+unset XDG_DATA_HOME
+if [ -n "$mac" ]; then
+  mkdir -p "$HOME/Library/Keychains" "$HOME/Library/Preferences"
+  keychain=$HOME/Library/Keychains/login.keychain-db
+  security create-keychain -p "" "$keychain" && security list-keychains -s "$keychain" && security default-keychain -s "$keychain" || { echo "admin.test.sh: no keychain could be made under $HOME"; exit 1; }
+  security unlock-keychain -p "" "$keychain" 2>/dev/null
+fi
 # Seals are made by the hook's own script, read out of its source (src/claudopus/gate.tsx), which also makes the key: what the hook
 # seals is then what this runner takes. A seal under another key is made here
 hook_seal=$(node -e '
@@ -103,10 +108,15 @@ expect '"never" as Config sealed it, through a wrapper as before: past the gate'
 
 config '{"adminPassword":"macos"}'
 expect 'macOS asks, no grant: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
-grant mac1 here 'id -u'
-expect 'macOS asks, in a chat reached over SSH: nothing runs' 7 'which nobody sees from a chat reached over SSH' -- "$admin" here 'id -u'
-grant mac2 m4 'id -u'
-expect 'macOS asks, on another Mac: nothing runs' 7 'works only on this Mac' -- "$admin" m4 'id -u'
+if [ -n "$mac" ]; then
+  grant mac1 here 'id -u'
+  expect 'macOS asks, in a chat reached over SSH: nothing runs' 7 'which nobody sees from a chat reached over SSH' -- "$admin" here 'id -u'
+  grant mac2 m4 'id -u'
+  expect 'macOS asks, on another Mac: nothing runs' 7 'works only on this Mac' -- "$admin" m4 'id -u'
+else
+  grant linux1 here 'id -u'
+  expect 'macOS asks, on Linux: nothing runs, and it says only a Mac can' 7 'only a Mac can do' -- "$admin" here 'id -u'
+fi
 
 config '{}'
 # What takes something back makes a new key: a grant and a "never" sealed before it count for nothing
@@ -124,6 +134,11 @@ expect 'forgetting a password needs no grant' 0 'No password was kept' -- "$admi
 expect 'with no command it says how it is used' 2 'usage' -- "$admin" here
 
 # The person's own keychain is as it was
-[ "$(HOME=$real_home security default-keychain 2>/dev/null)" != "$(security default-keychain 2>/dev/null)" ] || { echo "NOT OK - the test ran on the person's own keychain"; failed=1; }
+if [ -n "$mac" ]; then
+  [ "$(HOME=$real_home security default-keychain 2>/dev/null)" != "$(security default-keychain 2>/dev/null)" ] || { echo "NOT OK - the test ran on the person's own keychain"; failed=1; }
+else
+  kept_key=$HOME/.local/share/claudopus/keyring/claudopus-admin-gate/seal
+  [ -f "$kept_key" ] && [ "$(stat -c %a "$kept_key")" = 600 ] && [ "$(stat -c %a "$HOME/.local/share/claudopus/keyring")" = 700 ] && echo "ok - the gate's key is a file only this user reads, under the test's own home" || { echo "NOT OK - the gate's key file is missing or others can read it"; failed=1; }
+fi
 [ "$failed" = 0 ] && echo "admin.test.sh: all passed" || echo "admin.test.sh: FAILED"
 exit "$failed"

@@ -23,7 +23,8 @@ const copyAsk = ($: EngineInterface, id: string, text: string, surface: RenderSu
 let openedKey = ''
 let opens = 0
 const zshQuoted = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`
-const canOpenTerminal = (one: Todo) => Boolean(one.ask?.isCommand && one.ask.copy) && !one.chat?.host && !isRunFromAfar
+// Linux has no Terminal app to type it into, so there the card gives the command to copy only
+const canOpenTerminal = (one: Todo) => Boolean(one.ask?.isCommand && one.ask.copy) && !one.chat?.host && !isRunFromAfar && !isLinux
 const terminalFiles = (folder: string, home: string) => ({
   // Their own .zshenv runs first; one that moves ZDOTDIR to their own folder is followed there afterwards, not before ours runs
   '.zshenv': [

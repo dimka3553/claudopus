@@ -27,6 +27,34 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   return false
 }
 
+// bin/keyring and its store, the runners' alone: on a Mac a way into the keychain, on Linux files that hold every kept password and
+// key, the boxes' answers and the admin gate's key. A command that names the keyring runner or the store's folder (bin/keyring,
+// keyring/…, "keyring"), and any tool that reads, searches or writes a path in that folder, or searches a folder of yours it is in,
+// is refused. Commands that only name the word, such as `pip install keyring`, are refused with it. This stops slips and common
+// tricks, as the boxes' guard does; it is no wall
+const KEYRING_WORD = /(?:^|[\s'"=/;&|(`$])keyring(?:$|[\s'"/;&|)`])/i
+const KEYRING_PATH = /claudopus\/keyring(?:\/|\b)|\.local\/share\/claudopus\b/i
+const touchesKeyring = (e: { tool: string }) => {
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown; path?: unknown; pattern?: unknown; glob?: unknown }
+  if (e.tool === 'Bash') {
+    const command = String(input.command ?? '')
+    // git and gh alone may name the word, so a commit message or a pull request can; never the store's folder
+    return KEYRING_PATH.test(command) || (KEYRING_WORD.test(command) && !/^\s*(?:git|gh)\s[^;&|`$<>]*$/.test(command))
+  }
+  if (!['Read', 'Grep', 'Glob', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return false
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const roots = [keyringRoot, `${home}/.local/share/claudopus/keyring`].filter(Boolean).map(one => one.toLowerCase())
+  const isSearch = e.tool === 'Grep' || e.tool === 'Glob'
+  if (isSearch && [input.pattern, input.glob].some(one => typeof one === 'string' && KEYRING_WORD.test(` ${one} `))) return true
+  return [input.file_path, input.notebook_path, input.path, input.pattern, input.glob].some(one => {
+    if (typeof one !== 'string' || !one) return false
+    if (KEYRING_PATH.test(one)) return true
+    const path = pathOf(one, home, cwd || home).toLowerCase().replace(/\/+$/, '')
+    // A search from a folder of yours above the store reaches into it (ripgrep passes over hidden folders only from above your home)
+    return roots.some(root => path === root || path.startsWith(`${root}/`) || (isSearch && path.length > home.length && root.startsWith(`${path}/`)))
+  })
+}
+
 const workHooks = (on: On) => {
 
   // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
@@ -54,7 +82,7 @@ const workHooks = (on: On) => {
       await log($, `refused ${e.tool} touching the password and key boxes`)
       return { deny: NO_BOXES }
     }
-    if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
+    if ((e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) || touchesKeyring(e)) {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
     }
