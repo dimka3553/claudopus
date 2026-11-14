@@ -45,7 +45,7 @@ const shareMine = async ($: EngineInterface) => {
     myLink = await readLink($, id).catch(() => myLink)
   }
   const cards = shareable(await read($, todos), now)
-  const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, ...p }: Waiting): Prompt => p
+  const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
   const prompts: Prompt[] = waiting.map(shareOf)
   // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open
   const answeredNow: Prompt[] = answeredShown(now).map(shareOf)

@@ -118,7 +118,8 @@ export type Link = { bridge: string; app: string }
 // `kind` says what the person does (allow a call, answer a question, approve a plan), `detail` what exactly (the command, the message,
 // the page), `yes` and `no` what each answer does. Once answered it moves to Shared's `answeredPrompts`: `answered` is what the person
 // did (yes, no, an answer to a question, or nothing as it ended first), `isRunning` while an allowed call still runs, `endedAt` when
-// it ended, after which it shows a minute more
+// it ended, after which it shows a minute more; `done` how its end is said once allowed ("it was sent"), `isCut` an allowed call
+// that was stopped before it finished
 export type Prompt = {
   id: string
   text: string
@@ -128,7 +129,9 @@ export type Prompt = {
   detail?: string
   yes?: string
   no?: string
+  done?: string
   answered?: 'yes' | 'no' | 'stopped'
+  isCut?: boolean
   isRunning?: boolean
   endedAt?: number
 }

@@ -344,7 +344,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('tool.call', async (_, e) => {
     const command = String((e as { command?: string }).command ?? '')
     // The person says no to the app's prompt for this tool
-    if (files.get('refuse') === e.tool) return { deny: "The user doesn't want to proceed with this tool use." } as never
+    // as the engine says it: an error result in words, the same for an approval cut short
+    if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
+    if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
@@ -4749,8 +4751,8 @@ test("a chat stopped on the app's own prompt shows it amber at the top of its pa
   // It says which work asks, that it asks permission, the command whole, and what a yes and a no each do
   expect(await list.find({ type: 'Text', text: 'Asks your permission' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'rm -rf build' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Yes: the command runs on this Mac.' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'No: it does not happen; the work is told you said no and carries on without it.' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Yes: the command runs on its Mac.' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'No: it does not happen, and the work stops to wait for what you say next.' })).toBeDefined()
   // Amber, above the work's own card
   const texts = (await list.findAll({ type: 'Text' })).map(one => one.text)
   expect(texts.indexOf('Run a command: Clear the build folder')).toBeLessThan(texts.lastIndexOf('Clean the build'))
@@ -4856,19 +4858,43 @@ test('a message the chat passes to running work names that work and the message;
   await $.agent.spawn({ ...spawn, description: 'Fix the panel cards', prompt: 'fix the cards' } as never)
   await $.classic.PermissionRequest({ tool_name: 'SendMessage', tool_input: { to: 'a1', message: 'Make the buttons bigger too' } } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Pass a message to the work “Fix the panel cards”' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Make the buttons bigger too' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Yes: that work gets the message and acts on it.' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'No: that work does not get it and goes on as it was; the chat is told you said no.' })).toBeDefined()
+  await until(async () => list.find({ type: 'Text', text: 'Pass a message to the work “Fix the panel cards”' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the work “Fix the panel cards”')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Make the buttons bigger too')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Yes: that work gets the message and acts on it.')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('No: it is not sent, and the sender stops to wait for what you say next.')
   // No tool's own name anywhere on it
   expect((await list.findAll({ type: 'Text' })).some(one => String(one.text).includes('SendMessage'))).toBe(false)
   // The person says no
   files.set('refuse', 'SendMessage')
   await $.tool.call({ tool: 'SendMessage', to: 'a1', message: 'Make the buttons bigger too' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and the work was told' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Pass a message to the work “Fix the panel cards”' })).toBeDefined()
+  await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('You said no · it did not happen, and it waits for what you say next')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the work “Fix the panel cards”')
   await clock.advance(61_000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'You said no · it did not happen, and the work was told' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' })) ? undefined : true))).toBe(true)
+  // Allowed, a message says it was sent
+  files.delete('refuse')
+  await $.classic.PermissionRequest({ tool_name: 'SendMessage', tool_input: { to: 'a1', message: 'One more thing' } } as never)
+  await $.tool.call({ tool: 'SendMessage', to: 'a1', message: 'One more thing' } as never)
+  await until(async () => list.find({ type: 'Text', text: 'You allowed it · it was sent' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('You allowed it · it was sent')
+  // Interrupted before an answer: nothing happened
+  files.set('interrupt', 'Bash')
+  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'make clean', description: 'Clean up' }, agent_id: 'a1' } as never)
+  await until(async () => list.find({ type: 'Text', text: 'Run a command: Clean up' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Run a command: Clean up')
+  await $.tool.call({ tool: 'Bash', command: 'make clean', description: 'Clean up', agentId: 'a1' } as never)
+  await until(async () => list.find({ type: 'Text', text: 'It ended before you answered · nothing happened' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('It ended before you answered · nothing happened')
+  await list.unmount()
+})
+
+test("another chat's prompt and its answer show under that chat's name, titled by its work or as that chat's own", async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  files.set(`${MEMORY}/live/chat-o.json`, JSON.stringify({ chat: 'chat-o', title: 'Other chat', folder: '/x', host: '', at: NOW, cards: [], prompts: [{ id: 'toolu_9', text: 'Run a command: Count files', kind: 'allow', at: NOW }], answeredPrompts: [{ id: 'toolu_8', text: 'Pass a message to the work “Tidy”', title: 'Tidy', kind: 'allow', answered: 'yes', done: 'it was sent', at: NOW, endedAt: NOW }] }))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await until(async () => list.find({ type: 'Text', text: 'Run a command: Count files' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Run a command: Count files')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('That chat itself')
+  expect(await list.find({ type: 'Text', text: 'This chat itself' })).toBeUndefined()
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('You allowed it · it was sent')
   await list.unmount()
 })
 

@@ -865,10 +865,11 @@ const panelHooks = (on: On) => {
     // of what came of it (purple while it runs, grey once over)
     const saidOf = (p: Prompt) => {
       if (p.answered === 'stopped') return 'It ended before you answered · nothing happened'
-      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · it carries on without your answer' : p.kind === 'plan' ? 'You said no · it keeps planning' : 'You said no · it did not happen, and the work was told'
+      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · no answer went back, and it waits for you' : p.kind === 'plan' ? 'You said no · it keeps planning' : 'You said no · it did not happen, and it waits for what you say next'
       if (p.kind === 'question') return p.isRunning ? 'You answered · it is taking your answer' : 'You answered · it carries on with your answer'
       if (p.kind === 'plan') return 'You approved the plan · it is carrying it out'
-      return p.isRunning ? 'You allowed it · it is running now' : 'You allowed it · it ran and is done'
+      if (p.isCut) return 'You allowed it · it was stopped before it finished'
+      return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
     }
     const answeredCard = (p: Prompt, key: string, c?: Shared) => (
       <Box key={`answered-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
@@ -1162,7 +1163,7 @@ const panelHooks = (on: On) => {
                 // Open that chat whenever its link opens here: a chat of this Mac, or one of another Mac with Remote Control on
                 // In a chat another Mac's app runs here, that Mac opens it
                 const url = pressOf(c)
-                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', url ? c : undefined))
+                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', c))
                 const answered = answeredOf(c.answeredPrompts).map(p => answeredCard(p, `${c.host}-${c.chat}-${p.id}`, c))
                 return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...answered, ...cards.map(one => small(one))]
               }),

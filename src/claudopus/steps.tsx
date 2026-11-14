@@ -139,7 +139,7 @@ const lookInOnHelpers = async ($: EngineInterface) => {
   for (const one of told) {
     // Work that ended its turn to wait for its helpers is woken by the line; work under way reads it at its next step
     const parent = list.find(todo => todo.id === one.to)
-    if (parent?.waitsSince) await $.session.send({ to: { agentId: one.to }, text: one.line }).catch(err => log($, `work ${one.to} not told of its helper: ${String(err)}`))
+    if (parent?.waitsSince) await $.session.send({ to: { agentId: one.to }, text: one.line }).catch(err => log($, `work ${one.to} not told of its helper: ${String(err)}`)).finally(() => ownSent($))
     else await tell($, one.to, one.line)
   }
 }

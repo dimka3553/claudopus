@@ -4,7 +4,7 @@
 // The engine raises PermissionRequest as it puts a prompt to the person, and says nothing of the answer but a refusal: an allowed
 // call just runs and ends. So a prompt goes when its call ends (refused, interrupted or run), when the terminal draws its running
 // pill, or, for a command, as soon as a process running it is seen on this Mac. The mod never answers a prompt
-type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean }
+type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean; input?: Record<string, string> }
 let waiting: Waiting[] = []
 // The tool calls whose permission check asked, newest last, so the prompt that follows is known by its call's id: the one of the same
 // loop, tool and input, else the newest of the same loop and tool
@@ -19,22 +19,22 @@ const askedFor = (agent: string | undefined, tool: string, input: unknown) => {
 }
 // What the prompt asks, in plain words and never a tool's own name: what is asked, exactly what (the command, the message, the page),
 // and what a yes and a no each do. A message names the work it goes to, by its card
-type Asks = Pick<Prompt, 'text' | 'kind' | 'detail' | 'yes' | 'no'>
-const NO_SKIPS = 'No: it does not happen; the work is told you said no and carries on without it.'
+type Asks = Pick<Prompt, 'text' | 'kind' | 'detail' | 'yes' | 'no' | 'done'>
+const NO_SKIPS = 'No: it does not happen, and the work stops to wait for what you say next.'
 const promptOf = (tool: string, input: unknown, list: Todo[]): Asks => {
   const given = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
   const field = (key: string) => (typeof given[key] === 'string' ? oneLine(given[key] as string) : '')
   const whole = (key: string, max: number) => (typeof given[key] === 'string' ? cut((given[key] as string).trim(), max) : '')
   const file = (path: string) => path.split('/').filter(Boolean).pop() ?? ''
   const workNamed = (id: string) => {
-    if (!id) return ''
-    if (id === 'main' || id === 'parent') return 'this chat'
-    const card = list.find(one => one.id === id) ?? list.find(one => id.startsWith(one.id) || one.id.startsWith(id))
-    return card ? `“${titleOf(card)}”` : 'a piece of work'
+    if (!id) return 'another piece of work'
+    if (id === 'main' || id === 'parent') return 'its chat'
+    const card = list.find(one => one.id === id) ?? list.find(one => id.startsWith(one.id))
+    return card ? `the work “${titleOf(card)}”` : 'another piece of work'
   }
   const allow = (text: string, yes: string, detail = '', no = NO_SKIPS): Asks => ({ text, kind: 'allow', ...(detail ? { detail } : {}), yes: `Yes: ${yes}`, no })
   if (tool === 'Bash' || tool === 'PowerShell')
-    return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'one with no words'}`, 'the command runs on this Mac.', whole('command', 400))
+    return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'one with no words'}`, 'the command runs on its Mac.', whole('command', 400))
   if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'the file is saved, replacing any file of that name.', field('file_path'))
   if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit')
     return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'the change is made to the file.', field('file_path') || field('notebook_path'))
@@ -44,16 +44,19 @@ const promptOf = (tool: string, input: unknown, list: Todo[]): Asks => {
   if (tool === 'WebSearch') return allow(`Search the web for “${cut(field('query'), 80)}”`, 'it searches the web and reads the results.')
   if (tool === 'SendMessage') {
     const to = workNamed(field('to'))
-    return allow(
-      to === 'this chat' ? 'Pass a message back to this chat' : `Pass a message to the work ${to}`,
-      to === 'this chat' ? 'the chat gets the message.' : 'that work gets the message and acts on it.',
-      whole('message', 400) || field('summary'),
-      to === 'this chat' ? NO_SKIPS : 'No: that work does not get it and goes on as it was; the chat is told you said no.',
-    )
+    return {
+      ...allow(
+        to === 'its chat' ? 'Pass a message back to its chat' : `Pass a message to ${to}`,
+        to === 'its chat' ? 'its chat gets the message.' : 'that work gets the message and acts on it.',
+        whole('message', 400) || field('summary'),
+        'No: it is not sent, and the sender stops to wait for what you say next.',
+      ),
+      done: 'it was sent',
+    }
   }
   if (tool === 'Agent' || tool === 'Task')
-    return allow(`Start a piece of work: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), 'No: it is not started; the chat is told you said no.')
-  if (tool === 'TaskStop') return allow(`Stop the work ${workNamed(field('task_id') || field('id'))}`, 'that work is stopped where it is.', '', 'No: that work keeps running.')
+    return { ...allow(`Start a piece of work: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), 'No: it is not started, and the chat stops to wait for what you say next.'), done: 'it was started' }
+  if (tool === 'TaskStop') return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that work is stopped where it is.', '', 'No: that work keeps running.'), done: 'it was stopped' }
   if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`, 'it loads those instructions and follows them.')
   if (tool === 'AskUserQuestion') {
     const first = Array.isArray(given.questions) ? (given.questions[0] as { question?: unknown } | undefined)?.question : undefined
@@ -61,7 +64,7 @@ const promptOf = (tool: string, input: unknown, list: Todo[]): Asks => {
       text: typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 120)}` : 'Answer a question',
       kind: 'question',
       yes: 'Pick an answer: it goes back and the work carries on with it.',
-      no: 'Skip it: the work carries on without your answer.',
+      no: 'Skip it: no answer goes back, and it waits for what you say next.',
     }
   }
   if (tool === 'ExitPlanMode')
@@ -69,7 +72,7 @@ const promptOf = (tool: string, input: unknown, list: Todo[]): Asks => {
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
   const words = field('description') || field('text') || field('query') || field('title') || field('name') || field('url')
   if (mcp) return allow(`Use “${(mcp[2] ?? '').replace(/_/g, ' ')}” from ${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '').replace(/[_-]/g, ' ')}`, 'it runs that action.', cut(words, 300))
-  return allow(words ? `Use a tool: ${cut(words, 90)}` : 'Use one of its tools', 'it runs.', '')
+  return allow(words ? `Use a tool: ${cut(words, 90)}` : 'Use one of its tools', 'that tool runs.', '')
 }
 // The start of a command up to its first quote, `$` or line break, as a running shell shows it whatever the quoting
 const snippetOf = (tool: string, input: unknown) => {
@@ -89,7 +92,8 @@ const opened = async ($: EngineInterface, agent: string | undefined, tool: strin
   const id = askedFor(agent, tool, input) ?? `pr-${at}-${Math.random().toString(36).slice(2, 8)}`
   const list = await read($, todos)
   const card = agent !== undefined ? list.find(one => one.id === topOf(list, agent)) : undefined
-  const one: Waiting = { id, ...promptOf(tool, input, list), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input) }
+  const strings = Object.fromEntries(Object.entries(input && typeof input === 'object' ? input : {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>
+  const one: Waiting = { id, ...promptOf(tool, input, list), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
   waiting = [...waiting.filter(other => other.id !== id), one]
   redraw($)
   void shareMine($).catch(() => undefined)
@@ -116,36 +120,57 @@ const tellWaiting = async ($: EngineInterface) => {
 type Outcome = 'running' | 'ran' | 'no' | 'stopped'
 let answeredPrompts: Waiting[] = []
 const PROMPT_SHOWN = 60_000
-const answeredShown = (at: number) => answeredPrompts.filter(one => !one.endedAt || at - one.endedAt < PROMPT_SHOWN)
-const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, outcome?: Outcome) => {
+// An allowed call whose end is never seen is taken as over this long after it was seen running, so nothing stays purple for good
+const RUNNING_LONGEST = 15 * 60_000
+const answeredShown = (at: number) => answeredPrompts.filter(one => (one.endedAt ? at - one.endedAt < PROMPT_SHOWN : at - one.at < RUNNING_LONGEST))
+const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, outcome?: Outcome, args?: Record<string, unknown>) => {
   const byTool = (one: Waiting) => one.id.startsWith('pr-') && one.tool === tool && one.agent === (agent ?? '')
+  // The same call as the prompt asked about: every word it asked with is the call's own
+  const isSameCall = (one: Waiting) => Boolean(args) && Object.entries(one.input ?? {}).every(([key, value]) => args?.[key] === value)
+  // Its own id first, open or answered; only then the oldest open one of the same loop and tool whose id was not known. That one says
+  // what came of it only when the call asked with the very same words; else it may be another call's, and it goes with no word
   const exact = waiting.find(one => one.id === id)
-  const gone = exact ?? (tool ? waiting.find(byTool) : undefined)
-  const was = gone ? undefined : (answeredPrompts.find(one => one.id === id && !one.endedAt) ?? (tool ? answeredPrompts.find(one => byTool(one) && !one.endedAt) : undefined))
+  const was = exact ? undefined : answeredPrompts.find(one => one.id === id && !one.endedAt)
+  const guessed = exact || was || !tool ? undefined : (waiting.find(one => byTool(one) && isSameCall(one)) ?? waiting.find(byTool))
+  const gone = exact ?? guessed
   if (!gone && !was) return
   if (gone) waiting = waiting.filter(one => one !== gone)
-  if (outcome) {
+  const before = exact ?? was ?? (guessed && isSameCall(guessed) ? guessed : undefined)
+  if (outcome && before) {
     void $.clock.now().then(now => {
-      const before = gone ?? was
-      if (!before) return
       const isEnd = outcome !== 'running'
-      const answered: Prompt['answered'] = outcome === 'no' ? 'no' : outcome === 'stopped' ? (before.answered === 'yes' ? 'yes' : 'stopped') : 'yes'
-      const after: Waiting = { ...before, answered, isRunning: !isEnd, ...(isEnd ? { endedAt: now } : {}) }
+      const wasAllowed = before.answered === 'yes'
+      const answered: Prompt['answered'] = outcome === 'no' ? 'no' : outcome === 'stopped' && !wasAllowed ? 'stopped' : 'yes'
+      const after: Waiting = { ...before, answered, isRunning: !isEnd, ...(isEnd ? { endedAt: now } : { at: now }), ...(outcome === 'stopped' && wasAllowed ? { isCut: true } : {}) }
       answeredPrompts = [...answeredShown(now).filter(one => one.id !== before.id), after].slice(-10)
       redraw($)
       void shareMine($).catch(() => undefined)
-      if (isEnd) $.clock.after(PROMPT_SHOWN + 100, () => (redraw($), void shareMine($).catch(() => undefined)))
+      $.clock.after((isEnd ? PROMPT_SHOWN : RUNNING_LONGEST) + 100, () => (redraw($), void shareMine($).catch(() => undefined)))
     })
   }
   redraw($)
   void shareMine($).catch(() => undefined)
 }
-// What came of a call, as it ended: refused, ended before it ran (interrupted), or run
-const outcomeOf = (r: { deny?: unknown; result?: unknown } | undefined): Outcome => {
+// What came of a call, as it ended: the person said no, it ended before it ran (interrupted, timed out, the turn or session ended), or
+// it ran. The engine says most endings in words, in the result or its text, often with isError
+const REFUSED_WORDS = /doesn't want to proceed|tool use was rejected|user (denied|rejected)|permission to use .{1,80} (has been|was) denied/i
+const NOT_RUN_WORDS = /\[(tool call (not|did not) complete|request interrupted)|interrupted by user|the (turn|session) (was )?ended|approval request expired/i
+const outcomeOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined): Outcome => {
   if (!r) return 'stopped'
+  const words = [typeof r.deny === 'string' ? r.deny : '', typeof r.text === 'string' ? r.text : '', typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? '').slice(0, 2000)].join('\n')
+  if (REFUSED_WORDS.test(words)) return 'no'
+  if (NOT_RUN_WORDS.test(words)) return 'stopped'
   if (r.deny) return 'no'
-  const text = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? '').slice(0, 2000)
-  return /doesn't want to proceed|tool use was rejected|user (denied|rejected)/i.test(text) ? 'no' : 'ran'
+  return 'ran'
+}
+// The mod's own message, once on its way: a prompt it raised that no hook of the mod saw (one of its own tools, by a plugin's call
+// id) is over with it
+const ownSent = ($: EngineInterface) => {
+  const own = waiting.filter(one => one.id.startsWith('toolu_plugin_') && OWN_CALLS.includes(one.tool))
+  if (!own.length) return
+  waiting = waiting.filter(one => !own.includes(one))
+  redraw($)
+  void shareMine($).catch(() => undefined)
 }
 // A command allowed starts at once: a process on this Mac running it ends its prompt before the command itself ends
 let isLooking = false
@@ -173,8 +198,9 @@ const promptHooks = (on: On) => {
     // The mod's own calls carry out what the person already chose: their reply passed on to work, a Stop they pressed. The engine
     // would put each to them again as "Allow SendMessage", a prompt that says nothing of what it is, and no hook of the mod sees that
     // call end, so it never left the panel. Only these two tools, and only the mod's own calls of them, are allowed here
-    if (OWN_CALLS.includes(e.tool) && e.tool_use_id && isOwnCall(next as { origin?: { plugin?: string } })) return { decision: 'allow' }
     const r = await next(e)
+    // Only an ask becomes an allow: a rule or hook of the person's that refuses it still does
+    if (r.decision === 'ask' && OWN_CALLS.includes(e.tool) && e.tool_use_id && isOwnCall(next as { origin?: { plugin?: string } })) return { ...r, decision: 'allow' }
     if (r.decision === 'ask' && e.tool_use_id && e.approver) {
       asked = [...asked.filter(one => one.id !== e.tool_use_id), { agent: e.agentId ?? '', tool: e.tool, input: inputKey(e.input), id: e.tool_use_id }].slice(-50)
     }

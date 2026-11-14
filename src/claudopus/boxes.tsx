@@ -158,7 +158,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   }
   const request = `${boxesDir()}/${id}.json`
   // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
-  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id))
+  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'It was no longer waiting · nothing was saved'))
   const escaped = value.replace(/[\\"]/g, '\\$&')
   const r = await $.process
     .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
@@ -182,13 +182,13 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   $.ui.invalidate('ui.render')
 }
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
-const cancelBox = async ($: EngineInterface, id: string) => {
+const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
   boxDrafts.delete(id)
   boxSent.add(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
-  if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: 'You cancelled · nothing was saved, and what asked for it stops without it', what: '' })
+  if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said, what: '' })
   $.ui.invalidate('ui.render')
 }
 

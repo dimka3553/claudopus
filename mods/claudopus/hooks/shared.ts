@@ -48,7 +48,24 @@ export const promptsOf = (list: unknown): Prompt[] =>
     .filter((one): one is Prompt => Boolean(one && typeof one.id === 'string' && one.id && typeof one.text === 'string' && one.text && typeof one.at === 'number'))
     .filter((one, i, all) => all.findIndex(other => other.id === one.id) === i)
     .slice(0, PROMPTS_SHARED)
-    .map(one => ({ id: one.id.slice(0, 80), text: plain(one.text).slice(0, 200), ...(typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {}), at: one.at }))
+    .map(one => {
+      const words = (key: 'detail' | 'yes' | 'no' | 'done', max: number) => (typeof one[key] === 'string' && plain(one[key] as string) ? { [key]: plain(one[key] as string).slice(0, max) } : {})
+      return {
+        id: one.id.slice(0, 80),
+        text: plain(one.text).slice(0, 200),
+        ...(typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {}),
+        at: one.at,
+        ...(one.kind === 'allow' || one.kind === 'question' || one.kind === 'plan' ? { kind: one.kind } : {}),
+        ...words('detail', 400),
+        ...words('yes', 200),
+        ...words('no', 200),
+        ...words('done', 60),
+        ...(one.answered === 'yes' || one.answered === 'no' || one.answered === 'stopped' ? { answered: one.answered } : {}),
+        ...(one.isRunning === true ? { isRunning: true } : {}),
+        ...(one.isCut === true ? { isCut: true } : {}),
+        ...(typeof one.endedAt === 'number' ? { endedAt: one.endedAt } : {}),
+      }
+    })
 // Text from another chat's file with no control characters, so nothing in it can move or colour the terminal
 const plain = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim()
 
@@ -63,10 +80,12 @@ export const sharedOf = (text: string, now: number, host = ''): Shared | undefin
     // Running work under `cards`, ended work apart under `ended`, so a version that reads `cards` alone never shows ended work as running
     const cards = [...one.cards, ...(Array.isArray(one.ended) ? (one.ended as unknown[]) : [])].filter((card): card is Todo => Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)))
     // A chat waiting on its own prompt is listed whether or not it has work
-    const prompts = promptsOf(one.prompts)
-    if (!cards.length && !prompts.length) return undefined
+    const prompts = promptsOf(one.prompts).map(({ answered: _answered, isRunning: _running, isCut: _cut, endedAt: _ended, ...open }) => open)
+    // Prompts answered there lately, said for a minute, so a chat is listed for them too
+    const answeredPrompts = promptsOf(one.answeredPrompts).filter(p => p.answered)
+    if (!cards.length && !prompts.length && !answeredPrompts.length) return undefined
     const link = linkOf(one.link)
-    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(prompts.length ? { prompts } : {}), ...(link ? { link } : {}) }
+    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(prompts.length ? { prompts } : {}), ...(answeredPrompts.length ? { answeredPrompts } : {}), ...(link ? { link } : {}) }
   } catch {
     return undefined
   }
