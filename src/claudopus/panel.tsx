@@ -42,7 +42,7 @@ const panelHooks = (on: On) => {
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
     if (large) {
-      const back = (key: string) => <Button key={`${key}-${presses}`} label="← Back to Details" plain onPress={() => ((presses += 1), pictureBack($, paneId))} />
+      const back = (key: string) => <Button key={`${key}-${presses}`} label={paneId === LIST ? '← Back to the list' : '← Back to Details'} plain onPress={() => ((presses += 1), pictureBack($, paneId))} />
       return (
         <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
           {back('pic-back-top')}
@@ -158,6 +158,54 @@ const panelHooks = (on: On) => {
     // In the terminal the first ask's reply box holds the keys as the panel takes them: what is typed then is the person's words,
     // never a button's letter, and Tab leaves it for the buttons and their keys
     let askFocused = false
+    // The small pictures every ask in this drawing draws, in characters: together they stay under ASK_PICS_CHARS, and in Details under
+    // what the app draws in one tab beside the chat's own small pictures; one past that is a row that opens it
+    let askChars = 0
+    const askPictures = (one: Todo, key: string, isWhole: boolean) => {
+      const paths = one.ask?.pictures ?? []
+      if (!paths.length) return null
+      // An ask of a chat on another Mac names that Mac's files, which are not here: a file at the same path here is another picture
+      if (one.chat?.host) return <Text key={`${key}-pics`} dimColor wrap="wrap">{`Its ${paths.length === 1 ? 'picture is' : `${paths.length} pictures are`} on the Mac that chat runs on, and shown in that chat.`}</Text>
+      const drawing = uiOf($, e)
+      const canDraw = e.surface !== 'terminal' && 'Svg' in drawing
+      // The terminal draws no picture: a row each that opens it, with no small copy made
+      const made = canDraw ? askPicturesOf($, one) : paths.map(path => ({ name: fileName(path), path, thumb: null }) as Pic)
+      if (!made) return <Text key={`${key}-pics`} dimColor>Making its pictures small…</Text>
+      if (!made.length) return null
+      // In Details the chat's own small pictures are drawn too: all of them together stay near what that tab keeps for pictures
+      const chatChars = isWhole ? [...(shots.get(one.id)?.shots.values() ?? [])].flat().reduce((sum, pic) => sum + (pic.thumb?.source.length ?? 0), 0) : 0
+      const most = isWhole ? Math.min(ASK_PICS_CHARS, PICTURES_CHARS + 30_000 - chatChars) : ASK_PICS_CHARS
+      return (
+        <Box key={`${key}-pics`} flexDirection="row" flexWrap="wrap" alignItems="flex-start" gap={1} width="100%">
+          {made.map((pic, n) => {
+            const isDrawn = canDraw && pic.thumb !== null && askChars + pic.thumb.source.length <= most
+            if (isDrawn && pic.thumb) askChars += pic.thumb.source.length
+            const row = `${key}-pic-${n}`
+            // Drawn at most ASK_PIC_WIDE across, from a copy up to twice as wide, so two sit side by side on a wide sidebar
+            const size = pic.thumb && pic.thumb.width && pic.thumb.height ? sizedAskPic(pic.thumb.width, pic.thumb.height) : undefined
+            return (
+              <Box key={row} flexDirection="column" alignItems="flex-start" flexShrink={1} minWidth={0}>
+                {isDrawn && pic.thumb && 'Svg' in drawing ? (
+                  <drawing.Svg
+                    key={`${row}-svg`}
+                    source={pic.thumb.source}
+                    alt={`Picture: ${pic.name}`}
+                    {...(size ?? {})}
+                  />
+                ) : null}
+                <Button
+                  key={`${row}-open-${presses}`}
+                  label={`⤢ ${isDrawn ? 'Open large' : 'Open'}: ${cut(pic.name, Math.max(12, room - 14))}`}
+                  plain
+                  onPress={press => ((presses += 1), redraw($), void showPicture($, pic.path, paneId, row, press.surface))}
+                />
+                {e.surface === 'terminal' ? pictureSaidRow($, drawing, `${row}-said`, pic.path) : null}
+              </Box>
+            )
+          })}
+        </Box>
+      )
+    }
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
@@ -173,6 +221,8 @@ const panelHooks = (on: On) => {
               <Markdown text={isWhole || ask.details.length <= DETAILS_ON_CARD ? ask.details : `${cut(ask.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`} />
             </Box>
           ) : null}
+          {/* The pictures it is about, each drawn small with a row that opens it large, so it is decided here */}
+          {askPictures(one, key, isWhole)}
           {ask.copy ? (
             <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>

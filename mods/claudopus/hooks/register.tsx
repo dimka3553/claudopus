@@ -3367,6 +3367,84 @@ const loadWork = async ($: EngineInterface, id: string) => {
   if (isChanged) redraw($)
 }
 
+// The pictures an ask is about, drawn small on its card under what it is about, so the person decides there without waiting for
+// the chat to send them (14 Nov: a card asked to pick one of four designs, and the designs came only later, in the chat). Each
+// small copy is smaller than a chat's: a card's pictures are drawn in the list, beside every other card, and the list is one drawing
+// Each is made twice as wide as it is drawn, so its words stay readable on a sharp screen: smaller files first by a lower quality,
+// then by a narrower copy
+const ASK_THUMB_SIZES: [string, string][] = [
+  ['600', '45'],
+  ['600', '35'],
+  ['480', '40'],
+  ['360', '40'],
+]
+const ASK_THUMB_BYTES = 25_000
+// How wide an ask's small picture is drawn at most, and how tall, in the panel's pixels
+const ASK_PIC_WIDE = 300
+const ASK_PIC_TALL = 240
+const sizedAskPic = (width: number, height: number) => {
+  const scale = Math.min(1, ASK_PIC_WIDE / width, ASK_PIC_TALL / height)
+  return { width: Math.round(width * scale), height: Math.round(height * scale) }
+}
+// The most characters every ask's small pictures together take in one drawing; one past that is a row that opens it
+const ASK_PICS_CHARS = 140_000
+// Each ask's pictures as last made, by the work, its ask and its pictures; made out of the drawing, which is drawn again once they are
+const askPics = new Map<string, Pic[]>()
+const askLoading = new Set<string>()
+const askPicsKey = (one: Todo) => `${one.id}:${one.ask?.at ?? 0}:${(one.ask?.pictures ?? []).join('|')}`
+const askPicOf = async ($: EngineInterface, path: string): Promise<Pic | null> => {
+  const stat = await $.fs.stat(path).catch(() => undefined)
+  // A picture not on this Mac (an ask of a chat on another Mac names its own files) is left out
+  if (!stat || stat.kind !== 'file') return null
+  let thumb: Thumb = null
+  if (/\.svg$/i.test(path) && stat.size <= SVG_CHARS) {
+    const text = await readOr($, path)
+    const from = text.indexOf('<svg')
+    if (from >= 0) {
+      // Its own size, from its width and height or its viewBox, so it is drawn within the card like any other
+      const head = /<svg[^>]*>/i.exec(text.slice(from))?.[0] ?? ''
+      const box = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(head)
+      // Both from its width and height, else both from its viewBox: one of each could be in different units
+      const given = [/\swidth="([\d.]+)(px)?"/i.exec(head)?.[1], /\sheight="([\d.]+)(px)?"/i.exec(head)?.[1]]
+      const [width, height] = (given[0] && given[1] ? given : [box?.[1], box?.[2]]).map(one => Number(one ?? 0))
+      thumb = { source: text.slice(from), width: width && height ? width : 0, height: width && height ? height : 0 }
+    }
+  } else if (RASTER.test(path)) {
+    const to = `${dir}/thumbs/ask-${slug(path).slice(-60)}-${mark(path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
+    if (!(await $.fs.exists(to))) {
+      await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
+      for (const [size, quality] of ASK_THUMB_SIZES) {
+        await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to])
+        if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= ASK_THUMB_BYTES) break
+      }
+    }
+    thumb = await thumbOf($, to)
+  }
+  return { name: fileName(path), path, thumb }
+}
+// What a card draws: its ask's pictures as made, or nothing yet while they are made
+const askPicturesOf = ($: EngineInterface, one: Todo): Pic[] | undefined => {
+  if (!one.ask?.pictures?.length) return []
+  const key = askPicsKey(one)
+  if (askPics.has(key)) return askPics.get(key)
+  if (!askLoading.has(key)) {
+    askLoading.add(key)
+    const paths = [...one.ask.pictures]
+    void (async () => {
+      const made: Pic[] = []
+      for (const path of paths) {
+        const pic = await askPicOf($, path).catch(() => null)
+        if (pic) made.push(pic)
+      }
+      if (askPics.size >= 60) askPics.delete(askPics.keys().next().value ?? '')
+      askPics.set(key, made)
+    })()
+      .catch(err => log($, `pictures of an ask not made: ${String(err)}`))
+      .finally(() => (askLoading.delete(key), redraw($)))
+  }
+  return undefined
+}
+
 // Workflows: a run of the Workflow tool, a blue card with its stages, who is in it and its rounds
 
 // ---- Workflows: a run of the Workflow tool, a blue card with its stages, who is in it and its rounds ----
@@ -6075,7 +6153,7 @@ const chatHooks = (on: On) => {
           choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now (Done and Not now when left out); the one pressed comes back to you as a message' },
           command: { type: 'string', description: 'A command only they can run, never one you can run yourself, one line, whole: shown with a Copy button, and on this Mac a button that opens a terminal with it typed, never run' },
           cwd: { type: 'string', description: 'The folder the command runs in, a full path; the command is shown starting there. Needed when the command has a relative path' },
-          pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the picture files the ask is about, such as the options to pick from; shown with the ask in the chat' },
+          pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the picture files the ask is about, such as the options to pick from; drawn small on the card, each opening large on a press, and shown with the ask in the chat' },
         },
         required: ['text'],
       },
@@ -7567,7 +7645,7 @@ const toolHooks = (on: On) => {
     const tooLong = whole.length > ASK_DETAILS ? ` Its details were longer than ${ASK_DETAILS} letters and were cut at a word: put what matters first.` : ''
     // A go-ahead asked with nothing to decide it on: said back, since ${who()} sees the ask before the report
     const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : ''
-    const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} named with it, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
+    const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
     return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, and starts you again if you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
@@ -7738,7 +7816,7 @@ const panelHooks = (on: On) => {
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
     if (large) {
-      const back = (key: string) => <Button key={`${key}-${presses}`} label="← Back to Details" plain onPress={() => ((presses += 1), pictureBack($, paneId))} />
+      const back = (key: string) => <Button key={`${key}-${presses}`} label={paneId === LIST ? '← Back to the list' : '← Back to Details'} plain onPress={() => ((presses += 1), pictureBack($, paneId))} />
       return (
         <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
           {back('pic-back-top')}
@@ -7854,6 +7932,54 @@ const panelHooks = (on: On) => {
     // In the terminal the first ask's reply box holds the keys as the panel takes them: what is typed then is the person's words,
     // never a button's letter, and Tab leaves it for the buttons and their keys
     let askFocused = false
+    // The small pictures every ask in this drawing draws, in characters: together they stay under ASK_PICS_CHARS, and in Details under
+    // what the app draws in one tab beside the chat's own small pictures; one past that is a row that opens it
+    let askChars = 0
+    const askPictures = (one: Todo, key: string, isWhole: boolean) => {
+      const paths = one.ask?.pictures ?? []
+      if (!paths.length) return null
+      // An ask of a chat on another Mac names that Mac's files, which are not here: a file at the same path here is another picture
+      if (one.chat?.host) return <Text key={`${key}-pics`} dimColor wrap="wrap">{`Its ${paths.length === 1 ? 'picture is' : `${paths.length} pictures are`} on the Mac that chat runs on, and shown in that chat.`}</Text>
+      const drawing = uiOf($, e)
+      const canDraw = e.surface !== 'terminal' && 'Svg' in drawing
+      // The terminal draws no picture: a row each that opens it, with no small copy made
+      const made = canDraw ? askPicturesOf($, one) : paths.map(path => ({ name: fileName(path), path, thumb: null }) as Pic)
+      if (!made) return <Text key={`${key}-pics`} dimColor>Making its pictures small…</Text>
+      if (!made.length) return null
+      // In Details the chat's own small pictures are drawn too: all of them together stay near what that tab keeps for pictures
+      const chatChars = isWhole ? [...(shots.get(one.id)?.shots.values() ?? [])].flat().reduce((sum, pic) => sum + (pic.thumb?.source.length ?? 0), 0) : 0
+      const most = isWhole ? Math.min(ASK_PICS_CHARS, PICTURES_CHARS + 30_000 - chatChars) : ASK_PICS_CHARS
+      return (
+        <Box key={`${key}-pics`} flexDirection="row" flexWrap="wrap" alignItems="flex-start" gap={1} width="100%">
+          {made.map((pic, n) => {
+            const isDrawn = canDraw && pic.thumb !== null && askChars + pic.thumb.source.length <= most
+            if (isDrawn && pic.thumb) askChars += pic.thumb.source.length
+            const row = `${key}-pic-${n}`
+            // Drawn at most ASK_PIC_WIDE across, from a copy up to twice as wide, so two sit side by side on a wide sidebar
+            const size = pic.thumb && pic.thumb.width && pic.thumb.height ? sizedAskPic(pic.thumb.width, pic.thumb.height) : undefined
+            return (
+              <Box key={row} flexDirection="column" alignItems="flex-start" flexShrink={1} minWidth={0}>
+                {isDrawn && pic.thumb && 'Svg' in drawing ? (
+                  <drawing.Svg
+                    key={`${row}-svg`}
+                    source={pic.thumb.source}
+                    alt={`Picture: ${pic.name}`}
+                    {...(size ?? {})}
+                  />
+                ) : null}
+                <Button
+                  key={`${row}-open-${presses}`}
+                  label={`⤢ ${isDrawn ? 'Open large' : 'Open'}: ${cut(pic.name, Math.max(12, room - 14))}`}
+                  plain
+                  onPress={press => ((presses += 1), redraw($), void showPicture($, pic.path, paneId, row, press.surface))}
+                />
+                {e.surface === 'terminal' ? pictureSaidRow($, drawing, `${row}-said`, pic.path) : null}
+              </Box>
+            )
+          })}
+        </Box>
+      )
+    }
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
@@ -7869,6 +7995,8 @@ const panelHooks = (on: On) => {
               <Markdown text={isWhole || ask.details.length <= DETAILS_ON_CARD ? ask.details : `${cut(ask.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`} />
             </Box>
           ) : null}
+          {/* The pictures it is about, each drawn small with a row that opens it large, so it is decided here */}
+          {askPictures(one, key, isWhole)}
           {ask.copy ? (
             <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
