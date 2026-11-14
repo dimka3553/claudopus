@@ -3372,7 +3372,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   // Built as every card is: the title opens Details and Stop sits at its right end; where it stands, as a card's facts line says it
   expect(await keyed(pane, 'flow-open-wf_1')).toBeDefined()
   expect((await pane.find({ type: 'Button', key: 'flow-stop-wf_1' }))?.props.plain).toBe(true)
-  expect(await pane.find({ type: 'Text', text: /^Opus 5\.5 · (3 agents · )?round 2 of 3 · \d+s$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Opus 5\.5 · 3 agents · round 2 of 3 · \d+s$/ })).toBeDefined()
   // The bar it is held to, under it
   expect(await pane.find({ type: 'Text', text: /^Every case holds\.$/ })).toBeDefined()
   // A row per round up to the cap, each led by its own squares: round 1's make done and its check failed, round 2's make running
@@ -3428,6 +3428,9 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeDefined()
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect(await pane.find({ type: 'Button', key: 'flow-stop-wf_1' })).toBeUndefined()
+  // Its last line says how it ended, from what the run returned when its last round has no verdict; a round it did not need says so
+  expect(await pane.find({ type: 'Text', text: /^✓ Passed in round 2 of 3$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^not needed$/ })).toBeDefined()
   // A workflow that passed makes the octopus happy for its pause too, then it rests
   const octopus = async () => (await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).find(alt => /^Claudopus/.test(alt))
   expect(await octopus()).toBe('Claudopus, work finished')

@@ -1,3 +1,3 @@
-- A workflow's card is built like every other card now: its title opens Details and Stop sits at its right end, and its facts line names the model, the agents, the round of the cap and the time.
+- A workflow's card is built like every other card now: its title opens Details, Stop sits at its right end, and its facts line names the model, the agents, which round it is on of how many, and the time.
 - Under it are the bar the checker holds it to, and a row per round up to the cap, each led by its own squares: the round at work says who is at work beside moving dots, a checked round what its check found, and a round not run yet that it runs only if needed.
-- Once it ends, one line says how: passed in round 2 of 3, not passed after 3 rounds, or stopped.
+- Once it ends, its last line says how: passed in round 2 of 3, or not passed after 3 of 3 rounds.
