@@ -386,6 +386,8 @@ const loadFinished = async ($: EngineInterface) => {
 const follow = async ($: EngineInterface) => {
   await sync($)
   await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
+  await lookInDue($).catch(err => log($, `helpers not looked in on: ${String(err)}`))
+  await writeRolls($).catch(err => log($, `helpers not written: ${String(err)}`))
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
   const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)
