@@ -263,6 +263,7 @@ export const pidOf = (stdout: string) => {
   const numbers = stdout.split('\n').filter(line => /^\s*\d+\s*$/.test(line))
   return numbers.length === 1 ? numbers[0]?.match(/^\s*([1-9]\d{1,6})\s*$/)?.[1] : undefined
 }
+export const isPid = (pid: string) => /^[1-9]\d{1,6}$/.test(pid)
 
 // A call that only waits (a sleep, a wait) is no job of its own
 export const isWaitOnly = (cmd: string) => /^\s*(sleep\s|wait\b|python3? -c ['"]import time; ?time\.sleep)/.test(cmd)

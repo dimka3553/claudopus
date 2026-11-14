@@ -252,7 +252,7 @@ const panelHooks = (on: On) => {
           ) : null}
           <Box flexDirection="row" flexWrap="wrap" gap={1}>
             {answers.map((choice, n) => (
-              <Button key={`${key}-choice-${n}-${presses}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
+              <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
           </Box>
           {'Input' in table ? (

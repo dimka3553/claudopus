@@ -16,7 +16,7 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isReloadDue, isU
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { detachedOf, DOWNLOAD_CMD, foldJobs, isOutputEnded, isPausedProc, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
+import { detachedOf, DOWNLOAD_CMD, foldJobs, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
@@ -163,6 +163,12 @@ const afterLoad = ($: EngineInterface, ms: number, fn: () => unknown) => $.clock
 // focus and is kept in view: every redraw (a new line of the work, the person's own scrolling) pulled the view back to it, most often to
 // the bottom of the chat. With a new key after each press the app finds no such button, and the view stays where the person put it
 let presses = 0
+// An ask's answer buttons keep one key for as long as the ask stands, never the count of presses: a surface that draws late, as a
+// phone over the remote connection, still shows the keys of the last drawing, and a press on a key the panel no longer holds ran
+// nothing (14 Nov: "Release it" pressed on one card right after another card's went nowhere). Their buttons go with the ask, so none
+// is left holding the focus. The admin command's Allow and Deny keep theirs the same way. A new load gives them new keys, as presses
+// does for the rest
+let loadMark = 0
 // Each work's chat as its Details tab last read it, by the work
 const talks = new Map<string, { key: string; lines: Line[] | undefined; at?: number }>()
 // What each Details tab has unfolded, by the work: runs of tool steps and long messages by number, and the parts named by OPEN_ASK and the rest
@@ -3969,8 +3975,19 @@ const lookIo = ($: EngineInterface): LookIo => ({
 // One look: an installed copy runs Claude Code's own update steps, a copy run from a folder of its code brings that folder up to date
 // A folder's looks keep their own stamp, so they never stand in for an installed copy's hourly look on the same Mac
 const stampFor = (from: ReturnType<typeof installedFrom>) => `${dir}/${from ? 'update' : 'update-folder'}.json`
+// Claude Code's own program: the one the app names, else the first on the PATH, else where its installer puts it, as a terminal started without a login shell
+// (seen on Linux, in tmux started over ssh) has no ~/.local/bin on its PATH, else claude on the PATH
+const engineOf = async ($: EngineInterface) => {
+  const named = await $.env.get('CLAUDE_CODE_EXECPATH')
+  if (named) return named
+  // The PATH first, as the shell would find it, so an install by npm or another copy earlier on it is still the one used
+  const onPath = ((await $.env.get('PATH')) ?? '').split(':').filter(one => one.startsWith('/')).map(one => `${one.replace(/\/+$/, '')}/claude`)
+  for (const one of [...onPath, `${(await $.env.get('HOME')) ?? ''}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude'])
+    if (one.startsWith('/') && (await $.fs.exists(one).catch(() => false))) return one
+  return 'claude'
+}
 const lookAt = async ($: EngineInterface, from: ReturnType<typeof installedFrom>) => {
-  const engine = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
+  const engine = await engineOf($)
   const stampPath = stampFor(from)
   if (!from) return folderLook(lookIo($), { root: $.plugin.root, plugins: dir.replace(/\/claudopus$/, '/plugins'), engine, stampPath })
   return lookOnce(lookIo($), { from, root: $.plugin.root, cwd, engine, stampPath })
@@ -6014,9 +6031,9 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
     <ui.Text wrap="wrap">{`Allow: it runs with admin rights${gate.isWork ? ', and this work runs its next admin commands without asking' : ''}. Deny: it does not run, and the work is told.`}</ui.Text>
     {gateHeld.has(gate.id) && !isElsewhere ? (
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        <ui.Button key={`${key}-once-${presses}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate, 'once')} />
-        <ui.Button key={`${key}-always-${presses}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always')} />
-        <ui.Button key={`${key}-deny-${presses}`} label="Deny" onPress={() => answerGate($, gate, 'deny')} />
+        <ui.Button key={`${key}-once-${loadMark}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate, 'once')} />
+        <ui.Button key={`${key}-always-${loadMark}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always')} />
+        <ui.Button key={`${key}-deny-${loadMark}`} label="Deny" onPress={() => answerGate($, gate, 'deny')} />
       </ui.Box>
     ) : (
       <ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : 'It no longer waits.'}</ui.Text>
@@ -6440,7 +6457,7 @@ const chatHooks = (on: On) => {
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press
     // reached nothing. Keys no load before used make it take each button afresh: the moment of the load, with room for a thousand presses
-    if ((await $.ui.panes().catch(() => [])).length) presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000
+    if ((await $.ui.panes().catch(() => [])).length) loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000
     await loadSettings($)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
@@ -7096,7 +7113,8 @@ const lookJobs = async ($: EngineInterface) => {
   }))
   const targets = waits.flatMap(w => (w.wait.file ? [w.wait.file] : []))
   const isPs = now - jobProcsAt >= JOB_PS
-  const pids = owned.flatMap(o => (o.pid ? [o.pid] : []))
+  // One kept before process numbers were checked, such as 000, is never asked after: it counts as ended, and leaves its card
+  const pids = owned.flatMap(o => (o.pid && isPid(o.pid) ? [o.pid] : []))
   // One go: the end of each output with when it last changed, when each polled file last changed, which detached processes still
   // run, and now and then every process with its state
   const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
@@ -8516,7 +8534,7 @@ const panelHooks = (on: On) => {
           ) : null}
           <Box flexDirection="row" flexWrap="wrap" gap={1}>
             {answers.map((choice, n) => (
-              <Button key={`${key}-choice-${n}-${presses}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
+              <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
           </Box>
           {'Input' in table ? (

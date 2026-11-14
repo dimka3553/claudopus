@@ -140,6 +140,12 @@ const afterLoad = ($: EngineInterface, ms: number, fn: () => unknown) => $.clock
 // focus and is kept in view: every redraw (a new line of the work, the person's own scrolling) pulled the view back to it, most often to
 // the bottom of the chat. With a new key after each press the app finds no such button, and the view stays where the person put it
 let presses = 0
+// An ask's answer buttons keep one key for as long as the ask stands, never the count of presses: a surface that draws late, as a
+// phone over the remote connection, still shows the keys of the last drawing, and a press on a key the panel no longer holds ran
+// nothing (14 Nov: "Release it" pressed on one card right after another card's went nowhere). Their buttons go with the ask, so none
+// is left holding the focus. The admin command's Allow and Deny keep theirs the same way. A new load gives them new keys, as presses
+// does for the rest
+let loadMark = 0
 // Each work's chat as its Details tab last read it, by the work
 const talks = new Map<string, { key: string; lines: Line[] | undefined; at?: number }>()
 // What each Details tab has unfolded, by the work: runs of tool steps and long messages by number, and the parts named by OPEN_ASK and the rest

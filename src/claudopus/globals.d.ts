@@ -187,6 +187,7 @@ declare global {
   export import foldJobs = M10.foldJobs
   export import isOutputEnded = M10.isOutputEnded
   export import isPausedProc = M10.isPausedProc
+  export import isPid = M10.isPid
   export import isWaitOnly = M10.isWaitOnly
   export import labelOf = M10.labelOf
   export import JOB_COLOR = M10.JOB_COLOR

@@ -112,7 +112,8 @@ const lookJobs = async ($: EngineInterface) => {
   }))
   const targets = waits.flatMap(w => (w.wait.file ? [w.wait.file] : []))
   const isPs = now - jobProcsAt >= JOB_PS
-  const pids = owned.flatMap(o => (o.pid ? [o.pid] : []))
+  // One kept before process numbers were checked, such as 000, is never asked after: it counts as ended, and leaves its card
+  const pids = owned.flatMap(o => (o.pid && isPid(o.pid) ? [o.pid] : []))
   // One go: the end of each output with when it last changed, when each polled file last changed, which detached processes still
   // run, and now and then every process with its state
   const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
