@@ -664,8 +664,8 @@ const panelHooks = (on: On) => {
             <Text bold dimColor wrap="wrap">{name}</Text>
           </Box>
           {side ? (
-            <Box flexShrink={0}>
-              <Text dimColor>{side}</Text>
+            <Box flexShrink={1} minWidth={0}>
+              <Text dimColor wrap="truncate-end">{side}</Text>
             </Box>
           ) : null}
         </Box>
@@ -771,10 +771,12 @@ const panelHooks = (on: On) => {
       const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid, at).length, 0)
       if (!under.length && !jobs) return null
       const running = under.filter(kid => kid.status === 'working').length
-      const side = [jobs ? `${jobs} ${jobs === 1 ? 'job' : 'jobs'} running` : '', running ? `${running} at work` : '', under.length ? `${under.length} in all` : ''].filter(Boolean).join(' · ')
+      // Beside the jobs, the helpers are named, so neither count reads as the other's
+      const helpers = !jobs ? (running ? `${running} at work · ${under.length} in all` : `${under.length} in all`) : running ? `${running} of ${under.length} ${under.length === 1 ? 'helper' : 'helpers'} at work` : `${under.length} ${under.length === 1 ? 'helper' : 'helpers'}`
+      const side = [jobs ? `${jobs} ${jobs === 1 ? 'job' : 'jobs'} running` : '', under.length ? helpers : ''].filter(Boolean).join(' · ')
       return part(
         'part-helpers',
-        under.length ? 'Helpers' : 'Running',
+        !jobs ? 'Helpers' : under.length ? 'Helpers and jobs' : 'Running',
         side,
         <Box flexDirection="column">{twigsOf(branches).map(t => (t.job ? jobRow(t, 'details') : twigRow(t, 'details')))}</Box>,
       )
