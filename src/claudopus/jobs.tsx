@@ -10,6 +10,7 @@ const jobNews = new Map<string, number>()
 let jobsLookedAt = 0
 // Where the engine writes this chat's background output, once found; and when it was last looked for in vain
 let tasksDir = ''
+let tasksOf = ''
 let tasksMissedAt = 0
 
 // The jobs a card has running: what it sent to the background, and a command it has waited on a while
@@ -18,14 +19,14 @@ const jobsOf = (one: Todo, at: number): Job[] => [
     const cmd = b.cmd ?? b.what
     const seen = jobLog.get(b.id)
     const kind: JobKind = b.isWatch ? 'watch' : jobKindOf(cmd, b.what)
-    return { id: b.id, label: b.what || cmd, cmd, kind, at: b.at, ...(seen ?? {}), port: portOf(cmd) ?? seen?.port }
+    return { id: b.id, label: labelOf(b.what || cmd, cmd), cmd, kind, at: b.at, ...(seen ?? {}), port: portOf(cmd) ?? seen?.port }
   }),
   ...(one.detached ?? []).map(d => {
     const seen = jobLog.get(d.id)
-    return { id: d.id, label: d.what || d.cmd, cmd: d.cmd, kind: jobKindOf(d.cmd, d.what), at: d.at, ...(seen ?? {}), port: portOf(d.cmd) ?? seen?.port }
+    return { id: d.id, label: labelOf(d.what || d.cmd, d.cmd), cmd: d.cmd, kind: jobKindOf(d.cmd, d.what), at: d.at, ...(seen ?? {}), port: portOf(d.cmd) ?? seen?.port }
   }),
-  ...(one.status === 'working' && one.running?.cmd && at - one.running.at >= RUNNING_SHOWN
-    ? [{ id: `call-${one.id}`, label: one.running.cmd, cmd: one.running.cmd, kind: jobKindOf(one.running.cmd, one.running.cmd), at: one.running.at }]
+  ...(one.status === 'working' && one.running?.cmd && !isWaitOnly(one.running.cmd) && at - one.running.at >= RUNNING_SHOWN
+    ? [{ id: `call-${one.id}`, label: labelOf(one.running.label || one.running.cmd, one.running.cmd), cmd: one.running.cmd, kind: jobKindOf(one.running.cmd, one.running.label ?? ''), at: one.running.at }]
     : []),
 ]
 
@@ -53,20 +54,19 @@ const keepDetached = async ($: EngineInterface, agent: string, call: { tool: str
   const command = String(call.command ?? '')
   const found = detachedOf(command)
   if (!found) return
-  const base = found.cd ? (found.cd.startsWith('/') ? found.cd : `${await $.session.cwd()}/${found.cd}`) : await $.session.cwd()
-  const log = found.log.startsWith('/') ? found.log : found.log.startsWith('~/') ? found.log : `${base}/${found.log}`
-  const stdout = String((result as { stdout?: unknown } | undefined)?.stdout ?? '')
-  let pid = pidOf(stdout)
-  // No `echo $!`: the newest process running its command
-  if (!pid) {
-    const r = await $.process.run(['pgrep', '-n', '-f', found.core.slice(0, 200)], { timeoutMs: 5000 }).catch(() => undefined)
-    pid = r?.exitCode === 0 ? r.stdout.trim().split('\n')[0] : undefined
-  }
+  // A log named without a folder is the leading `cd`'s, or else the chat's folder's when it is there (a helper's own folder is
+  // not known); the process is the one `echo $!` printed. Without both it is not followed, so nothing stays on a card for ever
+  const here = await $.session.cwd()
+  const base = found.cd ? (found.cd.startsWith('/') ? found.cd : `${here}/${found.cd}`) : here
+  const log = found.log.startsWith('/') || found.log.startsWith('~/') ? found.log : `${base}/${found.log}`
+  if (!found.cd && !found.log.startsWith('/') && !found.log.startsWith('~/') && !(await $.fs.exists(log).catch(() => false))) return
+  const pid = pidOf(String((result as { stdout?: unknown } | undefined)?.stdout ?? ''))
+  if (!pid) return
   const what = oneLine(String(call.description ?? '') || found.core).slice(0, 160)
   const now = await $.clock.now()
   const id = `detached-${String(call.tool_use_id ?? now)}`
   await update($, todos, list =>
-    list.map(one => (one.id === agent ? { ...one, detached: [...(one.detached ?? []), { id, what, at: now, cmd: oneLine(command).slice(0, 400), log, ...(pid ? { pid } : {}) }].slice(-BG_KEPT) } : one)),
+    list.map(one => (one.id === agent ? { ...one, detached: [...(one.detached ?? []), { id, what, at: now, cmd: oneLine(command).slice(0, 400), log, pid }].slice(-BG_KEPT) } : one)),
   )
 }
 
@@ -82,12 +82,16 @@ const lookJobs = async ($: EngineInterface) => {
     ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid }))),
   ]
   for (const id of jobLog.keys()) if (!owned.some(o => o.id === id)) jobLog.delete(id)
+  for (const owner of jobNews.keys()) if (!owned.some(o => o.owner === owner)) jobNews.delete(owner)
   if (!owned.length) return
+  const sid = await $.session.id().catch(() => '')
+  if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
   if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
     tasksDir = await findTasks($)
     if (!tasksDir) tasksMissedAt = now
   }
-  const files = owned.map(o => o.file || (tasksDir ? `${tasksDir}/${o.id}.output` : '')).filter(Boolean)
+  const asked = owned.filter(o => o.file || tasksDir)
+  const files = asked.map(o => o.file || `${tasksDir}/${o.id}.output`)
   const pids = owned.flatMap(o => (o.pid ? [o.pid] : []))
   // One go: the end of each output, then which of the detached processes still run
   const script = `for f; do printf '\\n@@JOB@@ %s\\n' "$f"; case $f in "~/"*) f="$HOME/\${f#\\~/}";; esac; tail -c ${JOB_TAIL} "$f" 2>/dev/null; done; printf '\\n@@ALIVE@@'; for p in ${pids.map(p => p.replace(/\D/g, '')).join(' ')}; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; printf '\\n'`
@@ -105,14 +109,15 @@ const lookJobs = async ($: EngineInterface) => {
   let isChanged = false
   const moved = new Set<string>()
   for (let n = 1; n + 1 < parts.length; n += 2) {
-    const file = parts[n] ?? ''
-    const id = owned.find(o => o.file === file)?.id ?? file.split('/').at(-1)?.replace(/\.output$/, '') ?? ''
+    // The outputs come back in the order they were asked for
+    const job = asked[(n - 1) / 2]
+    const id = job?.id ?? ''
     const seen = latestOf(parts[n + 1] ?? '')
     const was = jobLog.get(id)
     if (!seen.latest || (was?.latest === seen.latest && was?.pct === seen.pct)) continue
     jobLog.set(id, seen)
     isChanged = true
-    const owner = owned.find(o => o.id === id)?.owner
+    const owner = job?.owner
     if (owner && was && now - (jobNews.get(owner) ?? 0) >= JOB_NEWS) moved.add(owner)
   }
   for (const owner of moved) jobNews.set(owner, now)

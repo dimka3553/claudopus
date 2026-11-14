@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { detachedOf, jobKindOf, latestOf, pidOf, portOf } from './jobs'
+import { detachedOf, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf } from './jobs'
 
 test('a job is told by its command: a server with its port, a download, else a script; its latest line is what a progress bar shows last', async () => {
   expect(jobKindOf('python3 -m http.server 8765 --directory out', 'Serve the mesh viewer')).toBe('server')
@@ -28,4 +28,16 @@ test('a command started detached is known by its log and folder; one that is not
   expect(detachedOf('python train.py > train.log')).toBeUndefined()
   expect(pidOf('48213\n')).toBe('48213')
   expect(pidOf('started\n')).toBeUndefined()
+})
+
+test('a detached start is one sent off with & by nohup or setsid on this Mac; a wait is no job; a description drops the command it repeats', async () => {
+  expect(detachedOf('grep nohup notes.md > hits.txt')).toBeUndefined()
+  expect(detachedOf('nohup make > build.log 2>&1')).toBeUndefined()
+  expect(detachedOf("ssh m4 'nohup python train.py > t.log 2>&1 &'")).toBeUndefined()
+  expect(detachedOf('cd /w && nohup make > build.log 2>&1 && echo ok')).toBeUndefined()
+  expect(isWaitOnly('sleep 500')).toBe(true)
+  expect(isWaitOnly("python3 -c 'import time; time.sleep(480)'")).toBe(true)
+  expect(isWaitOnly('python run_all.py')).toBe(false)
+  expect(labelOf('FLAME model download: curl -L --limit-rate 1M', 'curl -L --limit-rate 1M -o big.bin https://x')).toBe('FLAME model download')
+  expect(labelOf('Step 2: fit the mesh', 'python fit.py')).toBe('Step 2: fit the mesh')
 })

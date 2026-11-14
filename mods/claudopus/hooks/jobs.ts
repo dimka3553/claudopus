@@ -49,7 +49,10 @@ export const latestOf = (text: string) => {
 // A command started detached, with nohup or setsid and its output sent to a file: the command itself, the log as written, and the
 // folder a leading `cd` moved it to; undefined for any other command
 export const detachedOf = (command: string) => {
-  if (!/\b(nohup|setsid)\b/.test(command)) return undefined
+  // Started on another Mac over ssh, its log and process are there, not here
+  if (/^\s*(\S*\/)?ssh\b/.test(command)) return undefined
+  // nohup or setsid at the head of a command, sent off with a lone &
+  if (!/(^|&&|;|\|\||\n)\s*(nohup|setsid)\s/.test(command) || !/(?<![>&<])&(?![&>\d])/.test(command)) return undefined
   const log = command.match(/(?:^|[^0-9&2])>>?\s*("[^"]+"|'[^']+'|[^\s;&|]+)/)?.[1]?.replace(/^["']|["']$/g, '')
   if (!log || log === '/dev/null') return undefined
   const cd = command.match(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)\s*&&/)?.[1]?.replace(/^["']|["']$/g, '')
@@ -58,3 +61,12 @@ export const detachedOf = (command: string) => {
 }
 // The process id a detached start printed, as `echo $!` does
 export const pidOf = (stdout: string) => stdout.match(/^\s*(\d{2,7})\s*$/m)?.[1]
+
+// A call that only waits (a sleep, a wait) is no job of its own
+export const isWaitOnly = (cmd: string) => /^\s*(sleep\s|wait\b|python3? -c ['"]import time; ?time\.sleep)/.test(cmd)
+// A job's own words, without the command some descriptions repeat after a colon
+export const labelOf = (what: string, cmd: string) => {
+  const head = what.split(': ')[0] ?? what
+  const first = cmd.trim().split(/\s+/).find(word => !/^(cd|&&|nohup|setsid)$/.test(word) && !word.startsWith('/')) ?? ''
+  return head !== what && first && what.slice(head.length + 2).startsWith(first.slice(0, 6)) ? head : what
+}

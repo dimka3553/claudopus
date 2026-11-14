@@ -12,7 +12,7 @@ const SEEN_KEPT = 5000
 const LINES_READ = 2000
 
 // The calls running now, by tool_use_id: whose, what, since when
-const inFlight = new Map<string, { agent: string; what: string; at: number; cmd?: string }>()
+const inFlight = new Map<string, { agent: string; what: string; at: number; cmd?: string; label?: string }>()
 const seenLines = new Map<string, Set<string>>()
 
 // What a running call is, in a few words, for its row
@@ -36,7 +36,7 @@ const resultLines = (result: unknown): string[] => {
 // The longest-running call of an agent, as its card keeps it
 const runningOf = (agent: string) => {
   const first = [...inFlight.values()].filter(one => one.agent === agent).sort((a, b) => a.at - b.at)[0]
-  return first ? { what: first.what, at: first.at, ...(first.cmd ? { cmd: first.cmd } : {}) } : undefined
+  return first ? { what: first.what, at: first.at, ...(first.cmd ? { cmd: first.cmd, label: first.label } : {}) } : undefined
 }
 // A card with its running call as it is now, worked out as it is changed, so calls that begin and end together leave it true;
 // the list itself when nothing changed
@@ -50,9 +50,10 @@ const withRunning = (list: Todo[], agent: string, newAt?: number) => {
 
 // A call of a piece of work begins: its card keeps the one it has been running longest
 const callBegun = async ($: EngineInterface, id: string, agent: string, tool: string, input?: { command?: unknown; description?: unknown }) => {
-  // A command keeps its own words for itself, or its first line, so its row can say which
-  const cmd = tool === 'Bash' ? oneLine(String(input?.description ?? '') || String(input?.command ?? '').split('\n')[0] || '').slice(0, 160) : ''
-  inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now(), ...(cmd ? { cmd } : {}) })
+  // A command keeps itself and its own words for itself, so its row can say which
+  const cmd = tool === 'Bash' ? oneLine(String(input?.command ?? '')).slice(0, 400) : ''
+  const label = oneLine(String(input?.description ?? '') || cmd.split('\n')[0] || '').slice(0, 160)
+  inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now(), ...(cmd ? { cmd, label } : {}) })
   await update($, todos, list => withRunning(list, agent))
 }
 

@@ -184,6 +184,8 @@ declare global {
   export import tabMoveQueue = M9.tabMoveQueue
   export import detachedOf = M10.detachedOf
   export import DOWNLOAD_CMD = M10.DOWNLOAD_CMD
+  export import isWaitOnly = M10.isWaitOnly
+  export import labelOf = M10.labelOf
   export import JOB_COLOR = M10.JOB_COLOR
   export import JOB_GLYPH = M10.JOB_GLYPH
   export import JOB_LOOK = M10.JOB_LOOK

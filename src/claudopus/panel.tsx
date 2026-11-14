@@ -457,9 +457,9 @@ const panelHooks = (on: On) => {
       const side = job.pct ? `${job.pct} · ${time}` : time
       const width = perRow - 4 - t.depth * 2
       const room = Math.max(12, width - side.length - 1)
-      // The latest line, unless it is only a progress bar its percent already says; the name leaves it at least half the row
+      // The latest line, unless it is only a progress bar its percent already says, in the room the name leaves
       const latest = job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
-      const name = cut(jobHead(job), latest ? Math.max(20, Math.floor(room / 2)) : room)
+      const name = cut(jobHead(job), room)
       const rest = room - name.length - 3
       const detail = latest && rest >= 10 ? cut(latest, rest) : ''
       return (

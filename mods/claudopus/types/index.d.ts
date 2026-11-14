@@ -79,8 +79,8 @@ export type Todo = {
   // Work stopped after that, by the chat, the panel or the engine, had finished: it ends done, not stopped
   answeredAt?: number
   // The call it has been running longest, while one runs: what it is in a few words, since when, and for a command, the command
-  // in its own words
-  running?: { what: string; at: number; cmd?: string }
+  // and its own words for it
+  running?: { what: string; at: number; cmd?: string; label?: string }
   // When something new last came back to it: a result holding a line it had not seen come back before
   newAt?: number
   // Set while nothing new has come back to it or any helper under it for a while: when something last did
