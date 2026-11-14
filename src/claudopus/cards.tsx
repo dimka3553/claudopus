@@ -156,7 +156,7 @@ const sync = async ($: EngineInterface) => {
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
           ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
           : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
-            card.status === 'working' && !card.steps && !card.entries.length && !card.words && one.status === 'idle'
+            card.status === 'working' && !card.steps && !card.entries.length && !card.words && one.status === 'idle' && !cutPending.has(card.id)
             ? ended(card, 'done', now)
           : // Work that handed in its report and that the engine still holds on its own background work left something running;
             // once nothing does, or it was stopped, not
@@ -176,6 +176,7 @@ const sync = async ($: EngineInterface) => {
   })
   await keepStoppedReports($, now)
   await lookEnds($)
+  await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
 }
 
 // Changes the to-do a piece of work belongs to; work the mod never saw start is looked up first, and a helper of unknown work changes nothing
@@ -199,6 +200,7 @@ const stop = async ($: EngineInterface, id: string) => {
   const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
   if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
   stoppedHere.add(id)
+  await stopHelpers($, id)
   const now = await $.clock.now()
   // What finished work left running is stopped with it
   await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === id && one.leftSince ? { ...one, leftSince: undefined } : one)))
@@ -387,6 +389,8 @@ const loadFinished = async ($: EngineInterface) => {
 const follow = async ($: EngineInterface) => {
   await sync($)
   await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
+  await lookInDue($).catch(err => log($, `helpers not looked in on: ${String(err)}`))
+  await writeRolls($).catch(err => log($, `helpers not written: ${String(err)}`))
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
   const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)

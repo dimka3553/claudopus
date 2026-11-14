@@ -5,6 +5,7 @@ export const register: Register = on => {
   chatHooks(on)
   promptHooks(on)
   workHooks(on)
+  stepHooks(on)
   commandHooks(on)
   toolHooks(on)
   bandHooks(on)

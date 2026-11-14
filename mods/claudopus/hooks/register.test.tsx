@@ -82,6 +82,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   let spawned = 0
   let gateKeys = 0
   const sleepers: (() => void)[] = []
+  // Whether each agent started ran in the background, as the engine was asked
+  const backgrounds: boolean[] = []
   const wake = () => void sleepers.splice(0).forEach(one => one())
   // What each Bash call that ran the admin runner found waiting for it: the grants, as bin/admin would read them
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
@@ -341,6 +343,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const held = new Map<string, (text: string) => void>()
   on('tool.call', async (_, e) => {
     const command = String((e as { command?: string }).command ?? '')
+    // The person says no to the app's prompt for this tool
+    // as the engine says it: an error result in words, the same for an approval cut short
+    if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
+    if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
@@ -358,6 +364,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('agent.spawn', (_, e) => {
     prompts.push(e.prompt)
+    backgrounds.push(e.background)
     const resume = (e as { resume?: { agentId?: string } }).resume
     return { model: options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
   })
@@ -382,13 +389,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('tool.describe', (_, e) => ({ description: e.description }))
   // The settings hooks beneath: none answers a permission request, unless a test lays one that allows
   on('classic.Notification', () => ({}) as never)
+  on('classic.PostToolBatch', () => ({}) as never)
   on('classic.PermissionRequest', () => (files.has('settings:allow') ? { decision: { behavior: 'allow' } } : {}) as never)
   on('session.compact', (_, e) => {
     compacts.push(e.instructions)
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -2002,12 +2010,18 @@ test('work that answered while only its own background work held it, then stoppe
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's4', task_id: 'a4' } as never)
   await clock.advance(2_100)
 
-  // Handed back with a helper of its own still at work, it is done too, and the helper goes on
+  // A report handed back while a helper of its own is still at work is refused: the helper's result would reach the chat, not
+  // the work. Once the helper has ended, the report goes through and it is done
   await $.agent.spawn({ ...spawn, description: 'Name the squid', prompt: 'name it', resume: { agentId: 'h1' } } as never)
   await $.agent.spawn({ ...spawn, description: 'Look up names', prompt: 'look', parentAgentId: 'h1', resume: { agentId: 'h2' } } as never)
   agents.h1 = 'waiting'
   agents.h2 = 'running'
   kinds.h1 = 'general-purpose'
+  const early = await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb1', agentId: 'h1', message: 'Named it Sid.' } as never)
+  expect(String((early as { deny?: unknown }).deny)).toContain('still running in the background')
+  await $.turn.complete({ answer: 'Sid, Squidward, Inky', durationMs: 1, isAborted: false, turnId: 't4h', reason: 'answer', agentId: 'h2' } as never)
+  agents.h2 = 'completed'
+  await clock.advance(20_000)
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'h1', message: 'Named it Sid.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4t', reason: 'answer', agentId: 'h1' } as never)
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
@@ -3008,6 +3022,58 @@ test("a Details tab's small pictures together stay under what the app draws in o
   expect(logged).toEqual([])
 })
 
+test("an ask's pictures are drawn small on its card, in the list and in Details, each with a row that opens it large; together they stay under what the app draws in one drawing; the terminal has the rows alone", async ($, on) => {
+  const shots = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(n => `/w/designs/${n}.png`)
+  // Each small copy as made, 600 wide
+  const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 600\npixelHeight: 375' : '')
+  // Each ask copy as large as one may be, 25000 bytes; the chat's own copies, of the same pictures it sent, as large as theirs may be
+  const bytes = (path: string) => (path.includes('/thumbs/ask-') ? 'A'.repeat(33_400) : path.includes('/thumbs/') ? 'A'.repeat(48_000) : undefined)
+  const talk = [
+    { role: 'user', text: 'Draw the designs.', toolUses: [] },
+    { role: 'assistant', text: 'Here they are.', toolUses: [{ tool_use_id: 'u1', tool: 'SendUserFile', input: { files: shots, status: 'normal' } }] },
+  ]
+  const { files, logged, shown } = world(on, { sips, bytes, talk })
+  for (const path of shots) files.set(path, 'png')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'pick a design', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Pick a design', prompt: 'Draw the designs.' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Pick one of the designs', details: 'Each picture is one design.', choices: ['A', 'B'], pictures: shots } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // Made out of the drawing, which is drawn again once they are
+  for (let tries = 0; tries < 50 && !(await list.findAll({ type: 'Svg' })).some(one => String(one.props.alt).startsWith('Picture:')); tries += 1) await new Promise(done => setTimeout(done, 20))
+  const small = (await list.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))
+  // Four fit in what every ask's pictures may take; the rest are rows that open them
+  expect(small.map(one => String(one.props.alt))).toEqual(['Picture: a.png', 'Picture: b.png', 'Picture: c.png', 'Picture: d.png'])
+  // Each drawn at most 300 across, from a copy twice as wide
+  expect(small.map(one => [one.props.width, one.props.height])).toEqual(Array(4).fill([300, 188]))
+  const rows = (await list.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => label.startsWith('⤢'))
+  expect(rows).toEqual(['⤢ Open large: a.png', '⤢ Open large: b.png', '⤢ Open large: c.png', '⤢ Open large: d.png', '⤢ Open: e.png', '⤢ Open: f.png', '⤢ Open: g.png'])
+  expect(await drawnChars(list)).toBeLessThan(APP_DRAWING_CHARS)
+  // Pressed, one opens whole in the Mac's own viewer
+  shown.length = 0
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(one => one.props.label === '⤢ Open large: b.png')?.key ?? '' })
+  expect(shown).toEqual([['open', '/w/designs/b.png']])
+  // In Details too, under what it is about
+  await pressed(list, 'open-a1')
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  const drawnIn = async () => (await tab.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).filter(alt => alt.startsWith('Picture:'))
+  // Once the chat's own small copies are read: its newest three fill what the tab keeps for pictures, and of the ask's the first
+  // alone still fits; the rest are rows that open them
+  for (let tries = 0; tries < 100 && !(await drawnIn()).includes('Picture: g.png'); tries += 1) await new Promise(done => setTimeout(done, 20))
+  expect((await drawnIn()).sort()).toEqual(['Picture: a.png', 'Picture: e.png', 'Picture: f.png', 'Picture: g.png'])
+  expect(await drawnChars(tab)).toBeLessThan(APP_DRAWING_CHARS)
+  await tab.unmount()
+  await list.unmount()
+  // The terminal draws no pictures: a row each that opens it
+  const term = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  expect((await term.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))).toEqual([])
+  expect((await term.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => label.startsWith('⤢')).length).toBe(7)
+  expect(await term.find({ type: 'Text', text: /Making its pictures small/ })).toBeUndefined()
+  await term.unmount()
+  // Only the ask's notice in the chat is logged: nothing failed
+  expect(logged.filter(line => !line.startsWith('The work "Pick a design" needs the person'))).toEqual([])
+})
+
 // Memory files in the mod's tabs, and the Memory button
 
 test('a memory path in a reply opens in a tab of the mod on the desktop, never the app file pane; the terminal keeps its own', async ($, on) => {
@@ -3967,7 +4033,7 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which logo do you want?', choices: ['A', 'B'], pictures: ['/w/shots/a.png', '/w/shots/b.png', '/w/shots/gone.png', 'rel.png'] } as never)
   expect(String(asked.result)).toContain('shown in the chat as a notice from the panel')
-  expect(String(asked.result)).toContain('Its 2 pictures are named with it')
+  expect(String(asked.result)).toContain('Its 2 pictures are drawn small on the card')
   expect(String(asked.result)).toContain('2 of the pictures given are no picture file found here')
   // The chat shows the ask as the mod's notice, never a prompt in the person's place, with what it asks, its answers and its pictures
   await clock.advance(10)
@@ -4144,6 +4210,11 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)))
   await list.press({ key: cancel?.key ?? '' })
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${other}.json`) ? undefined : true))).toBe(true)
+  // Its place says what was done, for a minute
+  expect(await until(async () => list.find({ type: 'Text', text: 'You cancelled · nothing was saved, and what asked for it stops without it' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'The admin password of this Mac' })).toBeDefined()
+  await clock.advance(61_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'The admin password of this Mac' })) ? undefined : true))).toBe(true)
 })
 
 test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {
@@ -4774,54 +4845,78 @@ test("a chat of this Mac with work opens by the app's own id when it has no Remo
 
 // The app's own prompts shown amber in every panel
 
+// A prompt's Yes or No, by the start of its key: the prompt's id and the count of presses follow
+const button = async (pane: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; props: Record<string, unknown> }[]> }, start: string) =>
+  (await pane.findAll({ type: 'Button' })).find(one => String(one.key ?? '').startsWith(start))
+
 test("this chat waiting on the app's own prompt is listed with its prompt, and idle chats beside it are not", async ($, on) => {
-  const { files, clock } = world(on)
+  const { files, clock, wake } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
   const idle = JSON.stringify({ chat: 'chat-q', title: 'Quiet one', folder: '/x', host: '', at: NOW, cards: [] })
   files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${idle}\n`)
   await $.session.start(start)
-  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build', description: 'Clear the build folder' } } as never)
+  void $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build', description: 'Clear the build folder' } } as never)
   await clock.advance(10_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Allow a command: Clear the build folder' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Clear the build folder' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Quiet one' })).toBeUndefined()
   expect(await keyed(list, 'quiet-fold')).toBeUndefined()
+  await $.tool.call({ tool: 'Bash', command: 'rm -rf build', description: 'Clear the build folder' } as never)
+  wake()
   await list.unmount()
 })
 
 test("a chat stopped on the app's own prompt shows it amber at the top of its panel and in its file, says so aloud once, and clears as the call ends", async ($, on) => {
-  const { files, clock, notified } = world(on)
+  const { files, clock, notified, wake } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'clean up the build', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Clean the build', prompt: 'clean up the build' } as never)
-  // The work's call raises the app's prompt: the mod passes it on untouched
-  const r = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build', description: 'Clear the build folder' }, agent_id: 'a1' } as never)
-  expect((r as { decision?: unknown } | undefined)?.decision).toBeUndefined()
+  // The work's call raises the app's prompt: the mod holds it for a press, and answered in the box it passes it on untouched
+  const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build', description: 'Clear the build folder' }, agent_id: 'a1' } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Allow a command: Clear the build folder' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Answer it in this chat' })).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Clear the build folder' }))).toBeDefined()
+  // Yes and No on the card answer it; nothing tells the person to go and answer elsewhere
+  expect(await until(async () => button(list, 'prompt-yes-this-'))).toBeDefined()
+  expect(await button(list, 'prompt-no-this-')).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Answer Yes or No in the box at the bottom of this chat.' })).toBeUndefined()
+  // It says which work asks, that it asks permission, the command whole, and what a yes and a no each do
+  expect(await list.find({ type: 'Text', text: 'Asks your permission' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'rm -rf build' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Yes: the command runs on its Mac.' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'No: it does not happen, and the work is told you said no.' })).toBeDefined()
   // Amber, above the work's own card
   const texts = (await list.findAll({ type: 'Text' })).map(one => one.text)
-  expect(texts.indexOf('Allow a command: Clear the build folder')).toBeLessThan(texts.lastIndexOf('Clean the build'))
-  expect((await list.find({ type: 'Text', text: 'Allow a command: Clear the build folder' }))?.props.color).toBe('#E5A50A')
+  expect(texts.indexOf('Run a command: Clear the build folder')).toBeLessThan(texts.lastIndexOf('Clean the build'))
+  expect((await list.find({ type: 'Text', text: 'Run a command: Clear the build folder' }))?.props.color).toBe('#E5A50A')
   // The others see it in this chat's file, with the work it came from
   await clock.advance(1000)
-  expect(JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').prompts).toEqual([expect.objectContaining({ text: 'Allow a command: Clear the build folder', title: 'Clean the build' })])
+  expect(JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').prompts).toEqual([expect.objectContaining({ text: 'Run a command: Clear the build folder', title: 'Clean the build' })])
   // Not told before the app itself says the prompt is still waiting; then told once, as an ask is
   await clock.advance(5000)
   expect(notified.filter(line => line.includes('needs your OK'))).toEqual([])
   await $.classic.Notification({ message: 'Claude needs your permission', notification_type: 'permission_prompt' } as never)
   await $.classic.Notification({ message: 'Claude needs your permission', notification_type: 'permission_prompt' } as never)
-  expect(notified.filter(line => line.includes('needs your OK'))).toEqual(['Clean the build needs your OK | Allow a command: Clear the build folder'])
-  // The call ends, refused or run: the prompt goes, here and in the file
+  expect(notified.filter(line => line.includes('needs your OK'))).toEqual(['Clean the build needs your OK | Run a command: Clear the build folder'])
+  // The call ends, allowed and run: the amber prompt goes, here and in the file, and the card says what was answered and that it ran,
+  // for a minute, in this panel and in the file the others read
   await $.tool.call({ tool: 'Bash', command: 'rm -rf build', description: 'Clear the build folder', agentId: 'a1' } as never)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Allow a command: Clear the build folder' })) ? undefined : true))).toBe(true)
+  wake()
+  expect(((await asked) as { decision?: unknown } | undefined)?.decision).toBeUndefined()
+  const amber = async (text: string) => (await list.findAll({ type: 'Text', text })).find(one => one.props.color === '#E5A50A')
+  expect(await until(async () => ((await amber('Run a command: Clear the build folder')) ? undefined : true))).toBe(true)
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it ran and is done' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Run a command: Clear the build folder' })).toBeDefined()
   await clock.advance(1000)
-  expect(JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').prompts).toBeUndefined()
+  const shared = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}')
+  expect(shared.prompts).toBeUndefined()
+  expect(shared.answeredPrompts).toEqual([expect.objectContaining({ text: 'Run a command: Clear the build folder', answered: 'yes', isRunning: false })])
+  await clock.advance(61_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'You allowed it · it ran and is done' })) ? undefined : true))).toBe(true)
   // A prompt answered at once is not told
   await $.classic.PermissionRequest({ tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which colour for the nose?' }] } } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Answer a question: Which colour for the nose?' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Needs your input' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'This chat itself' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Pick your answer in the box at the bottom of this chat.' })).toBeDefined()
   await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Which colour for the nose?' }] } as never)
   await $.classic.Notification({ message: 'Claude needs your permission', notification_type: 'permission_prompt' } as never)
   expect(notified.filter(line => line.includes('needs your OK'))).toHaveLength(1)
@@ -4829,23 +4924,26 @@ test("a chat stopped on the app's own prompt shows it amber at the top of its pa
 })
 
 test('a command allowed leaves the panel as soon as it is seen running, before it ends; a prompt a settings hook answered never shows', async ($, on) => {
-  const { files, clock } = world(on)
+  const { files, clock, wake } = world(on)
   await $.session.start(start)
   // The same command already running elsewhere, as in a terminal, says nothing of this call
   files.set('ps:running', "python3 scripts/count_lines.py --all\n/bin/zsh -c source snap && eval 'python3 scripts/count_lines.py --all' < /dev/null\n")
-  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'python3 scripts/count_lines.py --all', description: 'Count the lines' } } as never)
+  void $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'python3 scripts/count_lines.py --all', description: 'Count the lines' } } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Allow a command: Count the lines' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Count the lines' }))).toBeDefined()
   await clock.advance(2000)
-  expect(await list.find({ type: 'Text', text: 'Allow a command: Count the lines' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Run a command: Count the lines' })).toBeDefined()
   files.set('ps:running', "python3 scripts/count_lines.py --all\n/bin/zsh -c source snap && eval 'python3 scripts/count_lines.py --all' < /dev/null\n/bin/zsh -c source snap && eval 'python3 scripts/count_lines.py --all' < /dev/null\n")
   await clock.advance(2000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Allow a command: Count the lines' })) ? undefined : true))).toBe(true)
+  // Seen running: no longer amber, and the card says it was allowed and runs now
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it is running now' }))).toBeDefined()
+  expect((await list.findAll({ type: 'Text', text: 'Run a command: Count the lines' })).some(one => one.props.color === '#E5A50A')).toBe(false)
+  wake()
   // Beneath the mod, a settings hook answers the request: no prompt is put to the person, and none shows
   files.set('settings:allow', '1')
   await $.classic.PermissionRequest({ tool_name: 'Write', tool_input: { file_path: '/repo/notes.md', content: 'x' } } as never)
   await clock.advance(1000)
-  expect(await list.find({ type: 'Text', text: 'Allow writing notes.md' })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: 'Write the file notes.md' })).toBeUndefined()
   await list.unmount()
 })
 
@@ -4884,6 +4982,152 @@ test("another chat's open prompt shows amber under its name, first; on this Mac 
   await clock.advance(5000)
   expect(await until(async () => ((await list.findAll({ type: 'Button' })).some(one => one.props.label === 'Open that chat' && String(one.key).includes('chat-w')) ? undefined : true))).toBe(true)
   expect(await list.find({ type: 'Text', text: 'Web chat' })).toBeUndefined()
+  await list.unmount()
+})
+
+test('a message the chat passes to running work names that work and the message; a no is said plainly, a minute, then it goes', async ($, on) => {
+  const { files, clock, wake } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the cards', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fix the panel cards', prompt: 'fix the cards' } as never)
+  void $.classic.PermissionRequest({ tool_name: 'SendMessage', tool_input: { to: 'a1', message: 'Make the buttons bigger too' } } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await until(async () => list.find({ type: 'Text', text: 'Pass a message to the work “Fix the panel cards”' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the work “Fix the panel cards”')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Make the buttons bigger too')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Yes: that work gets the message and acts on it.')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('No: it is not sent, and it stops to wait for what you say next.')
+  // No tool's own name anywhere on it
+  expect((await list.findAll({ type: 'Text' })).some(one => String(one.text).includes('SendMessage'))).toBe(false)
+  // The person says no
+  files.set('refuse', 'SendMessage')
+  await $.tool.call({ tool: 'SendMessage', to: 'a1', message: 'Make the buttons bigger too' } as never)
+  wake()
+  await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('You said no · it did not happen, and it waits for what you say next')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the work “Fix the panel cards”')
+  await clock.advance(61_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' })) ? undefined : true))).toBe(true)
+  // Allowed, a message says it was sent
+  files.delete('refuse')
+  void $.classic.PermissionRequest({ tool_name: 'SendMessage', tool_input: { to: 'a1', message: 'One more thing' } } as never)
+  await until(async () => list.find({ type: 'Text', text: 'Pass a message to the work “Fix the panel cards”' }))
+  await $.tool.call({ tool: 'SendMessage', to: 'a1', message: 'One more thing' } as never)
+  wake()
+  await until(async () => list.find({ type: 'Text', text: 'You allowed it · it was sent' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('You allowed it · it was sent')
+  // Interrupted before an answer: nothing happened
+  files.set('interrupt', 'Bash')
+  void $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'make clean', description: 'Clean up' }, agent_id: 'a1' } as never)
+  await until(async () => list.find({ type: 'Text', text: 'Run a command: Clean up' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Run a command: Clean up')
+  await $.tool.call({ tool: 'Bash', command: 'make clean', description: 'Clean up', agentId: 'a1' } as never)
+  wake()
+  await until(async () => list.find({ type: 'Text', text: 'It ended before you answered · nothing happened' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('It ended before you answered · nothing happened')
+  await list.unmount()
+})
+
+test("another chat's prompt and its answer show under that chat's name, titled by its work or as that chat's own", async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  files.set(`${MEMORY}/live/chat-o.json`, JSON.stringify({ chat: 'chat-o', title: 'Other chat', folder: '/x', host: '', at: NOW, cards: [], prompts: [{ id: 'toolu_9', text: 'Run a command: Count files', kind: 'allow', at: NOW }], answeredPrompts: [{ id: 'toolu_8', text: 'Pass a message to the work “Tidy”', title: 'Tidy', kind: 'allow', answered: 'yes', done: 'it was sent', at: NOW, endedAt: NOW }] }))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await until(async () => list.find({ type: 'Text', text: 'Run a command: Count files' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Run a command: Count files')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('That chat itself')
+  expect(await list.find({ type: 'Text', text: 'This chat itself' })).toBeUndefined()
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('You allowed it · it was sent')
+  await list.unmount()
+})
+
+test("Yes on a prompt's card allows the call as Claude Code's own box would, and the card says it runs", async ($, on) => {
+  const { clock, wake } = world(on)
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'npm test', description: 'Run the tests' } } as never)
+  expect(await until(async () => button(list, 'prompt-yes-this-'))).toBeDefined()
+  await list.press({ key: String((await button(list, 'prompt-yes-this-'))?.key) })
+  wake()
+  expect(((await asked) as { decision?: unknown }).decision).toEqual({ behavior: 'allow' })
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it is running now' }))).toBeDefined()
+  expect(await button(list, 'prompt-yes-this-')).toBeUndefined()
+  // The call runs and ends: the card says it is done
+  await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it ran and is done' }))).toBeDefined()
+  await clock.advance(1000)
+  await list.unmount()
+})
+
+test("No on a prompt's card refuses the call: the chat's own turn stops, and work is told and carries on", async ($, on) => {
+  const { wake } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'tidy up', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Tidy the repo', prompt: 'tidy up' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const own = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf dist', description: 'Delete the build' } } as never)
+  expect(await until(async () => button(list, 'prompt-no-this-'))).toBeDefined()
+  await list.press({ key: String((await button(list, 'prompt-no-this-'))?.key) })
+  wake()
+  expect(((await own) as { decision?: unknown }).decision).toEqual({ behavior: 'deny', message: expect.stringContaining('said no'), interrupt: true })
+  expect(await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' }))).toBeDefined()
+  const work = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'git clean -fd', description: 'Clean the tree' }, agent_id: 'a1' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Clean the tree' }))).toBeDefined()
+  expect(await until(async () => button(list, 'prompt-no-this-'))).toBeDefined()
+  await list.press({ key: String((await button(list, 'prompt-no-this-'))?.key) })
+  wake()
+  const decision = ((await work) as { decision?: { interrupt?: unknown; message?: string } }).decision
+  expect(decision?.interrupt).toBeUndefined()
+  expect(decision?.message).toContain('carry on without it')
+  expect(await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and the work was told' }))).toBeDefined()
+  await list.unmount()
+})
+
+test('a question or a plan has no Yes or No on its card: it says where to answer it', async ($, on) => {
+  const { wake } = world(on)
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const r = await $.classic.PermissionRequest({ tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which colour?' }] } } as never)
+  expect((r as { decision?: unknown } | undefined)?.decision).toBeUndefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'Pick your answer in the box at the bottom of this chat.' }))).toBeDefined()
+  expect(await button(list, 'prompt-yes-')).toBeUndefined()
+  wake()
+  await list.unmount()
+})
+
+test("another chat's held prompt has Yes and No, which leave the answer for that chat; this chat takes such an answer for its own", async ($, on) => {
+  const { files, clock, wake } = world(on)
+  await $.session.start(start)
+  files.set(`${MEMORY}/live/chat-o.json`, JSON.stringify({ chat: 'chat-o', title: 'Other chat', folder: '/x', host: '', at: NOW, cards: [], prompts: [{ id: 'toolu_9', text: 'Run a command: Count files', kind: 'allow', at: NOW, isHeld: true }, { id: 'toolu_7', text: 'Run a command: Old one', kind: 'allow', at: NOW }] }))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => button(list, 'prompt-yes--chat-o-toolu_9'))).toBeDefined()
+  // One its chat does not hold, as from an older version, keeps saying where to answer it
+  expect(await button(list, 'prompt-yes--chat-o-toolu_7')).toBeUndefined()
+  await list.press({ key: String((await button(list, 'prompt-yes--chat-o-toolu_9'))?.key) })
+  const left = await until(async () => [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/live/answers/chat-o/`) && path.endsWith('.json'))?.[1])
+  expect(JSON.parse(left ?? '{}')).toEqual(expect.objectContaining({ card: 'prompt:toolu_9', choice: 'yes' }))
+  expect(await until(async () => list.find({ type: 'Text', text: 'You said yes · it goes to that chat' }))).toBeDefined()
+  expect(await button(list, 'prompt-yes--chat-o-toolu_9')).toBeUndefined()
+  // This chat's own prompt, answered by a press another chat left for it
+  const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'make', description: 'Build it' } } as never)
+  expect(await until(async () => button(list, 'prompt-yes-this-'))).toBeDefined()
+  const id = String((await button(list, 'prompt-yes-this-'))?.key ?? '').replace(/^prompt-yes-this-/, '').replace(/-\d+$/, '')
+  files.set(`${MEMORY}/live/answers/engine-id/1-a.json`, JSON.stringify({ card: `prompt:${id}`, choice: 'yes', isReply: false, ask: 'Run a command: Build it', askAt: NOW, at: NOW + 6000 }))
+  await clock.advance(5000)
+  wake()
+  expect(((await asked) as { decision?: unknown }).decision).toEqual({ behavior: 'allow' })
+  await list.unmount()
+})
+
+test("a No pressed after Claude Code's box said yes does not stand: the card says what the call did once it ends", async ($, on) => {
+  const { wake } = world(on)
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  void $.classic.PermissionRequest({ tool_name: 'WebFetch', tool_input: { url: 'https://example.com/a' } } as never)
+  expect(await until(async () => button(list, 'prompt-no-this-'))).toBeDefined()
+  await list.press({ key: String((await button(list, 'prompt-no-this-'))?.key) })
+  wake()
+  expect(await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' }))).toBeDefined()
+  // The box had allowed it first: the call runs and ends well
+  await $.tool.call({ tool: 'WebFetch', url: 'https://example.com/a' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it ran and is done' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' })).toBeUndefined()
   await list.unmount()
 })
 
@@ -5813,7 +6057,7 @@ test('an admin command is held however the runner is reached, and nothing else i
     const call = bash(id, command)
     expect(await held(id)).toBeDefined()
     // Each shows the command as the runner would be handed it
-    expect((await list.find({ type: 'Text', text: 'id -u' }))?.props.mono).toBe(true)
+    expect((await list.findAll({ type: 'Text', text: 'id -u' })).some(one => one.props.mono)).toBe(true)
     await press(`gate-${id}-0-deny`)
     expect((await call).deny).toContain('Refused by Sam')
   }
@@ -5845,6 +6089,7 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect(grants()).toEqual([])
   expect((await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' }))?.props.color).toBe('#E5A50A')
   expect((await list.find({ type: 'Text', text: 'chmod 644 /etc/hosts' }))?.props.mono).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'Allow: it runs with admin rights. Deny: it does not run, and the work is told.' })).toBeDefined()
   expect((await labels()).filter(one => ['Allow once', 'Always allow this command', 'Deny'].includes(one))).toEqual(['Allow once', 'Always allow this command', 'Deny'])
   // Said in the chat and as a notification; its Details tab has it at the top
   expect(logged.some(line => line.includes('The work "Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts') && line.includes('Nothing typed in the chat allows it'))).toBe(true)
@@ -5861,6 +6106,8 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect(grant?.seal).toBe(fakeSeal(files.get('keychain:gate') ?? '', `grant\n${grant?.id}\n${grant?.at}\nhere\nchmod 644 /etc/hosts`))
   expect(grants()).toEqual([])
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeUndefined()
+  // In its place for a minute: what the person pressed and what happens now
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it once · it runs now' }))).toBeDefined()
   expect(files.has(ALLOWED)).toBe(false)
   // Once is once: the same command again is held again
   void bash('b2', `${ADMIN} here 'chmod 644 /etc/hosts'`)
@@ -5879,6 +6126,8 @@ test('Deny refuses the call with a line that says the person refused it, and not
   expect(admins).toEqual([])
   expect(grants()).toEqual([])
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on m4' })).toBeUndefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'You denied it · it did not run, and the work was told' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'An admin command on m4' })).toBeDefined()
 })
 
 test('no way to the runner gets past the press: another spelling, a shell, a helper, and two commands in one call each wait', async ($, on) => {
@@ -6113,4 +6362,274 @@ test("another chat's panel shows an admin command that waits, with no button: on
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Allow or deny it on its card in its own chat.' })).toBeDefined()
   expect((await list.findAll({ type: 'Button' })).some(one => ['Allow once', 'Always allow this command', 'Deny'].includes(String(one.props.label)))).toBe(false)
+})
+
+// Work that runs its helpers beside it: a helper runs in the background, the work waits for it only when it has nothing else, is
+// held back from ending while one runs, is told at the step when it could have sent calls together, and is told of a quiet helper
+
+// One step of an agent as the engine reports it after its calls ended
+const batch = ($: unknown, agent: string, calls: { tool: string; input?: object; id?: string }[]) =>
+  ($ as unknown as { classic: { PostToolBatch: (e: object) => Promise<{ additionalContext?: string[] }> } }).classic.PostToolBatch({
+    hook_event_name: 'PostToolBatch',
+    agent_id: agent,
+    tool_calls: calls.map((one, n) => ({ tool_name: one.tool, tool_input: one.input ?? {}, tool_use_id: one.id ?? `${agent}-${one.tool}-${n}` })),
+  })
+const toldOf = async (r: Promise<{ additionalContext?: string[] }>) => ((await r).additionalContext ?? []).join('\n')
+
+test("a helper a piece of work starts runs in the background, while the chat's own work is started as it asked", async ($, on) => {
+  const { backgrounds } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, background: false, prompt: 'fix it' } as never)
+  await $.agent.spawn({ ...spawn, background: false, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ ...spawn, background: false, description: 'Draw the nose', prompt: 'draw', parentAgentId: 'a2' } as never)
+  expect(backgrounds).toEqual([false, true, true])
+})
+
+test('a step is told when it started a helper alone, held only to-dos, or made a commit with no second look started; one that sends calls together is told nothing', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'Read the nose code' } }]))).toContain('started one helper and nothing else')
+  // Sent with other calls, a helper is no line
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'Read' } }, { tool: 'Agent', input: { description: 'Draw' } }, { tool: 'mcp__claudopus__note' }]))).toBe('')
+  expect(await toldOf(batch($, 'a1', [{ tool: 'mcp__claudopus__todo' }, { tool: 'mcp__claudopus__note' }]))).toContain('only to-do and note calls')
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Bash', input: { command: 'git commit -m "Nose"' } }]))).toContain('start them now')
+  // Each kind of line is said at most twice to one agent
+  await batch($, 'a1', [{ tool: 'Agent', input: { description: 'One more' } }])
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'And another' } }]))).toBe('')
+  // A commit after a second look was started says nothing of it
+  await $.agent.spawn({ ...spawn, prompt: 'fix the ears' } as never)
+  await batch($, 'a2', [{ tool: 'Agent', input: { description: 'Second look at the ears' } }, { tool: 'Read', input: { file_path: '/repo/a' } }])
+  expect(await toldOf(batch($, 'a2', [{ tool: 'Bash', input: { command: 'git -C /repo commit -m "Ears"' } }]))).toBe('')
+  // The chat's own thread is never told
+  expect(await toldOf(batch($, undefined as never, [{ tool: 'Agent' }]))).toBe('')
+})
+
+test('three single lookups in a row are told to go together or to a helper; two long runs of one kind in a row, to run side by side', async ($, on) => {
+  const { clock, held } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }]))).toBe('')
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Bash', input: { command: 'rg nose /repo' } }]))).toBe('')
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Grep', input: { pattern: 'ear' } }]))).toContain('The last 3 steps each held one lookup')
+  // A step of two lookups breaks the run
+  await batch($, 'a1', [{ tool: 'Read' }, { tool: 'Read' }])
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Read' }]))).toBe('')
+  // A long test run, then another of its kind, each alone in its step
+  const run = async (id: string, command: string) => {
+    const call = $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: `hold ${id}` } as never)
+    await clock.advance(90_000)
+    held.get(id)?.('ok')
+    await call
+    return toldOf(batch($, 'a1', [{ tool: 'Bash', input: { command }, id }]))
+  }
+  expect(await run('t1', 'npm test -- nose')).toBe('')
+  expect(await run('t2', 'npm test -- ears')).toContain('Two long runs of one kind (npm test)')
+})
+
+test('the work waits for its helpers with a command of its own: a file it waits on names the helpers running and how each is doing, and changes as one ends', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const { clock, files } = world(on, { agents })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw', parentAgentId: 'a1' } as never)
+  const roll = () => files.get(`${MEMORY}/helpers/a1.txt`) ?? ''
+  expect(roll().split('\n')[0]).toBe('running: a2,a3')
+  expect(roll()).toContain('"Read the nose code" (a2): running')
+  // Told once, as it starts them, that they run beside it and how it waits for them
+  const told = await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'Read the nose code' } }, { tool: 'Agent', input: { description: 'Draw the nose' } }]))
+  expect(told).toContain('Your helpers run in the background')
+  expect(told).toMatch(/bin\/helpers' '\/home\/sam\/\.claude\/claudopus\/helpers\/a1\.txt'/)
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'A third' } }, { tool: 'Read' }]))).toBe('')
+  // Five minutes with nothing new from either: the line names them as quiet, so a wait on it comes back
+  await clock.advance(5 * 60_000)
+  expect(roll().split('\n')[0]).toBe('running: a2,a3 quiet: a2,a3')
+  agents.a2 = 'completed'
+  await $.turn.complete({ answer: 'nose.ts', durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' } as never)
+  await clock.advance(21_000)
+  expect(roll().split('\n')[0]).toBe('running: a3 quiet: a3')
+  expect(roll()).toContain('"Read the nose code" (a2): ended')
+})
+
+test('work that tries to end while a helper of its runs is held back, and lets go once it has ended', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const { clock } = world(on, { agents })
+  on('classic.SubagentStop', () => ({}) as never)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' } as never)
+  const stop = () => ($ as unknown as { classic: { SubagentStop: (e: object) => Promise<{ block?: string }> } }).classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: 'a1', background_tasks: [] })
+  expect((await stop()).block).toContain('a helper still running in the background')
+  const handback = await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: 'Fixed.' } as never)
+  expect(String((handback as { deny?: unknown }).deny)).toContain('Do not finish yet')
+  agents.a2 = 'completed'
+  await $.turn.complete({ answer: 'nose.ts', durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' } as never)
+  await clock.advance(20_000)
+  expect((await stop()).block).toBeUndefined()
+})
+
+test('a helper quiet for five minutes is named to its work once, and the card says its helpers were looked in on', SLOW, async ($, on) => {
+  const { clock, appended } = world(on)
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' } as never)
+  await clock.advance(70_000)
+  expect((await pane.find({ type: 'Text', text: /^1 helper running, looked in on/ }))?.text).toBeDefined()
+  await clock.advance(5 * 60_000)
+  expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1)
+  expect((await pane.find({ type: 'Text', text: /1 quiet for 5\+ min/ }))?.text).toBeDefined()
+  await clock.advance(3 * 60_000)
+  expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
+})
+
+test('a helper that already answered holds nothing, a report given lets the end go, and work stopped takes its running helpers with it', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const { stopped } = world(on, { agents })
+  on('classic.SubagentStop', () => ({}) as never)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Serve the page', prompt: 'serve', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw', parentAgentId: 'a1' } as never)
+  const stop = () => ($ as unknown as { classic: { SubagentStop: (e: object) => Promise<{ block?: string }> } }).classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: 'a1', background_tasks: [] })
+  // The server helper answered and left its server running: it still works, but holds nothing; the other still does
+  agents.a2 = 'waiting'
+  await $.turn.complete({ answer: `The page is served on port 3100, and it keeps running for you to look at. ${'It shows the nose as drawn, at every size. '.repeat(14)}`, durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' } as never)
+  expect((await stop()).block).toContain('a helper still running')
+  // Stopped from its card or by the chat, the work's running helpers are stopped with it
+  await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
+  expect(stopped).toEqual(expect.arrayContaining(['a1', 'a3']))
+})
+
+// Work that goes on when the chat's process ends: what the keeper reads, the keeper started, cut-off work marked and started again
+
+const KEEP_AT = `${MEMORY}/keep/engine-id`
+const KEEP_NOW = 1_700_000_000_000
+// What the last process of this chat left: the work it had at work, and when the keeper saw it end
+const leftAtWork = (files: Map<string, string>, ids: string[], cutAt = KEEP_NOW - 60_000, pid = '4242') => {
+  files.set(`${KEEP_AT}.json`, JSON.stringify({ count: ids.length, ids, title: 'Contest', pid, at: cutAt - 5_000 }))
+  files.set(`${KEEP_AT}.state`, JSON.stringify({ cutAt, count: ids.length }))
+}
+const cardText = async ($: { ui: { mount: (q: never) => Promise<{ findAll: (q: object) => Promise<readonly { text?: string; props: Record<string, unknown> }[]>; unmount: () => Promise<void> }> } }, pattern: RegExp) => {
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const found = (await pane.findAll({ type: 'Text', text: pattern })).map(one => ({ text: one.text, color: one.props.color }))
+  await pane.unmount()
+  return found
+}
+
+test('what is at work is kept for the keeper, with the process that runs it, and a chat run from another Mac starts one', SLOW, async ($, on) => {
+  const { files, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  await $.session.start(start)
+  expect(files.get(`${MEMORY}/log.md`)).toContain('keeper started for engine-id')
+  await $.prompt.submit({ text: 'solve the cameras', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Solve the cameras', prompt: 'solve' } as never)
+  await clock.advance(21_000)
+  expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ count: 1, ids: ['a1'] })
+  await $.turn.complete({ answer: 'Solved: all 158 frames placed, and the report is written with every number.'.repeat(4), durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(21_000)
+  expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ count: 0, ids: [] })
+})
+
+test('a chat this Mac runs itself, and the copy the keeper started, start no keeper', async ($, on) => {
+  const { files } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1', CLAUDE_CODE_SESSION_KIND: 'bg' } })
+  await $.session.start(start)
+  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain('keeper started')
+})
+
+test('work cut off as the process ended is started again with a message, its card says so, and the person is told', SLOW, async ($, on) => {
+  const { files, clock, resumed, logged } = world(on)
+  leftAtWork(files, ['a7', 'a8'])
+  await $.session.start(start)
+  // Nothing until Claude Code has had its moment to start what it starts itself
+  expect(resumed).toEqual([])
+  await clock.advance(31_000)
+  expect(resumed.map(one => one.split(':')[0])).toEqual(['a7', 'a8'])
+  expect(resumed[0]).toContain("this chat's process was ended at")
+  expect(resumed[0]).toContain('not by')
+  const lines = await cardText($ as never, /^Cut off at /)
+  expect(lines).toHaveLength(2)
+  expect(lines[0]?.text).toMatch(/^Cut off at \d\d:\d\d as the chat's process ended; going again since \d\d:\d\d\.$/)
+  expect(logged.some(line => /^2 pieces of work were cut off at \d\d:\d\d and have been going again since \d\d:\d\d\.$/.test(line))).toBe(true)
+  expect(files.get(`${MEMORY}/log.md`)).toContain('cut-off notice pushed')
+  // The keeper's file says both are at work again
+  expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ count: 2 })
+})
+
+test('in the copy kept on this Mac, work Claude Code started again itself is only marked; one it could not is said in amber', SLOW, async ($, on) => {
+  const { files, clock, resumed, logged } = world(on, { env: { CLAUDE_CODE_SESSION_KIND: 'bg' }, agents: { a7: 'running' }, kinds: { a7: 'general-purpose' }, unresumable: new Set(['a8']) })
+  leftAtWork(files, ['a7', 'a8'])
+  await $.session.start(start)
+  await clock.advance(31_000)
+  expect(resumed).toEqual([])
+  const lines = await cardText($ as never, /^Cut off at /)
+  const said = (end: string) => lines.find(one => one.text?.endsWith(end))
+  expect(lines.map(one => one.text?.replace(/\d\d:\d\d/g, 'hh:mm')).sort()).toEqual([
+    "Cut off at hh:mm as the chat's process ended; going again since hh:mm.",
+    "Cut off at hh:mm as the chat's process ended; it could not be started again.",
+  ])
+  expect(said('could not be started again.')?.color).toBe('#E5A50A')
+  expect(lines.find(one => one.text?.includes('going again'))?.color).toBeUndefined()
+  expect(logged.some(line => line.includes('has been going on this Mac by itself') && line.includes('could not be started again'))).toBe(true)
+})
+
+test('a chat with no keeper starts nothing again, and a cut is taken up once, through a reload of the mod before it was done', SLOW, async ($, on) => {
+  const { files, clock, resumed } = world(on)
+  // Work left at work with no keeper to see its process end, as a chat quit on purpose days ago
+  files.set(`${KEEP_AT}.json`, JSON.stringify({ count: 1, ids: ['a6'], title: 'Contest', pid: '4242', at: KEEP_NOW - 5_000 }))
+  await $.session.start(start)
+  await clock.advance(31_000)
+  expect(resumed).toEqual([])
+  // A cut the keeper saw, and a reload 10 s into the new process: each piece is sent one message, not two
+  leftAtWork(files, ['a7'], KEEP_NOW + 31_000 - 60_000)
+  await $.session.start(start)
+  await clock.advance(10_000)
+  await $.session.start(start)
+  await clock.advance(31_000)
+  expect(resumed.map(one => one.split(':')[0])).toEqual(['a7'])
+  // Loaded again once it was done: nothing more
+  await $.session.start(start)
+  await clock.advance(31_000)
+  expect(resumed).toHaveLength(1)
+  // A day and more ago
+  leftAtWork(files, ['a9'], KEEP_NOW - 25 * 3600_000)
+  await $.session.start(start)
+  await clock.advance(31_000)
+  expect(resumed).toHaveLength(1)
+})
+
+test('the notice names each piece by its own title', SLOW, async ($, on) => {
+  const { files, clock, logged } = world(on, { unresumable: new Set(['a8']) })
+  const card = (id: string, title: string) => ({ id, parentId: '', isFork: false, tokens: 0, title, words: '', items: [], entries: [], answer: '', startedAt: KEEP_NOW - 600_000, endedAt: KEEP_NOW - 60_000, status: 'stopped' })
+  // Kept in the order the other way round from the keeper's file
+  files.set(`${MEMORY}/finished/engine-id.json`, JSON.stringify([card('a8', 'Train the splats'), card('a7', 'Solve the cameras')]))
+  leftAtWork(files, ['a7', 'a8'])
+  await $.session.start(start)
+  await clock.advance(31_000)
+  const said = logged.find(line => line.includes('was cut off at')) ?? ''
+  expect(said).toMatch(/^"Solve the cameras" was cut off at \d\d:\d\d and has been going again since \d\d:\d\d\. "Train the splats" cut off at \d\d:\d\d could not be started again\.$/)
+})
+
+test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper, its work counted as at work', SLOW, async ($, on) => {
+  const { files } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'train the splats', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Train the splats', prompt: 'train' } as never)
+  // Another error is not a lapsed sign-in
+  await $.turn.complete({ answer: 'API Error: 529 overloaded', durationMs: 1, isAborted: false, turnId: 't0', reason: 'error', agentId: 'a1' } as never)
+  expect(files.has(`${KEEP_AT}.handover`)).toBe(false)
+  const lapse = (turnId: string) => $.turn.complete({ answer: 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}', durationMs: 1, isAborted: false, turnId, reason: 'error', agentId: 'a1' } as never)
+  // Once is no lapse; twice within minutes is
+  await lapse('t1')
+  expect(files.has(`${KEEP_AT}.handover`)).toBe(false)
+  await lapse('t2')
+  expect(files.has(`${KEEP_AT}.handover`)).toBe(true)
+  expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ ids: ['a1'] })
 })

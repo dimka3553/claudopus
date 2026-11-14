@@ -1,0 +1,138 @@
+#!/bin/bash
+# Keeps a chat's work going on this Mac when the Claude app on another Mac ends the chat's process here.
+#
+# keep <engine pid> <session id> <folder> <memory folder> [the mod's own folder, when it is loaded from a folder]
+#
+# Claudopus starts one for each load of a chat the app runs on this Mac over SSH, in a session of its own, so it outlives the
+# chat's process. It waits for that process to end. When it ends while work of the chat's is at work (the mod keeps
+# <memory>/keep/<session>.json true) and the app does not start the chat again within a minute, it starts the chat again here as
+# one of Claude Code's own background sessions: under this Mac's own sign-in, with the same conversation, model, effort and
+# permission mode. Claude Code starts its cut-off work again by itself there, and Claudopus marks it and says so. The copy is
+# stopped once its work is done and idle a while, or as soon as the app starts the chat again, so the app finds it free.
+# What it did is in <memory>/keep/<session>.log; where it stands in <memory>/keep/<session>.state. Archiving or quitting the
+# chat in the app ends its process the same way, so work still at work then goes on here too, until it is stopped.
+set -u
+pid=${1:?engine pid} sid=${2:?session id} cwd=${3:?folder} mem=${4:?memory folder} own=${5:-}
+case "$sid" in *[!A-Za-z0-9-]*) exit 2 ;; esac
+dir="$mem/keep"
+mkdir -p "$dir" || exit 1
+# How long the app has to start the chat again itself, how often to look, how long finished work rests before its copy stops
+GRACE=${CLAUDOPUS_KEEP_GRACE:-60}
+STEP=${CLAUDOPUS_KEEP_STEP:-2}
+REST=${CLAUDOPUS_KEEP_REST:-120}
+# A copy Claude Code has not listed as working this long is stopped, whatever the mod says is at work (a copy without the mod)
+IDLE=${CLAUDOPUS_KEEP_IDLE:-600}
+log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$dir/$sid.log"; }
+field() { /usr/bin/plutil -extract "$1" raw -o - "$2" 2>/dev/null; }
+now() { date +%s; }
+
+# The newest keeper of a chat is the one that acts: a load after this one starts its own. A reload of the mod in the same process
+# leaves the keeper that watches it
+read -r was wasfor wasown < "$dir/$sid.keeper" 2>/dev/null
+if [ "${wasfor:-}" = "$pid" ] && [ "${wasown:-}" = "$own" ] && [ "${was:-}" != "$$" ] && kill -0 "${was:-0}" 2>/dev/null; then exit 0; fi
+me="$$ $pid $own"
+printf '%s\n' "$me" > "$dir/$sid.keeper"
+mine() { [ "$(cat "$dir/$sid.keeper" 2>/dev/null)" = "$me" ]; }
+
+# The process's own model, effort and permission mode, read while it runs
+args=$(ps -o args= -p "$pid" 2>/dev/null) || { log "process $pid was gone before it was watched"; exit 0; }
+opt() { printf '%s\n' "$args" | tr ' ' '\n' | awk -v k="--$1" 'f { print; exit } $0 == k { f = 1 } index($0, k "=") == 1 { print substr($0, length(k) + 2); exit }'; }
+model=$(opt model) effort=$(opt effort) mode=$(opt permission-mode) sources=$(opt setting-sources)
+# Its plugin folders too, such as those the app copies here from the other Mac, so the copy runs with the same plugins; ps
+# joins the arguments with spaces, so a folder with a space in its path is not passed on (the app's own have none), except
+# the mod's own folder, which it hands over whole
+plugins=$(printf '%s\n' "$args" | tr ' ' '\n' | awk 'f { print; f = 0; next } $0 == "--plugin-dir" { f = 1 } index($0, "--plugin-dir=") == 1 { print substr($0, 14) }')
+[ -n "$own" ] && plugins=$(printf '%s\n%s\n' "$plugins" "$own" | awk 'NF && !seen[$0]++')
+log "watching process $pid in $cwd (model ${model:-default}, effort ${effort:-default}, mode ${mode:-default})"
+
+# The mod asks for the process to be ended when the sign-in the app lent it has lapsed: the chat then goes on here at once
+# A hand-over asked of another process, left behind, is no ask of this one
+[ "$(cat "$dir/$sid.handover" 2>/dev/null)" = "$pid" ] || rm -f "$dir/$sid.handover"
+handed=0
+while kill -0 "$pid" 2>/dev/null; do
+  if [ "$(cat "$dir/$sid.handover" 2>/dev/null)" = "$pid" ] && mine; then
+    rm -f "$dir/$sid.handover"; handed=1
+    log "the sign-in the app lent the chat lapsed: process $pid ended so the chat goes on here"
+    kill -TERM "$pid" 2>/dev/null
+  fi
+  sleep "$STEP"
+done
+gone=$(now)
+mine || exit 0
+count=$(field count "$dir/$sid.json")
+title=$(field title "$dir/$sid.json")
+case "$count" in '' | *[!0-9]* | 0) log "process $pid ended with nothing at work: not kept"; exit 0 ;; esac
+log "process $pid ended with $count piece(s) of work at work"
+# When it ended, for the cards: the next load of the chat, here or in the app, marks that work cut off from then
+printf '{"cutAt":%s,"count":%s}\n' "$((gone * 1000))" "$count" > "$dir/$sid.state"
+
+# Another process of the same chat: the app started it again itself, or someone resumed it
+again() { pgrep -f -- "--resume[= ]$sid" >/dev/null 2>&1; }
+waited=0
+[ "$handed" = 1 ] && waited=$GRACE
+while [ "$waited" -lt "$GRACE" ]; do
+  if again; then log "the chat was started again by the app within ${waited}s: not kept"; exit 0; fi
+  mine || exit 0
+  sleep "$STEP"; waited=$((waited + STEP))
+done
+
+# Started as Claude Code's own background session, with none of the app's settings: this Mac's sign-in, its PATH, its plugins
+claude=${CLAUDOPUS_KEEP_CLAUDE:-}
+[ -n "$claude" ] || for one in "$HOME/.local/bin/claude" /opt/homebrew/bin/claude /usr/local/bin/claude; do [ -x "$one" ] && { claude=$one; break; }; done
+[ -n "$claude" ] || { log "no claude found on this Mac: not kept"; exit 1; }
+name=$(printf '%s' "${title:-Chat}" | tr -cd '[:alnum:][:space:]._:-' | cut -c1-60)
+name="${name:-Chat} (kept on this Mac)"
+set -- --bg --resume "$sid" -n "$name" --remote-control "$name"
+[ -n "$model" ] && set -- "$@" --model "$model"
+[ -n "$effort" ] && set -- "$@" --effort "$effort"
+[ -n "$mode" ] && set -- "$@" --permission-mode "$mode"
+[ -n "$sources" ] && set -- "$@" --setting-sources "$sources"
+while IFS= read -r one; do [ -n "$one" ] && [ -d "$one" ] && set -- "$@" --plugin-dir "$one"; done <<EOF_PLUGINS
+$plugins
+EOF_PLUGINS
+said=$(cd "$cwd" && env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-${USER:-}}" SHELL="${SHELL:-/bin/zsh}" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-en_US.UTF-8}" \
+  PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" "$claude" "$@" 2>&1)
+copy=$(printf '%s\n' "$said" | sed -n 's/^backgrounded · \([0-9a-f]\{1,\}\) ·.*/\1/p' | head -1)
+if [ -z "$copy" ]; then log "the chat could not be started again here: $(printf '%s' "$said" | tr '\n' ' ' | cut -c1-300)"; exit 1; fi
+moved=$(now)
+printf '{"cutAt":%s,"movedAt":%s,"copy":"%s","count":%s}\n' "$((gone * 1000))" "$((moved * 1000))" "$copy" "$count" > "$dir/$sid.state"
+log "the chat goes on here as background session $copy, $((moved - gone))s after its process ended"
+
+# While the copy runs: the app starting the chat again (its process, under the app's helper here) has it stopped at once, so the
+# app finds the chat free, and its cut-off work is started again there; finished work at rest a while stops it too, and so does
+# a chat that has done nothing for a long while. Claude Code keeps the conversation: the app's next start goes on from it
+# How the copy stands in Claude Code's list: working (it or its work is), another state, gone, or unknown when the list could
+# not be read
+standing() { "$claude" agents --json 2>/dev/null | COPY=$copy /usr/bin/perl -MJSON::PP -0777 -ne 'my $l = eval { decode_json($_) }; if (ref $l ne "ARRAY") { print "unknown"; exit } for my $a (@$l) { if (ref $a eq "HASH" && ($a->{id} // "") eq $ENV{COPY}) { print $a->{state} // "listed"; exit } } print "gone"' 2>/dev/null || echo unknown; }
+rest=0 idle=0 gone_looks=0 last=$SECONDS
+while :; do
+  sleep 0.3
+  if pgrep -f -- "/ccd-cli/.* --resume=$sid" >/dev/null 2>&1; then
+    "$claude" stop "$copy" >/dev/null 2>&1
+    printf '{"cutAt":%s,"movedAt":%s,"copy":"%s","count":%s,"backAt":%s}\n' "$((gone * 1000))" "$((moved * 1000))" "$copy" "$count" "$(($(now) * 1000))" > "$dir/$sid.state"
+    log "the app started the chat again: background session $copy stopped so the app has it"
+    exit 0
+  fi
+  [ $((SECONDS - last)) -ge 10 ] || continue
+  last=$SECONDS
+  state=$(standing)
+  [ "$state" = unknown ] && continue
+  if [ "$state" = gone ]; then gone_looks=$((gone_looks + 1)); else gone_looks=0; fi
+  if [ "$gone_looks" -ge 3 ]; then log "background session $copy is gone"; exit 0; fi
+  [ "$state" = gone ] && continue
+  if [ "$state" = working ]; then idle=0; else idle=$((idle + 10)); fi
+  if [ "$(field count "$dir/$sid.json")" = 0 ]; then rest=$((rest + 10)); else rest=0; fi
+  if [ "$idle" -ge "$IDLE" ]; then
+    "$claude" stop "$copy" >/dev/null 2>&1
+    left=$(field count "$dir/$sid.json")
+    # Work still counted at work is a cut of its own: the next start of the chat, in the app, starts it again
+    case "$left" in '' | *[!0-9]* | 0) ;; *) printf '{"cutAt":%s,"movedAt":%s,"copy":"%s","count":%s,"backAt":%s}\n' "$((gone * 1000))" "$((moved * 1000))" "$copy" "$left" "$(($(now) * 1000))" > "$dir/$sid.state" ;; esac
+    log "background session $copy was not working for ${IDLE}s: stopped${left:+ with $left piece(s) of work still counted, for the next start in the app to take up}"
+    exit 0
+  fi
+  if [ "$rest" -ge "$REST" ]; then
+    "$claude" stop "$copy" >/dev/null 2>&1
+    log "its work is done: background session $copy stopped; the chat opens in the app as before"
+    exit 0
+  fi
+done

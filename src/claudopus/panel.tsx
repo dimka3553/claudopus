@@ -42,7 +42,7 @@ const panelHooks = (on: On) => {
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
     if (large) {
-      const back = (key: string) => <Button key={`${key}-${presses}`} label="← Back to Details" plain onPress={() => ((presses += 1), pictureBack($, paneId))} />
+      const back = (key: string) => <Button key={`${key}-${presses}`} label={paneId === LIST ? '← Back to the list' : '← Back to Details'} plain onPress={() => ((presses += 1), pictureBack($, paneId))} />
       return (
         <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
           {back('pic-back-top')}
@@ -72,9 +72,12 @@ const panelHooks = (on: On) => {
     const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
     const chat = await read($, me)
     const at = await $.clock.now()
+    // Prompts answered here and in other chats, for a minute after their call ended
+    const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
+    const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince)
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD))
     // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of the chat always does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
@@ -160,6 +163,54 @@ const panelHooks = (on: On) => {
     // In the terminal the first ask's reply box holds the keys as the panel takes them: what is typed then is the person's words,
     // never a button's letter, and Tab leaves it for the buttons and their keys
     let askFocused = false
+    // The small pictures every ask in this drawing draws, in characters: together they stay under ASK_PICS_CHARS, and in Details under
+    // what the app draws in one tab beside the chat's own small pictures; one past that is a row that opens it
+    let askChars = 0
+    const askPictures = (one: Todo, key: string, isWhole: boolean) => {
+      const paths = one.ask?.pictures ?? []
+      if (!paths.length) return null
+      // An ask of a chat on another Mac names that Mac's files, which are not here: a file at the same path here is another picture
+      if (one.chat?.host) return <Text key={`${key}-pics`} dimColor wrap="wrap">{`Its ${paths.length === 1 ? 'picture is' : `${paths.length} pictures are`} on the Mac that chat runs on, and shown in that chat.`}</Text>
+      const drawing = uiOf($, e)
+      const canDraw = e.surface !== 'terminal' && 'Svg' in drawing
+      // The terminal draws no picture: a row each that opens it, with no small copy made
+      const made = canDraw ? askPicturesOf($, one) : paths.map(path => ({ name: fileName(path), path, thumb: null }) as Pic)
+      if (!made) return <Text key={`${key}-pics`} dimColor>Making its pictures small…</Text>
+      if (!made.length) return null
+      // In Details the chat's own small pictures are drawn too: all of them together stay near what that tab keeps for pictures
+      const chatChars = isWhole ? [...(shots.get(one.id)?.shots.values() ?? [])].flat().reduce((sum, pic) => sum + (pic.thumb?.source.length ?? 0), 0) : 0
+      const most = isWhole ? Math.min(ASK_PICS_CHARS, PICTURES_CHARS + 30_000 - chatChars) : ASK_PICS_CHARS
+      return (
+        <Box key={`${key}-pics`} flexDirection="row" flexWrap="wrap" alignItems="flex-start" gap={1} width="100%">
+          {made.map((pic, n) => {
+            const isDrawn = canDraw && pic.thumb !== null && askChars + pic.thumb.source.length <= most
+            if (isDrawn && pic.thumb) askChars += pic.thumb.source.length
+            const row = `${key}-pic-${n}`
+            // Drawn at most ASK_PIC_WIDE across, from a copy up to twice as wide, so two sit side by side on a wide sidebar
+            const size = pic.thumb && pic.thumb.width && pic.thumb.height ? sizedAskPic(pic.thumb.width, pic.thumb.height) : undefined
+            return (
+              <Box key={row} flexDirection="column" alignItems="flex-start" flexShrink={1} minWidth={0}>
+                {isDrawn && pic.thumb && 'Svg' in drawing ? (
+                  <drawing.Svg
+                    key={`${row}-svg`}
+                    source={pic.thumb.source}
+                    alt={`Picture: ${pic.name}`}
+                    {...(size ?? {})}
+                  />
+                ) : null}
+                <Button
+                  key={`${row}-open-${presses}`}
+                  label={`⤢ ${isDrawn ? 'Open large' : 'Open'}: ${cut(pic.name, Math.max(12, room - 14))}`}
+                  plain
+                  onPress={press => ((presses += 1), redraw($), void showPicture($, pic.path, paneId, row, press.surface))}
+                />
+                {e.surface === 'terminal' ? pictureSaidRow($, drawing, `${row}-said`, pic.path) : null}
+              </Box>
+            )
+          })}
+        </Box>
+      )
+    }
     const askBlock = (one: Todo, key: string, isWhole = false) => {
       const ask = one.ask
       if (!ask) return null
@@ -183,6 +234,8 @@ const panelHooks = (on: On) => {
               <Markdown text={isWhole || ask.details.length <= DETAILS_ON_CARD ? ask.details : `${cut(ask.details, DETAILS_ON_CARD)}\n\nThe rest is in its Details.`} />
             </Box>
           ) : null}
+          {/* The pictures it is about, each drawn small with a row that opens it large, so it is decided here */}
+          {askPictures(one, key, isWhole)}
           {ask.copy ? (
             <Box flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -271,10 +324,22 @@ const panelHooks = (on: On) => {
                 <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
               </Box>
             ) : null}
+            {/* Cut off as the chat's process ended: when, and since when it goes on again; amber when it could not be started again */}
+            {cutLine(one) && !one.chat ? (
+              <Box key={`cut-${one.id}`} paddingLeft={lead}>
+                <Text color={one.backAt ? undefined : NEEDS} dimColor={Boolean(one.backAt)} wrap="wrap">{cutLine(one)}</Text>
+              </Box>
+            ) : null}
             {/* Still at work, waiting for a command of its own it started in the background: which, and how long it has run */}
             {waitLine(one, at) ? (
               <Box key={`wait-${one.id}`} paddingLeft={lead}>
                 <Text dimColor wrap="wrap">{waitLine(one, at)}</Text>
+              </Box>
+            ) : null}
+            {/* Its helpers running: how many, when they were last looked in on, and how many have gone quiet */}
+            {lookedInLine(one, at) && !one.chat ? (
+              <Box key={`looked-${one.id}`} paddingLeft={lead}>
+                <Text dimColor={!one.lookedIn?.quiet} color={one.lookedIn?.quiet ? NEEDS : undefined} wrap="wrap">{lookedInLine(one, at)}</Text>
               </Box>
             ) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
@@ -828,22 +893,70 @@ const panelHooks = (on: On) => {
       )
     }
 
-    // The app's own prompt open in a chat, amber at the top of that chat's cards: what it asks in its own few words, the work it came
-    // from, and where to answer it. A chat of the Claude app on this Mac opens at a press; the panel answers no prompt itself
+    // The app's own prompt open in a chat, amber at the top of that chat's cards, in plain words: which work asks, what it asks, exactly
+    // what (the command, the message), what a yes and a no each do, and Yes and No that answer it while its chat holds it. Not held
+    // (a question, a plan, a chat of an older version), it says where to answer it, and a chat of the Claude app on this Mac opens at a
+    // press. Another chat's Yes or No is left for that chat, and the card says what was pressed until that chat's file moves it on
+    const promptButtons = (p: Prompt, key: string, c?: Shared) => {
+      const pressed = c ? promptsPressed.get(`${c.host}:${c.chat}:${p.id}`) : undefined
+      if (pressed) return <Text key={`prompt-sent-${key}`} color={LIVE} bold wrap="wrap">{pressed === 'yes' ? 'You said yes · it goes to that chat' : 'You said no · it goes to that chat'}</Text>
+      const press = (said: 'yes' | 'no') => (c ? () => void answerPromptElsewhere($, c, p, said).catch(err => log($, `prompt answer not left: ${String(err)}`)) : () => void (answerPrompt($, p.id, said), redraw($)))
+      return (
+        <Box key={`prompt-buttons-${key}`} flexDirection="row" gap={1}>
+          <Button key={`prompt-yes-${key}-${presses}`} label="Yes" onPress={press('yes')} />
+          <Button key={`prompt-no-${key}-${presses}`} label="No" onPress={press('no')} />
+        </Box>
+      )
+    }
+    const isHeldHere = (p: Prompt, c?: Shared) => Boolean(p.isHeld && (c || promptHeld.has(p.id)))
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
       <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
         <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
         <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
           <Box flexDirection="column">
-            <Text bold wrap="truncate-end">{p.title || 'Needs your input'}</Text>
-            <Text dimColor wrap="truncate-end">{where}</Text>
+            <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+            <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
           </Box>
           <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
-          {c ? (
+          {p.detail ? (
+            <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
+              <Text mono wrap="wrap">{p.detail}</Text>
+            </Box>
+          ) : null}
+          {p.yes || p.no ? (
+            <Box flexDirection="column">
+              {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
+              {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
+            </Box>
+          ) : null}
+          {isHeldHere(p, c) ? promptButtons(p, key, c) : <Text dimColor wrap="wrap">{where}</Text>}
+          {c && pressOf(c) && !isHeldHere(p, c) ? (
             <Box flexDirection="row">
               <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
             </Box>
           ) : null}
+        </Box>
+      </Box>
+    )
+    // Where a prompt is answered: in this chat, the box Claude Code shows at its bottom
+    const answerHere = (p: Prompt) => (p.kind === 'question' ? 'Pick your answer in the box at the bottom of this chat.' : 'Answer Yes or No in the box at the bottom of this chat.')
+    // The same prompt once answered, for a minute after its call ends: what the person said and what is happening now, in the colour
+    // of what came of it (purple while it runs, grey once over)
+    const saidOf = (p: Prompt) => {
+      if (p.answered === 'stopped') return 'It ended before you answered · nothing happened'
+      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · no answer went back, and it waits for you' : p.kind === 'plan' ? 'You said no · it keeps planning' : p.title ? 'You said no · it did not happen, and the work was told' : 'You said no · it did not happen, and it waits for what you say next'
+      if (p.kind === 'question') return p.isRunning ? 'You answered · it is taking your answer' : 'You answered · it carries on with your answer'
+      if (p.kind === 'plan') return 'You approved the plan · it is carrying it out'
+      if (p.isCut) return 'You allowed it · it was stopped before it finished'
+      return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
+    }
+    const answeredCard = (p: Prompt, key: string, c?: Shared) => (
+      <Box key={`answered-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+        <Box width={1} flexShrink={0} backgroundColor={p.isRunning ? LIVE : FILL} />
+        <Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
+          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+          <Text wrap="wrap" color={p.isRunning ? LIVE : undefined} bold={p.isRunning}>{saidOf(p)}</Text>
+          <Text dimColor wrap="wrap">{p.text}</Text>
         </Box>
       </Box>
     )
@@ -887,7 +1000,7 @@ const panelHooks = (on: On) => {
     // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none of these and no prompt
     // is not listed at all, however many are open: the app's own list of chats has them
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
-    const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
+    const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length || answeredOf(c.answeredPrompts).length)
     const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
@@ -1062,7 +1175,7 @@ const panelHooks = (on: On) => {
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     // A password or key box stays above it: the runner waits on it
-    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{screen}</Box>
+    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{doneNotesPart(ui, at)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
     return (
@@ -1111,6 +1224,7 @@ const panelHooks = (on: On) => {
         ) : null}
         {!alone ? boxesPart($, ui) : null}
         {!alone ? gatesPart($, ui) : null}
+        {!alone ? doneNotesPart(ui, at) : null}
         {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
@@ -1118,8 +1232,9 @@ const panelHooks = (on: On) => {
           : [
               // This chat's work first, named as this chat's once another chat's is shown; work that needs the person's hands comes first
               // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
-              ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-              ...waiting.map(p => promptCard(p, `this-${p.id}`, 'Answer it in this chat')),
+              ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
+              ...waiting.map(p => promptCard(p, `this-${p.id}`, answerHere(p))),
+              ...promptsAnswered.map(p => answeredCard(p, `this-${p.id}`)),
               ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, those that wait on the person first
               ...listedChats.flatMap(c => {
@@ -1127,8 +1242,9 @@ const panelHooks = (on: On) => {
                 // Open that chat whenever its link opens here: a chat of this Mac, or one of another Mac with Remote Control on
                 // In a chat another Mac's app runs here, that Mac opens it
                 const url = pressOf(c)
-                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', url ? c : undefined))
-                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...cards.map(one => small(one))]
+                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', c))
+                const answered = answeredOf(c.answeredPrompts).map(p => answeredCard(p, `${c.host}-${c.chat}-${p.id}`, c))
+                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...answered, ...cards.map(one => small(one))]
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}

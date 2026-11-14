@@ -92,6 +92,16 @@ export type Todo = {
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number
+  // Work cut off as the chat's process ended, not stopped by anyone: when, and when it went on again; `backAt` is absent while it
+  // could not be started again
+  cutAt?: number
+  backAt?: number
+  // Work with helpers running: when the mod last looked in on them, how many ran and how many had shown nothing new for a while
+  lookedIn?: { at: number; running: number; quiet: number }
+  // A helper whose work was told it has shown nothing new: when it last had, so it is told once each quiet stretch
+  quietTold?: number
+  // A helper whose work was told it works through in order what could be split
+  serialTold?: boolean
   // Only work that is working has a card; one that has ended is kept, so a message to it brings its card back as it was
   status: 'working' | 'done' | 'stopped' | 'failed'
   // Set on a card another chat shares: that chat, the Mac it runs on when another (empty for this one), and the card's own id there.
@@ -101,7 +111,7 @@ export type Todo = {
 
 // What one chat shares with the panels of the others, in ~/.claude/claudopus/live/<chat id>.json: its running work, and when it last
 // said so. `host` is the Mac it was fetched from, empty for this one
-export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; prompts?: Prompt[]; link?: Link }
+export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; prompts?: Prompt[]; answeredPrompts?: Prompt[]; link?: Link }
 // What opens a chat in the Claude app: its Remote Control id (session_…), which opens it from any Mac signed in to the same account,
 // and the app's own id for it (local_…), which opens it only on the Mac it runs on
 export type Link = { bridge: string; app: string }
@@ -109,7 +119,28 @@ export type Link = { bridge: string; app: string }
 // The app's own prompt open in a chat and waiting on the person: allow a command or a tool, answer its question, approve its plan.
 // `id` is the tool call's, `text` the prompt's own short description, `title` the work it came from when not the chat's own thread,
 // `at` when it opened. `link` on Shared opens that chat in the Claude app on its own Mac
-export type Prompt = { id: string; text: string; title?: string; at: number }
+// `kind` says what the person does (allow a call, answer a question, approve a plan), `detail` what exactly (the command, the message,
+// the page), `yes` and `no` what each answer does. Once answered it moves to Shared's `answeredPrompts`: `answered` is what the person
+// did (yes, no, an answer to a question, or nothing as it ended first), `isRunning` while an allowed call still runs, `endedAt` when
+// it ended, after which it shows a minute more; `done` how its end is said once allowed ("it was sent"), `isCut` an allowed call
+// that was stopped before it finished; `isHeld` while the chat that raised it waits for a press on its card's Yes or No, which
+// answers it as Claude Code's own box would
+export type Prompt = {
+  id: string
+  text: string
+  title?: string
+  at: number
+  kind?: 'allow' | 'question' | 'plan'
+  detail?: string
+  yes?: string
+  no?: string
+  done?: string
+  answered?: 'yes' | 'no' | 'stopped'
+  isCut?: boolean
+  isRunning?: boolean
+  endedAt?: number
+  isHeld?: boolean
+}
 
 // The card that has the pane to itself, by id; empty while the small cards show
 // `open` names what is unfolded in that card's chat: a run of tool steps by the number of steps before it, a long message by that number negated less one

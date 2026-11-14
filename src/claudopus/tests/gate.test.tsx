@@ -49,7 +49,7 @@ test('an admin command is held however the runner is reached, and nothing else i
     const call = bash(id, command)
     expect(await held(id)).toBeDefined()
     // Each shows the command as the runner would be handed it
-    expect((await list.find({ type: 'Text', text: 'id -u' }))?.props.mono).toBe(true)
+    expect((await list.findAll({ type: 'Text', text: 'id -u' })).some(one => one.props.mono)).toBe(true)
     await press(`gate-${id}-0-deny`)
     expect((await call).deny).toContain('Refused by Sam')
   }
@@ -81,6 +81,7 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect(grants()).toEqual([])
   expect((await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' }))?.props.color).toBe('#E5A50A')
   expect((await list.find({ type: 'Text', text: 'chmod 644 /etc/hosts' }))?.props.mono).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'Allow: it runs with admin rights. Deny: it does not run, and the work is told.' })).toBeDefined()
   expect((await labels()).filter(one => ['Allow once', 'Always allow this command', 'Deny'].includes(one))).toEqual(['Allow once', 'Always allow this command', 'Deny'])
   // Said in the chat and as a notification; its Details tab has it at the top
   expect(logged.some(line => line.includes('The work "Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts') && line.includes('Nothing typed in the chat allows it'))).toBe(true)
@@ -97,6 +98,8 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect(grant?.seal).toBe(fakeSeal(files.get('keychain:gate') ?? '', `grant\n${grant?.id}\n${grant?.at}\nhere\nchmod 644 /etc/hosts`))
   expect(grants()).toEqual([])
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeUndefined()
+  // In its place for a minute: what the person pressed and what happens now
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it once · it runs now' }))).toBeDefined()
   expect(files.has(ALLOWED)).toBe(false)
   // Once is once: the same command again is held again
   void bash('b2', `${ADMIN} here 'chmod 644 /etc/hosts'`)
@@ -115,6 +118,8 @@ test('Deny refuses the call with a line that says the person refused it, and not
   expect(admins).toEqual([])
   expect(grants()).toEqual([])
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on m4' })).toBeUndefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'You denied it · it did not run, and the work was told' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'An admin command on m4' })).toBeDefined()
 })
 
 test('no way to the runner gets past the press: another spelling, a shell, a helper, and two commands in one call each wait', async ($, on) => {

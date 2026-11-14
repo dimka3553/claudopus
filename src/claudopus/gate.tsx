@@ -245,9 +245,26 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await log($, `admin command on ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
   return said
 }
-const answerGate = ($: EngineInterface, id: string, said: GateSaid) => {
+const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
   presses += 1
-  if (gateHeld.has(id)) gateSaid.set(id, said)
+  const id = gate.id
+  if (gateHeld.has(id)) {
+    gateSaid.set(id, said)
+    void noteDone($, {
+      id: `gate-${id}`,
+      head: `An admin command on ${gate.host === 'here' ? 'this Mac' : gate.host}`,
+      said:
+        said === 'deny'
+          ? 'You denied it · it did not run, and the work was told'
+          : said === 'always'
+            ? 'You always allow this command · it runs now, and will not ask again'
+            : gate.isWork
+              ? "You allowed this work's admin commands · it runs now"
+              : 'You allowed it once · it runs now',
+      what: cut(oneLine(gate.command), 200),
+      isOn: said !== 'deny',
+    }).catch(() => undefined)
+  }
   redraw($)
 }
 
@@ -295,11 +312,12 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
     <ui.Box backgroundColor={FILL} paddingLeft={2}>
       <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
     </ui.Box>
+    <ui.Text wrap="wrap">{`Allow: it runs with admin rights${gate.isWork ? ', and this work runs its next admin commands without asking' : ''}. Deny: it does not run, and the work is told.`}</ui.Text>
     {gateHeld.has(gate.id) && !isElsewhere ? (
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        <ui.Button key={`${key}-once-${presses}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate.id, 'once')} />
-        <ui.Button key={`${key}-always-${presses}`} label="Always allow this command" onPress={() => answerGate($, gate.id, 'always')} />
-        <ui.Button key={`${key}-deny-${presses}`} label="Deny" onPress={() => answerGate($, gate.id, 'deny')} />
+        <ui.Button key={`${key}-once-${presses}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate, 'once')} />
+        <ui.Button key={`${key}-always-${presses}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always')} />
+        <ui.Button key={`${key}-deny-${presses}`} label="Deny" onPress={() => answerGate($, gate, 'deny')} />
       </ui.Box>
     ) : (
       <ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : 'It no longer waits.'}</ui.Text>

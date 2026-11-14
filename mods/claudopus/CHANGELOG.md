@@ -2,6 +2,29 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.93 · 14 November 2026
+- The app's prompts in the panel say in plain words which work asks, what exactly (the command, the message and the work it goes to, the page), and what a yes and a no each do; no tool's own name such as "Allow SendMessage"
+- Once you answer one, the card says what you did and what is happening now (running, done, said no, or ended before you answered) for a minute, then goes, instead of staying or vanishing
+- Claudopus no longer asks you to allow its own messages that pass your reply on to work, or a Stop you pressed; those prompts used to pile up in every chat's panel and never clear
+- An admin command's card says what Allow and Deny each do, and after you press, or send or cancel a password or key box, the top of the panel says what you did and what happens now for a minute
+- A prompt to allow something has Yes and No on its card, in this chat's panel and in other chats' panels: pressing one answers Claude Code's prompt for real, with nothing to type. Claude Code's own box still works too, and whichever you answer first counts
+- A question or a plan from Claude Code has no Yes or No on its card, as Claude Code lets only its own box answer those: the card says where that box is
+
+## 0.2.92 · 14 November 2026
+- A card that asks you something now shows its pictures on the card itself, small, each with a row that opens it large, so you can decide there without waiting for the chat to send them. In the terminal each picture is a row that opens it on your device.
+
+## 0.2.91 · 14 November 2026
+- A chat your Claude app runs on another Mac over SSH keeps its work going when your Mac goes away: if the app ends the chat's process there while work runs, that Mac starts the chat again by itself within about a minute, under its own sign-in, and the cut-off work carries on. When the chat's process still runs there but the sign-in your app lent it has lapsed, Claudopus ends that process so the same happens at once.
+- Work cut off that way says so on its card ("Cut off at 00:14 … going again since 00:15"), and one notice tells you, on your phone too where Claude Code's push notifications and Remote Control are on.
+- Work starts long commands detached and follows their logs, so a training or a build goes on even when the chat's process ends.
+
+## 0.2.90 · 14 November 2026
+- A piece of work's helpers now run in the background, as the chat's own work does: the work carries on with its own steps while they run, and their results come to it as they end. Before, the work was frozen until each helper ended.
+- Work waits for its helpers only when it has nothing else to do, with a command that comes back within about 20 seconds of one ending, or after two minutes with how each is doing. It is held back from finishing while one still runs (six tries at most), so a helper's result does not go to the chat instead, and stopping the work stops its helpers too.
+- While a piece of work has helpers running, its card says how many and when they were last looked in on, and that line turns amber when one has shown nothing new for five minutes; the work is told, to check it, nudge it or replace it.
+- After each step, work is told when it could have sent its calls together: a helper started alone, three single lookups in a row, two long runs of one kind one after the other, a step of only to-dos, or a commit with no second look started yet.
+- The to-do reminder now asks for the to-do and note calls to go with the next work call, never in a step of their own.
+
 ## 0.2.89 · 14 November 2026
 - A copy run from a folder of its code now updates itself: Check for updates and automatic updates bring that folder up to the newest release with git, and the box says so. Work in the folder that isn't committed is never touched; if the update would overwrite it, the box says why and nothing changes.
 

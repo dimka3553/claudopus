@@ -76,6 +76,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   let spawned = 0
   let gateKeys = 0
   const sleepers: (() => void)[] = []
+  // Whether each agent started ran in the background, as the engine was asked
+  const backgrounds: boolean[] = []
   const wake = () => void sleepers.splice(0).forEach(one => one())
   // What each Bash call that ran the admin runner found waiting for it: the grants, as bin/admin would read them
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
@@ -335,6 +337,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const held = new Map<string, (text: string) => void>()
   on('tool.call', async (_, e) => {
     const command = String((e as { command?: string }).command ?? '')
+    // The person says no to the app's prompt for this tool
+    // as the engine says it: an error result in words, the same for an approval cut short
+    if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
+    if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
@@ -352,6 +358,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('agent.spawn', (_, e) => {
     prompts.push(e.prompt)
+    backgrounds.push(e.background)
     const resume = (e as { resume?: { agentId?: string } }).resume
     return { model: options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
   })
@@ -376,13 +383,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('tool.describe', (_, e) => ({ description: e.description }))
   // The settings hooks beneath: none answers a permission request, unless a test lays one that allows
   on('classic.Notification', () => ({}) as never)
+  on('classic.PostToolBatch', () => ({}) as never)
   on('classic.PermissionRequest', () => (files.has('settings:allow') ? { decision: { behavior: 'allow' } } : {}) as never)
   on('session.compact', (_, e) => {
     compacts.push(e.instructions)
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two

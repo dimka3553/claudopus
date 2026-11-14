@@ -428,7 +428,7 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which logo do you want?', choices: ['A', 'B'], pictures: ['/w/shots/a.png', '/w/shots/b.png', '/w/shots/gone.png', 'rel.png'] } as never)
   expect(String(asked.result)).toContain('shown in the chat as a notice from the panel')
-  expect(String(asked.result)).toContain('Its 2 pictures are named with it')
+  expect(String(asked.result)).toContain('Its 2 pictures are drawn small on the card')
   expect(String(asked.result)).toContain('2 of the pictures given are no picture file found here')
   // The chat shows the ask as the mod's notice, never a prompt in the person's place, with what it asks, its answers and its pictures
   await clock.advance(10)
@@ -605,6 +605,11 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)))
   await list.press({ key: cancel?.key ?? '' })
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${other}.json`) ? undefined : true))).toBe(true)
+  // Its place says what was done, for a minute
+  expect(await until(async () => list.find({ type: 'Text', text: 'You cancelled · nothing was saved, and what asked for it stops without it' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'The admin password of this Mac' })).toBeDefined()
+  await clock.advance(61_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'The admin password of this Mac' })) ? undefined : true))).toBe(true)
 })
 
 test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {
