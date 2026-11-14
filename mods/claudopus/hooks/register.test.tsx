@@ -51,6 +51,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const tabs: string[] = []
   const stopped: string[] = []
   const killed: string[] = []
+  const gitRan: string[] = []
   const closed: string[] = []
   const logged: string[] = []
   const copied: string[] = []
@@ -109,7 +110,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
     if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: options.shipped ? SHIPPED_PRINCIPLES : PRINCIPLES }
     if (isShipped && options.changelog !== undefined && e.path.endsWith('/CHANGELOG.md')) return { value: options.changelog }
-    if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: '{ "name": "claudopus", "version": "0.1.0" }' }
+    if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: files.get('manifest') ?? '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
     return { value: text }
@@ -221,6 +222,24 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return { value: { exitCode: 0, stdout: rest.includes('--targets') ? options.tailscale : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (tool === 'kill') killed.push(String(rest[0]))
+    // git in the mod's folder: no checkout unless the test lays git:online, the version its branch online has; then the folder is on
+    // main following origin/main, behind it, and a fast-forward (refused with what git:merge says, where laid) moves the manifest there
+    if (tool === 'env' && rest.includes('git')) {
+      const args = rest.slice(rest.indexOf('-C') + 2)
+      const online = files.get('git:online')
+      if (online === undefined) return ok('', 128)
+      gitRan.push(args.join(' '))
+      if (args[0] === 'merge' && args[1] !== undefined && args[1].startsWith('--ff')) {
+        if (files.has('git:merge')) return { value: { exitCode: 1, stdout: '', stderr: files.get('git:merge') ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
+        files.set('manifest', JSON.stringify({ name: 'claudopus', version: online }))
+        return ok()
+      }
+      if (args.includes('--symbolic-full-name')) return ok('origin/main\n')
+      if (args[0] === 'symbolic-ref') return ok('main\n')
+      if (args[0] === 'rev-parse' && args.at(-1) === 'HEAD') return ok('aaa\n')
+      if (args[0] === 'rev-parse' && args.at(-1) === '@{u}') return ok('bbb\n')
+      return ok()
+    }
     // Another Mac over ssh: what it answers is laid by the test as ssh:<what>; an answer sent there is kept as it was handed over
     if (tool === 'ssh') {
       sshed.push([String(e.argv.at(-1)), String(e.init?.stdin ?? '')])
@@ -373,7 +392,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, backgrounds }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -3474,8 +3493,8 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
 })
 
 test('Check for updates in Config shows it is checking, then what it found; a second press meanwhile starts no second look', async ($, on) => {
-  world(on)
-  // The tests run the mod from a folder of its code, as its maker does: only the version page is read, and nothing is downloaded
+  const { files, gitRan } = world(on)
+  // The tests run the mod from a folder of its code, as its maker does: a newer version brings that folder up to date with git
   let page = '{"version":"0.1.0"}'
   let answer: (() => void) | undefined
   let fetches = 0
@@ -3499,12 +3518,26 @@ test('Check for updates in Config shows it is checking, then what it found; a se
   release()
   expect(await until(() => config.find({ type: 'Text', text: /^You're on the newest version \(v0\.1\.0\)/ }))).toBeDefined()
   expect(fetches).toBe(1)
-  // A newer release: said, with what to do for a copy run from its folder
+  // The folder is newest already: git is never run
+  expect(gitRan).toEqual([])
+  // A newer release, with changes in the folder that the update would overwrite: git refuses and nothing is changed
   page = '{"version":"0.1.2"}'
+  files.set('git:online', '0.1.2')
+  files.set('git:merge', 'error: Your local changes to the following files would be overwritten by merge:\n\ta.tsx')
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  expect(await until(() => config.find({ type: 'Text', text: /^v0\.1\.2 is out\. This copy runs from a folder of its code/ }))).toBeDefined()
+  const kept = await until(() => config.find({ type: 'Text', text: /^Couldn't update to v0\.1\.2: changes in its folder that aren't committed/ }))
+  expect(kept?.props.color).toBe('error')
+  expect(files.get('manifest')).toBeUndefined()
+  // Pressed again once that is sorted: the folder moves forward to it, and the box says so
+  files.delete('git:merge')
+  await pressed(config, 'config-check')
+  await until(async () => answer)
+  release()
+  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it, or it switches by itself in a moment.' }))).toBeDefined()
+  expect(gitRan).toContain('merge --ff-only --quiet @{u}')
+  files.delete('git:online')
   // No answer that reads as a version: said as a failure, in the error colour
   page = 'oops'
   await pressed(config, 'config-check')
