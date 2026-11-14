@@ -2369,7 +2369,7 @@ test('work that reports with nothing of its own running finishes, though the eng
   await $.agent.spawn({ ...spawn, description: 'Eyes, next round', prompt: 'eyes' } as never)
   kinds.a1 = 'general-purpose'
   agents.a2 = 'running'
-  // As at 22:23: everything it set out to do is done, it asks for the release and hands in its report. Every command and helper of
+  // As at 22:24: everything it set out to do is done, it asks for the release and hands in its report. Every command and helper of
   // its had ended, yet the engine went on listing it as held on background work of its own
   await call('mcp__claudopus__todo', 't1', { item: 'One command that runs a job on Azure', state: 'done' })
   await call('mcp__claudopus__ask', 'k1', { text: 'Release the Azure heavy-jobs route?', choices: ['Release it', 'Not now'] })
@@ -2432,10 +2432,12 @@ test('the same words as a card answer still go when they answer a newer question
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Also merge it?', choices: ['Yes', 'Not now'] } as never)
   const sent = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Yes' } as never)
   expect((sent as { deny?: unknown }).deny).toBeUndefined()
-  // Typed in the chat, then passed on again later in the same words: a chat answer is never refused as a card's
-  await $.prompt.submit({ text: 'go on', wait: false, origin: composer })
-  const first = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'go on' } as never)
-  const second = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a1', message: 'go on' } as never)
+  // An answer typed in the chat and passed on, then passed on again in the same words: only a card's answer is refused as a repeat
+  await clock.advance(5_000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'Tag it?', choices: ['Yes', 'Not now'] } as never)
+  await $.prompt.submit({ text: 'Yes', wait: false, origin: composer })
+  const first = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'Yes' } as never)
+  const second = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a1', message: 'Yes' } as never)
   expect((first as { deny?: unknown }).deny).toBeUndefined()
   expect((second as { deny?: unknown }).deny).toBeUndefined()
   await list.unmount()

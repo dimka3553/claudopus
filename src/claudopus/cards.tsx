@@ -44,10 +44,10 @@ const stoppedHere = new Set<string>()
 // Work that ended with nothing of its own running that the mod or the engine's stop knew of: the engine still listing it as held
 // (once, for a whole evening, on nothing any tool showed open) is no sign it left something running
 const leftNothing = new Set<string>()
-// Nothing of its own runs: no command or watch it started that has not ended, no helper at work. The engine's list of what is in
+// Nothing of its own runs: no command or watch it started that has not ended, no detached run it is followed on, no helper at work. The engine's list of what is in
 // flight as work stops is the whole session's, every other work's too, so it says nothing of this work's own (what it lists that
 // this work started is let go of from its card as it ends, at its stop)
-const ownsNothing = (list: Todo[], id: string) => !list.find(one => one.id === id)?.bg?.length && !list.some(kid => kid.parentId === id && kid.status === 'working')
+const ownsNothing = (list: Todo[], id: string) => !list.find(one => one.id === id)?.bg?.length && !list.find(one => one.id === id)?.detached?.length && !list.some(kid => kid.parentId === id && kid.status === 'working')
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
