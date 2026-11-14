@@ -97,7 +97,10 @@ export const detachedOf = (command: string) => {
   return { log, cd, core }
 }
 // The process id a detached start printed, as `echo $!` does
-export const pidOf = (stdout: string) => stdout.match(/^\s*(\d{2,7})\s*$/m)?.[1]
+// A process number is never 0 nor led by 0: a command that printed curl's "000" kept a job alive on its card for ever, as kill -0 0
+// asks after the whole process group
+export const pidOf = (stdout: string) => stdout.match(/^\s*([1-9]\d{1,6})\s*$/m)?.[1]
+export const isPid = (pid: string) => /^[1-9]\d{1,6}$/.test(pid)
 
 // A call that only waits (a sleep, a wait) is no job of its own
 export const isWaitOnly = (cmd: string) => /^\s*(sleep\s|wait\b|python3? -c ['"]import time; ?time\.sleep)/.test(cmd)
