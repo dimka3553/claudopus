@@ -17,6 +17,7 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isReloadDue, isU
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { detachedOf, DOWNLOAD_CMD, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_LOOK, JOB_NEWS, JOB_TAIL, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, SERVER_CMD } from './jobs'
+import { detachedOf, DOWNLOAD_CMD, foldJobs, isOutputEnded, isPausedProc, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
+import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
