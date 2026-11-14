@@ -162,3 +162,43 @@ test("a Details tab's small pictures together stay under what the app draws in o
   await pane.unmount()
   expect(logged).toEqual([])
 })
+
+test("an ask's pictures are drawn small on its card, in the list and in Details, each with a row that opens it large; together they stay under what the app draws in one drawing; the terminal has the rows alone", async ($, on) => {
+  const shots = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(n => `/w/designs/${n}.png`)
+  const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 480\npixelHeight: 300' : '')
+  // Each small copy as large as an ask's may be: 22000 bytes, about 29400 characters of base64
+  const bytes = (path: string) => (path.includes('/thumbs/ask-') ? 'A'.repeat(29_400) : undefined)
+  const { files, logged, shown } = world(on, { sips, bytes })
+  for (const path of shots) files.set(path, 'png')
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'pick a design', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Pick a design', prompt: 'Draw the designs.' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Pick one of the designs', details: 'Each picture is one design.', choices: ['A', 'B'], pictures: shots } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // Made out of the drawing, which is drawn again once they are
+  for (let tries = 0; tries < 50 && !(await list.findAll({ type: 'Svg' })).some(one => String(one.props.alt).startsWith('Picture:')); tries += 1) await new Promise(done => setTimeout(done, 20))
+  const small = (await list.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))
+  // Four fit in what every ask's pictures may take; the rest are rows that open them
+  expect(small.map(one => String(one.props.alt))).toEqual(['Picture: a.png', 'Picture: b.png', 'Picture: c.png', 'Picture: d.png'])
+  const rows = (await list.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => label.startsWith('⤢'))
+  expect(rows).toEqual(['⤢ Open large: a.png', '⤢ Open large: b.png', '⤢ Open large: c.png', '⤢ Open large: d.png', '⤢ Open: e.png', '⤢ Open: f.png', '⤢ Open: g.png'])
+  expect(await drawnChars(list)).toBeLessThan(APP_DRAWING_CHARS)
+  // Pressed, one opens whole in the Mac's own viewer
+  shown.length = 0
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(one => one.props.label === '⤢ Open large: b.png')?.key ?? '' })
+  expect(shown).toEqual([['open', '/w/designs/b.png']])
+  // In Details too, under what it is about
+  await pressed(list, 'open-a1')
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  expect((await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:')).length).toBe(4)
+  expect(await drawnChars(tab)).toBeLessThan(APP_DRAWING_CHARS)
+  await tab.unmount()
+  await list.unmount()
+  // The terminal draws no pictures: a row each that opens it
+  const term = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  expect((await term.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))).toEqual([])
+  expect((await term.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => label.startsWith('⤢')).length).toBe(7)
+  await term.unmount()
+  // Only the ask's notice in the chat is logged: nothing failed
+  expect(logged.filter(line => !line.startsWith('The work "Pick a design" needs the person'))).toEqual([])
+})
