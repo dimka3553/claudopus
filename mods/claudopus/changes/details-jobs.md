@@ -1,0 +1,1 @@
+- A piece of work's Details shows what it and its helpers have running, the same job rows as its card, every one of them under the one that started it; a helper's own Details shows its own

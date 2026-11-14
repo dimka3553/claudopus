@@ -8573,15 +8573,17 @@ const panelHooks = (on: On) => {
     }
     // Each branch with the jobs its helper has running first, under it, as the card's own come first under the card
     // At most JOBS_SHOWN each, the newest; the rest one row that says how many more run and opens the card's Details
-    const jobBranches = (card: Todo): Branch[] => {
+    // In Details every one is shown
+    const jobBranches = (card: Todo, isAll = false): Branch[] => {
       const jobs = jobsOf(card, at)
-      if (jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
+      if (isAll || jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
       const more = jobs.length - JOBS_SHOWN + 1
       const shown = jobs.slice(-(JOBS_SHOWN - 1))
       const rest: Job = { id: `more-${card.id}`, label: `${more} more running`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
       return [...shown, rest].map(job => ({ one: card, job, kids: [] }))
     }
-    const withJobs = (branches: Branch[]): Branch[] => branches.map(b => (b.job ? b : { ...b, kids: [...jobBranches(b.one), ...withJobs(b.kids)] }))
+    const withJobs = (branches: Branch[], isAll = false): Branch[] =>
+      branches.map(b => (b.job ? b : { ...b, kids: [...jobBranches(b.one, isAll), ...withJobs(b.kids, isAll)] }))
     const rowOf = (t: Twig) => (t.job ? jobRow(t, 'list') : twigRow(t, 'list'))
     // In a small card: what it has running, then the helpers at work now or just ended, and any that one of those runs under; the
     // rest are one closing row, laid out as the others, that says how many have ended and opens the card's Details, where every
@@ -8838,16 +8840,20 @@ const panelHooks = (on: On) => {
       )
     }
 
-    // In Details: every helper the work started, and theirs, at work or ended, as the same tree; each opens its own Details
+    // In Details: what the work has running, then every helper it started, and theirs, at work or ended, each with what it has
+    // running under it, as the same tree as on its card, every job shown; each helper opens its own Details, which shows its own
     const helpersPart = (one: Todo) => {
       const under = underOf(all, one.id)
-      if (!under.length) return null
+      const branches = [...jobBranches(one, true), ...withJobs(branchesOf(all, one.id, () => true), true)]
+      const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid, at).length, 0)
+      if (!under.length && !jobs) return null
       const running = under.filter(kid => kid.status === 'working').length
+      const side = [jobs ? `${jobs} ${jobs === 1 ? 'job' : 'jobs'} running` : '', running ? `${running} at work` : '', under.length ? `${under.length} in all` : ''].filter(Boolean).join(' · ')
       return part(
         'part-helpers',
-        'Helpers',
-        running ? `${running} at work · ${under.length} in all` : `${under.length} in all`,
-        <Box flexDirection="column">{twigsOf(branchesOf(all, one.id, () => true)).map(t => twigRow(t, 'details'))}</Box>,
+        under.length ? 'Helpers' : 'Running',
+        side,
+        <Box flexDirection="column">{twigsOf(branches).map(t => (t.job ? jobRow(t, 'details') : twigRow(t, 'details')))}</Box>,
       )
     }
 
