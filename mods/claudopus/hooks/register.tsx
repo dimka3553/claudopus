@@ -12,7 +12,7 @@ import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
 import type { LookIo } from './update'
-import { checkSaid, copyOf, folderSaid, installedFrom, isNewer, isReloadDue, isUpdateDue, lookOnce, RELOAD_AGAIN, RELOAD_EVERY, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
+import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isReloadDue, isUpdateDue, lookOnce, RELOAD_AGAIN, RELOAD_EVERY, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
@@ -3771,13 +3771,13 @@ const aloud = async ($: EngineInterface, what: string, title: string, text: stri
 }
 const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} needs you`, text, `ask-${one.id}`)
 
-// Claudopus keeps itself up to date: every hour one chat reads the version page on claudopus.ai, and when it names a version other than the one installed runs Claude Code's own update steps for it (the pure parts are in hooks/update.ts)
+// Claudopus keeps itself up to date: every hour one chat reads the version page on claudopus.ai, and when it names a version other than the one installed runs Claude Code's own update steps for it, or, for a copy run from a folder of its code, brings that folder up to date (the pure parts are in hooks/update.ts)
 
 // ---- Keeping itself up to date (the pure parts are in ./update) ----
 
 // Every hour one chat on this Mac reads the version page and, when it differs from the installed version, runs Claude Code's own two
 // update steps for the mod, under a lock the other chats see, and
-// keeps what it learnt in update.json; a copy not installed from a marketplace (its maker's folder) is never updated
+// keeps what it learnt in update.json; a copy run from a folder of its code brings that folder up to date with git instead
 let isUpdating = false
 // The lock is one file made only where none is (the shell's noclobber), holding when it was taken and by whom; a lock left by a
 // chat that closed mid-look is moved aside by exactly one chat once it is old (by what it says, else by when it was written).
@@ -3817,18 +3817,25 @@ const lookIo = ($: EngineInterface): LookIo => ({
   now: () => $.clock.now(),
   log: text => log($, text),
 })
-const lookAt = async ($: EngineInterface, from: NonNullable<ReturnType<typeof installedFrom>>) =>
-  lookOnce(lookIo($), { from, root: $.plugin.root, cwd, engine: (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude', stampPath: `${dir}/update.json` })
+// One look: an installed copy runs Claude Code's own update steps, a copy run from a folder of its code brings that folder up to date
+// A folder's looks keep their own stamp, so they never stand in for an installed copy's hourly look on the same Mac
+const stampFor = (from: ReturnType<typeof installedFrom>) => `${dir}/${from ? 'update' : 'update-folder'}.json`
+const lookAt = async ($: EngineInterface, from: ReturnType<typeof installedFrom>) => {
+  const engine = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
+  const stampPath = stampFor(from)
+  if (!from) return folderLook(lookIo($), { root: $.plugin.root, plugins: dir.replace(/\/claudopus$/, '/plugins'), engine, stampPath })
+  return lookOnce(lookIo($), { from, root: $.plugin.root, cwd, engine, stampPath })
+}
 
 // Every hour one chat on this Mac reads the version page and, when it differs from the installed version, runs Claude Code's own two
 // update steps for the mod, under a lock the other chats see, and
-// keeps what it learnt in update.json; a copy not installed from a marketplace (its maker's folder) is never updated
+// keeps what it learnt in update.json; a copy run from a folder of its code brings that folder up to date with git instead
 const selfUpdate = async ($: EngineInterface) => {
   const from = installedFrom($.plugin.root)
-  if (!from || isUpdating || !dir) return
+  if (isUpdating || !dir) return
   // Automatic updates turned off in Config leave the installed version alone
   if ((await readConfig($, dir)).updates === false) return
-  const stampPath = `${dir}/update.json`
+  const stampPath = stampFor(from)
   if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now())) return
   isUpdating = true
   try {
@@ -3851,10 +3858,6 @@ const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isEr
   const loaded = (await versionsOf($)).version
   const from = installedFrom($.plugin.root)
   if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
-  if (!from) {
-    const page = await lookIo($).page()
-    return folderSaid(page.ok ? versionOnPage(page.text) : undefined, loaded)
-  }
   const until = (await $.clock.now()) + UPDATE_LOOK + CHECK_STEP
   for (;;) {
     if (!isUpdating) {
@@ -3863,7 +3866,7 @@ const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isEr
         const look = await underUpdateLock($, () => lookAt($, from))
         if (look !== UPDATE_BUSY) {
           await log($, `Claudopus checked for updates from Config: ${look.kind}${'version' in look && look.version ? ` ${look.version}` : ''}`)
-          return checkSaid(look, loaded, isRunFromAfar || isReloadRefused)
+          return checkSaid(look, loaded, isRunFromAfar || isReloadRefused, !from)
         }
       } finally {
         isUpdating = false
@@ -3876,12 +3879,19 @@ const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isEr
 
 // ---- Moving an open chat to the version installed ----
 
-// The version the Mac has installed now, from Claude Code's own record (installed_plugins.json), with the folder it is in; nothing
-// for a copy run from a folder of its code, which has nothing installed to move to
+// The version the Mac has installed now, from Claude Code's own record (installed_plugins.json), with the folder it is in; for a copy
+// run from a folder of its code, the version that folder has now, which a reload loads
 const installedNow = async ($: EngineInterface) => (await installedCopy($))?.version ?? ''
 const installedCopy = async ($: EngineInterface) => {
   const from = installedFrom($.plugin.root)
-  if (!from) return undefined
+  if (!from) {
+    // Only a main checkout (its .git a folder, not a worktree's file) follows its folder: a worktree's version rises as work merges
+    // main or a release numbers it, mid-build, and a chat loaded from it is reloaded by hand
+    const root = $.plugin.root.replace(/\/+$/, '')
+    if (!(await readOr($, `${root}/../../.git/HEAD`)).trim()) return undefined
+    const version = versionOnPage(await readOr($, `${root}/.claude-plugin/plugin.json`))
+    return version ? { version, installPath: root } : undefined
+  }
   const installed = await readOr($, `${from.plugins}/installed_plugins.json`)
   const id = `${from.plugin}@${from.marketplace}`
   return copyOf(installed, id, $.plugin.root, cwd)

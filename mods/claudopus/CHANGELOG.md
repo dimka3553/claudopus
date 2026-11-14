@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.89 · 14 November 2026
+- A copy run from a folder of its code now updates itself: Check for updates and automatic updates bring that folder up to the newest release with git, and the box says so. Work in the folder that isn't committed is never touched; if the update would overwrite it, the box says why and nothing changes.
+
 ## 0.2.88 · 14 November 2026
 - In a narrow terminal, as on a phone over ssh, a button in the panel that opens a tab (Results, Stats, Memory, Config, About, a card's Details, a result) now opens it where you can see it, instead of opening nothing or making the panel vanish.
 - Every tab of the panel in the terminal starts with x: Close: click it, or press x once the tab has the keys (ctrl+x Tab), and the tab closes and the panel comes back.
