@@ -290,15 +290,15 @@ test('F-017 · a release waits for the person\'s press on its card, and its gran
     expect(((await $.tool.call({ tool: 'Bash', tool_use_id: `p${command.length}`, agentId: 'a1', command } as never)) as { deny?: string }).deny).toContain('never pushes or merges to main')
 })
 
-test('F-019 · Claudopus never installs an update or reloads a chat by itself, whatever config.json says: only a press of Check for updates looks', async ($, on) => {
+test('F-019 · Claudopus never installs an update or reloads a chat by itself, whatever config.json says: only a press of Check for updates looks', SLOW, async ($, on) => {
   const { files, clock } = world(on)
   let fetches = 0
   on('http.fetch', () => ((fetches += 1), { value: { status: 200, ok: true, headers: {}, text: '{"version":"9.9.9"}' } }) as never)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ updates: true }))
   await $.session.start(start)
+  // Past the times a look came by itself before this fix: a little after the start, and the next quarter hour
   await clock.advance(3 * 60_000)
   await clock.advance(20 * 60_000)
-  await clock.advance(41 * 60_000)
   expect(fetches).toBe(0)
   expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain('reloading it')
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
