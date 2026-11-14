@@ -27,6 +27,25 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   return false
 }
 
+// bin/keyring and its store, the runners' alone: on a Mac a way into the keychain, on Linux files that hold every kept password and
+// key, the boxes' answers and the admin gate's key. A command that names the keyring runner or the store's folder (bin/keyring,
+// keyring/…, "keyring"), and any tool that reads, searches or writes a path in that folder, is refused. This stops slips and common
+// tricks, as the boxes' guard does; it is no wall
+const KEYRING_WORD = /(?:^|[\s'"=/;&|(`$])keyring(?:$|[\s'"/;&|)`])/i
+const touchesKeyring = (e: { tool: string }) => {
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown; path?: unknown; pattern?: unknown }
+  // git and gh alone are let through, so a commit message or a pull request may name it
+  if (e.tool === 'Bash') return KEYRING_WORD.test(String(input.command ?? '')) && !/^\s*(?:git|gh)\s[^;&|`$<>]*$/.test(String(input.command ?? ''))
+  if (!['Read', 'Grep', 'Glob', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return false
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const roots = [keyringRoot, `${home}/.local/share/claudopus/keyring`].filter(Boolean).map(one => one.toLowerCase())
+  return [input.file_path, input.notebook_path, input.path, input.pattern].some(one => {
+    if (typeof one !== 'string' || !one) return false
+    const path = pathOf(one, home, cwd || home).toLowerCase()
+    return roots.some(root => path === root || path.startsWith(`${root}/`)) || /claudopus\/keyring(?:\/|$)/i.test(one)
+  })
+}
+
 const workHooks = (on: On) => {
 
   // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
@@ -54,7 +73,7 @@ const workHooks = (on: On) => {
       await log($, `refused ${e.tool} touching the password and key boxes`)
       return { deny: NO_BOXES }
     }
-    if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
+    if ((e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) || touchesKeyring(e)) {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
     }

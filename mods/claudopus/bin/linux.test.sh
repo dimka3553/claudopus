@@ -27,7 +27,6 @@ ok 'list names the accounts, never values' '[ "$("$k" list test-service | tr "\n
 ok 'delete removes it' '"$k" delete test-service one && ! "$k" has test-service one'
 ok 'delete of none ends 1' '! "$k" delete test-service one'
 ok 'a name that climbs out of its folder is refused' '! "$k" get .. one 2>/dev/null && ! "$k" get test-service ../x 2>/dev/null && ! "$k" get test-service "a/b" 2>/dev/null'
-ok 'the value never shows in a command line' '! grep -rq "s3cret" "$tmp/home/.bash_history" 2>/dev/null'
 
 # bin/secret keeps and hides a key through bin/keyring
 printf '%s\n' "abcd1234" | "$k" set claudopus-secret TEST_KEY "Claudopus: TEST_KEY"

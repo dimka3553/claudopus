@@ -308,14 +308,18 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
 // Linux desktop session the person sees (DISPLAY or WAYLAND_DISPLAY): without one, as in a terminal over SSH, nothing opens a window
 let isLinux = false
 let hasDesktop = true
+// Where bin/keyring keeps its files on Linux, as it finds it: $XDG_DATA_HOME, when it is a full path, else ~/.local/share
+let keyringRoot = ''
 const knowSystem = async ($: EngineInterface) => {
   const r = await $.process.run(['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined)
   isLinux = r?.exitCode === 0 && r.stdout.trim() === 'Linux'
   hasDesktop = !isLinux || Boolean((await $.env.get('DISPLAY')) || (await $.env.get('WAYLAND_DISPLAY')))
+  const data = (await $.env.get('XDG_DATA_HOME')) ?? ''
+  keyringRoot = `${data.startsWith('/') ? data : `${(await $.env.get('HOME')) ?? ''}/.local/share`}/claudopus/keyring`
 }
 // How this computer is named in what the person reads
 const thisMac = () => (isLinux ? 'this machine' : 'this Mac')
-const keptWhere = () => (isLinux ? 'a file only you can read on this machine' : "this Mac's keychain")
+const keptWhere = () => (isLinux ? 'a file on this machine that only you can read' : "this Mac's keychain")
 // A file, folder or link opened as the person's own system opens it: `open` on a Mac, xdg-open on a Linux desktop. Linux without
 // a desktop has nothing to open it on, and says so as a failed run does
 const openOn = async ($: EngineInterface, target: string, isText = false) => {

@@ -523,6 +523,13 @@ test('work uses a kept key without reading it: the keychain is not read, and wha
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'k6', command: 'CLAUDOPUS_SECRET_SERVICE=other bin/secret API_KEY here "env"', agentId: 'w1' } as never)).deny).toContain('never read')
   // A command that only lists what the keychain holds, with no value, runs
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'k7', command: 'security find-generic-password -s claudopus-secret -a API_KEY', agentId: 'w1' } as never)).deny).toBeUndefined()
+  // bin/keyring and its store on Linux, by any tool: the runner named, its verb quoted, its folder reached through a cd, read,
+  // searched or written; git alone may name it in a message
+  for (const command of ['mods/claudopus/bin/keyring get claudopus-admin here', '"$HOME/x/bin/keyring" "get" claudopus-secret API_KEY', 'cd ~/.local/share/claudopus && cat keyring/claudopus-admin/here', 'keyring set claudopus-admin-gate seal'])
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `kr-${command.length}`, command, agentId: 'w1' } as never)).deny).toContain('never read')
+  for (const [tool, field] of [['Read', 'file_path'], ['Write', 'file_path'], ['Grep', 'path'], ['Glob', 'path']] as const)
+    expect((await $.tool.call({ tool, tool_use_id: `kf-${tool}`, [field]: '~/.local/share/claudopus/keyring/claudopus-admin/here', ...(tool === 'Write' ? { content: 'x' } : { pattern: '.' }), agentId: 'w1' } as never)).deny).toContain('never read')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'kg', command: 'git commit -m "keyring for Linux"', agentId: 'w1' } as never)).deny).toBeUndefined()
 
   // Nothing kept: what the tool answers passes as it was
   expect(JSON.stringify((await $.tool.call({ tool: 'Bash', tool_use_id: 'k3', command: 'echo $API_KEY', agentId: 'w1' } as never)).result)).toContain('token is none')
@@ -6494,7 +6501,7 @@ test('a step is told when it started a helper alone, held only to-dos, or made a
   expect(await toldOf(batch($, undefined as never, [{ tool: 'Agent' }]))).toBe('')
 })
 
-test('three single lookups in a row are told to go together or to a helper; two long runs of one kind in a row, to run side by side', async ($, on) => {
+test('three single lookups in a row are told to go together or to a helper; two long runs of one kind in a row, to run side by side', SLOW, async ($, on) => {
   const { clock, held } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })

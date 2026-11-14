@@ -26,7 +26,7 @@ const GATE_DENIED = () =>
 const GATE_GONE = () => named('This admin command did not run: the wait for {name} to allow it was cut short. Run it again if it is still needed.')
 const GATE_LATE = () => named('This admin command did not run: {name} did not answer in the time a call can be held. Run it again when it is needed, and {name} is asked again.')
 const GATE_BLIND = () => named('This admin command did not run: {name} is asked before every admin command, on a card in the Claudopus panel, and no panel is drawn for this chat.')
-const GATE_UNSEALED = "This admin command did not run: what was allowed could not be sealed in this Mac's keychain. Run it again."
+const GATE_UNSEALED = () => `This admin command did not run: what was allowed could not be sealed in ${keptWhere()}. Run it again.`
 const NO_GATE_TOUCH = () =>
   named('The list of admin commands {name} always allows, what {name} allowed and the key that seals them are never read or written by work: only {name} adds to them, with a press on a card or in Config.')
 const MACOS_ONLY_HERE = () =>
@@ -93,7 +93,7 @@ else
 fi
 k=$(key)
 if [ "$mode" = new ] || { [ -z "$k" ] && [ "$mode" = make ]; }; then
-  k=$(/usr/bin/openssl rand -hex 32) || exit 1
+  k=$(/usr/bin/openssl rand -hex 32 2>/dev/null || od -An -tx1 -N32 /dev/urandom | tr -d ' \\n') || exit 1
   [ \${#k} = 64 ] || exit 1
   keep "$k"
   [ "$(key)" = "$k" ] || exit 1
@@ -160,7 +160,7 @@ const isAllowed = async ($: EngineInterface, call: AdminCall) => {
 }
 const allowAlways = async ($: EngineInterface, call: AdminCall) => {
   const seal = (await sealed($, 'make', [allowMessage(call)]))?.[0]
-  if (!seal) throw new Error("the seal could not be made in this Mac's keychain")
+  if (!seal) throw new Error(`the seal could not be made in ${keptWhere()}`)
   const at = await $.clock.now()
   allowedRead = { key: '', valid: [], unsealed: 0 }
   await writeAllowed($, [...(await readAllowed($)).filter(one => one.host !== call.host || one.command !== call.command), { ...call, seal, at }])
@@ -172,7 +172,7 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
   const kept = change.remove ? valid.filter(one => one.host !== change.remove?.host || one.command !== change.remove.command) : valid
   const mode = change.mode ?? (await gateOf($)).mode
   const seals = await sealed($, 'new', [...kept.map(allowMessage), ...(mode === 'each' ? [] : [`mode\n${mode}`])])
-  if (!seals) throw new Error("the seal could not be made in this Mac's keychain")
+  if (!seals) throw new Error(`the seal could not be made in ${keptWhere()}`)
   allowedRead = { key: '', valid: [], unsealed: 0 }
   await writeAllowed($, kept.map((one, n) => ({ ...one, seal: seals[n] ?? '' })))
   await setConfig($, dir, 'admin', mode === 'each' ? undefined : mode)
@@ -231,7 +231,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
   await openList($).catch(() => undefined)
   const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
-  const where = gate.host === 'here' ? 'this Mac' : gate.host
+  const where = gate.host === 'here' ? thisMac() : gate.host
   const text = `Wants to run an admin command on ${where}: ${cut(oneLine(gate.command), 200)}`
   await (card ? askAloud($, card, text) : aloud($, 'ask', 'An admin command needs you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
   $.ui.log(
@@ -262,7 +262,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
     gateSaid.set(id, said)
     void noteDone($, {
       id: `gate-${id}`,
-      head: `An admin command on ${gate.host === 'here' ? 'this Mac' : gate.host}`,
+      head: `An admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
       said:
         said === 'deny'
           ? 'You denied it · it did not run, and the work was told'
@@ -307,7 +307,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
     const grant = await issueGrant($, `${e.tool_use_id}-${n}`, call)
     if (!grant) {
       await dropGrants($, grants)
-      return { deny: GATE_UNSEALED, grants: [] }
+      return { deny: GATE_UNSEALED(), grants: [] }
     }
     grants.push(grant)
   }
@@ -318,7 +318,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
 // that holds the call allows it
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
   <ui.Box key={key} flexDirection="column" gap={1}>
-    <ui.Text wrap="wrap" color={NEEDS} bold>{`Wants to run an admin command on ${gate.host === 'here' ? 'this Mac' : gate.host}`}</ui.Text>
+    <ui.Text wrap="wrap" color={NEEDS} bold>{`Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`}</ui.Text>
     <ui.Box backgroundColor={FILL} paddingLeft={2}>
       <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
     </ui.Box>
