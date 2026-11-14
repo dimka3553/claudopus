@@ -16,6 +16,7 @@ test('a job is told by its command: a server with its port, a download, else a s
   const log = latestOf('\x1b[32m[4/6]\x1b[0m fitting mesh\nframe 812/2000  loss 0.0123\n\n')
   expect(log.latest).toBe('frame 812/2000 loss 0.0123')
   expect(log.pct).toBeUndefined()
+  expect(latestOf('127.0.0.1 - - [14/Nov/2026 11:20:03] "GET /mesh_final.ply HTTP/1.1" 200 -\n').latest).toBe('GET /mesh_final.ply 200')
   expect(latestOf('Serving HTTP on :: port 8765 (http://[::]:8765/) ...\n').port).toBe('8765')
 })
 

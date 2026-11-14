@@ -191,6 +191,7 @@ declare global {
   export import JOB_TAIL = M10.JOB_TAIL
   export import JOB_WORD = M10.JOB_WORD
   export import jobKindOf = M10.jobKindOf
+  export import JOBS_SHOWN = M10.JOBS_SHOWN
   export import latestOf = M10.latestOf
   export import pidOf = M10.pidOf
   export import portOf = M10.portOf

@@ -31,6 +31,7 @@ const jobsOf = (one: Todo, at: number): Job[] => [
 
 // A job's name on its row: what kind, a server's port, and its own words
 const jobHead = (job: Job) => {
+  if (job.id.startsWith('more-')) return job.label
   const kind = job.kind === 'server' ? `Server${job.port ? ` :${job.port}` : ''}` : job.kind === 'download' ? 'Download' : job.kind === 'watch' ? 'Watch' : ''
   return kind ? `${kind} · ${job.label}` : job.label
 }

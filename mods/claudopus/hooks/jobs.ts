@@ -7,6 +7,8 @@ export type Job = { id: string; label: string; cmd: string; kind: JobKind; at: n
 // How often the jobs' output is read, and how often a job that wrote something new counts as news for its card
 export const JOB_LOOK = 5_000
 export const JOB_NEWS = 60_000
+// At most this many jobs are rows under one card or helper
+export const JOBS_SHOWN = 4
 // Only the end of each job's output is read
 export const JOB_TAIL = 4000
 
@@ -37,7 +39,10 @@ export const latestOf = (text: string) => {
     .filter(Boolean)
   const last = lines.at(-1) ?? ''
   const pct = last.match(/\b\d{1,3}(?:\.\d+)?\s?%/g)?.at(-1)?.replace(/\s/g, '')
-  return { latest: last.replace(/\s+/g, ' ').trim().slice(0, 240), pct, port: portOf(clean) }
+  // A web server's access line says only the request and its answer
+  const hit = last.match(/"(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS) (\S+) HTTP\/[\d.]+" (\d{3})/)
+  const line = hit ? `${hit[1]} ${hit[2]} ${hit[3]}` : last
+  return { latest: line.replace(/\s+/g, ' ').trim().slice(0, 240), pct, port: portOf(clean) }
 }
 
 

@@ -16,7 +16,7 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isReloadDue, isU
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { detachedOf, DOWNLOAD_CMD, JOB_COLOR, JOB_GLYPH, JOB_LOOK, JOB_NEWS, JOB_TAIL, JOB_WORD, jobKindOf, latestOf, pidOf, portOf, SERVER_CMD } from './jobs'
+import { detachedOf, DOWNLOAD_CMD, JOB_COLOR, JOB_GLYPH, JOB_LOOK, JOB_NEWS, JOB_TAIL, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, SERVER_CMD } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
 
@@ -6566,6 +6566,7 @@ const jobsOf = (one: Todo, at: number): Job[] => [
 
 // A job's name on its row: what kind, a server's port, and its own words
 const jobHead = (job: Job) => {
+  if (job.id.startsWith('more-')) return job.label
   const kind = job.kind === 'server' ? `Server${job.port ? ` :${job.port}` : ''}` : job.kind === 'download' ? 'Download' : job.kind === 'watch' ? 'Watch' : ''
   return kind ? `${kind} · ${job.label}` : job.label
 }
@@ -8102,18 +8103,20 @@ const panelHooks = (on: On) => {
       const side = job.pct ? `${job.pct} · ${time}` : time
       const width = perRow - 4 - t.depth * 2
       const room = Math.max(12, width - side.length - 1)
-      const name = cut(jobHead(job), room)
+      // The latest line, unless it is only a progress bar its percent already says; the name leaves it at least half the row
+      const latest = job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
+      const name = cut(jobHead(job), latest ? Math.max(20, Math.floor(room / 2)) : room)
       const rest = room - name.length - 3
-      const detail = job.latest && rest >= 10 ? cut(job.latest, rest) : ''
+      const detail = latest && rest >= 10 ? cut(latest, rest) : ''
       return (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
           {jobLines(t, `twig-lines-${key}`, job)}
           <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
-            <Box flexShrink={0}>
-              <Text>{name}</Text>
+            <Box flexShrink={1} minWidth={0}>
+              <Text wrap="truncate-end">{name}</Text>
             </Box>
             {detail ? (
-              <Box flexShrink={1} minWidth={0}>
+              <Box flexShrink={1000} minWidth={0}>
                 <Text dimColor wrap="truncate-end">{` · ${detail}`}</Text>
               </Box>
             ) : null}
@@ -8125,7 +8128,15 @@ const panelHooks = (on: On) => {
       )
     }
     // Each branch with the jobs its helper has running first, under it, as the card's own come first under the card
-    const jobBranches = (card: Todo): Branch[] => jobsOf(card, at).map(job => ({ one: card, job, kids: [] }))
+    // At most JOBS_SHOWN each, the newest; the rest one row that says how many more run and opens the card's Details
+    const jobBranches = (card: Todo): Branch[] => {
+      const jobs = jobsOf(card, at)
+      if (jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
+      const more = jobs.length - JOBS_SHOWN + 1
+      const shown = jobs.slice(-(JOBS_SHOWN - 1))
+      const rest: Job = { id: `more-${card.id}`, label: `${more} more running`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
+      return [...shown, rest].map(job => ({ one: card, job, kids: [] }))
+    }
     const withJobs = (branches: Branch[]): Branch[] => branches.map(b => (b.job ? b : { ...b, kids: [...jobBranches(b.one), ...withJobs(b.kids)] }))
     const rowOf = (t: Twig) => (t.job ? jobRow(t, 'list') : twigRow(t, 'list'))
     // In a small card: what it has running, then the helpers at work now or just ended, and any that one of those runs under; the
