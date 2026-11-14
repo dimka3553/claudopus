@@ -227,7 +227,7 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
-    : await $.session.send({ to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) })).finally(() => ownSent($))
+    : await sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (!r.isDelivered) return wakeFailed($, wake, r.reason)
   // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
   await wakeCard($, wake.target)

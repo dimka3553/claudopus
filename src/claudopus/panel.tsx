@@ -865,7 +865,7 @@ const panelHooks = (on: On) => {
     // of what came of it (purple while it runs, grey once over)
     const saidOf = (p: Prompt) => {
       if (p.answered === 'stopped') return 'It ended before you answered · nothing happened'
-      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · no answer went back, and it waits for you' : p.kind === 'plan' ? 'You said no · it keeps planning' : 'You said no · it did not happen, and it waits for what you say next'
+      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · no answer went back, and it waits for you' : p.kind === 'plan' ? 'You said no · it keeps planning' : p.title ? 'You said no · it did not happen, and the work was told' : 'You said no · it did not happen, and it waits for what you say next'
       if (p.kind === 'question') return p.isRunning ? 'You answered · it is taking your answer' : 'You answered · it carries on with your answer'
       if (p.kind === 'plan') return 'You approved the plan · it is carrying it out'
       if (p.isCut) return 'You allowed it · it was stopped before it finished'

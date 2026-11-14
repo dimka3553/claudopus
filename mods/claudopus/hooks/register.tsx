@@ -4424,7 +4424,7 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
-    : await $.session.send({ to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) })).finally(() => ownSent($))
+    : await sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (!r.isDelivered) return wakeFailed($, wake, r.reason)
   // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
   await wakeCard($, wake.target)
@@ -5847,8 +5847,9 @@ const askedFor = (agent: string | undefined, tool: string, input: unknown) => {
 // What the prompt asks, in plain words and never a tool's own name: what is asked, exactly what (the command, the message, the page),
 // and what a yes and a no each do. A message names the work it goes to, by its card
 type Asks = Pick<Prompt, 'text' | 'kind' | 'detail' | 'yes' | 'no' | 'done'>
-const NO_SKIPS = 'No: it does not happen, and the work stops to wait for what you say next.'
-const promptOf = (tool: string, input: unknown, list: Todo[]): Asks => {
+const NO_SKIPS = 'No: it does not happen, and it stops to wait for what you say next.'
+const NO_TOLD = 'No: it does not happen, and the work is told you said no.'
+const promptOf = (tool: string, input: unknown, list: Todo[], isWork = false): Asks => {
   const given = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
   const field = (key: string) => (typeof given[key] === 'string' ? oneLine(given[key] as string) : '')
   const whole = (key: string, max: number) => (typeof given[key] === 'string' ? cut((given[key] as string).trim(), max) : '')
@@ -5859,7 +5860,7 @@ const promptOf = (tool: string, input: unknown, list: Todo[]): Asks => {
     const card = list.find(one => one.id === id) ?? list.find(one => id.startsWith(one.id))
     return card ? `the work “${titleOf(card)}”` : 'another piece of work'
   }
-  const allow = (text: string, yes: string, detail = '', no = NO_SKIPS): Asks => ({ text, kind: 'allow', ...(detail ? { detail } : {}), yes: `Yes: ${yes}`, no })
+  const allow = (text: string, yes: string, detail = '', no = isWork ? NO_TOLD : NO_SKIPS): Asks => ({ text, kind: 'allow', ...(detail ? { detail } : {}), yes: `Yes: ${yes}`, no })
   if (tool === 'Bash' || tool === 'PowerShell')
     return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'one with no words'}`, 'the command runs on its Mac.', whole('command', 400))
   if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'the file is saved, replacing any file of that name.', field('file_path'))
@@ -5876,7 +5877,7 @@ const promptOf = (tool: string, input: unknown, list: Todo[]): Asks => {
         to === 'its chat' ? 'Pass a message back to its chat' : `Pass a message to ${to}`,
         to === 'its chat' ? 'its chat gets the message.' : 'that work gets the message and acts on it.',
         whole('message', 400) || field('summary'),
-        'No: it is not sent, and the sender stops to wait for what you say next.',
+        isWork ? 'No: it is not sent, and the work is told you said no.' : 'No: it is not sent, and it stops to wait for what you say next.',
       ),
       done: 'it was sent',
     }
@@ -5920,7 +5921,7 @@ const opened = async ($: EngineInterface, agent: string | undefined, tool: strin
   const list = await read($, todos)
   const card = agent !== undefined ? list.find(one => one.id === topOf(list, agent)) : undefined
   const strings = Object.fromEntries(Object.entries(input && typeof input === 'object' ? input : {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>
-  const one: Waiting = { id, ...promptOf(tool, input, list), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
+  const one: Waiting = { id, ...promptOf(tool, input, list, Boolean(card)), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
   waiting = [...waiting.filter(other => other.id !== id), one]
   redraw($)
   void shareMine($).catch(() => undefined)
@@ -5953,7 +5954,7 @@ const answeredShown = (at: number) => answeredPrompts.filter(one => (one.endedAt
 const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, outcome?: Outcome, args?: Record<string, unknown>) => {
   const byTool = (one: Waiting) => one.id.startsWith('pr-') && one.tool === tool && one.agent === (agent ?? '')
   // The same call as the prompt asked about: every word it asked with is the call's own
-  const isSameCall = (one: Waiting) => Boolean(args) && Object.entries(one.input ?? {}).every(([key, value]) => args?.[key] === value)
+  const isSameCall = (one: Waiting) => Boolean(args) && Object.keys(one.input ?? {}).length > 0 && Object.entries(one.input ?? {}).every(([key, value]) => args?.[key] === value)
   // Its own id first, open or answered; only then the oldest open one of the same loop and tool whose id was not known. That one says
   // what came of it only when the call asked with the very same words; else it may be another call's, and it goes with no word
   const exact = waiting.find(one => one.id === id)
@@ -5984,16 +5985,27 @@ const REFUSED_WORDS = /doesn't want to proceed|tool use was rejected|user (denie
 const NOT_RUN_WORDS = /\[(tool call (not|did not) complete|request interrupted)|interrupted by user|the (turn|session) (was )?ended|approval request expired/i
 const outcomeOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined): Outcome => {
   if (!r) return 'stopped'
+  // Only a call that did not end well is read for words: a command that ran may print anything
+  if (!r.deny && !r.isError && typeof r.result !== 'string') return 'ran'
   const words = [typeof r.deny === 'string' ? r.deny : '', typeof r.text === 'string' ? r.text : '', typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? '').slice(0, 2000)].join('\n')
   if (REFUSED_WORDS.test(words)) return 'no'
   if (NOT_RUN_WORDS.test(words)) return 'stopped'
   if (r.deny) return 'no'
-  return 'ran'
+  return r.isError ? 'stopped' : 'ran'
 }
 // The mod's own message, once on its way: a prompt it raised that no hook of the mod saw (one of its own tools, by a plugin's call
 // id) is over with it
-const ownSent = ($: EngineInterface) => {
-  const own = waiting.filter(one => one.id.startsWith('toolu_plugin_') && OWN_CALLS.includes(one.tool))
+// The mod's own message to work: a prompt it raises is over once it is on its way
+const sendOwn = async ($: EngineInterface, message: { to: { agentId: string }; text: string }) => {
+  const since = await $.clock.now()
+  try {
+    return await $.session.send(message)
+  } finally {
+    ownSent($, since)
+  }
+}
+const ownSent = ($: EngineInterface, since: number) => {
+  const own = waiting.filter(one => one.id.startsWith('toolu_plugin_') && OWN_CALLS.includes(one.tool) && one.at >= since)
   if (!own.length) return
   waiting = waiting.filter(one => !own.includes(one))
   redraw($)
@@ -6810,7 +6822,7 @@ const lookInOnHelpers = async ($: EngineInterface) => {
   for (const one of told) {
     // Work that ended its turn to wait for its helpers is woken by the line; work under way reads it at its next step
     const parent = list.find(todo => todo.id === one.to)
-    if (parent?.waitsSince) await $.session.send({ to: { agentId: one.to }, text: one.line }).catch(err => log($, `work ${one.to} not told of its helper: ${String(err)}`)).finally(() => ownSent($))
+    if (parent?.waitsSince) await sendOwn($, { to: { agentId: one.to }, text: one.line }).catch(err => log($, `work ${one.to} not told of its helper: ${String(err)}`))
     else await tell($, one.to, one.line)
   }
 }
@@ -7110,7 +7122,7 @@ const workHooks = (on: On) => {
       // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
       // chat's own note that landed after the person's words once marked their words as not theirs
       const line = named(answered ? ANSWERED_IN_CHAT(answered, words, Boolean(answer && !settles(answer.ask, words, true))) : woke ? WOKE(woke) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words))
-      if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? $.session.send({ to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)).finally(() => ownSent($)) : undefined))
+      if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? sendOwn($, { to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
       return sent
     }
     // A report handed back is kept as the turn's answer only once the handback went through: refused, the work carries on
@@ -8405,7 +8417,7 @@ const panelHooks = (on: On) => {
     // of what came of it (purple while it runs, grey once over)
     const saidOf = (p: Prompt) => {
       if (p.answered === 'stopped') return 'It ended before you answered · nothing happened'
-      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · no answer went back, and it waits for you' : p.kind === 'plan' ? 'You said no · it keeps planning' : 'You said no · it did not happen, and it waits for what you say next'
+      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · no answer went back, and it waits for you' : p.kind === 'plan' ? 'You said no · it keeps planning' : p.title ? 'You said no · it did not happen, and the work was told' : 'You said no · it did not happen, and it waits for what you say next'
       if (p.kind === 'question') return p.isRunning ? 'You answered · it is taking your answer' : 'You answered · it carries on with your answer'
       if (p.kind === 'plan') return 'You approved the plan · it is carrying it out'
       if (p.isCut) return 'You allowed it · it was stopped before it finished'

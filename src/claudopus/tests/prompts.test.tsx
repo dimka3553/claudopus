@@ -30,7 +30,7 @@ test("a chat stopped on the app's own prompt shows it amber at the top of its pa
   expect(await list.find({ type: 'Text', text: 'Asks your permission' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'rm -rf build' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Yes: the command runs on its Mac.' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'No: it does not happen, and the work stops to wait for what you say next.' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'No: it does not happen, and the work is told you said no.' })).toBeDefined()
   // Amber, above the work's own card
   const texts = (await list.findAll({ type: 'Text' })).map(one => one.text)
   expect(texts.indexOf('Run a command: Clear the build folder')).toBeLessThan(texts.lastIndexOf('Clean the build'))
@@ -139,7 +139,7 @@ test('a message the chat passes to running work names that work and the message;
   await until(async () => list.find({ type: 'Text', text: 'Pass a message to the work “Fix the panel cards”' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the work “Fix the panel cards”')
   expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Make the buttons bigger too')
   expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Yes: that work gets the message and acts on it.')
-  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('No: it is not sent, and the sender stops to wait for what you say next.')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('No: it is not sent, and it stops to wait for what you say next.')
   // No tool's own name anywhere on it
   expect((await list.findAll({ type: 'Text' })).some(one => String(one.text).includes('SendMessage'))).toBe(false)
   // The person says no
