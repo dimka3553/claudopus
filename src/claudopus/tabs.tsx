@@ -37,7 +37,7 @@ const tabHooks = (on: On) => {
     const line = Math.max(24, Math.floor((e.props.bodyColumns - 8) * (e.surface === 'terminal' ? 1 : 1.25)))
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportsView($, uiOf($, e), kept, await $.clock.now(), line)}
+        {reportsView($, uiOf($, e), kept, await $.clock.now(), line, e.props.scroll.bodyRows)}
       </Box>
     )
   })
@@ -105,7 +105,7 @@ const tabHooks = (on: On) => {
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture)}
+        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows)}
       </Box>
     )
   })

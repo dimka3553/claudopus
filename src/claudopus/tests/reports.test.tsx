@@ -345,3 +345,42 @@ test('work whose brief names one result on what it is about is a round of that w
   })
   expect(['a1', 'a2', 'a3'].map(id => metas?.find(one => one.agent === id)?.from ?? '')).toEqual(['20261111-1853-explainer-video', '', ''])
 })
+
+test('every button of the results list and of a result takes a new key whenever its drawing changes, and keeps it while nothing does, so the app never presses a handle that is gone', async ($, on) => {
+  const { files, clock, opened } = world(on, { panes: ['claudopus', 'reports'] })
+  const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], agent: '' }
+  const put = (r: { id: string; title: string; at: number; waiting?: { text: string }[] }) => {
+    files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify({ ...base, gist: 'It was found.', ...r }))
+    files.set(`${MEMORY}/reports/${r.id}/report.md`, 'It was found, and it is written here in full.\n')
+  }
+  put({ id: 'bucket', title: 'FaceIQ bucket migration plan', at: 1_699_000_000_000, waiting: [{ text: 'Start step 0?' }] })
+  put({ id: 'header', title: 'Rethink the panel header', at: 1_699_000_100_000, waiting: [{ text: 'Reopen the M4 chat?' }] })
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Results', bodyColumns: 80 }, surface: 'desktop' } as never)
+  const keys = async () => (await list.findAll({ type: 'Button' })).map(one => String(one.key))
+  const first = await keys()
+  expect(first.some(key => /^report-bucket-\d+$/.test(key))).toBe(true)
+  // Drawn again with nothing changed: the same keys, so the handles the app holds stay good
+  await clock.advance(5000)
+  expect(await keys()).toEqual(first)
+  // A result arriving from another chat changes the drawing: no key stays, so the app takes every button afresh
+  put({ id: 'fresh', title: 'Something new', at: 1_700_000_000_000 })
+  // (a search of the memory reads the results again, as the panel's own look does)
+  await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't1', query: 'found' } as never)
+  expect(await until(async () => ((await list.findAll({ type: 'Button' })).some(one => /^report-fresh-\d+$/.test(String(one.key))) || undefined))).toBe(true)
+  const after = await keys()
+  expect(after.filter(key => first.includes(key))).toEqual([])
+  // and a press on either named result opens it, drawn
+  await pressed(list, 'report-bucket')
+  expect(await until(async () => opened.includes('report-bucket') || undefined)).toBe(true)
+  await pressed(list, 'report-header')
+  expect(await until(async () => opened.includes('report-header') || undefined)).toBe(true)
+  const tab = await $.ui.mount({ ...LIST, requestId: 'report-header', props: { ...LIST.props, title: 'Rethink the panel header', bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect(await tab.find({ type: 'Text', text: /^Rethink the panel header$/ })).toBeDefined()
+  const tabKeys = (await tab.findAll({ type: 'Button' })).map(one => String(one.key))
+  // The result's own tab follows the same rule: answered on another Mac, it changes with no press here, and every key moves
+  put({ id: 'header', title: 'Rethink the panel header', at: 1_699_000_100_000, waiting: [{ text: 'Reopen the M4 chat?', answer: 'Not now' } as { text: string }] })
+  await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't2', query: 'found' } as never)
+  expect(await until(async () => ((await tab.findAll({ type: 'Button' })).some(one => one.props.label === 'Yes') ? undefined : true))).toBe(true)
+  expect((await tab.findAll({ type: 'Button' })).map(one => String(one.key)).filter(key => tabKeys.includes(key))).toEqual([])
+})

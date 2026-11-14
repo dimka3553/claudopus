@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.99 · 14 November 2026
+- Every result in the Results list opens on a click again, and the buttons inside a result work too. When the list changed while it was open (a result arriving, a time moving), the app kept pressing buttons the list had already replaced, so nothing happened however often you clicked; now each button takes a new name whenever the list changes, and the app always presses the live one.
+
 ## 0.2.98 · 14 November 2026
 - A job on a card's tree is never taken for a helper: its row starts with what it is (Command, Server, Download, Wait, Watch), and its mark is its own shape and colour; purple round dots are helpers only.
 - Each job row says whether it moves: when its output last changed, "no new output for …" in amber when it has written nothing for ten minutes, and "paused" when its processes are stopped.
