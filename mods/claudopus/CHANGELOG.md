@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.91 · 14 November 2026
+- A chat your Claude app runs on another Mac over SSH keeps its work going when your Mac goes away: if the app ends the chat's process there while work runs, that Mac starts the chat again by itself within about a minute, under its own sign-in, and the cut-off work carries on. When the chat's process still runs there but the sign-in your app lent it has lapsed, Claudopus ends that process so the same happens at once.
+- Work cut off that way says so on its card ("Cut off at 00:14 … going again since 00:15"), and one notice tells you, on your phone too where Claude Code's push notifications and Remote Control are on.
+- Work starts long commands detached and follows their logs, so a training or a build goes on even when the chat's process ends.
+
 ## 0.2.90 · 14 November 2026
 - A piece of work's helpers now run in the background, as the chat's own work does: the work carries on with its own steps while they run, and their results come to it as they end. Before, the work was frozen until each helper ended.
 - Work waits for its helpers only when it has nothing else to do, with a command that comes back within about 20 seconds of one ending, or after two minutes with how each is doing. It is held back from finishing while one still runs (six tries at most), so a helper's result does not go to the chat instead, and stopping the work stops its helpers too.

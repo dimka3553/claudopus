@@ -92,6 +92,10 @@ export type Todo = {
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number
+  // Work cut off as the chat's process ended, not stopped by anyone: when, and when it went on again; `backAt` is absent while it
+  // could not be started again
+  cutAt?: number
+  backAt?: number
   // Work with helpers running: when the mod last looked in on them, how many ran and how many had shown nothing new for a while
   lookedIn?: { at: number; running: number; quiet: number }
   // A helper whose work was told it has shown nothing new: when it last had, so it is told once each quiet stretch
