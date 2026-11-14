@@ -152,7 +152,7 @@ declare global {
   export import LookIo = M7.LookIo
   export import checkSaid = M7.checkSaid
   export import copyOf = M7.copyOf
-  export import folderSaid = M7.folderSaid
+  export import folderLook = M7.folderLook
   export import installedFrom = M7.installedFrom
   export import isNewer = M7.isNewer
   export import isReloadDue = M7.isReloadDue

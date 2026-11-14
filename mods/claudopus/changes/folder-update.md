@@ -1,0 +1,1 @@
+- A copy run from a folder of its code now updates itself: Check for updates and automatic updates bring that folder up to the newest release with git, and the box says so. Work in the folder that isn't committed is never touched; if the update would overwrite it, the box says why and nothing changes.
