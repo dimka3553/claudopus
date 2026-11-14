@@ -8664,6 +8664,31 @@ const panelHooks = (on: On) => {
     // and is clipped to them, so a card never changes height as the work goes
     let cardNo = 0
     let keyed = false
+    // One row under the facts while the work runs: the to-do being done, or the next when none is, numbered done + 1 of all kept,
+    // which is how far along it is (the edge's lighter part), not its place in the Details list
+    const stepLine = (one: Todo, kept: Item[], done: number) => {
+      if (one.status !== 'working' || one.chat) return null
+      const doing = kept.find(item => item.state === 'doing')
+      const named = doing ?? kept.find(item => item.state === 'open')
+      if (!kept.length) return null
+      // Every step ticked while it still runs: said in the same row, so the card keeps its height until it ends
+      if (!named)
+        return (
+          <Box key={`step-${one.id}`} height={1} overflow="hidden" paddingLeft={lead}>
+            <Text dimColor wrap="truncate-end">{`All ${kept.length} steps done`}</Text>
+          </Box>
+        )
+      return (
+        <Box key={`step-${one.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" paddingLeft={lead}>
+          <Box flexShrink={0}>
+            <Text dimColor>{`${doing ? 'Step' : 'Next, step'} ${done + 1} of ${kept.length} ·`}</Text>
+          </Box>
+          <Box flexShrink={1} minWidth={0}>
+            <Text wrap="truncate-end" dimColor={!doing}>{named.text}</Text>
+          </Box>
+        </Box>
+      )
+    }
     const small = (one: Todo) => {
       // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
       cardNo += 1
@@ -8692,6 +8717,8 @@ const panelHooks = (on: On) => {
               </Box>
               {facts(one, false, kept.length > 0 ? `${done} of ${kept.length} done` : '')}
             </Box>
+            {/* The to-do it is on, numbered by how many are done, as the edge's lighter part is, so the edge, the count and the row agree */}
+            {stepLine(one, kept, done)}
             {/* Every part under the title starts at the title's own left edge (lead) */}
             {one.ask ? (
               <Box key={`ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
@@ -8767,8 +8794,10 @@ const panelHooks = (on: On) => {
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
         <Box key={`edge-${one.id}`} width={1} flexShrink={0} flexDirection="column">
+          {/* Too many to-dos for a part each: one bar in the same three shades, done, the one being done, and what is left */}
           {done ? <Box key="done" flexGrow={done} backgroundColor={LIVE} /> : null}
-          {count > done ? <Box key="left" flexGrow={count - done} backgroundColor={`${LIVE}5C`} /> : null}
+          {isDoing && count > done ? <Box key="doing" flexGrow={1} backgroundColor={`${LIVE}AD`} /> : null}
+          {count - done - (isDoing ? 1 : 0) > 0 ? <Box key="left" flexGrow={count - done - (isDoing ? 1 : 0)} backgroundColor={`${LIVE}5C`} /> : null}
         </Box>
       ) : (
         <Box key={`edge-${one.id}`} width={1} flexShrink={0} flexDirection="column" gap={count > 8 ? 0.2 : 0.3}>

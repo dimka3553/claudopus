@@ -929,10 +929,12 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   await call('note', { text: 'I am fitting the nostril again, because the first fit left it open.' })
 
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  // Three moving dots beside the line the work last wrote and nowhere else; its to-dos are only counted
+  // Three moving dots beside the line the work last wrote and nowhere else; of its to-dos only the one being done is named, numbered
+  // as the edge's lighter part, the rest only counted
   expect(await pane.findAll({ type: 'Svg' })).toHaveLength(1)
   expect(await pane.find({ type: 'Text', text: /^Now:$/ })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /^Fit the/ })).toBeUndefined()
+  expect((await pane.find({ type: 'Text', text: /^Step / }))?.text).toBe('Step 1 of 2 ·')
+  expect((await pane.find({ type: 'Text', text: /^Fit the/ }))?.props.dimColor).toBe(false)
   expect(await pane.find({ type: 'Text', text: /^Try the/ })).toBeUndefined()
   expect((await pane.find({ type: 'Text', text: /of \d+ done/ }))?.text).toMatch(/(^| · )0 of 2 done · \d+s$/)
   // Its edge is its to-dos, one part each: the one being done lighter than a done one, the rest a dim tint; a terminal's edge is whole
@@ -964,8 +966,10 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect(await pane.find({ type: 'Text', text: /^I am fitting/ })).toBeUndefined()
   expect((await pane.find({ type: 'Text', text: /^The nostril is closed/ }))?.text).toBe('The nostril is closed; I am comparing the head with your scan.')
   expect((await pane.find({ type: 'Text', text: /of \d+ done/ }))?.text).toContain('1 of 2 done')
-  // The done to-do's part of the edge is bright, and with none being done the other is dim
+  // The done to-do's part of the edge is bright, and with none being done the other is dim, named dim as the next
   expect(await edgeOf(pane)).toEqual(['#8A63F0', '#8A63F05C'])
+  expect((await pane.find({ type: 'Text', text: /^Next, step / }))?.text).toBe('Next, step 2 of 2 ·')
+  expect((await pane.find({ type: 'Text', text: /^Compare the head/ }))?.props.dimColor).toBe(true)
   expect(await pane.findAll({ type: 'Svg' })).toHaveLength(1)
   expect(await pane.find({ type: 'Text', text: /^To do/ })).toBeUndefined()
 
@@ -1072,6 +1076,34 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await band.find({ type: 'Text' }))?.text).toBe("the engine's own")
   await band.unmount()
   expect(logged).toEqual([])
+})
+
+// A long work resumed with new rounds: 16 to-dos, 12 done and one being done, more than the edge has parts for
+test('past the parts the edge has, it is one bar in three shades, and the step being done is named with the same number', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'add the depth model to the video fit', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'add the depth model to the video fit' } as never)
+  const call = (tool: string, input: object) => $.tool.call({ tool: `mcp__claudopus__${tool}`, tool_use_id: 't', agentId: 'a1', ...input } as never)
+  for (let n = 1; n <= 16; n += 1) await call('todo', { item: `Round step ${n}` })
+  for (let n = 1; n <= 12; n += 1) await call('todo', { item: `Round step ${n}`, state: 'done' })
+  await call('todo', { item: 'Round step 13', state: 'doing' })
+  await call('note', { text: 'New round on the nose only.' })
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const edge = (await pane.findAll({ type: 'Box' })).filter(b => String(b.props.backgroundColor).startsWith('#8A63F0'))
+  expect(edge.map(b => [b.props.backgroundColor, b.props.flexGrow])).toEqual([['#8A63F0', 12], ['#8A63F0AD', 1], ['#8A63F05C', 3]])
+  expect((await pane.find({ type: 'Text', text: /of \d+ done/ }))?.text).toContain('12 of 16 done')
+  expect((await pane.find({ type: 'Text', text: /^Step / }))?.text).toBe('Step 13 of 16 ·')
+  expect(await pane.find({ type: 'Text', text: /^Round step 13$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Round step 14$/ })).toBeUndefined()
+  // With nothing being done, the bar has no lighter part and the next is named dim
+  await call('todo', { item: 'Round step 13', state: 'done' })
+  const after = (await pane.findAll({ type: 'Box' })).filter(b => String(b.props.backgroundColor).startsWith('#8A63F0'))
+  expect(after.map(b => [b.props.backgroundColor, b.props.flexGrow])).toEqual([['#8A63F0', 13], ['#8A63F05C', 3]])
+  expect((await pane.find({ type: 'Text', text: /^Next, step / }))?.text).toBe('Next, step 14 of 16 ·')
+  // Every step ticked while it still runs: the row stays and says so
+  for (let n = 14; n <= 16; n += 1) await call('todo', { item: `Round step ${n}`, state: 'done' })
+  expect((await pane.find({ type: 'Text', text: /^All \d+ steps done$/ }))?.text).toBe('All 16 steps done')
 })
 
 test("a pressed card shows the work's own chat: what it was told, what it wrote, and each tool step in order", async ($, on) => {
@@ -1401,11 +1433,11 @@ test("a card's title, its line of facts and every line under them start at one l
     expect(await edges('desktop')).toEqual(Array(lines).fill('xs'))
     expect(await edges('terminal')).toEqual(Array(lines).fill(''))
   }
-  // At work: the title, the model's name that opens the choice of models, the line beside the dots, the helper tree
-  await expectOneEdge(4)
-  // Asking: the ask comes between the facts and the line it wrote
-  await call('ask', { text: 'May I replace the nose?', choices: ['Approve', 'Not now'] })
+  // At work: the title, the model's name that opens the choice of models, the step it is on, the line beside the dots, the helper tree
   await expectOneEdge(5)
+  // Asking: the ask comes between the step and the line it wrote
+  await call('ask', { text: 'May I replace the nose?', choices: ['Approve', 'Not now'] })
+  await expectOneEdge(6)
   await call('ask', { text: '' })
   // Finished, in its pause: the facts are plain text, the line says it finished
   await $.turn.complete({ answer: 'Measured.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)

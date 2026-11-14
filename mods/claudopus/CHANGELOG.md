@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.105 · 15 November 2026
+- A card now names the step its work is on, as "Step 13 of 16", under its line of facts; with no step in hand it names the next one, dim
+- Past 14 steps, a card's coloured edge still shows the step being done in its lighter shade, between what is done and what is left
+- When every step is ticked while the work still runs, that row says "All N steps done", so the card keeps its height
+
 ## 0.2.104 · 15 November 2026
 - A download or long run on a card now shows how much is done of how much (such as 460 MB of 1 GB, or 3 of 6 steps), its percent and its speed, read by itself from the progress curl, wget, rsync, az and azcopy, aws, pip, git, tqdm and the like print, beside when it last wrote or how long it has been quiet.
 - Work is told to make its long scripts print a `progress:` line the card reads, and to run tools with their progress shown even when their output goes to a file.
