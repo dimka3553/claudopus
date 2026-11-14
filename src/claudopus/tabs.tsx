@@ -118,9 +118,9 @@ const tabHooks = (on: On) => {
 // The app asks a tab for its drawing once, as it shows it, and again only when told the drawing changed. One ask that comes back
 // empty (the chat could not be reached that moment, or the drawing failed) leaves the tab empty until then, and a tab that reads
 // nothing that changes, as Stats, About or a result, is never told. So each ask is noted, and a tab open but not asked for since it
-// opened, since this code loaded, or since it came in front, is drawn again after 2, 6 and 15 seconds until it is asked for. A
+// opened, since this code loaded, or since it came in front, is drawn again after 2, 6, 15 and 40 seconds until it is asked for. A
 // redraw tells the app to ask every tab it shows, so it reaches one the engine has never drawn as well
-const TAB_CHECKS = [2_000, 6_000, 15_000]
+const TAB_CHECKS = [2_000, 6_000, 15_000, 40_000]
 const tabAsked = new Map<string, number>()
 const tabFails = new Map<string, number[]>()
 let tabInFront = ''
@@ -141,10 +141,12 @@ const watchTabs = async ($: EngineInterface, ids: string[], why: string, since =
     })
 }
 // As this code loads: the tab in front where the engine says which it is, else every tab open (a tab behind the others is never
-// asked for, so it costs three redraws and no more)
+// asked for, so it costs four redraws and no more)
 const watchLoaded = async ($: EngineInterface) => {
   const panes = await $.ui.panes().catch(() => [])
   const shown = panes.filter(pane => pane.isShown)
+  // the tab in front is watched here, not again by the first look each second
+  tabInFront = shown[0]?.id ?? ''
   await watchTabs($, (shown.length ? shown : panes).map(pane => pane.id), 'this code loaded')
 }
 // Each second: a tab the person brought in front
@@ -160,16 +162,16 @@ const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
   const now = await $.clock.now()
   const fails = [...(tabFails.get(id) ?? []).filter(at => now - at < 60_000), now]
   tabFails.set(id, fails)
-  const why = error?.message || (error?.kind === 'timeout' ? 'It took too long.' : 'No reason was given.')
+  const why = error?.kind === 'timeout' ? 'It took too long to draw.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.'
   await log($, `tab ${id} not drawn (${error?.kind ?? 'unknown'}): ${why}`)
-  const isAgain = fails.length <= 3
+  const isAgain = fails.length < 3
   if (isAgain) await watchTabs($, [id], 'its drawing failed')
   const { Box, Text } = uiOf($, e)
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
       <Text bold>This tab could not be drawn</Text>
       <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
-      <Text dimColor wrap="wrap">{isAgain ? 'It is tried again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
+      <Text dimColor wrap="wrap">{isAgain ? 'Trying again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
     </Box>
   )
 }

@@ -1,2 +1,2 @@
-- A tab that said "Nothing to show yet" (Stats, About, a result, any of the mod's tabs) is drawn within seconds: when it opens, when it comes in front, after the mod updates or reloads, and when the app's first ask for it came back empty.
-- A tab whose drawing fails says what went wrong instead of staying empty, and is tried again.
+- A tab left saying "Nothing to show yet" (Stats, About, a result or any other Claudopus tab) now fills in on its own a few seconds later: after it opens, when you bring it to the front, and after Claudopus updates or reloads.
+- A tab that cannot be drawn says what went wrong instead of staying empty, and tries again.

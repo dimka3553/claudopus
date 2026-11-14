@@ -3668,9 +3668,9 @@ test('a tab left open as the mod loads, after an update or a reload, is drawn ag
   const before = redraws
   await clock.advance(2_000)
   expect(redraws).toBeGreaterThan(before)
-  // Three times at most, while nothing asks for it: a tab behind the others is never asked for
-  await clock.advance(30_000)
-  expect(redraws - before).toBeLessThanOrEqual(3)
+  // Four times at most, while nothing asks for it: a tab behind the others is never asked for
+  await clock.advance(60_000)
+  expect(redraws - before).toBeLessThanOrEqual(4)
 })
 
 // Config: the person's own texts, settings, and models
