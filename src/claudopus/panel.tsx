@@ -17,6 +17,8 @@ const panelHooks = (on: On) => {
   // tab of the mod's but the panel has a first row whose Close, pressed or keyed x, closes it and hands the keys back to the panel
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const id = e.requestId ?? ''
+    // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
+    await noteTabAsked($, id)
     const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start))
     if (e.surface !== 'terminal' || !isTab) return next(e)
     const { Box, Button, Text } = uiOf($, e)
@@ -31,7 +33,7 @@ const panelHooks = (on: On) => {
         {body}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // Beside the chat: one small card per piece of work under way, as wide as the panel, every card the same height whatever the work
   // writes. Work that has ended leaves the panel. A card's Details is a tab of its own, drawn here too: all its to-dos, then its own chat
@@ -1396,7 +1398,7 @@ const panelHooks = (on: On) => {
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
 

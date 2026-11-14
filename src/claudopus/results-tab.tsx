@@ -107,6 +107,7 @@ const frontAsked = async ($: EngineInterface, id: string, title: string) => {
   const was = (await $.ui.panes()).find(pane => pane.id === id)
   if (was && !was.isShown) await $.ui.close({ id }).catch(() => undefined)
   const opened = await $.ui.open({ id, title, focus: true })
+  void watchTabs($, [id], 'it opened').catch(() => undefined)
   if (isRunFromAfar) await log($, `front ${id}: ${holding.length} let go first; opened ${opened.isPlaced ? 'drawn' : `undrawn (${opened.reason})`}; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
   // The pane pressed in stays in front while its press runs: once it has run, the new pane is opened again, which brings it forward
   // Only where the surface says which pane it shows: a chat the app runs on another Mac over ssh says none is shown, ever, and there

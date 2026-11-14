@@ -156,7 +156,7 @@ const memoryHooks = (on: On) => {
         )}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
 
