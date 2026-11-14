@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.103 · 15 November 2026
+- Pressing an answer on one card no longer stops the answer buttons of other cards from working: before, a press renamed every card's buttons, so a second press from a panel that redraws late, as on a phone over the remote connection, went nowhere and left that card amber with nothing woken. The admin command's Allow and Deny buttons are fixed the same way.
+- A finished work's card no longer keeps a run counting for ever when the command it started printed a number that is no process, such as a web address's "000".
+
 ## 0.2.102 · 15 November 2026
 - Automatic updates find Claude Code where its installer puts it, so a chat started without a login shell (as in tmux over ssh on Linux) updates too, instead of failing to find claude.
 

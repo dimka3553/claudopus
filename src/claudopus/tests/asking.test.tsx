@@ -197,6 +197,35 @@ test('an ask outlives the work that made it: amber after the work ends, with or 
   await list.unmount()
 })
 
+test('a press on one ended work\'s ask leaves the other asks\' buttons where they were: the 14 Nov "Release it" pressed from a phone right after another card\'s, on the keys it last drew, which ran nothing', async ($, on) => {
+  const { resumed, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two releases', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Linux support', prompt: 'linux' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Azure route', prompt: 'azure' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  for (const [id, text] of [['a1', 'Release Linux support?'], ['a2', 'Release the Azure route?']]) {
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${id}`, agentId: id, text, choices: ['Release it', 'Not now'] } as never)
+    await $.turn.complete({ answer: 'Waits for your Release it.', durationMs: 1, isAborted: false, turnId: `turn-${id}`, reason: 'answer', agentId: id } as never)
+  }
+  await clock.advance(60_000)
+  // The keys as the late surface last drew them, both cards amber with their buttons
+  const drawn = await until(async () => {
+    const releases = (await list.findAll({ type: 'Button' })).filter(b => b.props.label === 'Release it')
+    return releases.length === 2 ? releases.map(b => b.key ?? '') : undefined
+  })
+  const linux = drawn?.find(key => key.startsWith('ask-a1-')) ?? ''
+  const azure = drawn?.find(key => key.startsWith('ask-a2-')) ?? ''
+  expect(linux && azure).toBeTruthy()
+  await list.press({ key: linux })
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()
+  // The second press names the key it was drawn with: it still answers its own ask, takes the card out of amber, and wakes its work
+  await list.press({ key: azure }).catch(() => undefined)
+  expect(await until(async () => resumed.find(line => line.startsWith('a2: ') && line.includes('pressed "Release it"') && line.includes('Release the Azure route?')))).toBeDefined()
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'Release the Azure route?' })) ? undefined : true))).toBe(true)
+  await list.unmount()
+})
+
 test('a reply in words that does not settle an ask keeps it, and the card active, with nothing to press while the work acts on it, until it is settled: the 13 Nov "Show me images first." to work that asked "Release it?" and handed in its report', async ($, on) => {
   const { resumed, clock } = world(on)
   await $.session.start(start)

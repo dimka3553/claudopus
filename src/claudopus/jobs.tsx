@@ -71,7 +71,8 @@ const keepDetached = async ($: EngineInterface, agent: string, call: { tool: str
   const base = found.cd ? (found.cd.startsWith('/') ? found.cd : `${here}/${found.cd}`) : here
   const log = found.log.startsWith('/') || found.log.startsWith('~/') ? found.log : `${base}/${found.log}`
   if (!found.cd && !found.log.startsWith('/') && !found.log.startsWith('~/') && !(await $.fs.exists(log).catch(() => false))) return
-  const pid = pidOf(String((result as { stdout?: unknown } | undefined)?.stdout ?? ''))
+  // Only a command that printed its own process number with `echo $!`; another number it printed, as an http code, is not one
+  const pid = /\$!/.test(command) ? pidOf(String((result as { stdout?: unknown } | undefined)?.stdout ?? '')) : undefined
   if (!pid) return
   const what = oneLine(String(call.description ?? '') || found.core).slice(0, 160)
   const now = await $.clock.now()
@@ -111,7 +112,8 @@ const lookJobs = async ($: EngineInterface) => {
   }))
   const targets = waits.flatMap(w => (w.wait.file ? [w.wait.file] : []))
   const isPs = now - jobProcsAt >= JOB_PS
-  const pids = owned.flatMap(o => (o.pid ? [o.pid] : []))
+  // One kept before process numbers were checked, such as 000, is never asked after: it counts as ended, and leaves its card
+  const pids = owned.flatMap(o => (o.pid && isPid(o.pid) ? [o.pid] : []))
   // One go: the end of each output with when it last changed, when each polled file last changed, which detached processes still
   // run, and now and then every process with its state
   const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
