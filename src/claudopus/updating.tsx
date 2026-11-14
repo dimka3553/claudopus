@@ -47,8 +47,19 @@ const lookIo = ($: EngineInterface): LookIo => ({
 // One look: an installed copy runs Claude Code's own update steps, a copy run from a folder of its code brings that folder up to date
 // A folder's looks keep their own stamp, so they never stand in for an installed copy's hourly look on the same Mac
 const stampFor = (from: ReturnType<typeof installedFrom>) => `${dir}/${from ? 'update' : 'update-folder'}.json`
+// Claude Code's own program: the one the app names, else the first on the PATH, else where its installer puts it, as a terminal started without a login shell
+// (seen on Linux, in tmux started over ssh) has no ~/.local/bin on its PATH, else claude on the PATH
+const engineOf = async ($: EngineInterface) => {
+  const named = await $.env.get('CLAUDE_CODE_EXECPATH')
+  if (named) return named
+  // The PATH first, as the shell would find it, so an install by npm or another copy earlier on it is still the one used
+  const onPath = ((await $.env.get('PATH')) ?? '').split(':').filter(one => one.startsWith('/')).map(one => `${one.replace(/\/+$/, '')}/claude`)
+  for (const one of [...onPath, `${(await $.env.get('HOME')) ?? ''}/.local/bin/claude`, '/opt/homebrew/bin/claude', '/usr/local/bin/claude', '/usr/bin/claude'])
+    if (one.startsWith('/') && (await $.fs.exists(one).catch(() => false))) return one
+  return 'claude'
+}
 const lookAt = async ($: EngineInterface, from: ReturnType<typeof installedFrom>) => {
-  const engine = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
+  const engine = await engineOf($)
   const stampPath = stampFor(from)
   if (!from) return folderLook(lookIo($), { root: $.plugin.root, plugins: dir.replace(/\/claudopus$/, '/plugins'), engine, stampPath })
   return lookOnce(lookIo($), { from, root: $.plugin.root, cwd, engine, stampPath })
