@@ -198,6 +198,7 @@ const stop = async ($: EngineInterface, id: string) => {
   const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
   if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
   stoppedHere.add(id)
+  await stopHelpers($, id)
   const now = await $.clock.now()
   // What finished work left running is stopped with it
   await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === id && one.leftSince ? { ...one, leftSince: undefined } : one)))
@@ -386,6 +387,8 @@ const loadFinished = async ($: EngineInterface) => {
 const follow = async ($: EngineInterface) => {
   await sync($)
   await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
+  await lookInDue($).catch(err => log($, `helpers not looked in on: ${String(err)}`))
+  await writeRolls($).catch(err => log($, `helpers not written: ${String(err)}`))
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
   const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)

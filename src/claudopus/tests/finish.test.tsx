@@ -213,12 +213,18 @@ test('work that answered while only its own background work held it, then stoppe
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's4', task_id: 'a4' } as never)
   await clock.advance(2_100)
 
-  // Handed back with a helper of its own still at work, it is done too, and the helper goes on
+  // A report handed back while a helper of its own is still at work is refused: the helper's result would reach the chat, not
+  // the work. Once the helper has ended, the report goes through and it is done
   await $.agent.spawn({ ...spawn, description: 'Name the squid', prompt: 'name it', resume: { agentId: 'h1' } } as never)
   await $.agent.spawn({ ...spawn, description: 'Look up names', prompt: 'look', parentAgentId: 'h1', resume: { agentId: 'h2' } } as never)
   agents.h1 = 'waiting'
   agents.h2 = 'running'
   kinds.h1 = 'general-purpose'
+  const early = await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb1', agentId: 'h1', message: 'Named it Sid.' } as never)
+  expect(String((early as { deny?: unknown }).deny)).toContain('still running in the background')
+  await $.turn.complete({ answer: 'Sid, Squidward, Inky', durationMs: 1, isAborted: false, turnId: 't4h', reason: 'answer', agentId: 'h2' } as never)
+  agents.h2 = 'completed'
+  await clock.advance(20_000)
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb2', agentId: 'h1', message: 'Named it Sid.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4t', reason: 'answer', agentId: 'h1' } as never)
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')

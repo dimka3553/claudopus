@@ -232,7 +232,7 @@ const OWED =
   'A message from {name} is waiting for your decision, and you have gone on working. Stop now and decide: more for your to-do list, a new task to hand back with the `note` tool and its `task`, or a change in how you work. Change your to-dos to match, then say with the `note` tool, in one plain line, what you did with their message.'
 // What the work is told when it has taken many steps without touching its to-dos or saying where it stands
 const drifted = (steps: number) =>
-  `You have taken ${steps} steps since you last touched your to-dos or said where the work stands. Look at your to-do list now: tick what is done, mark the one you are on as doing, add what you took on, and say where the work stands with the \`note\` tool. If all of it is already true, carry on.`
+  `You have taken ${steps} steps since you last touched your to-dos or said where the work stands. In your next step, send with your next work call, in that same step and never in a step of their own, the to-do calls that make the list true (tick what is done, mark the one you are on as doing, add what you took on) and a \`note\` saying where the work stands. If all of it is already true, carry on.`
 // The chat is told once when nothing new has come back under a piece of work for a while
 const STUCK_IN_CHAT = (title: string, mins: number) =>
   `"${title}" has had nothing new come back to it or its helpers for ${mins} minutes: it may be stuck waiting on something that will not come. Its card shows where it stands.`

@@ -267,6 +267,12 @@ const panelHooks = (on: On) => {
                 <Text dimColor wrap="wrap">{waitLine(one, at)}</Text>
               </Box>
             ) : null}
+            {/* Its helpers running: how many, when they were last looked in on, and how many have gone quiet */}
+            {lookedInLine(one, at) && !one.chat ? (
+              <Box key={`looked-${one.id}`} paddingLeft={lead}>
+                <Text dimColor={!one.lookedIn?.quiet} color={one.lookedIn?.quiet ? NEEDS : undefined} wrap="wrap">{lookedInLine(one, at)}</Text>
+              </Box>
+            ) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>

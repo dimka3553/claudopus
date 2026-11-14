@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.90 · 14 November 2026
+- A piece of work's helpers now run in the background, as the chat's own work does: the work carries on with its own steps while they run, and their results come to it as they end. Before, the work was frozen until each helper ended.
+- Work waits for its helpers only when it has nothing else to do, with a command that comes back within about 20 seconds of one ending, or after two minutes with how each is doing. It is held back from finishing while one still runs (six tries at most), so a helper's result does not go to the chat instead, and stopping the work stops its helpers too.
+- While a piece of work has helpers running, its card says how many and when they were last looked in on, and that line turns amber when one has shown nothing new for five minutes; the work is told, to check it, nudge it or replace it.
+- After each step, work is told when it could have sent its calls together: a helper started alone, three single lookups in a row, two long runs of one kind one after the other, a step of only to-dos, or a commit with no second look started yet.
+- The to-do reminder now asks for the to-do and note calls to go with the next work call, never in a step of their own.
+
 ## 0.2.89 · 14 November 2026
 - A copy run from a folder of its code now updates itself: Check for updates and automatic updates bring that folder up to the newest release with git, and the box says so. Work in the folder that isn't committed is never touched; if the update would overwrite it, the box says why and nothing changes.
 

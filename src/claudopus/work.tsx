@@ -36,6 +36,7 @@ const workHooks = (on: On) => {
       // What work runs, and what comes back of it, tells the stuck check whether it moves
       const isWatched = e.agentId !== undefined && Boolean(dir)
       if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool).catch(err => log($, `call not followed: ${String(err)}`))
+      if (isWatched) callStarted(e.tool_use_id, await $.clock.now())
       let r: Awaited<ReturnType<typeof raw>> | undefined
       try {
         r = await raw(call)
@@ -182,6 +183,8 @@ const workHooks = (on: On) => {
     }
     // A report handed back is kept as the turn's answer only once the handback went through: refused, the work carries on
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
+      const hold = await holdAtStop($, e.agentId, 'handback').catch(() => '')
+      if (hold) return { deny: hold }
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       return r
@@ -208,6 +211,7 @@ const workHooks = (on: On) => {
       const stopId = String((e as { task_id?: unknown }).task_id ?? '')
       if (!r.deny && stopId) {
         stoppedHere.add(stopId)
+        await stopHelpers($, stopId)
         await dropBackground($, [stopId])
         const now = await $.clock.now()
         await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
@@ -268,6 +272,8 @@ const workHooks = (on: On) => {
   // As a piece of work stops, the engine says what background work is still in flight: what its card kept that is not, has ended
   on('classic.SubagentStop', async ($, e, next) => {
     const r = await next(e)
+    const hold = r.block ? '' : await holdAtStop($, e.agent_id, 'stop').catch(() => '')
+    if (hold) return { ...r, block: hold }
     const live = e.background_tasks
     if (dir && Array.isArray(live)) {
       const ids = new Set(live.map(one => one.id))
@@ -293,7 +299,9 @@ const workHooks = (on: On) => {
     // and where the runner is that does an admin command with a Mac's kept password
     const work = isTold ? named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).trim() : ''
     const words = isTold ? `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md` : ''
-    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : e)
+    const isBackground = isHelperSpawn(e)
+    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : isBackground ? { ...e, background: true } : e)
+    if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
     if (!dir || !r.agentId) return r
     const id = r.agentId
     endedByHandback.delete(id)
@@ -310,6 +318,7 @@ const workHooks = (on: On) => {
       return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model }])
     })
     if (isOwn) await openList($)
+    if (!isOwn) await writeRolls($, true).catch(err => log($, `helpers not written: ${String(err)}`))
     await sync($).catch(() => undefined)
 
     return r
