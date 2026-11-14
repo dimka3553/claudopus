@@ -54,7 +54,7 @@ test('Config lists each thing a person can set with what is in force, edits a te
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config')
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  for (const name of ['Principles', "The chat's rules", 'Work rules', 'Your name', 'Background work', 'Sound', 'Notifications', 'Automatic updates', 'Most work', 'Long legwork', 'Heavy work'])
+  for (const name of ['Principles', "The chat's rules", 'Work rules', 'Your name', 'Background work', 'Sound', 'Notifications', 'Most work', 'Long legwork', 'Heavy work'])
     expect(await config.find({ type: 'Text', text: name })).toBeDefined()
   // Only what differs from what shipped has a Reset: here the name
   expect((await config.findAll({ type: 'Button' })).filter(one => one.props.label === 'Reset').length).toBe(1)
@@ -81,11 +81,9 @@ test('Config lists each thing a person can set with what is in force, edits a te
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, sound: false })
   await pressed(config, 'config-sound-back')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 })
-  // Automatic updates are off as shipped; On writes updates: true, and Off takes the key out again
-  await pressed(config, 'config-updates-on')
-  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, updates: true })
-  await pressed(config, 'config-updates-off')
-  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 })
+  // Nothing in Config turns on updates that install by themselves, nor keeps an admin password
+  expect(await config.find({ type: 'Text', text: 'Automatic updates' })).toBeUndefined()
+  expect(await config.find({ type: 'Text', text: 'Admin password' })).toBeUndefined()
   await config.input({ key: 'config-name-input', text: 'Alex' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').name).toBe('Alex')
   await pressed(config, 'config-name-back')

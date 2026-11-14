@@ -12,7 +12,7 @@ import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
 import type { LookIo } from './update'
-import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isReloadDue, isUpdateDue, lookOnce, RELOAD_AGAIN, RELOAD_EVERY, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
+import { checkSaid, copyOf, folderLook, installedFrom, isNewer, lookOnce, RELOAD_AGAIN, RELOAD_EVERY, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
@@ -188,15 +188,11 @@ let person = ''
 // config.json can say which model does which work; the chat's and the work's rules name them
 let models: Models = modelsOf({})
 // The settings read again: at a session's start, and after a change in the Config tab
-// Whether the person turned automatic updates on in Config: off as shipped, a chat then switches to a newer version only when typed
-let isAutoUpdate = false
-let macosKeptLooked = false
 const loadSettings = async ($: EngineInterface) => {
   const config = await readConfig($, dir)
   isOff = config.agents === false
-  isAutoUpdate = config.updates === true
-  // "Let macOS ask" chosen before it was kept beside the gate's key is kept there as the mod loads, before anything can drop it
-  if (config.adminPassword === 'macos' && !macosKeptLooked) (macosKeptLooked = true), void keepMacos($).catch(() => undefined)
+  // Admin passwords an earlier version kept leave the keychain as the mod loads: none is kept any more
+  void forgetKeptPasswords($).catch(() => undefined)
   person = typeof config.name === 'string' ? config.name.trim() : ''
   models = modelsOf(config)
   macs = (Array.isArray((config as { macs?: unknown }).macs) ? ((config as { macs: unknown[] }).macs) : []).filter(isMac).slice(0, 4)
@@ -805,7 +801,7 @@ const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
   config: await readConfig($, dir),
   gate: await (async () => {
     const [gate, kept] = [await gateOf($), await validAllowed($)]
-    return { mode: gate.mode, unsealed: gate.unsealed, password: gate.password, allowed: kept.valid.map(({ host, command }) => ({ host, command })), unsealedAllowed: kept.unsealed, isAfar: isRunFromAfar, isLinux }
+    return { mode: gate.mode, unsealed: gate.unsealed, allowed: kept.valid.map(({ host, command }) => ({ host, command })), unsealedAllowed: kept.unsealed, isAfar: isRunFromAfar, isLinux }
   })(),
   // A config.json that does not read is said at once: until it is fixed every setting is as shipped
   failed:
@@ -850,12 +846,9 @@ const configActs = ($: EngineInterface) => ({
   set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) =>
     configAct($, 'Not saved', async () => {
       await setConfig($, dir, key, value, role)
-      // Automatic updates turned on look at once when a look is due, not at the next quarter hour
-      if (key === 'updates' && value === true) void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`))
     }),
   // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
   gateMode: (mode: 'each' | 'work' | 'never') => configAct($, 'Not saved', () => regate($, { mode })),
-  gatePassword: (value: 'keep' | 'macos') => configAct($, 'Not saved', () => setAdminPassword($, value)),
   gateRemove: (host: string, command: string) => configAct($, 'Not removed', () => regate($, { remove: { host, command } })),
   // A press while a check runs does nothing: the tab shows it checking
   check: () => {
@@ -4001,7 +3994,7 @@ const aloud = async ($: EngineInterface, what: string, title: string, text: stri
 }
 const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} needs you`, text, `ask-${one.id}`)
 
-// Claudopus keeps itself up to date: every hour one chat reads the version page on claudopus.ai, and when it names a version other than the one installed runs Claude Code's own update steps for it, or, for a copy run from a folder of its code, brings that folder up to date (the pure parts are in hooks/update.ts)
+// Updates as the person asks for them: Config's Check for updates reads the version page on claudopus.ai, and when it names a version other than the one installed runs Claude Code's own update steps for it, or, for a copy run from a folder of its code, brings that folder up to date (the pure parts are in hooks/update.ts)
 
 // ---- Keeping itself up to date (the pure parts are in ./update) ----
 
@@ -4070,30 +4063,10 @@ const lookAt = async ($: EngineInterface, from: ReturnType<typeof installedFrom>
   return lookOnce(lookIo($), { from, root: $.plugin.root, cwd, engine, stampPath })
 }
 
-// Every hour one chat on this Mac reads the version page and, when it differs from the installed version, runs Claude Code's own two
-// update steps for the mod, under a lock the other chats see, and
-// keeps what it learnt in update.json; a copy run from a folder of its code brings that folder up to date with git instead
-const selfUpdate = async ($: EngineInterface) => {
-  const from = installedFrom($.plugin.root)
-  if (isUpdating || !dir) return
-  // Automatic updates are off as shipped, as Claude Code leaves them off for a marketplace other than Anthropic's own: only the
-  // person turning them on in Config lets a look install a new version by itself; else it waits for Check for updates
-  if ((await readConfig($, dir)).updates !== true) return
-  const stampPath = stampFor(from)
-  if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now())) return
-  isUpdating = true
-  try {
-    await underUpdateLock($, async () => {
-      // Another chat may have looked between this chat's reading and its lock, and the person may have turned automatic updates
-      // off while this chat waited for it
-      if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now()) || (await readConfig($, dir)).updates !== true) return
-      await lookAt($, from)
-    })
-  } finally {
-    isUpdating = false
-  }
-}
-
+// Claudopus never installs an update by itself, nor reloads a chat to one: Claude Code leaves automatic updates off for a marketplace
+// other than Anthropic's own, and what an update installs carries no signature the mod could check. A new version comes only when the
+// person asks for it, with Config's Check for updates (Claude Code's own update steps, as /plugin update runs them), and a chat
+// switches to it only when they type /reload-plugins
 // Config's Check for updates: the same look, now, whatever the switch and the hour say. A look already under way here, or another
 // chat's, is waited for (CHECK_STEP at a time, up to UPDATE_LOOK, after which a stale lock is taken over), then this one runs, so
 // two looks never run at once; it is cheap when the other one already downloaded the newest version
@@ -4110,7 +4083,7 @@ const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isEr
         const look = await underUpdateLock($, () => lookAt($, from))
         if (look !== UPDATE_BUSY) {
           await log($, `Claudopus checked for updates from Config: ${look.kind}${'version' in look && look.version ? ` ${look.version}` : ''}`)
-          return checkSaid(look, loaded, isRunFromAfar || isReloadRefused || (await readConfig($, dir)).updates !== true, !from)
+          return checkSaid(look, loaded, true, !from)
         }
       } finally {
         isUpdating = false
@@ -4141,15 +4114,6 @@ const installedCopy = async ($: EngineInterface) => {
   return copyOf(installed, id, $.plugin.root, cwd)
 }
 
-// A chat whose copy is older than the one installed loads the new one itself, with Claude Code's own /reload-plugins: the run waits
-// until the chat is idle (no turn of its own running), and background work carries on through it. The reload starts this code
-// afresh; each ask is kept in reloads/<chat>.json, so a reload that brought back the old copy, or was refused, is not asked again
-// for the same version for RELOAD_AGAIN, and a chat never reloads over and over
-let reloadAsked = ''
-// In a chat the app runs on another Mac over ssh, the engine refuses a /reload-plugins it was not typed in ("isn't available over a
-// remote connection in this session"): every one the mod ran there was refused, every one typed was not. There it is not sent, since
-// each refusal is a line in the chat, and the header says to type it
-let isReloadRefused = false
 // A /reload-plugins run from afar loads the new copy but leaves the old one's timers running in the same chat, and copies before
 // 0.2.56 send it whatever the connection, each a refused line. They all wait while reloads/<chat>.json names the installed version from under RELOAD_AGAIN ago, so
 // in a chat run from afar this copy keeps that mark naming it, looked at every HOLD_EVERY, which is far below their RELOAD_EVERY.
@@ -4175,43 +4139,6 @@ const holdOldCopies = async ($: EngineInterface) => {
   if (before?.version === copy.version && now >= at && now - at < RELOAD_AGAIN / 2) return
   await $.fs.write(mark, JSON.stringify({ version: copy.version, from: loaded, at: now }))
 }
-// Only with automatic updates on, which the person chose in Config: else a chat switches to a newer version only when they type
-// /reload-plugins, and the header says one is installed
-const reloadToInstalled = async ($: EngineInterface) => {
-  if (!dir || reloadAsked || isRunFromAfar) return
-  if ((await readConfig($, dir)).updates !== true) return
-  const loaded = (await versionsOf($)).version
-  const copy = await installedCopy($)
-  if (!loaded || !copy?.version || !isNewer(copy.version, loaded)) return
-  const manifest = copy.installPath ? await readOr($, `${copy.installPath}/.claude-plugin/plugin.json`) : ''
-  const mark = `${dir}/reloads/${await $.session.id()}.json`
-  const before = await readOr($, mark).then(text => {
-    try {
-      return JSON.parse(text) as { version?: string; at?: number }
-    } catch {
-      return undefined
-    }
-  })
-  const now = await $.clock.now()
-  if (!isReloadDue(loaded, copy, manifest, before, now)) return
-  reloadAsked = copy.version
-  try {
-    await $.fs.write(mark, JSON.stringify({ version: copy.version, from: loaded, at: now }))
-    await log($, `Claudopus ${copy.version} is installed and this chat runs ${loaded}: reloading it`)
-    const said = await $.command.run({ command: 'reload-plugins' })
-    if (/isn't available/i.test(String((said as { text?: unknown } | undefined)?.text ?? ''))) {
-      isReloadRefused = true
-      $.ui.invalidate('ui.render')
-      await log($, `Claudopus not reloaded to ${copy.version}: the engine refused it over the remote connection; the header says to type /reload-plugins`)
-    }
-  } catch (err) {
-    await log($, `Claudopus not reloaded to ${copy.version}: ${String(err)}`)
-  } finally {
-    // Settled without this code being replaced (refused, or the old copy came back): the mark decides when to ask again
-    reloadAsked = ''
-  }
-}
-
 // ---- The moment a chat moves to a newer version ----
 
 // The version this chat loaded last, kept through a reload of this code, so the load after it knows what it moved from
@@ -4574,7 +4501,8 @@ const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
   !isReply || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
-  if (one.chat) return answerElsewhere($, one, choice, isReply)
+  // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
+  if (one.chat) return
   const ask = one.ask
   const said = choice.trim()
   if (!ask || !said) return
@@ -5151,110 +5079,25 @@ const openTaken = async ($: EngineInterface, chat: string, mac: string) => {
   else await log($, `chat ${chat} pressed on ${mac}: nothing here opens it`)
 }
 
-// An answer pressed here for another chat's work, left for that chat: on this Mac in its folder of answers, on a Mac named under
-// macs over ssh, for a chat of a Mac that handed it over in this Mac's outbox for that Mac, which its next trip carries back. Each is
-// written under another name and then renamed, so it is never read half-written. The ask leaves this panel at once; that chat's own
-// file brings it back if the work asks again, and an answer that could not be left says so and brings the ask back
+// A file left for another chat (a request to open it), written under another name and then renamed, so it is never read half-written
 const answeredHere = new Set<string>()
 const leaveHere = ($: EngineInterface, folder: string, name: string, body: unknown) =>
   $.fs
     .write(`${liveDir()}/${folder}/${name}.part`, JSON.stringify(body))
     .then(() => $.process.run(['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
     .catch(err => ({ exitCode: -1, stderr: String(err) }))
-const leaveAnswer = async ($: EngineInterface, chat: { id: string; host: string }, answer: Answer) => {
-  const name = `${answer.at}-${Math.random().toString(36).slice(2, 8)}`
-  const mac = chat.host ? macs.find(m => m === chat.host) : undefined
-  const folder = `${ANSWERS}/${chat.id}`
-  return !chat.host
-    ? await leaveHere($, folder, name, answer)
-    : mac
-      ? await $.process
-          .run(ssh(mac, `d=~/.claude/claudopus/${LIVE_DIR}/${folder} && mkdir -p $d && cat > $d/${name}.part && mv $d/${name}.part $d/${name}.json`), { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
-          .catch(err => ({ exitCode: -1, stderr: String(err) }))
-      : isKey(chat.host) && pushedFrom.has(chat.host)
-        ? await leaveHere($, `${OUTBOX}/${chat.host}`, name, { ...answer, chat: chat.id })
-        : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
-}
-// An answer some file leaves for one of this chat's prompts (card `prompt:<its id>`, as versions before 0.2.106 left) answers nothing:
-// a prompt of Claude Code's is answered only in its own chat, by a press on its card there or in Claude Code's own box, never by a file
-// anything on this Mac, or on another Mac, could write
-const PROMPT_ANSWER = 'prompt:'
-const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, isReply: boolean) => {
-  const ask = one.ask
-  const said = choice.trim()
-  const chat = one.chat
-  if (!ask || !said || !chat || !/^[A-Za-z0-9_-]+$/.test(chat.id)) return
-  // A second press on an ask already answered here sends nothing. A reply that does not settle it leaves the ask shown here, as its
-  // own chat keeps it open, so a button can still answer it; the same reply sent twice at once counts once
-  const isHeld = !settles(ask, said, isReply)
-  const mark = isHeld ? `${one.id}:${ask.at}:${ask.replied?.at ?? ''}:${said}` : `${one.id}:${ask.at}`
-  if (answeredHere.has(`${one.id}:${ask.at}`) || answeredHere.has(mark)) return
-  drafts.delete(one.id)
-  if (!isHeld) replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
-  if (isReply) freeTimes()
-  answeredHere.add(mark)
-  if (isHeld) actingOn.set(`${one.id}:${ask.at}`, said)
-  const at = await $.clock.now()
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line: lineOf(one), isHeld })
-  redraw($)
-  const answer: Answer = { card: chat.agent, choice: said, isReply, ask: ask.text, askAt: ask.at, at }
-  const r = await leaveAnswer($, chat, answer)
-  if (r.exitCode !== 0) {
-    answeredHere.delete(mark)
-    actingOn.delete(`${one.id}:${ask.at}`)
-    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost', at, line: lineOf(one) })
-    redraw($)
-    await log($, `answer for the chat ${chat.id}${chat.host ? ` on ${chat.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)
-  }
-}
-// Answers other chats left for this one's work: each acted on as if pressed here, once, then put away. Each answers only the ask open
-// on its card now, named by when that ask was asked, and a reply in words after a press only the ask that press answered: an answer to
-// no open ask does nothing. One dated more than ANSWER_SKEW ahead of this Mac's clock, one that waited past ANSWER_KEPT, the same answer
-// a second time and a file too big to be one are dropped, and a look reads at most ANSWERS_A_LOOK of them
-const takenAnswers = new Set<string>()
-const answersActed = new Set<string>()
-const ANSWER_SKEW = 60_000
-const ANSWERS_A_LOOK = 20
-const ANSWER_BYTES = 16_000
+// An answer some file leaves for this chat's work, from another chat's panel here or carried from another Mac, answers nothing: a file
+// carries no proof of who wrote it, and anything running as the person on this Mac, or on a Mac named under macs, can write one. An
+// ask (as a prompt of Claude Code's) is answered only in its own chat, by a press or a reply in that chat's own panel, which is in this
+// code's memory. A file left there (by a version before this one) is put away unread, and said in the log
 const readAnswers = async ($: EngineInterface) => {
   const { id } = await read($, me)
   if (!id || !dir) return
   const folder = `${liveDir()}/${ANSWERS}/${id}`
-  const all = (await $.fs.list(folder).catch(() => [])).filter(entry => entry.name.endsWith('.json'))
-  // One taken already and left again, as an answer another Mac's trip carried twice, is put away unread; so is one too big to be one
-  for (const entry of all.filter(one => takenAnswers.has(one.name) || one.size > ANSWER_BYTES)) await $.process.run(['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
-  const entries = all.filter(entry => !takenAnswers.has(entry.name) && entry.size <= ANSWER_BYTES)
-  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name)).slice(0, ANSWERS_A_LOOK)) {
-    takenAnswers.add(entry.name)
-    const path = `${folder}/${entry.name}`
-    const answer = answerOf(await readOr($, path))
-    await $.process.run(['rm', '-f', path]).catch(() => undefined)
-    const now = await $.clock.now()
-    if (answer?.card.startsWith(PROMPT_ANSWER)) {
-      await log($, `answer to a prompt left in a file dropped: a prompt is answered only in its own chat`)
-      continue
-    }
-    const card = answer ? (await read($, todos)).find(one => one.id === answer.card && !one.parentId) : undefined
-    const isFresh = Boolean(answer) && now - (answer?.at ?? 0) <= ANSWER_KEPT && (answer?.at ?? 0) - now <= ANSWER_SKEW
-    const acted = answer ? `${answer.card}:${answer.askAt}:${answer.isReply ? 'reply' : 'press'}:${answer.choice}` : ''
-    if (!answer || !isFresh || !answer.askAt || answersActed.has(acted)) {
-      await log($, `answer from another chat dropped: ${!answer ? 'unreadable' : !isFresh ? 'it is not of now' : !answer.askAt ? 'it names no ask' : 'it came twice'}`)
-      continue
-    }
-    // A reply in words to work whose ask was answered a moment ago, as a second message after a press, still reaches it: only the ask
-    // that press answered
-    if (card && !card.ask && answer.isReply && answeredAt.get(card.id) === answer.askAt) {
-      answersActed.add(acted)
-      await replyAfter($, card, answer.choice, answer.ask)
-      continue
-    }
-    if (!card?.ask || answer.askAt !== card.ask.at) {
-      await log($, `answer from another chat dropped: its ask is gone from ${answer.card}`)
-      continue
-    }
-    answersActed.add(acted)
-    await answerAsk($, card, answer.choice, answer.isReply)
-  }
+  const all = (await $.fs.list(folder).catch(() => [])).filter(entry => entry.name.endsWith('.json') || entry.name.endsWith('.part'))
+  if (!all.length) return
+  for (const entry of all) await $.process.run(['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
+  await log($, `${all.length === 1 ? 'an answer' : `${all.length} answers`} left in a file put away unread: an ask is answered only in its own chat`)
 }
 
 // The other Macs over ssh: their chats fetched, and the same results on every Mac
@@ -5283,18 +5126,49 @@ const ownFiles = async ($: EngineInterface, now: number) => {
   const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && !(entry.mtimeMs && now - entry.mtimeMs > 180_000))
   return (await Promise.all(listed.map(entry => readOr($, `${liveDir()}/${entry.name}`)))).filter(text => text.trim().startsWith('{')).map(forOtherMac)
 }
-// What leaves this Mac for another: a chat's file less the text an ask gives to paste (a code or a token; a command to type stays) and
-// the command or text a prompt shows whole. Both stay on this Mac's own cards and in its chats
+// What leaves this Mac for another: a chat's file less every command and text that work runs or sends. Gone are the text an ask
+// gives to paste (a code, a token or a command), the command or text a prompt shows whole and the words of its line that came from
+// the command, the command a card shows running, sent to the background or detached (and the log it writes), and the command, change
+// or release an admin, file or release press is asked for: a card there says what kind of thing waits, and what it is in the work's
+// own words where it gave some, never the command. All of it stays on this Mac's own cards and in its chats
+const AS_COMMAND = 'a command'
 const forOtherMac = (text: string) => {
   try {
     const one = JSON.parse(text) as { cards?: unknown; ended?: unknown; prompts?: unknown; answeredPrompts?: unknown }
-    const card = (c: unknown) => {
-      const ask = (c as { ask?: { copy?: unknown; isCommand?: unknown } } | null)?.ask
-      if (!ask || ask.isCommand || ask.copy === undefined) return c
-      const { copy: _copy, ...rest } = ask
-      return { ...(c as object), ask: rest }
+    type Run = { what?: unknown; cmd?: unknown; label?: unknown; log?: unknown; pid?: unknown }
+    // The work's own words for what runs, never a line of the command itself
+    const said = (run: Run) => {
+      const what = typeof run.what === 'string' ? run.what : ''
+      const cmd = typeof run.cmd === 'string' ? run.cmd : ''
+      const label = typeof run.label === 'string' ? run.label : ''
+      const first = cmd.split('\n')[0]?.trim() ?? ''
+      const isCommand = !what || (first && (first.startsWith(what.trim()) || what.trim().startsWith(first.slice(0, 40)) || cmd.includes(what.trim())))
+      return isCommand ? label && !cmd.includes(label) ? label : AS_COMMAND : what
     }
-    const prompt = (p: unknown) => (p && typeof p === 'object' ? (({ detail: _detail, ...rest }) => rest)(p as { detail?: unknown }) : p)
+    const run = (r: unknown) => {
+      if (!r || typeof r !== 'object') return r
+      const { cmd: _cmd, label: _label, log: _log, pid: _pid, ...rest } = r as Run & Record<string, unknown>
+      return 'cmd' in (r as object) ? { ...rest, what: said(r as Run), ...('log' in (r as object) ? { cmd: '', log: '' } : {}) } : rest
+    }
+    const card = (c: unknown) => {
+      if (!c || typeof c !== 'object') return c
+      const t = c as Record<string, unknown> & { ask?: Record<string, unknown>; running?: unknown; bg?: unknown; detached?: unknown; admins?: unknown }
+      const ask = t.ask ? (({ copy: _copy, ...rest }) => rest)(t.ask) : undefined
+      return {
+        ...t,
+        ...(t.ask ? { ask } : {}),
+        ...(t.running ? { running: run(t.running) } : {}),
+        ...(Array.isArray(t.bg) ? { bg: t.bg.map(run) } : {}),
+        ...(Array.isArray(t.detached) ? { detached: t.detached.map(run) } : {}),
+        ...(Array.isArray(t.admins) ? { admins: t.admins.map(g => (g && typeof g === 'object' ? { ...(g as object), command: '' } : g)) } : {}),
+      }
+    }
+    const prompt = (p: unknown) => {
+      if (!p || typeof p !== 'object') return p
+      const { detail: _detail, ...rest } = p as { detail?: unknown; text?: unknown; kind?: unknown }
+      // "Run a command: <its words>": only the kind of thing it asks, as the words after it may be the command
+      return typeof rest.text === 'string' && rest.kind === 'allow' ? { ...rest, text: rest.text.split(': ')[0] } : rest
+    }
     const each = (list: unknown, fn: (one: unknown) => unknown) => (Array.isArray(list) ? list.map(fn) : list)
     return JSON.stringify({ ...one, cards: each(one.cards, card), ended: each(one.ended, card), prompts: each(one.prompts, prompt), answeredPrompts: each(one.answeredPrompts, prompt) })
   } catch {
@@ -5325,23 +5199,10 @@ const fetchMacs = async ($: EngineInterface) => {
       }
       const fetchedAt = await $.clock.now()
       const { text, carried } = tripOf(r.stdout)
-      // An answer carried back is left for its chat here as one pressed in another chat's panel, its time moved onto this Mac's clock
-      const shift = clockOf(text) ? fetchedAt - clockOf(text) : 0
-      // Only an answer left here, or left on an earlier trip, is put away there: one that could not be left is carried again
-      const names: string[] = []
-      for (const one of carried) {
-        if (kept.seen.includes(one.name)) {
-          names.push(one.name)
-          continue
-        }
-        const path = `${liveDir()}/${ANSWERS}/${one.chat}/${one.name}`
-        const r = await $.fs
-          .write(`${path}.part`, JSON.stringify({ ...one.answer, at: one.answer.at + shift }))
-          .then(() => $.process.run(['mv', '-f', `${path}.part`, path]))
-          .catch(err => ({ exitCode: -1, stderr: String(err) }))
-        if (r.exitCode === 0) names.push(one.name)
-        else await log($, `answer from ${mac} not left: ${r.stderr.trim().slice(0, 160)}`)
-      }
+      // An answer carried back from that Mac answers nothing here: an ask is answered only in its own chat, and that Mac (or anything
+      // that can write its outbox) proves nothing of who pressed it. Each is only put away there, on the next trip
+      const names = carried.map(one => one.name)
+      if (names.some(name => !kept.seen.includes(name))) await log($, `answers carried from ${mac} put away unread: an ask is answered only in its own chat`)
       await $.fs.write(macPath(mac), JSON.stringify({ mac, text, fetchedAt, triedAt: now, acks: names, seen: [...new Set([...kept.seen, ...names])].slice(-200) }))
     }
   } finally {
@@ -5585,7 +5446,7 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
 // word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
 // any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
 // it is no wall against code set on getting round it
-type Asked = { id: string; text: string; at: number; chat?: string; command?: string }
+type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string }
 // The Bash calls of this chat that run bin/admin or bin/secret, by call id, with their command: a box is drawn only for a request of
 // this chat's own while one of them runs (one sent to the background for BOX_OLD after it began), and says which command asked. A
 // request no runner of this chat could have made, however it is worded, is drawn nowhere
@@ -5604,6 +5465,19 @@ const BOX_SKEW = 60_000
 // What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
 const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
 const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/
+// The public half of the key bin/admin made for one request, as DER in base64: an RSA key of 2048 bits or more
+const BOX_KEY = /^MII[A-Za-z0-9+/]{280,1400}={0,2}$/
+// The key each request was first seen with: a request whose key changed after that is drawn nowhere, so a key put in its place by
+// something else gets nothing typed for the runner
+const boxKeys = new Map<string, string>()
+// What was typed, sealed to the runner's key (RSA-OAEP, SHA-256) by openssl, which only the runner that asked can open: the value
+// on openssl's stdin, the key on a pipe of its own, so neither is ever in a file or a command line but the key, which is public
+const SEAL_FOR = 'PATH=/usr/bin:/bin; openssl pkeyutl -encrypt -pubin -keyform DER -inkey <(printf %s "$1" | openssl base64 -d -A) -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | openssl base64 -A'
+const sealedFor = async ($: EngineInterface, key: string, value: string) => {
+  const r = await $.process.run(['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
+  const out = r?.exitCode === 0 ? r.stdout.trim() : ''
+  return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : ''
+}
 const BOX_AGAIN: Record<string, string> = {
   refused: 'That password was refused. ',
   short: 'That was shorter than 4 characters. ',
@@ -5614,9 +5488,10 @@ const boxWording = (one: Record<string, unknown>): string | undefined => {
   // A reason it does not know is left out
   const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
   if (one.kind === 'admin') {
-    if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined) return undefined
+    // A password is sent only sealed to the key the runner made for this one request: a request with none is drawn nowhere
+    if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined || typeof one.key !== 'string' || !BOX_KEY.test(one.key)) return undefined
     const mac = one.host === 'here' ? thisMac() : one.host
-    return `${again}Claudopus needs the admin password of ${mac} to run an admin command. It is kept only in ${keptWhere()}, and later admin commands on ${mac} run without asking again until it is forgotten.`
+    return `${again}Claudopus needs the admin password of ${mac} to run the admin command below. Nothing is kept: it goes only to that command, and the next one asks again.`
   }
   if (one.kind === 'secret') {
     if (one.host !== undefined) return undefined
@@ -5702,7 +5577,10 @@ const lookBoxes = async ($: EngineInterface) => {
       const text = one && typeof one === 'object' ? boxWording(one) : undefined
       // Only this chat's own request, dated no later than now, while a runner of this chat's that could have made it runs
       const runner = typeof one.at === 'number' ? runnerOf(one.at, now) : undefined
-      if (one.id === id && text && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command })
+      const key = typeof one.key === 'string' ? one.key : undefined
+      if (key && !boxKeys.has(id)) boxKeys.set(id, key)
+      const isKeySame = !key || boxKeys.get(id) === key
+      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, ...(one.kind === 'admin' && key ? { key } : {}) })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
@@ -5732,6 +5610,7 @@ const lookBoxes = async ($: EngineInterface) => {
     $.ui.log(BOX_TOLD(one.text))
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
+  for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
   for (const id of [...boxDrafts.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxDrafts.delete(id), boxSaid.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
@@ -5759,9 +5638,17 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   const request = `${boxesDir()}/${id}.json`
   // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
   if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'It was no longer waiting · nothing was saved'))
-  const escaped = value.replace(/[\\"]/g, '\\$&')
+  // An admin password goes only sealed to its runner's key: what sits in the keychain a moment is of no use to anything else
+  const asked = boxes.find(other => other.id === id)
+  const sent = asked?.key ? await sealedFor($, asked.key, value) : value
+  if (!sent) {
+    boxSaid.set(id, 'It could not be sealed for the command that asked, so it was not sent.')
+    boxPresses += 1
+    return void $.ui.invalidate('ui.render')
+  }
+  const escaped = sent.replace(/[\\"]/g, '\\$&')
   const r = isLinux
-    ? await boxKeyring($, 'set', id, `${value}\n`)
+    ? await boxKeyring($, 'set', id, `${sent}\n`)
     : await $.process
         .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
         .catch(() => ({ exitCode: -1 }))
@@ -5778,7 +5665,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     boxSaid.delete(id)
     const one = boxes.find(other => other.id === id)
     boxes = boxes.filter(other => other.id !== id)
-    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
+    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   $.ui.invalidate('ui.render')
@@ -5802,7 +5689,7 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
       {one.command ? <ui.Text dimColor wrap="wrap">{`Asked by this chat's command: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
-      <ui.Text dimColor wrap="wrap">What you type here shows as you type it. It goes only into {keptWhere()}, never into a chat.</ui.Text>
+      <ui.Text dimColor wrap="wrap">{one.key ? 'What you type here shows as you type it. It goes only to the command that asked, sealed for it, never into a chat, and is not kept.' : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
           key={`box-${one.id}-field-${boxPresses}`}
@@ -5833,7 +5720,10 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
 // that reaches it some other way (a script, another spelling of its path, a command built by the shell) is refused there. The
 // commands always allowed (admin-allowed.json) and a "work" or "never" in config.json count only with the same seal, which only a
 // press in Config or on a card makes; whatever takes one back makes a new key, so an old seal put back counts for nothing.
-// The seal is as strong as the keychain: what runs as the person and reads the keychain can make one, as it can read a kept password.
+// The seal is as strong as the keychain: what runs as the person and reads the keychain can make one. So a seal never stands in for
+// the password: no admin password is kept anywhere, and bin/admin runs nothing as admin until the person types it for that very
+// command, into macOS's own box (which names the command) or the panel's box (sealed to that one run). A forged seal spares only
+// the card's press, never the password, and there is no kept password to read.
 // The same press gates two more things work could do in the person's place: a release to a repo's main branch (bin/release takes a
 // grant as bin/admin does) and a change to the person's own settings and texts in the memory folder (config.json, rules/, roles/)
 type Gate = NonNullable<Todo['admins']>[number]
@@ -5856,10 +5746,6 @@ const GATE_BLIND = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {na
 const GATE_UNSEALED = () => `This admin command did not run: what was allowed could not be sealed in ${keptWhere()}. Run it again.`
 const NO_GATE_TOUCH = () =>
   named('The list of admin commands {name} always allows, what {name} allowed and the key that seals them are never read or written by work: only {name} adds to them, with a press on a card or in Config.')
-const MACOS_ONLY_HERE = () =>
-  named("This admin command did not run: {name} set admin commands to let macOS ask for the password and keep none, which works only on this Mac's own screen, never over SSH on another Mac.")
-const MACOS_AFAR = () =>
-  named("This admin command did not run: {name} set admin commands to let macOS ask for the password and keep none. macOS asks on this Mac's own screen, which {name} cannot see from this chat, so nothing runs as admin here until {name} is at this Mac or changes that in Config.")
 
 // What a gate asks, in words, by its kind
 const gateWhat = (gate: Gate) =>
@@ -5939,28 +5825,14 @@ const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new', message
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
 }
 
-// Let macOS ask, keep nothing, is kept beside the gate's key too (account "password" of GATE_SERVICE), where only a press in Config
-// puts it and takes it away: a config.json changed by anything else never switches it back to keeping passwords
-const PASSWORD_ACCOUNT = 'password'
-const isMacosKept = async ($: EngineInterface) =>
-  (await $.process.run([`${$.plugin.root}/bin/keyring`, 'get', GATE_SERVICE, PASSWORD_ACCOUNT], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout.trim() === 'macos'
-// An install that chose it before it was kept there has it only in config.json: kept there too the first time it is read (a
-// config.json that says so only ever adds it, never takes it away)
-const keepMacos = async ($: EngineInterface) => {
-  if (await isMacosKept($)) return
-  const r = await $.process.run([`${$.plugin.root}/bin/keyring`, 'set', GATE_SERVICE, PASSWORD_ACCOUNT, 'Claudopus admin password'], { stdin: 'macos\n', timeoutMs: 15_000 }).catch(() => undefined)
-  if (r?.exitCode !== 0) await log($, '"Let macOS ask" not kept beside the gate\'s key')
-}
-// What is in force: "work" or "never" only as Config sealed it, every command asked otherwise; and where the password comes from
+// What is in force: "work" or "never" only as Config sealed it, every command asked otherwise
 const gateOf = async ($: EngineInterface) => {
   const config = await readConfig($, dir)
   const said: 'each' | 'work' | 'never' = config.admin === 'work' || config.admin === 'never' ? config.admin : 'each'
-  if (config.adminPassword === 'macos') await keepMacos($)
-  const password = config.adminPassword === 'macos' || (await isMacosKept($)) ? ('macos' as const) : ('keep' as const)
-  if (said === 'each') return { mode: 'each' as const, unsealed: '', password }
+  if (said === 'each') return { mode: 'each' as const, unsealed: '' }
   const seal = (await sealed($, 'read', [`mode\n${said}`]))?.[0]
   const isSealed = Boolean(seal) && seal === config.adminSealed
-  return { mode: isSealed ? said : ('each' as const), unsealed: isSealed ? '' : said, password }
+  return { mode: isSealed ? said : ('each' as const), unsealed: isSealed ? '' : said }
 }
 
 // The commands always allowed, by Mac: admin-allowed.json, { "<mac>": [{ command, seal, at }] }. One whose seal is not right
@@ -6023,17 +5895,15 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
   await setConfig($, dir, 'adminSealed', mode === 'each' ? undefined : seals[kept.length])
   if (change.mode) workAllowed.clear()
 }
-// "Let macOS ask, keep nothing": every password kept for an admin command leaves the keychain
-const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; else d=${XDG_DATA_HOME:-$HOME/.local/share}; case $d in /*) ;; *) d=$HOME/.local/share ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; fi'
-const setAdminPassword = async ($: EngineInterface, value: 'keep' | 'macos') => {
-  const keyring = `${$.plugin.root}/bin/keyring`
-  const r = await (value === 'macos'
-    ? $.process.run([keyring, 'set', GATE_SERVICE, PASSWORD_ACCOUNT, 'Claudopus admin password'], { stdin: 'macos\n', timeoutMs: 15_000 })
-    : $.process.run([keyring, 'delete', GATE_SERVICE, PASSWORD_ACCOUNT], { timeoutMs: 15_000 })
-  ).catch(err => ({ exitCode: -1, stderr: String(err) }))
-  if (value === 'macos' && r.exitCode !== 0) throw new Error(`it could not be kept in ${keptWhere()}`)
-  await setConfig($, dir, 'adminPassword', value === 'macos' ? 'macos' : undefined)
-  if (value === 'macos') await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
+// No admin password is kept: every one an earlier version kept leaves the keychain (on Linux, bin/keyring's folder) as the mod
+// loads, with the "Let macOS ask" mark kept beside the gate's key and config.json's adminPassword, which no longer choose anything
+const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else d=${XDG_DATA_HOME:-$HOME/.local/share}; case $d in /*) ;; *) d=$HOME/.local/share ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
+let isKeptForgotten = false
+const forgetKeptPasswords = async ($: EngineInterface) => {
+  if (isKeptForgotten || !dir) return
+  isKeptForgotten = true
+  await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
+  if ((await readConfig($, dir)).adminPassword !== undefined) await setConfig($, dir, 'adminPassword', undefined).catch(() => undefined)
 }
 
 // What a press allowed, for bin/admin to take once: the Mac and the exact command, sealed. One nothing took goes as its call ends
@@ -6149,8 +6019,6 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
   const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root)
   if (!calls.length || !dir) return { grants: [] }
   const gate = await gateOf($)
-  if (gate.password === 'macos' && calls.some(one => one.host !== 'here')) return { deny: MACOS_ONLY_HERE(), grants: [] }
-  if (gate.password === 'macos' && isRunFromAfar) return { deny: MACOS_AFAR(), grants: [] }
   if (gate.mode === 'never') return { grants: [] }
   const list = await read($, todos)
   const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
@@ -6276,9 +6144,13 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
   <ui.Box key={key} flexDirection="column" gap={1}>
     <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
-    <ui.Box backgroundColor={FILL} paddingLeft={2}>
-      <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
-    </ui.Box>
+    {gate.command ? (
+      <ui.Box backgroundColor={FILL} paddingLeft={2}>
+        <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
+      </ui.Box>
+    ) : (
+      <ui.Text dimColor wrap="wrap">What it is is shown only on its own Mac.</ui.Text>
+    )}
     <ui.Text wrap="wrap">
       {gate.kind === 'release'
         ? 'Allow: this branch is merged into main, checked and pushed, with its version and tag. Deny: nothing is released, and the work is told.'
@@ -6904,12 +6776,7 @@ const chatHooks = (on: On) => {
     await knowSession($)
     await loadFlows($).catch(err => log($, `workflows not read back: ${String(err)}`))
     everyLoad($, FLOW_EVERY, () => followFlows($).catch(err => log($, `workflows not followed: ${String(err)}`)))
-    // Claudopus updates itself: a look a little after the chat starts, then whenever one is due
-    afterLoad($, UPDATE_AFTER, () => void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
-    everyLoad($, UPDATE_LOOK, () => selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
-    // and an open chat moves to a newer copy installed while it runs, by itself, once it is idle
-    reloadAsked = ''
-    everyLoad($, RELOAD_EVERY, () => reloadToInstalled($).catch(err => log($, `reload not looked for: ${String(err)}`)))
+    // Claudopus never updates itself or reloads a chat by itself: Config's Check for updates and a typed /reload-plugins do
     if (isRunFromAfar) {
       await holdOldCopies($).catch(() => undefined)
       everyLoad($, HOLD_EVERY, () => holdOldCopies($).catch(err => log($, `old copies not held: ${String(err)}`)))
@@ -8635,12 +8502,12 @@ const bandHooks = (on: On) => {
     const { Box, Button, Text } = ui
 
     // In the terminal the panel is out of the keys' reach until ctrl+x Tab, and a narrow one seats no panel until it is asked for:
-    // there what needs the person is said here, every chat's, under the name of the work that asks, whole, with its answers
+    // there what needs the person is said here, this chat's own (another chat's ask is answered in its chat), under the name of the work that asks, whole, with its answers
     // numbered. A bare digit typed in an empty prompt presses a band's Button, so the person answers from where they already are.
     // A message may begin with a digit too, so one press only picks the answer and says so; the same digit again sends it
     if (e.surface === 'terminal') {
       // What waits on the person comes before an ask whose work is acting on their reply, which is drawn in the work's purple
-      const asking = [...cards.filter(one => !one.parentId && one.ask), ...cardsOf(await read($, others)).filter(one => one.ask && !answeredHere.has(`${one.id}:${one.ask.at}`))].sort((a, b) => Number(needsPerson(b)) - Number(needsPerson(a)))
+      const asking = [...cards.filter(one => !one.parentId && one.ask)].sort((a, b) => Number(needsPerson(b)) - Number(needsPerson(a)))
       const [first] = asking
       const ask = first?.ask
       if (first && ask) {
@@ -8965,12 +8832,18 @@ const panelHooks = (on: On) => {
               <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Opened in Terminal, typed, not run' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
             </Box>
           ) : null}
+          {/* Another chat's ask is answered only in its own chat: no file carries an answer there */}
+          {one.chat ? (
+            <Text key={`${key}-elsewhere`} dimColor wrap="wrap">{`Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.`}</Text>
+          ) : null}
+          {one.chat ? null : (
           <Box flexDirection="row" flexWrap="wrap" gap={1}>
             {answers.map((choice, n) => (
               <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
           </Box>
-          {'Input' in table ? (
+          )}
+          {'Input' in table && !one.chat ? (
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
@@ -10055,7 +9928,7 @@ const panelHooks = (on: On) => {
                     <Box flexShrink={0}>
                       <Text bold>Claudopus</Text>
                     </Box>
-                    {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed${isRunFromAfar || isReloadRefused || !isAutoUpdate ? ', type /reload-plugins' : ''}` : ''}`}</Text> : null}
+                    {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed, type /reload-plugins` : ''}`}</Text> : null}
                   </Box>
                 )}
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>

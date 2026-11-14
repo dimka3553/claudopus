@@ -10,7 +10,7 @@
 // word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
 // any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
 // it is no wall against code set on getting round it
-type Asked = { id: string; text: string; at: number; chat?: string; command?: string }
+type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string }
 // The Bash calls of this chat that run bin/admin or bin/secret, by call id, with their command: a box is drawn only for a request of
 // this chat's own while one of them runs (one sent to the background for BOX_OLD after it began), and says which command asked. A
 // request no runner of this chat could have made, however it is worded, is drawn nowhere
@@ -29,6 +29,19 @@ const BOX_SKEW = 60_000
 // What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
 const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
 const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/
+// The public half of the key bin/admin made for one request, as DER in base64: an RSA key of 2048 bits or more
+const BOX_KEY = /^MII[A-Za-z0-9+/]{280,1400}={0,2}$/
+// The key each request was first seen with: a request whose key changed after that is drawn nowhere, so a key put in its place by
+// something else gets nothing typed for the runner
+const boxKeys = new Map<string, string>()
+// What was typed, sealed to the runner's key (RSA-OAEP, SHA-256) by openssl, which only the runner that asked can open: the value
+// on openssl's stdin, the key on a pipe of its own, so neither is ever in a file or a command line but the key, which is public
+const SEAL_FOR = 'PATH=/usr/bin:/bin; openssl pkeyutl -encrypt -pubin -keyform DER -inkey <(printf %s "$1" | openssl base64 -d -A) -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | openssl base64 -A'
+const sealedFor = async ($: EngineInterface, key: string, value: string) => {
+  const r = await $.process.run(['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined)
+  const out = r?.exitCode === 0 ? r.stdout.trim() : ''
+  return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : ''
+}
 const BOX_AGAIN: Record<string, string> = {
   refused: 'That password was refused. ',
   short: 'That was shorter than 4 characters. ',
@@ -39,9 +52,10 @@ const boxWording = (one: Record<string, unknown>): string | undefined => {
   // A reason it does not know is left out
   const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
   if (one.kind === 'admin') {
-    if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined) return undefined
+    // A password is sent only sealed to the key the runner made for this one request: a request with none is drawn nowhere
+    if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined || typeof one.key !== 'string' || !BOX_KEY.test(one.key)) return undefined
     const mac = one.host === 'here' ? thisMac() : one.host
-    return `${again}Claudopus needs the admin password of ${mac} to run an admin command. It is kept only in ${keptWhere()}, and later admin commands on ${mac} run without asking again until it is forgotten.`
+    return `${again}Claudopus needs the admin password of ${mac} to run the admin command below. Nothing is kept: it goes only to that command, and the next one asks again.`
   }
   if (one.kind === 'secret') {
     if (one.host !== undefined) return undefined
@@ -127,7 +141,10 @@ const lookBoxes = async ($: EngineInterface) => {
       const text = one && typeof one === 'object' ? boxWording(one) : undefined
       // Only this chat's own request, dated no later than now, while a runner of this chat's that could have made it runs
       const runner = typeof one.at === 'number' ? runnerOf(one.at, now) : undefined
-      if (one.id === id && text && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command })
+      const key = typeof one.key === 'string' ? one.key : undefined
+      if (key && !boxKeys.has(id)) boxKeys.set(id, key)
+      const isKeySame = !key || boxKeys.get(id) === key
+      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, ...(one.kind === 'admin' && key ? { key } : {}) })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
@@ -157,6 +174,7 @@ const lookBoxes = async ($: EngineInterface) => {
     $.ui.log(BOX_TOLD(one.text))
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
+  for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
   for (const id of [...boxDrafts.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxDrafts.delete(id), boxSaid.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
@@ -184,9 +202,17 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   const request = `${boxesDir()}/${id}.json`
   // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
   if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'It was no longer waiting · nothing was saved'))
-  const escaped = value.replace(/[\\"]/g, '\\$&')
+  // An admin password goes only sealed to its runner's key: what sits in the keychain a moment is of no use to anything else
+  const asked = boxes.find(other => other.id === id)
+  const sent = asked?.key ? await sealedFor($, asked.key, value) : value
+  if (!sent) {
+    boxSaid.set(id, 'It could not be sealed for the command that asked, so it was not sent.')
+    boxPresses += 1
+    return void $.ui.invalidate('ui.render')
+  }
+  const escaped = sent.replace(/[\\"]/g, '\\$&')
   const r = isLinux
-    ? await boxKeyring($, 'set', id, `${value}\n`)
+    ? await boxKeyring($, 'set', id, `${sent}\n`)
     : await $.process
         .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
         .catch(() => ({ exitCode: -1 }))
@@ -203,7 +229,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     boxSaid.delete(id)
     const one = boxes.find(other => other.id === id)
     boxes = boxes.filter(other => other.id !== id)
-    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
+    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   $.ui.invalidate('ui.render')
@@ -227,7 +253,7 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
       {one.command ? <ui.Text dimColor wrap="wrap">{`Asked by this chat's command: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
-      <ui.Text dimColor wrap="wrap">What you type here shows as you type it. It goes only into {keptWhere()}, never into a chat.</ui.Text>
+      <ui.Text dimColor wrap="wrap">{one.key ? 'What you type here shows as you type it. It goes only to the command that asked, sealed for it, never into a chat, and is not kept.' : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
           key={`box-${one.id}-field-${boxPresses}`}

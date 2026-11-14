@@ -266,7 +266,7 @@ test("another chat's held prompt has no Yes or No here, only where to answer it;
   wake()
   expect(settled).toBe(false)
   expect(files.has(`${MEMORY}/live/answers/engine-id/1-a.json`)).toBe(false)
-  expect((files.get(`${MEMORY}/log.md`) ?? '')).toContain('answer to a prompt left in a file dropped')
+  expect((files.get(`${MEMORY}/log.md`) ?? '')).toContain('left in a file put away unread')
   // Its own Yes, pressed in this chat's panel, still answers it
   await list.press({ key: String((await button(list, 'prompt-yes-this-'))?.key) })
   wake()

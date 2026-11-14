@@ -1,12 +1,14 @@
 #!/bin/bash -p
-# Runs one admin (sudo) command on this Mac or on a Mac reached over SSH, with that Mac's password
-# from this Mac's keychain. The password is asked once, in a box at the top of the Claudopus panel (a box on this Mac's screen
-# that hides what is typed only where no chat draws a panel), checked, then kept in the keychain. It only ever travels through pipes: never in a command
-# line, a file, the output or a log.
+# Runs one admin (sudo) command on this Mac or on a Mac reached over SSH. No admin password is ever kept: each command asks for it.
+# On this Mac, with someone at its screen, macOS asks in its own box, which names the command, and runs it; this runner never sees
+# the password. Over SSH, on Linux, or in a chat reached from another device, it is asked in a box at the top of the Claudopus panel
+# (a box on this Mac's screen that hides what is typed only where no chat draws a panel), sealed there to a key this one run made and
+# holds only in its memory, checked, used for this command and dropped. It only ever travels through pipes: never in a command line,
+# a file, the output or a log.
 #
 #   admin here '<command>'         on this Mac
 #   admin <ssh host> '<command>'   on that Mac, over SSH
-#   admin <mac> --forget           removes the kept password
+#   admin <mac> --forget           removes a password an earlier version kept
 #
 # A command runs only when the person allowed it: the Claudopus hook that holds the Bash call until they press Allow on the work's
 # card leaves a grant for this Mac and this exact command, sealed with a key in this Mac's keychain, and this runner takes it once.
@@ -24,14 +26,13 @@ if [ -z "$mac" ] || [ -z "$command" ] || [ "${mac#-}" != "$mac" ]; then
   echo "usage: admin here|<ssh host> '<command>' | here|<ssh host> --forget" >&2
   exit 2
 fi
-# The keychain's service is fixed: nothing the caller sets points the runner at another store
+# Where earlier versions kept admin passwords: fixed, so nothing the caller sets points the runner at another store
 service=claudopus-admin
 # This Mac's keychain, or on Linux a folder only this user reads: bin/keyring beside this runner
 keyring=$(cd -P "$(dirname "$0")" && pwd)/keyring
 # What this computer is called in what is said: a Mac, or on Linux this machine
-if [ "$(uname -s)" = Darwin ]; then machine='this Mac' store="this Mac's keychain"; else machine='this machine' store='a file on this machine that only you can read'; fi
+if [ "$(uname -s)" = Darwin ]; then machine='this Mac'; else machine='this machine'; fi
 
-kept() { "$keyring" get "$service" "$mac" 2>/dev/null; }
 forget() { "$keyring" delete "$service" "$mac" >/dev/null 2>&1; }
 
 if [ "$command" = --forget ]; then
@@ -40,22 +41,19 @@ if [ "$command" = --forget ]; then
 fi
 
 # ---- The gate ----
-# Says "never", "granted" or "refused", then where the password comes from ("keep" or "macos"). "never" in config.json counts
-# only with the seal Config made; a grant counts when it names this Mac and this command as they reached this runner, is under
-# two minutes old and carries the right seal, and it is taken (removed) as it is found
+# Says "never", "granted" or "refused". "never" in config.json counts only with the seal Config made; a grant counts when it names
+# this Mac and this command as they reached this runner, is under two minutes old and carries the right seal, and it is taken
+# (removed) as it is found. The seal spares the person the card's press, never the password: whatever gets past here, nothing runs
+# as admin until the person types the password for this very command (below), so a seal made by anything else runs nothing by itself
 memory=$HOME/.claude/claudopus
 gate_key() { "$keyring" get claudopus-admin-gate seal 2>/dev/null; }
-# "Let macOS ask, keep nothing" is kept beside the gate's key as well, where only a press in Config puts it: a config.json that no
-# longer says so never switches this runner back to keeping passwords
-macos_kept=$("$keyring" get claudopus-admin-gate password 2>/dev/null)
 gate=$(gate_key | perl -MJSON::PP -MDigest::SHA=hmac_sha256_hex -e '
   my $k = <STDIN>; $k = "" unless defined $k; chomp $k;
-  my ($config, $grants, $host, $command, $macos) = @ARGV;
+  my ($config, $grants, $host, $command) = @ARGV;
   my $read = sub { my $text = do { local $/; open(my $f, "<", $_[0]) or return {}; <$f> }; my $j = eval { decode_json($text) }; ref $j eq "HASH" ? $j : {} };
   my $bytes = sub { my $v = shift; return "" if !defined $v || ref $v; $v = "$v"; utf8::encode($v); $v };
   my $c = $read->($config);
-  my $pw = $bytes->($c->{adminPassword}) eq "macos" || $macos eq "macos" ? "macos" : "keep";
-  if (length $k && $bytes->($c->{admin}) eq "never" && $bytes->($c->{adminSealed}) eq hmac_sha256_hex("mode\nnever", $k)) { print "never $pw"; exit }
+  if (length $k && $bytes->($c->{admin}) eq "never" && $bytes->($c->{adminSealed}) eq hmac_sha256_hex("mode\nnever", $k)) { print "never"; exit }
   my $ok = 0;
   if (length $k && opendir(my $d, $grants)) {
     for my $name (sort grep { /\.json$/ } readdir $d) {
@@ -70,10 +68,10 @@ gate=$(gate_key | perl -MJSON::PP -MDigest::SHA=hmac_sha256_hex -e '
       last;
     }
   }
-  print(($ok ? "granted" : "refused"), " $pw");
-' "$memory/config.json" "$memory/admin-grants" "$mac" "$command" "$macos_kept")
+  print($ok ? "granted" : "refused");
+' "$memory/config.json" "$memory/admin-grants" "$mac" "$command")
 case $gate in
-never\ * | granted\ *) ;;
+never | granted) ;;
 *)
   echo "Refused: this admin command did not run, because it was not allowed on its card in the Claudopus panel. Run it as one Bash call of its own, written out in full with nothing for the shell to fill in: $0 here|<ssh host> '<command>'. The card then shows it and asks." >&2
   exit 6
@@ -102,24 +100,29 @@ check() {
 
 # The Claudopus panel beside the chat asks, in every chat. The request names what is needed in fields (kind admin or secret, the
 # Mac as host or the key as name, and why it asks again), which the panel words itself, and the chat that asks; it holds no text that
-# is shown and never a value; what is typed in the panel goes into this Mac's keychain under the request's id, and is taken from there and
-# removed at once. 1 when it is cancelled there or nothing comes in 590 s, under the longest a Bash call may run; 2 when no chat
-# with a panel takes the request in its first 15 s (the .told mark), as in a -p run with no chat open on this Mac
+# is shown and never a value. It carries the public half of a key made for this one request, whose private half stays in this
+# runner's memory (a shell variable, handed to openssl on a pipe): the panel seals what is typed to it before it goes into this Mac's
+# keychain under the request's id, so what sits there for a moment is of no use to anything that reads it. It is taken from there,
+# removed at once and opened here. 1 when it is cancelled there or nothing comes in 590 s, under the longest a Bash call may run; 2 when
+# no chat with a panel takes the request in its first 15 s (the .told mark), as in a -p run with no chat open on this Mac
 box_ask() {
-  local boxes=${CLAUDOPUS_BOXES:-$HOME/.claude/claudopus/boxes} id value i status=1 taken=${CLAUDOPUS_BOX_TAKEN:-15}
+  local boxes=${CLAUDOPUS_BOXES:-$HOME/.claude/claudopus/boxes} id value i status=1 taken=${CLAUDOPUS_BOX_TAKEN:-15} private public
   # uuidgen, or Linux's own where it is not installed
   id=$({ /usr/bin/uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null; } | /usr/bin/tr '[:upper:]' '[:lower:]')
   [ -n "$id" ] || return 1
+  private=$(openssl genrsa 2048 2>/dev/null) && [ -n "$private" ] || return 1
+  public=$(printf '%s\n' "$private" | openssl rsa -pubout -outform DER 2>/dev/null | openssl base64 -A) && [ -n "$public" ] || return 1
   /bin/mkdir -p "$boxes" || return 1
   # $@: the request's fields as name value pairs; an empty value is left out
-  /usr/bin/perl -MJSON::PP -e 'my %r = (id => shift, chat => shift, at => time() * 1000); while (@ARGV) { my ($k, $v) = splice @ARGV, 0, 2; $r{$k} = $v if length $v } print JSON::PP->new->canonical->encode(\%r), "\n"' "$id" "${CLAUDE_CODE_SESSION_ID:-}" "$@" >"$boxes/$id.part" &&
+  /usr/bin/perl -MJSON::PP -e 'my %r = (id => shift, chat => shift, key => shift, at => time() * 1000); while (@ARGV) { my ($k, $v) = splice @ARGV, 0, 2; $r{$k} = $v if length $v } print JSON::PP->new->canonical->encode(\%r), "\n"' "$id" "${CLAUDE_CODE_SESSION_ID:-}" "$public" "$@" >"$boxes/$id.part" &&
     /bin/mv "$boxes/$id.part" "$boxes/$id.json" || return 1
   trap '/bin/rm -f "$boxes/$id.json" "$boxes/$id.told"; "$keyring" delete claudopus-box "$id" >/dev/null 2>&1' EXIT
   for ((i = 0; i < 590; i++)); do
     if value=$("$keyring" get claudopus-box "$id" 2>/dev/null); then
-      printf '%s' "$value"
+      "$keyring" delete claudopus-box "$id" >/dev/null 2>&1
+      # Opened with the private half on a pipe of its own: it is never in a file or a command line
+      printf '%s' "$value" | openssl base64 -d -A 2>/dev/null | openssl pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 3< <(printf '%s\n' "$private") 2>/dev/null && status=0
       unset value
-      status=0
       break
     fi
     # Cancel in the panel removes the request
@@ -130,6 +133,7 @@ box_ask() {
   done
   /bin/rm -f "$boxes/$id.json" "$boxes/$id.told"
   "$keyring" delete claudopus-box "$id" >/dev/null 2>&1
+  unset private
   trap - EXIT
   return "$status"
 }
@@ -142,7 +146,7 @@ ask() {
   local label=$mac again=$1 said='' text status
   [ "$mac" = here ] && label=$machine
   [ "$again" = refused ] && said='That password was refused. '
-  text="${said}Claudopus needs the admin password of $label to run an admin command. It is kept only in $store, and later admin commands on $label run without asking again until it is forgotten."
+  text="${said}Claudopus needs the admin password of $label to run this admin command: $(printf '%s' "$command" | tr '\n' ' ' | cut -c1-300). Nothing is kept: the next admin command asks again."
   box_ask kind admin host "$mac" again "$again"
   status=$?
   [ "$status" = 2 ] || return "$status"
@@ -166,27 +170,19 @@ with_path=''
 # For its test only: past the gate, it prints the shell line root would be handed and runs nothing, asking for no password
 if [ -n "${CLAUDOPUS_ADMIN_SHOW:-}" ]; then printf '%s\n' "${with_path}$command"; exit 0; fi
 
-# "Let macOS ask, keep nothing": macOS asks for the password in its own box on this Mac's screen, each time, and runs the command;
-# no password is kept, typed into the panel or read here. Only on this Mac, and only where its screen is seen
-if [ "${gate#* }" = macos ]; then
-  if [ "$machine" != 'this Mac' ]; then
-    echo "Admin commands are set to let macOS ask for the password and keep none, which only a Mac can do, so nothing ran. On Linux, set Config's Admin password back to keeping it, and the Claudopus panel asks for it once." >&2
-    exit 7
-  fi
-  if [ "$mac" != here ]; then
-    echo "Admin commands are set to let macOS ask for the password and keep none, which works only on this Mac, not on $mac over SSH." >&2
-    exit 7
-  fi
-  if afar; then
-    echo "Admin commands are set to let macOS ask for the password and keep none. macOS asks on this Mac's own screen, which nobody sees from a chat reached over SSH, so nothing ran. It runs from a chat at this Mac, or once Config's Admin password is set back to the keychain." >&2
-    exit 7
-  fi
+# A password an earlier version kept for this Mac is forgotten, never used: every command asks
+forget
+
+# On this Mac, with someone at its screen: macOS asks for the password in its own box, which names the command, and runs it. The
+# password goes to macOS alone, never to this runner, the panel or a file
+if [ "$mac" = here ] && [ "$machine" = 'this Mac' ] && ! afar; then
   out=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-admin.XXXXXX") || exit 1
   trap 'rm -rf "$out"' EXIT
   # What it prints comes back through files in a folder of this run's own. Root makes each one new (set -C) and never writes
   # through a link someone else put there
   script="set -C; ( set +C; exec </dev/null; ${with_path}$command ) >$(printf '%q' "$out/out") 2>$(printf '%q' "$out/err"); echo \$? >$(printf '%q' "$out/status")"
-  if ! osascript -e 'on run argv' -e 'do shell script (item 1 of argv) with administrator privileges' -e 'end run' "$script" >/dev/null 2>"$out/osa"; then
+  prompt="Claudopus wants to run this admin command on this Mac: $(printf '%s' "$command" | tr '\n' ' ' | cut -c1-300)"
+  if ! osascript -e 'on run argv' -e 'do shell script (item 1 of argv) with prompt (item 2 of argv) with administrator privileges' -e 'end run' "$script" "$prompt" >/dev/null 2>"$out/osa"; then
     if grep -q -e '-128' "$out/osa"; then
       echo "The macOS password box was cancelled, so the command did not run." >&2
       exit 3
@@ -205,38 +201,21 @@ if [ "$mac" != here ] && ! ssh_to true </dev/null 2>/dev/null; then
   exit 5
 fi
 
-if ! kept >/dev/null; then
-  again=''
-  for try in 1 2 3; do
-    pw=$(ask "$again") || { echo "No password was typed for $mac." >&2; exit 3; }
-    [ -n "$pw" ] || { echo "No password was typed for $mac." >&2; exit 3; }
-    printf '%s\n' "$pw" | check
+# Elsewhere the panel's box asks, for this command alone: the password is checked, used once and dropped, never kept
+again=''
+for try in 1 2 3; do
+  pw=$(ask "$again") || { echo "No password was typed for $mac." >&2; exit 3; }
+  [ -n "$pw" ] || { echo "No password was typed for $mac." >&2; exit 3; }
+  printf '%s\n' "$pw" | check
+  status=$?
+  if [ "$status" = 0 ]; then
+    printf '%s\n' "$pw" | sudo_on /bin/sh -c "exec </dev/null; ${with_path}$command"
     status=$?
-    if [ "$status" = 0 ]; then
-      printf '%s\n' "$pw" | "$keyring" set "$service" "$mac" "Claudopus admin: $mac" >/dev/null 2>&1 ||
-        echo "The password for $mac was right but could not be kept in $store; it will be asked again next time." >&2
-      # The first run uses the password just typed, kept or not
-      printf '%s\n' "$pw" | sudo_on /bin/sh -c "exec </dev/null; ${with_path}$command"
-      status=$?
-      unset pw
-      exit "$status"
-    fi
     unset pw
-    [ "$status" = 5 ] && { echo "$mac could not be reached over SSH." >&2; exit 5; }
-    [ "$try" = 3 ] && { echo "The password typed for $mac was refused three times." >&2; exit 4; }
-    again=refused
-  done
-fi
-
-# A kept password that sudo refuses is forgotten, so the next run asks again
-kept | check
-status=$?
-if [ "$status" = 5 ]; then
-  echo "$mac could not be reached over SSH." >&2
-  exit 5
-elif [ "$status" != 0 ]; then
-  forget
-  echo "The kept password for $mac was refused; it is forgotten and will be asked again." >&2
-  exit 4
-fi
-kept | sudo_on /bin/sh -c "exec </dev/null; ${with_path}$command"
+    exit "$status"
+  fi
+  unset pw
+  [ "$status" = 5 ] && { echo "$mac could not be reached over SSH." >&2; exit 5; }
+  [ "$try" = 3 ] && { echo "The password typed for $mac was refused three times." >&2; exit 4; }
+  again=refused
+done

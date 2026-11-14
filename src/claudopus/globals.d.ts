@@ -157,13 +157,9 @@ declare global {
   export import folderLook = M7.folderLook
   export import installedFrom = M7.installedFrom
   export import isNewer = M7.isNewer
-  export import isReloadDue = M7.isReloadDue
-  export import isUpdateDue = M7.isUpdateDue
   export import lookOnce = M7.lookOnce
   export import RELOAD_AGAIN = M7.RELOAD_AGAIN
   export import RELOAD_EVERY = M7.RELOAD_EVERY
-  export import stampOf = M7.stampOf
-  export import UPDATE_AFTER = M7.UPDATE_AFTER
   export import UPDATE_LOOK = M7.UPDATE_LOOK
   export import updatedArt = M7.updatedArt
   export import updatedFrom = M7.updatedFrom

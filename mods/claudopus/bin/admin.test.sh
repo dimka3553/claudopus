@@ -113,17 +113,11 @@ config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nnever')")
 expect '"never" as Config sealed it: past the gate with no grant' 3 "$PAST" -- "$admin" here 'id -u'
 expect '"never" as Config sealed it, through a wrapper as before: past the gate' 3 "$PAST" -- "$tmp/wrapper.sh"
 
-config '{"adminPassword":"macos"}'
-expect 'macOS asks, no grant: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
-if [ -n "$mac" ]; then
-  grant mac1 here 'id -u'
-  expect 'macOS asks, in a chat reached over SSH: nothing runs' 7 'which nobody sees from a chat reached over SSH' -- "$admin" here 'id -u'
-  grant mac2 m4 'id -u'
-  expect 'macOS asks, on another Mac: nothing runs' 7 'works only on this Mac' -- "$admin" m4 'id -u'
-else
-  grant linux1 here 'id -u'
-  expect 'macOS asks, on Linux: nothing runs, and it says only a Mac can' 7 'only a Mac can do' -- "$admin" here 'id -u'
-fi
+# adminPassword, which earlier versions read, chooses nothing: with no grant refused, with one the password is asked for
+config '{"adminPassword":"keep"}'
+expect 'adminPassword set, no grant: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+grant pw1 here 'id -u'
+expect 'adminPassword set, a grant: the password is asked for, as always' 3 "$PAST" -- "$admin" here 'id -u'
 
 config '{}'
 # What takes something back makes a new key: a grant and a "never" sealed before it count for nothing
@@ -143,15 +137,29 @@ listed=$(env CLAUDOPUS_SECRET_SERVICE=claudopus-admin "$here/secret" --list 2>&1
 n=$((n + 1))
 if [ -z "$listed" ]; then echo "ok $n - the secret runner cannot be pointed at the admin passwords"; else echo "NOT OK $n - the secret runner listed: $listed"; failed=1; fi
 "$here/keyring" delete claudopus-admin m9 >/dev/null 2>&1
-# "Let macOS ask", kept beside the gate's key by Config, holds though config.json no longer says so
-printf 'macos\n' | "$here/keyring" set claudopus-admin-gate password 'Claudopus admin password'
-grant kept-macos here 'id -u'
-if [ -n "$mac" ]; then
-  expect 'macOS asks as Config kept it, with config.json silent: over SSH nothing runs' 7 'which nobody sees from a chat reached over SSH' -- "$admin" here 'id -u'
-else
-  expect 'macOS asks as Config kept it, with config.json silent, on Linux: nothing runs' 7 'only a Mac can do' -- "$admin" here 'id -u'
-fi
-"$here/keyring" delete claudopus-admin-gate password >/dev/null 2>&1
+# F-007 F-009: no admin password is kept or used. A "never" sealed with the gate's own key, as anything that reads the key could seal
+# it, with a password an earlier version kept: the runner neither uses that password nor runs anything; it asks for the password,
+# and the kept one is gone. Before this fix the kept password ran the command with no one asked
+printf '%s\n' 'kept-admin-pw' | "$here/keyring" set claudopus-admin here 'Claudopus admin: here'
+config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nnever')")\"}"
+expect 'a "never" sealed with the real key and a password kept: nothing runs, the password is asked for' 3 "$PAST" -- "$admin" here 'id -u'
+n=$((n + 1))
+if "$here/keyring" has claudopus-admin here; then echo "NOT OK $n - the kept admin password was left"; failed=1; else echo "ok $n - the kept admin password was forgotten, never used"; fi
+config '{}'
+# What the panel types is sealed by the hook's own openssl line (read out of src/claudopus/boxes.tsx) to a key made as the runner
+# makes it, and opened as the runner opens it: this machine's openssl takes every option both use
+seal_for=$(node -e 'const t = require("fs").readFileSync(process.argv[1], "utf8"); process.stdout.write(eval(/const SEAL_FOR = (\x27[^\n]*\x27)\n/.exec(t)[1]))' "$here/../../../src/claudopus/boxes.tsx")
+private=$(openssl genrsa 2048 2>/dev/null)
+public=$(printf '%s\n' "$private" | openssl rsa -pubout -outform DER 2>/dev/null | openssl base64 -A)
+sealed_value=$(printf '%s' 'pw "with" \quotes' | /bin/bash -c "$seal_for" sh "$public")
+opened=$(printf '%s' "$sealed_value" | openssl base64 -d -A 2>/dev/null | openssl pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 3< <(printf '%s\n' "$private") 2>/dev/null)
+n=$((n + 1))
+if [ "$opened" = 'pw "with" \quotes' ] && [ "${sealed_value#pw}" = "$sealed_value" ]; then echo "ok $n - a box's value goes sealed and is opened only with the runner's key"; else echo "NOT OK $n - sealed '$sealed_value' opened as '$opened'"; failed=1; fi
+grep -q 'pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256' "$admin" || { echo "NOT OK - the runner opens a box's value another way than tested here"; failed=1; }
+unset private
+# Nothing in the runner keeps an admin password
+n=$((n + 1))
+if grep -q 'keyring" set "$service"' "$admin"; then echo "NOT OK $n - the runner still keeps a password"; failed=1; else echo "ok $n - the runner keeps no admin password"; fi
 rm -f "$memory"/admin-grants/*
 # A kept admin password is hidden in what the secret runner hides, as a kept key is
 printf '%s\n' 'adminpw-5678' | "$here/keyring" set claudopus-admin here 'Claudopus admin: here'

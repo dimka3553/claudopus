@@ -182,6 +182,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const ok = (stdout = '', exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // The admin gate's wait between two looks at what was pressed: it lasts until the test lets it go with wake(), as a second passing
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
+    // Every admin password an earlier version kept, taken out of the keychain as the mod loads
+    if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
+    // What a password box sends, sealed by openssl to the key of the runner that asked: the test's own stand-in for it
+    if (tool === '/bin/bash' && String(rest[1]).includes('pkeyutl -encrypt')) return ok(`${boxSealed(String(rest[3]), String(e.init?.stdin ?? ''))}\n`)
     // The admin gate's seals: one for each message, under the key the keychain holds as keychain:gate; "make" makes a key where
     // there is none and "new" always, as the Mac's own shell does
     if (tool === '/bin/sh' && String(rest[1]).includes('claudopus-admin-gate')) {
@@ -190,8 +194,6 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const key = files.get('keychain:gate')
       return key ? ok(messages.map(one => `${fakeSeal(key, String(one))}\n`).join('')) : ok('', 3)
     }
-    // Every kept admin password taken out of the keychain
-    if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
     // A line added to the end of a file, as the log is written
     if (tool === 'sh' && rest[1] === 'printf %s "$2" >> "$1"' && rest[3] !== undefined) {
       files.set(rest[3], `${files.get(rest[3]) ?? ''}${rest[4] ?? ''}`)
@@ -427,6 +429,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
 const fakeSeal = (key: string, message: string) =>
   Array.from({ length: 8 }, (_, n) => [...`${n}${key}\n${message}`].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261 + n).toString(16).padStart(8, '0')).join('')
+// A box's value as the test world seals it to a runner's key: hex of the key's start and the value, long as a real one, never the
+// value itself as typed
+const boxSealed = (key: string, value: string) => `${[...`${key.slice(0, 12)}|${value}`].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('')}`.padEnd(344, 'A')
+// The public half of a runner's key, as bin/admin puts it in a request
+const BOX_PUBLIC = `MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA${'x'.repeat(300)}IDAQAB`
 // A button of the open card by its key less the count of presses the card adds to it
 const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; props: Record<string, unknown> }[]> }, base: string) =>
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))

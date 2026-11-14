@@ -163,15 +163,11 @@ let person = ''
 // config.json can say which model does which work; the chat's and the work's rules name them
 let models: Models = modelsOf({})
 // The settings read again: at a session's start, and after a change in the Config tab
-// Whether the person turned automatic updates on in Config: off as shipped, a chat then switches to a newer version only when typed
-let isAutoUpdate = false
-let macosKeptLooked = false
 const loadSettings = async ($: EngineInterface) => {
   const config = await readConfig($, dir)
   isOff = config.agents === false
-  isAutoUpdate = config.updates === true
-  // "Let macOS ask" chosen before it was kept beside the gate's key is kept there as the mod loads, before anything can drop it
-  if (config.adminPassword === 'macos' && !macosKeptLooked) (macosKeptLooked = true), void keepMacos($).catch(() => undefined)
+  // Admin passwords an earlier version kept leave the keychain as the mod loads: none is kept any more
+  void forgetKeptPasswords($).catch(() => undefined)
   person = typeof config.name === 'string' ? config.name.trim() : ''
   models = modelsOf(config)
   macs = (Array.isArray((config as { macs?: unknown }).macs) ? ((config as { macs: unknown[] }).macs) : []).filter(isMac).slice(0, 4)

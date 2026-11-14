@@ -9,7 +9,10 @@
 // that reaches it some other way (a script, another spelling of its path, a command built by the shell) is refused there. The
 // commands always allowed (admin-allowed.json) and a "work" or "never" in config.json count only with the same seal, which only a
 // press in Config or on a card makes; whatever takes one back makes a new key, so an old seal put back counts for nothing.
-// The seal is as strong as the keychain: what runs as the person and reads the keychain can make one, as it can read a kept password.
+// The seal is as strong as the keychain: what runs as the person and reads the keychain can make one. So a seal never stands in for
+// the password: no admin password is kept anywhere, and bin/admin runs nothing as admin until the person types it for that very
+// command, into macOS's own box (which names the command) or the panel's box (sealed to that one run). A forged seal spares only
+// the card's press, never the password, and there is no kept password to read.
 // The same press gates two more things work could do in the person's place: a release to a repo's main branch (bin/release takes a
 // grant as bin/admin does) and a change to the person's own settings and texts in the memory folder (config.json, rules/, roles/)
 type Gate = NonNullable<Todo['admins']>[number]
@@ -32,10 +35,6 @@ const GATE_BLIND = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {na
 const GATE_UNSEALED = () => `This admin command did not run: what was allowed could not be sealed in ${keptWhere()}. Run it again.`
 const NO_GATE_TOUCH = () =>
   named('The list of admin commands {name} always allows, what {name} allowed and the key that seals them are never read or written by work: only {name} adds to them, with a press on a card or in Config.')
-const MACOS_ONLY_HERE = () =>
-  named("This admin command did not run: {name} set admin commands to let macOS ask for the password and keep none, which works only on this Mac's own screen, never over SSH on another Mac.")
-const MACOS_AFAR = () =>
-  named("This admin command did not run: {name} set admin commands to let macOS ask for the password and keep none. macOS asks on this Mac's own screen, which {name} cannot see from this chat, so nothing runs as admin here until {name} is at this Mac or changes that in Config.")
 
 // What a gate asks, in words, by its kind
 const gateWhat = (gate: Gate) =>
@@ -115,28 +114,14 @@ const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new', message
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
 }
 
-// Let macOS ask, keep nothing, is kept beside the gate's key too (account "password" of GATE_SERVICE), where only a press in Config
-// puts it and takes it away: a config.json changed by anything else never switches it back to keeping passwords
-const PASSWORD_ACCOUNT = 'password'
-const isMacosKept = async ($: EngineInterface) =>
-  (await $.process.run([`${$.plugin.root}/bin/keyring`, 'get', GATE_SERVICE, PASSWORD_ACCOUNT], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout.trim() === 'macos'
-// An install that chose it before it was kept there has it only in config.json: kept there too the first time it is read (a
-// config.json that says so only ever adds it, never takes it away)
-const keepMacos = async ($: EngineInterface) => {
-  if (await isMacosKept($)) return
-  const r = await $.process.run([`${$.plugin.root}/bin/keyring`, 'set', GATE_SERVICE, PASSWORD_ACCOUNT, 'Claudopus admin password'], { stdin: 'macos\n', timeoutMs: 15_000 }).catch(() => undefined)
-  if (r?.exitCode !== 0) await log($, '"Let macOS ask" not kept beside the gate\'s key')
-}
-// What is in force: "work" or "never" only as Config sealed it, every command asked otherwise; and where the password comes from
+// What is in force: "work" or "never" only as Config sealed it, every command asked otherwise
 const gateOf = async ($: EngineInterface) => {
   const config = await readConfig($, dir)
   const said: 'each' | 'work' | 'never' = config.admin === 'work' || config.admin === 'never' ? config.admin : 'each'
-  if (config.adminPassword === 'macos') await keepMacos($)
-  const password = config.adminPassword === 'macos' || (await isMacosKept($)) ? ('macos' as const) : ('keep' as const)
-  if (said === 'each') return { mode: 'each' as const, unsealed: '', password }
+  if (said === 'each') return { mode: 'each' as const, unsealed: '' }
   const seal = (await sealed($, 'read', [`mode\n${said}`]))?.[0]
   const isSealed = Boolean(seal) && seal === config.adminSealed
-  return { mode: isSealed ? said : ('each' as const), unsealed: isSealed ? '' : said, password }
+  return { mode: isSealed ? said : ('each' as const), unsealed: isSealed ? '' : said }
 }
 
 // The commands always allowed, by Mac: admin-allowed.json, { "<mac>": [{ command, seal, at }] }. One whose seal is not right
@@ -199,17 +184,15 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
   await setConfig($, dir, 'adminSealed', mode === 'each' ? undefined : seals[kept.length])
   if (change.mode) workAllowed.clear()
 }
-// "Let macOS ask, keep nothing": every password kept for an admin command leaves the keychain
-const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; else d=${XDG_DATA_HOME:-$HOME/.local/share}; case $d in /*) ;; *) d=$HOME/.local/share ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; fi'
-const setAdminPassword = async ($: EngineInterface, value: 'keep' | 'macos') => {
-  const keyring = `${$.plugin.root}/bin/keyring`
-  const r = await (value === 'macos'
-    ? $.process.run([keyring, 'set', GATE_SERVICE, PASSWORD_ACCOUNT, 'Claudopus admin password'], { stdin: 'macos\n', timeoutMs: 15_000 })
-    : $.process.run([keyring, 'delete', GATE_SERVICE, PASSWORD_ACCOUNT], { timeoutMs: 15_000 })
-  ).catch(err => ({ exitCode: -1, stderr: String(err) }))
-  if (value === 'macos' && r.exitCode !== 0) throw new Error(`it could not be kept in ${keptWhere()}`)
-  await setConfig($, dir, 'adminPassword', value === 'macos' ? 'macos' : undefined)
-  if (value === 'macos') await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
+// No admin password is kept: every one an earlier version kept leaves the keychain (on Linux, bin/keyring's folder) as the mod
+// loads, with the "Let macOS ask" mark kept beside the gate's key and config.json's adminPassword, which no longer choose anything
+const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else d=${XDG_DATA_HOME:-$HOME/.local/share}; case $d in /*) ;; *) d=$HOME/.local/share ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
+let isKeptForgotten = false
+const forgetKeptPasswords = async ($: EngineInterface) => {
+  if (isKeptForgotten || !dir) return
+  isKeptForgotten = true
+  await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
+  if ((await readConfig($, dir)).adminPassword !== undefined) await setConfig($, dir, 'adminPassword', undefined).catch(() => undefined)
 }
 
 // What a press allowed, for bin/admin to take once: the Mac and the exact command, sealed. One nothing took goes as its call ends
@@ -325,8 +308,6 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
   const calls = adminCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root)
   if (!calls.length || !dir) return { grants: [] }
   const gate = await gateOf($)
-  if (gate.password === 'macos' && calls.some(one => one.host !== 'here')) return { deny: MACOS_ONLY_HERE(), grants: [] }
-  if (gate.password === 'macos' && isRunFromAfar) return { deny: MACOS_AFAR(), grants: [] }
   if (gate.mode === 'never') return { grants: [] }
   const list = await read($, todos)
   const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
@@ -452,9 +433,13 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
   <ui.Box key={key} flexDirection="column" gap={1}>
     <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
-    <ui.Box backgroundColor={FILL} paddingLeft={2}>
-      <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
-    </ui.Box>
+    {gate.command ? (
+      <ui.Box backgroundColor={FILL} paddingLeft={2}>
+        <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
+      </ui.Box>
+    ) : (
+      <ui.Text dimColor wrap="wrap">What it is is shown only on its own Mac.</ui.Text>
+    )}
     <ui.Text wrap="wrap">
       {gate.kind === 'release'
         ? 'Allow: this branch is merged into main, checked and pushed, with its version and tag. Deny: nothing is released, and the work is told.'

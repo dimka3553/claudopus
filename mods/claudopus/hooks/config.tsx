@@ -25,16 +25,12 @@ export type Models = Record<Role, string>
 export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', fable: 'Fable 5.2', haiku: 'Haiku 5.5' }
 // `admin`: when the person is asked before an admin command runs: "each" time (as shipped), once for a piece of "work", or "never".
 // "work" and "never" count only with `adminSealed`, the seal a press in this tab makes; without it every command asks.
-// `adminPassword`: "macos" lets macOS ask for the password each time and keeps none; otherwise it is kept in the keychain
+// `adminPassword` and `updates` are read no more: no admin password is kept, and Claudopus never installs an update by itself
 export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; models?: Partial<Models>; admin?: string; adminSealed?: string; adminPassword?: string }
 export const ADMIN_MODES = [
   { value: 'each', label: 'Ask each time' },
   { value: 'work', label: 'Ask once per piece of work' },
   { value: 'never', label: 'Never ask' },
-] as const
-export const ADMIN_PASSWORDS = [
-  { value: 'keep', label: "Keep it in this Mac's keychain" },
-  { value: 'macos', label: 'Let macOS ask, keep nothing' },
 ] as const
 export type AdminMode = (typeof ADMIN_MODES)[number]['value']
 
@@ -107,7 +103,7 @@ export type ConfigShown = {
   texts: { text: Text; isOwn: boolean; isStale: boolean; path: string; body: string }[]; config: Config; failed: string
   // Admin commands: what is in force, a "work" or "never" in config.json that no press here sealed, the commands always allowed
   // (and how many in the file carry no seal of this Mac's), and whether this chat is reached from another device
-  gate: { mode: AdminMode; unsealed: string; password: 'keep' | 'macos'; allowed: { host: string; command: string }[]; unsealedAllowed: number; isAfar: boolean; isLinux?: boolean }
+  gate: { mode: AdminMode; unsealed: string; allowed: { host: string; command: string }[]; unsealedAllowed: number; isAfar: boolean; isLinux?: boolean }
 }
 export type ConfigActs = {
   edit: (text: Text, body: string) => void
@@ -118,7 +114,6 @@ export type ConfigActs = {
   set: (key: keyof Config, value: unknown, role?: Role) => void
   check: () => void
   gateMode: (mode: AdminMode) => void
-  gatePassword: (value: 'keep' | 'macos') => void
   gateRemove: (host: string, command: string) => void
 }
 type Band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => JSX.Element
@@ -249,23 +244,10 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           {item(
             'config-admin-mode',
             'Ask before an admin command',
-            `Work runs a command as administrator only after you allow it on its card: each time, or once for a piece of work and its helpers until it ends. Never ask runs them without asking.${shown.gate.unsealed ? ` config.json says "${shown.gate.unsealed}", but it was not chosen here, so every command asks.` : ''}`,
+            `Work runs a command as administrator only after you allow it on its card: each time, or once for a piece of work and its helpers until it ends. Never ask runs them without the card asking. Whatever you choose, each one also asks for the admin password, which is never kept: macOS asks in its own box on this Mac's screen, and the panel asks over SSH, on Linux or from another device.${shown.gate.unsealed ? ` config.json says "${shown.gate.unsealed}", but it was not chosen here, so every command asks.` : ''}`,
             <Select key="config-admin-mode-pick" options={ADMIN_MODES.map(one => ({ value: one.value, label: one.label }))} value={shown.gate.mode} onSelect={value => acts.gateMode(value as AdminMode)} />,
             shown.gate.mode !== 'each' || Boolean(shown.gate.unsealed),
             () => acts.gateMode('each'),
-          )}
-          {item(
-            'config-admin-password',
-            'Admin password',
-            shown.gate.isLinux
-              ? `Linux has no keychain for it: the password is kept in a file only you can read on this machine, which any process running as you can read too, so asking first is a check, not a wall. Let macOS ask works only on a Mac: set to it, admin commands here are refused.`
-              : `Kept in this Mac's keychain, a password can be read by any process running as you, so asking first is a check, not a wall. Let macOS ask keeps no password: macOS asks for it on this Mac's screen each time, on this Mac only.${shown.gate.isAfar && shown.gate.password === 'macos' ? ' This chat is reached from another device, where that box cannot be seen: admin commands are refused here.' : shown.gate.isAfar ? ' In a chat reached from another device that box cannot be seen, so admin commands are then refused there.' : ''}`,
-            null,
-            shown.gate.password !== 'keep',
-            () => acts.gatePassword('keep'),
-            <Box key="config-admin-password-choice" flexDirection="row" flexShrink={0}>
-              <Select key="config-admin-password-pick" options={ADMIN_PASSWORDS.map(one => ({ value: one.value, label: shown.gate.isLinux && one.value === 'keep' ? 'Keep it in a file only you can read' : one.label }))} value={shown.gate.password} onSelect={value => acts.gatePassword(value === 'macos' ? 'macos' : 'keep')} />
-            </Box>,
           )}
           {item(
             'config-admin-allowed',
@@ -308,15 +290,10 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         'Updates',
         '',
         <Box flexDirection="column" gap={1}>
-          {toggle(
-            'updates',
-            'Automatic updates',
-            'On, every hour Claudopus gets its newest release by itself, and chats switch to it once they are idle. Off, as shipped, it stays on the version you have until you press Check for updates.',
-          )}
           {item(
             'config-check',
             shown.version ? `This chat runs v${shown.version}` : 'Check for updates',
-            'Looks for a newer release now and gets it; with automatic updates off, type /reload-plugins in a chat to switch it.',
+            'Looks for a newer release now and gets it, through Claude Code\'s own update steps; type /reload-plugins in a chat to switch it. Claudopus never installs one by itself.',
             shown.check.isChecking ? (
               <Text key="config-check-checking" dimColor>Checking…</Text>
             ) : (

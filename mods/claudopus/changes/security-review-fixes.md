@@ -1,11 +1,11 @@
-- Automatic updates are now off as shipped: turn them on in Config to have Claudopus update itself and reload open chats. Until then, update with `/plugin` and type `/reload-plugins`, as the panel's header says.
+- Claudopus no longer updates itself or reloads open chats by itself, and Config's Automatic updates switch is gone: update with Check for updates in Config or with `/plugin`, then type `/reload-plugins`, as the panel's header says.
 - A release now waits for your press of Release on its work's card, and nothing is released without it (a release you run yourself in a terminal asks you there); a branch's own `.release` no longer runs anything.
 - Work that writes your settings, the principles, the chat's rules or the work rules now waits for your Allow on its card; a shell command that writes them is refused.
 - A prompt from the app is answered only in its own chat: other chats' panels and other Macs show it without Yes and No.
-- An answer left in a file counts only for the very ask it was made for, and only once.
+- A question from work is answered only in its own chat, too: other chats' panels and other Macs show it without its buttons and reply box, and an answer left in a file, or carried from another Mac, is put away unread.
 - A password or key box shows only in the chat whose command asked for it, and only while that command waits.
-- Admin commands run with the system's own PATH, never the one the caller set.
-- "Let macOS ask, keep nothing" holds even if `config.json` loses the setting, and kept admin passwords are hidden in what commands print, as keys are.
+- No admin password is kept any more, and Config's Admin password setting is gone: every admin command asks for it, in macOS's own box (which now names the command) on this Mac, or in the panel's box over SSH, on Linux and from another device, sealed there for that one command. Passwords an earlier version kept are removed.
+- Admin commands run with the system's own PATH, never the one the caller set, and kept keys are hidden in what commands print.
 - Work the app moves to an older model now stays on it, and its card says so; a step sent to Haiku still runs on Sonnet.
-- Your other Macs no longer get the text an ask gives you to paste, or a prompt's full command.
+- Your other Macs no longer get the commands and texts work runs or sends: the text an ask gives you to paste, a prompt's command, a running or background command, or what an admin, file or release press is for.
 - A message passed on to work is marked as your own words only when the chat passes it on whole.

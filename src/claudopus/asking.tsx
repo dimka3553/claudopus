@@ -133,7 +133,8 @@ const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
   !isReply || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
-  if (one.chat) return answerElsewhere($, one, choice, isReply)
+  // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
+  if (one.chat) return
   const ask = one.ask
   const said = choice.trim()
   if (!ask || !said) return
