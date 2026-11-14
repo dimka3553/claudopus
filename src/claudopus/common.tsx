@@ -71,11 +71,14 @@ const RELOAD_GRACE = 30_000
 const pauseFrom = (one: { id: string; endedAt: number }) => Math.max(one.endedAt, lateFrom.get(`${one.id}:${one.endedAt}`) ?? 0)
 // Whether ended work is still in that pause at a time: a card that ended in the future, as from another clock, is not
 const isLingering = (one: { id: string; status: string; endedAt: number }, at: number) => one.status !== 'working' && one.endedAt > 0 && at >= pauseFrom(one) && at - pauseFrom(one) < LINGER
-// Work acting on the person's reply in their own words to an ask it keeps open: at work, drawn in the work's purple, with the ask
-// still there to answer. Only once it stops again with the ask open does it wait on the person
-const isActingOnReply = (one: { status: string; ask?: { replied?: unknown } }) => one.status === 'working' && Boolean(one.ask?.replied)
+// Work acting on the person's reply in their own words to an ask it keeps open: at work, drawn in the work's purple, its question
+// with the reply under it and nothing to press or type, as the person has answered. So from the moment the reply is sent: ended
+// work being started again with it (isWaking), and another chat's work until its own chat has taken the reply (actingOn). Only
+// once it stops again with the ask open does it wait on the person, with every answer back
+const isActingOnReply = (one: { id?: string; status: string; ask?: { at?: number; replied?: { isWaking?: boolean } } }) =>
+  Boolean(one.ask) && ((Boolean(one.ask?.replied) && (one.status === 'working' || Boolean(one.ask?.replied?.isWaking))) || actingOn.has(`${one.id}:${one.ask?.at}`))
 // An admin command held for the person's press needs them whatever else the work does
-const needsPerson = (one: { status: string; ask?: { replied?: unknown }; admins?: unknown[] }) => Boolean(one.admins?.length) || (Boolean(one.ask) && !isActingOnReply(one))
+const needsPerson = (one: { id?: string; status: string; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: unknown[] }) => Boolean(one.admins?.length) || (Boolean(one.ask) && !isActingOnReply(one))
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set<string>()
 // The engine's list of agents is read again this often, and the minutes move on

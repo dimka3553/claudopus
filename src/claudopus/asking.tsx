@@ -110,6 +110,9 @@ const DETAILS_IN_RELAY = 2000
 const sentReplies = new Map<string, Sent>()
 // An answer on its way, by the work it was written into: that work's next step reads it, and the card it belongs to says so
 const pending = new Map<string, string>()
+// Asks of another chat's work replied to here in words that hold them, by work and when it asked: acted on from the moment the reply
+// is left, until that chat's own file carries the reply
+const actingOn = new Set<string>()
 // The asks of this chat's work already answered, by work and when it asked
 const answeredAsks = new Set<string>()
 // Answers on their way, so a press hook can wait for the one its press started (a button's handler does not await it)
@@ -159,8 +162,9 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   if (told && !told.deny) return void (writtenIn(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line }), redraw($))
   await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line })
 }
-// A reply in the person's own words that does not settle the ask: the ask stays open on the card, with the reply under it, and the
-// work is told so; its card stays among the running cards while the work acts on it. A button pressed later still answers it
+// A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
+// and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its
+// buttons and box go at once, and come back only when the work asks again, or ends with the ask still open
 const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, target: string) => {
   // The same words twice at once count once; typed again later, after an earlier reply, they go again
   const key = `${one.id}:${ask.at}:${ask.text}:reply:${ask.replied?.at ?? ''}:${said}`
@@ -168,8 +172,9 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   answeredAsks.add(key)
   const at = await $.clock.now()
   let isHeld = false
+  const isWaking = (await read($, todos)).find(card => card.id === target)?.status !== 'working'
   await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
+    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
   // The box keeps its place, emptied, so the focus does not fall onto the ask's first button, which a stray key would press
@@ -178,7 +183,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line })
   redraw($)
-  if (inChat.has(one.id)) void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`)))
+  // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
+  if (inChat.has(one.id)) (inChat.delete(one.id), void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
   const to = `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
@@ -201,6 +207,8 @@ const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Se
 const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
+  // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
+  await update($, todos, list => list.map(card => (card.id === one.id && card.ask?.replied?.text === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? { ...card, ask: { ...card.ask, replied: { ...card.ask.replied, isWaking: true } } } : card)))
   sentReplies.set(one.id, { ...sent, to: 'work' })
   redraw($)
   // One message for a work: a second answer for the same one joins the first
@@ -251,6 +259,9 @@ const wakeCard = async ($: EngineInterface, target: string) => {
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
   if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
   await log($, `work ${target} not started again with an answer: ${reason}`)
+  // An ask its reply held waits on the person again, every answer back
+  const ids = new Set(answers.map(({ one }) => one.id))
+  await update($, todos, list => list.map(card => (ids.has(card.id) && card.ask?.replied?.isWaking ? { ...card, ask: { ...card.ask, replied: { text: card.ask.replied.text, at: card.ask.replied.at } } } : card)))
   for (const { one, sent } of answers) {
     sentReplies.set(one.id, { ...sent, to: 'chat' })
     const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))
@@ -298,7 +309,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   const isHeld = !settles(a.ask, a.words, true)
   if (isHeld) answeredAsks.delete(a.key)
   else inChat.delete(a.card.id)
-  await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at } } : undefined } : one)))
+  await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   drafts.delete(a.card.id)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
   writtenIn(to, a.card.id)
@@ -340,7 +351,7 @@ const sentLine = (one: Todo, now: number) => {
   const sent = sentReplies.get(one.id)
   // A held reply this copy did not send (before a reload, or from another chat) is still said under its ask
   const replied = one.ask?.replied
-  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You replied “${cut(replied.text, 60)}”; it still asks this`
+  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You replied “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · it is acting on it' : '; it still asks this'}`
   if (!sent) return ''
   if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}”. That Mac could not be reached; answer it in its own chat` : ''
   const newer = lineOf(one) !== sent.line
@@ -352,6 +363,6 @@ const sentLine = (one: Todo, now: number) => {
     chat: 'left in the chat, which carries the work on',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose work reads it at its next step`,
   }[sent.to]
-  if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'it is acting on it' : 'it has read it') : how}; it still asks this`
+  if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'it is acting on it' : 'it has read it') : how}${isActingOnReply(one) ? '' : '; it still asks this'}`
   return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
 }

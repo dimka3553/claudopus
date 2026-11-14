@@ -1,0 +1,2 @@
+- Once you have answered an ask, by a button or in your own words, its card keeps no buttons, reply box or send: a reply in words turns it purple with the question and your reply under it while the work acts on it, in the panel, in other chats' panels, in Details and in the terminal's band
+- When the work asks again, or ends with the ask still open, the ask comes back with its answers and an empty box, and the chat is shown it afresh

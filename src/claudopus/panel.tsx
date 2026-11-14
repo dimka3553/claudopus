@@ -67,6 +67,8 @@ const panelHooks = (on: On) => {
     const own = all.filter(one => !one.parentId)
     // The work of the other chats, by chat; an ask answered here leaves its card at once
     const otherChats = await read($, others)
+    // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
+    for (const one of cardsOf(otherChats)) if (one.ask?.replied) actingOn.delete(`${one.id}:${one.ask.at}`)
     const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
     const chat = await read($, me)
     const at = await $.clock.now()
@@ -82,7 +84,7 @@ const panelHooks = (on: On) => {
     // Work the app sent to an older model says which one it was kept off; work that answers from one all the same says so
     const offModel = (one: Todo) => (rightModel(one.model ?? '') ? 'not a model work should run on' : one.moved ? `kept off ${one.moved}` : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -163,6 +165,14 @@ const panelHooks = (on: On) => {
       if (!ask) return null
       const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
       const lost = sentLine(one, at)
+      // Answered in the person's own words and acted on: its question, with their reply under it, and nothing to press or type
+      if (isActingOnReply(one))
+        return (
+          <Box key={key} flexDirection="column" gap={1}>
+            <Text wrap="wrap" color={LIVE} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
+            {lost ? <Text key={`${key}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{lost}</Text> : null}
+          </Box>
+        )
       return (
         <Box key={key} flexDirection="column" gap={1}>
           {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
@@ -799,7 +809,7 @@ const panelHooks = (on: On) => {
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>{needsPerson(one) ? 'Needs you now' : 'Acting on your reply; it still asks'}</Text>
+                <Text bold dimColor>{needsPerson(one) ? 'Needs you now' : 'Acting on your reply'}</Text>
                 {askBlock(one, `ask-big-${one.id}`, true)}
               </Box>
             </Box>

@@ -22,7 +22,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // What the person allowed it under "Ask once per piece of work" ends with it
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, status, endedAt: at, bg: undefined, waitsSince: undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
 // a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
 // such command: it may run until stopped
