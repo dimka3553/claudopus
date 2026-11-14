@@ -785,7 +785,7 @@ const panelHooks = (on: On) => {
     const helpersPart = (one: Todo) => {
       const under = underOf(all, one.id)
       const branches = [...jobBranches(one, true), ...withJobs(branchesOf(all, one.id, () => true), true)]
-      const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid, at).length, 0)
+      const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid, at).reduce((sum, job) => sum + (job.count ?? 1), 0), 0)
       if (!under.length && !jobs) return null
       const running = under.filter(kid => kid.status === 'working').length
       // Beside the jobs, the helpers are named, so neither count reads as the other's

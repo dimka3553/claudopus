@@ -951,14 +951,14 @@ test('what a piece of work and its helpers have running is in its Details too, e
   const picked = rows.flatMap((text, i) => (/^Server · |^Download · /.test(text) ? [`${rows[i - 2]} ${text}`] : []))
   expect(picked).toEqual(['├─── Server · Serve the site', ...[1, 2, 3, 4].map(n => `  ├─── Download · Download weights ${n}`), '  └─── Download · Download weights 5'])
   const shown = await texts(tab)
-  expect(shown.some(text => /more running/.test(text))).toBe(false)
+  expect(shown.some(text => /more (running|jobs)/.test(text))).toBe(false)
   expect((await tab.find({ type: 'Text', text: /^Helpers and jobs$/ }))?.props.bold).toBe(true)
   expect(shown).toContain('6 jobs running · 1 helper at work')
   await tab.unmount()
   // The card on the list still folds the helper's jobs past JOBS_SHOWN into one row
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   expect((await texts(list)).filter(text => /Download weights/.test(text))).toHaveLength(3)
-  expect((await texts(list)).some(text => /^2 more running/.test(text))).toBe(true)
+  expect((await texts(list)).some(text => /^2 more jobs/.test(text))).toBe(true)
   await list.unmount()
   // The helper's own Details, with no helpers of its own, shows what it has running
   const helperTab = await $.ui.mount({ ...LIST, requestId: 'work-a2', props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
