@@ -127,6 +127,10 @@ if (isNewer(version, newest)) {
 // `--notes` prints the GitHub release's text for plugin.json's version, from its changelog entry, and writes nothing: release
 // makes the version's GitHub release with it, so the repo page's latest release and its badge are always the version installs get
 if (process.argv.includes('--notes')) {
+  if (process.env.RELEASE_VERSION && process.env.RELEASE_VERSION !== version) {
+    console.error(`Release is making ${process.env.RELEASE_VERSION}, but plugin.json says ${version}.`)
+    process.exit(1)
+  }
   const entry = versionsIn(changelog).find(v => v.version === version)
   if (!entry?.changes.length) {
     console.error(`Version ${version} has no changelog entry to make its GitHub release from.`)

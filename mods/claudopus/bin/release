@@ -6,7 +6,8 @@
 # left that the repo does not track, runs the repo's checks on the result, pushes main and the version's tag.
 #   release --status   says who is releasing in this repo now, and since when
 # Exit: 0 released; 2 main and the branch changed the same lines (merge main into the branch, resolve, commit, run again);
-#       3 the build or the checks failed (fix on the branch, run again); 4 main was pushed but its tag or its GitHub release was
+#       3 the build or the checks failed (fix on the branch, run again), or, with GITHUB_RELEASE, its notes could not be made
+#       or gh cannot make the release (not installed, not signed in, no write access to the repo: fix that, run again); 4 main was pushed but its tag or its GitHub release was
 #       not (it says the one command that finishes it); 1 anything else. Nothing is pushed unless it exits 0 or 4.
 # Settings, all optional, in the repo's committed `.release` (bash): MAIN (main), REMOTE (origin), NAME (put before the version
 # in the title), VERSION_FILE (a JSON file with "version": "x.y.z", or a file holding only x.y.z), DERIVED (files the build
@@ -171,6 +172,9 @@ for try in 1 2 3 4 5; do
     RELEASE_VERSION=$ver bash -c "$GITHUB_RELEASE" >"$notes" 2>"$notes.err" && [ -s "$notes" ] || { tail -5 "$notes.err" >&2; die "the GitHub release notes for $ver could not be made; nothing pushed" 3; }
     command -v gh >/dev/null || die "GITHUB_RELEASE is set but gh is not installed; nothing pushed" 3
     gh auth status >/dev/null 2>&1 || die "gh is not signed in to GitHub (gh auth login), so the GitHub release could not be made; nothing pushed" 3
+    # owner/repo is the remote URL's last two parts, whatever its form (https, ssh, an ssh host alias)
+    repo=$(printf %s "$url" | sed -E 's#/+$##; s#\.git$##' | awk -F'[/:]' '{ print $(NF-1) "/" $NF }')
+    [ "$(gh api "repos/$repo" --jq .permissions.push 2>/dev/null)" = true ] || die "gh cannot write to $repo on GitHub, so its release could not be made; nothing pushed" 3
   fi
   what=${title:-$(git log --no-merges -1 --format=%s "$base..$branch")}
   label=${NAME:+$NAME }${ver:+$ver: }
@@ -179,13 +183,14 @@ for try in 1 2 3 4 5; do
     sha=$(git rev-parse --short HEAD)
     failed=""
     if [ -n "$ver" ]; then
+      kept="$common/release-notes-v$ver.md"
+      retry="gh release create v$ver --repo \"${repo:-}\" --title \"${NAME:+$NAME }$ver\" --notes-file \"$kept\" --latest --verify-tag"
       if ! { git tag -f "v$ver" >/dev/null && RELEASE_PUSH=1 git push -q "$REMOTE" "v$ver" 2>/dev/null; }; then
-        failed="RELEASE FAILED: $MAIN was pushed as $sha, but its tag v$ver was not. Finish it with: git push $REMOTE v$ver"
+        failed="RELEASE FAILED: $MAIN was pushed as $sha, but its tag v$ver was not. Finish it with: git push $REMOTE $sha:refs/tags/v$ver"
+        [ -n "$GITHUB_RELEASE" ] && { cp "$notes" "$kept"; failed="$failed, then: $retry"; }
       elif [ -n "$GITHUB_RELEASE" ]; then
-        repo=$(printf %s "$url" | sed -E 's#^.*github\.com[:/]##; s#\.git$##')
-        kept="$common/release-notes-v$ver.md"
-        retry="gh release create v$ver --repo $repo --title '${NAME:+$NAME }$ver' --notes-file '$kept' --latest --verify-tag"
-        if ! out=$(gh release create "v$ver" --repo "$repo" --title "${NAME:+$NAME }$ver" --notes-file "$notes" --latest --verify-tag 2>&1); then
+        if ! out=$(gh release create "v$ver" --repo "$repo" --title "${NAME:+$NAME }$ver" --notes-file "$notes" --latest --verify-tag 2>&1) \
+          && ! gh release view "v$ver" --repo "$repo" >/dev/null 2>&1; then
           cp "$notes" "$kept"; echo "$out" | tail -5 >&2
           failed="RELEASE FAILED: $MAIN and tag v$ver were pushed, but GitHub's release for v$ver was not made. Finish it with: $retry"
         elif [ "$(gh release view --repo "$repo" --json tagName --jq .tagName 2>/dev/null)" != "v$ver" ]; then
