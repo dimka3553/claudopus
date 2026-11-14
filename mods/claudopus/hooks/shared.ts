@@ -39,7 +39,7 @@ export const shareable = (list: readonly Todo[], now = 0): Todo[] =>
 
 // What tells one shared state from another, the running times aside: a file is written again when it changes or its beat is due
 export const signOf = (cards: readonly Todo[]) =>
-  JSON.stringify(cards.map(one => [one.id, one.status, one.title, one.model, one.tokens, one.items, one.entries.at(-1)?.text ?? '', one.ask?.text ?? '', one.ask?.at ?? 0, one.ask?.copy ?? '', one.ask?.choices ?? [], one.ask?.replied?.at ?? 0]))
+  JSON.stringify(cards.map(one => [one.id, one.status, one.title, one.model, one.tokens, one.items, one.entries.at(-1)?.text ?? '', one.ask?.text ?? '', one.ask?.at ?? 0, one.ask?.copy ?? '', one.ask?.choices ?? [], one.ask?.replied?.at ?? 0, Boolean(one.ask?.replied?.isWaking)]))
 
 // The prompts a chat's file carries, as far as they are whole: at most a few, each cut short
 const PROMPTS_SHARED = 6
@@ -123,7 +123,7 @@ const firstStart = (s: Shared) => {
   return running.length ? Math.min(...running.map(one => one.startedAt)) : Number.MAX_SAFE_INTEGER
 }
 // An ask whose work is at work on the person's reply to it does not wait on them
-const waits = (s: Shared) => (s.prompts?.length ? 2 : s.cards.some(one => one.ask && !(one.status === 'working' && one.ask.replied)) ? 1 : 0)
+const waits = (s: Shared) => (s.prompts?.length ? 2 : s.cards.some(one => one.ask && !(one.ask.replied && (one.status === 'working' || one.ask.replied.isWaking))) ? 1 : 0)
 export const ordered = (list: readonly Shared[]) =>
   [...list].sort((a, b) => waits(b) - waits(a) || firstStart(a) - firstStart(b) || chatName(a).localeCompare(chatName(b)))
 

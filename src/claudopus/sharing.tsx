@@ -389,6 +389,7 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   if (!isHeld) replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   if (isReply) freeTimes()
   answeredHere.add(mark)
+  if (isHeld) actingOn.set(`${one.id}:${ask.at}`, said)
   const at = await $.clock.now()
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line: lineOf(one), isHeld })
   redraw($)
@@ -396,6 +397,7 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   const r = await leaveAnswer($, chat, answer)
   if (r.exitCode !== 0) {
     answeredHere.delete(mark)
+    actingOn.delete(`${one.id}:${ask.at}`)
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost', at, line: lineOf(one) })
     redraw($)
     await log($, `answer for the chat ${chat.id}${chat.host ? ` on ${chat.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)
