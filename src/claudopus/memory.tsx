@@ -64,7 +64,7 @@ const memoryRead = async ($: EngineInterface, path: string) => {
 // A memory link pressed: a result's own path opens that result's tab, any other file a tab of its own, named after its heading
 const openMemory = ($: EngineInterface, path: string) => {
   presses += 1
-  void (async () => {
+  void comingTab((async () => {
     const report = path.slice(dir.length + 1).match(/^reports\/([^/]+)/)?.[1]
     if (report && (await read($, reports)).some(one => one.id === report)) return openReport($, report)
     const id = memoryPaneOf(path)
@@ -77,7 +77,7 @@ const openMemory = ($: EngineInterface, path: string) => {
     // The memory folder itself is named Memory, as its button; else its heading would read 'claudopus' beside the panel's tab
     await front($, id, path === dir ? 'Memory' : cut(heading || fileName(path), 30))
     redraw($)
-  })().catch(err => log($, `memory file ${path} not opened: ${String(err)}`))
+  })()).catch(err => log($, `memory file ${path} not opened: ${String(err)}`))
 }
 
 // Memory: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on

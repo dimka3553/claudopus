@@ -38,7 +38,7 @@ const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my pri
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean } } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -137,7 +137,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('session.id', () => ({ value: 'engine-id' }))
   // A chat drawn on the desktop app, as most are; `headless` none, as a -p run
-  on('session.surfaces', () => ({ value: options.headless ? [] : ['desktop'] }) as never)
+  // `narrow`: a terminal under 144 columns, as a phone over ssh, which draws only a tab opened as the person asked: here, one opened
+  // while the test's press is still being answered (isPressing). The engine counts only what the press's own hook opens, which the kit
+  // cannot tell from what a button's closure opens in that time; tabmoves.test.tsx holds the hand-over to the hook itself
+  on('session.surfaces', () => ({ value: options.headless ? [] : options.narrow ? ['terminal'] : ['desktop'] }) as never)
   on('session.version', () => ({ value: { version: '2.1.321', base: '2.1.321' } }))
   // The chat of a piece of work as the engine keeps it, or its refusal to read one
   // A promise given as the chat is one the app is slow to give
@@ -297,6 +300,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     tabs.push(`${e.id}: ${e.title}`)
     // A screen with nowhere to draw a pane, as a Remote Control chat seen from another device
     if (options.unplaced) return { value: { isPlaced: false, reason: 'no-surface' } } as never
+    if (options.narrow && !options.narrow.isPressing) {
+      if (options.live && !options.live.some(one => one.id === e.id)) options.live.push({ id: e.id, isShown: false, isPlaced: false })
+      return { value: { isPlaced: false, reason: 'unasked below 144 columns (42 now)' } } as never
+    }
     // `blind`: an engine with no surface to ask (a chat the app runs on another Mac over ssh) says nothing of any tab, drawn or not
     if (options.live && !options.live.some(one => one.id === e.id)) options.live.push({ id: e.id, isShown: false, isPlaced: !options.blind })
     return { value: { isPlaced: true } }
@@ -5591,7 +5598,7 @@ test('in the terminal an ask is above the prompt with its answers numbered, and 
   await app.unmount()
 })
 
-test('in the terminal each card has a number that opens it, Finished has f, and every tab has p back to the panel', async ($, on) => {
+test('in the terminal each card has a number that opens it, Finished has f, and every tab has Close on x', async ($, on) => {
   world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -5602,10 +5609,10 @@ test('in the terminal each card has a number that opens it, Finished has f, and 
   expect([card?.props.hotkey, card?.props.plain]).toEqual(['1', true])
   await pane.unmount()
 
-  // A tab of the mod's in the terminal: its first row goes back to the panel on p
+  // A tab of the mod's in the terminal: its first row closes it on x, back to the panel
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'terminal' } as never)
   const back = (await tab.findAll({ type: 'Button' })).find(one => one.key === 'tab-back')
-  expect([back?.props.label, back?.props.hotkey]).toEqual(['Panel', 'p'])
+  expect([back?.props.label, back?.props.hotkey]).toEqual(['Close', 'x'])
   await tab.unmount()
 
   // The app has its own pointer: no numbers, no row back
@@ -5615,6 +5622,40 @@ test('in the terminal each card has a number that opens it, Finished has f, and 
   const appTab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   expect((await appTab.findAll({ type: 'Button' })).find(one => one.key === 'tab-back')).toBeUndefined()
   await appTab.unmount()
+})
+
+test('in a narrow terminal a tab a press opens is drawn, and its Close shuts it and leaves the panel drawn', async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: true, isPlaced: true, isFocused: true }]
+  const narrow = { isPressing: false }
+  const { closed } = world(on, { narrow, live })
+  await $.session.start(start)
+  const placed = (id: string) => live.find(one => one.id === id)?.isPlaced
+  // What the press opens before it is answered counts as the person's asking; anything after is drawn nowhere
+  const press = async (pane: Parameters<typeof pressed>[0], key: string) => {
+    narrow.isPressing = true
+    await pressed(pane, key)
+    narrow.isPressing = false
+  }
+  // Stats pressed in the panel, which holds the keys: Stats is drawn, and so is the panel, opened again to let go of them
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, isFocused: true }, surface: 'terminal' } as never)
+  await press(pane, 'stats-open')
+  expect(placed('stats')).toBe(true)
+  expect(placed('claudopus')).toBe(true)
+  await pane.unmount()
+  // Its first row says Close on x; pressed, the tab closes and the panel, opened again to take the keys, is still drawn
+  const tab = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, isFocused: true }, surface: 'terminal' } as never)
+  await press(tab, 'tab-back')
+  expect(closed).toContain('stats')
+  expect(live.map(one => one.id)).toEqual(['claudopus'])
+  expect(placed('claudopus')).toBe(true)
+  await tab.unmount()
+  // A card's Details reads the card first: it too opens before the press is answered
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose.' } as never)
+  const again = await $.ui.mount({ ...LIST, props: { ...LIST.props, isFocused: true }, surface: 'terminal' } as never)
+  await press(again, 'open-a1')
+  expect(placed('work-a1')).toBe(true)
+  await again.unmount()
 })
 
 // The admin gate: an admin command waits for the person's press on its work's card

@@ -201,13 +201,13 @@ const loadFlows = async ($: EngineInterface) => {
 }
 const openFlow = ($: EngineInterface, id: string) => {
   presses += 1
-  void (async () => {
+  void comingTab((async () => {
     const f = (await read($, flows)).find(one => one.id === id)
     if (!f) return
     if (!(await $.ui.panes()).some(pane => pane.id === flowPaneOf(id))) (flowPicked.delete(id), pictureIn.delete(flowPaneOf(id)))
     await front($, flowPaneOf(id), cut(f.title, 30))
     redraw($)
-  })().catch(err => log($, `workflow ${id} not opened: ${String(err)}`))
+  })()).catch(err => log($, `workflow ${id} not opened: ${String(err)}`))
 }
 // The agent whose chat a workflow's Details tab shows: the one pressed, else the one at work, else the last
 const pickedOf = (f: Flow) => f.agents.find(one => one.id === flowPicked.get(f.id)) ?? [...f.agents].reverse().find(one => one.status === 'working') ?? f.agents.at(-1)

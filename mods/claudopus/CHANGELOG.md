@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.88 · 14 November 2026
+- In a narrow terminal, as on a phone over ssh, a button in the panel that opens a tab (Results, Stats, Memory, Config, About, a card's Details, a result) now opens it where you can see it, instead of opening nothing or making the panel vanish.
+- Every tab of the panel in the terminal starts with x: Close: click it, or press x once the tab has the keys (ctrl+x Tab), and the tab closes and the panel comes back.
+
 ## 0.2.87 · 13 November 2026
 - Admin commands ask before they run: when work wants to run a command as administrator, its card shows the exact command and the Mac, with Allow once, Always allow this command and Deny. Only your press in the panel allows it; nothing typed in a chat does, and Deny tells the work you refused it.
 - Config has a new part, Admin commands: ask each time (as shipped), once for a piece of work and its helpers until it ends, or never, as before. It lists the commands you always allow, each with Remove.

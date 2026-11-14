@@ -32,7 +32,7 @@ const SHIPPED_PRINCIPLES: string = '<shipped: rules/CLAUDE.md>'
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean } } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -131,7 +131,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('session.id', () => ({ value: 'engine-id' }))
   // A chat drawn on the desktop app, as most are; `headless` none, as a -p run
-  on('session.surfaces', () => ({ value: options.headless ? [] : ['desktop'] }) as never)
+  // `narrow`: a terminal under 144 columns, as a phone over ssh, which draws only a tab opened as the person asked: here, one opened
+  // while the test's press is still being answered (isPressing). The engine counts only what the press's own hook opens, which the kit
+  // cannot tell from what a button's closure opens in that time; tabmoves.test.tsx holds the hand-over to the hook itself
+  on('session.surfaces', () => ({ value: options.headless ? [] : options.narrow ? ['terminal'] : ['desktop'] }) as never)
   on('session.version', () => ({ value: { version: '2.1.321', base: '2.1.321' } }))
   // The chat of a piece of work as the engine keeps it, or its refusal to read one
   // A promise given as the chat is one the app is slow to give
@@ -291,6 +294,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     tabs.push(`${e.id}: ${e.title}`)
     // A screen with nowhere to draw a pane, as a Remote Control chat seen from another device
     if (options.unplaced) return { value: { isPlaced: false, reason: 'no-surface' } } as never
+    if (options.narrow && !options.narrow.isPressing) {
+      if (options.live && !options.live.some(one => one.id === e.id)) options.live.push({ id: e.id, isShown: false, isPlaced: false })
+      return { value: { isPlaced: false, reason: 'unasked below 144 columns (42 now)' } } as never
+    }
     // `blind`: an engine with no surface to ask (a chat the app runs on another Mac over ssh) says nothing of any tab, drawn or not
     if (options.live && !options.live.some(one => one.id === e.id)) options.live.push({ id: e.id, isShown: false, isPlaced: !options.blind })
     return { value: { isPlaced: true } }

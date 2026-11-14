@@ -6,7 +6,15 @@ const tabHooks = (on: On) => {
   // since the panel was last drawn, and the tabs as the engine lists them, so a press that did nothing shows whether it arrived at all
   on('ui.press', async ($, e, next) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
-    const r = await next(e)
+    // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
+    const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
+    if (isTerminal) tabMoves.begin()
+    let r: Awaited<ReturnType<typeof next>>
+    try {
+      r = await next(e)
+    } finally {
+      if (isTerminal) await tabMoves.finish(move => runTabMove($, move), ms => $.clock.sleep(ms))
+    }
     // An answer the press gave to work that had ended starts it again from here, inside the press's own hook (sendWakes)
     if (e.plugin === 'claudopus' && (answersOnWay.size || wakes.length)) await sendWakes($, true).catch(err => log($, `answer not sent: ${String(err)}`))
     return r
