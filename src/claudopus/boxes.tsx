@@ -38,6 +38,37 @@ const boxWording = (one: Record<string, unknown>): string | undefined => {
   return undefined
 }
 let boxes: Asked[] = []
+// What the person just did with a box or an admin command, shown a minute at the top of the panel where it was: what they did and
+// what happens now, so nothing that needed them just vanishes
+type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean }
+let doneNotes: DoneNote[] = []
+const DONE_SHOWN = 60_000
+const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
+  const at = await $.clock.now()
+  doneNotes = [...doneNotes.filter(one => one.id !== note.id && at - one.at < DONE_SHOWN), { ...note, at }].slice(-6)
+  $.ui.invalidate('ui.render')
+  // Drawn again as its minute ends, so it goes with nothing else to redraw the panel
+  $.clock.after(DONE_SHOWN + 100, () => $.ui.invalidate('ui.render'))
+}
+const doneNotesPart = (ui: Ui, at: number) =>
+  doneNotes
+    .filter(one => at - one.at < DONE_SHOWN)
+    .map(one => (
+      <ui.Box key={`done-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+        <ui.Box width={1} flexShrink={0} backgroundColor={one.isOn ? LIVE : FILL} />
+        <ui.Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
+          <ui.Text bold wrap="truncate-end">{one.head}</ui.Text>
+          <ui.Text wrap="wrap" color={one.isOn ? LIVE : undefined} bold={one.isOn}>{one.said}</ui.Text>
+          {one.what ? <ui.Text dimColor wrap="wrap">{one.what}</ui.Text> : null}
+        </ui.Box>
+      </ui.Box>
+    ))
+// What a box asks for, in a few words, for its note once answered
+const boxHead = (text: string) => {
+  const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
+  const mac = text.match(/admin password of (.+?) to run/)?.[1]
+  return mac ? `The admin password of ${mac}` : name ? `The key ${name}` : 'A key to save'
+}
 // What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
 const boxDrafts = new Map<string, string>()
 // A line under a box: what went wrong with what was sent
@@ -143,7 +174,9 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   } else {
     boxSent.add(id)
     boxSaid.delete(id)
-    boxes = boxes.filter(one => one.id !== id)
+    const one = boxes.find(other => other.id === id)
+    boxes = boxes.filter(other => other.id !== id)
+    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: "You gave it · it is in this Mac's keychain, and what asked for it goes on now", what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   $.ui.invalidate('ui.render')
@@ -152,8 +185,10 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
 const cancelBox = async ($: EngineInterface, id: string) => {
   boxDrafts.delete(id)
   boxSent.add(id)
-  boxes = boxes.filter(one => one.id !== id)
+  const one = boxes.find(other => other.id === id)
+  boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
+  if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: 'You cancelled · nothing was saved, and what asked for it stops without it', what: '' })
   $.ui.invalidate('ui.render')
 }
 

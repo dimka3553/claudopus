@@ -1,0 +1,4 @@
+- The app's prompts in the panel say in plain words which work asks, what exactly (the command, the message and the work it goes to, the page), what a yes and a no each do, and where to answer; no tool's own name such as "Allow SendMessage"
+- Once you answer one, the card says what you did and what is happening now (running, done, said no, or ended before you answered) for a minute, then goes, instead of staying or vanishing
+- Claudopus no longer asks you to allow its own messages that pass your reply on to work, or a Stop you pressed; those prompts used to pile up in every chat's panel and never clear
+- An admin command's card says what Allow and Deny each do, and after you press, or send or cancel a password or key box, the top of the panel says what you did and what happens now for a minute

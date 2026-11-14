@@ -101,7 +101,7 @@ export type Todo = {
 
 // What one chat shares with the panels of the others, in ~/.claude/claudopus/live/<chat id>.json: its running work, and when it last
 // said so. `host` is the Mac it was fetched from, empty for this one
-export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; prompts?: Prompt[]; link?: Link }
+export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; prompts?: Prompt[]; answeredPrompts?: Prompt[]; link?: Link }
 // What opens a chat in the Claude app: its Remote Control id (session_…), which opens it from any Mac signed in to the same account,
 // and the app's own id for it (local_…), which opens it only on the Mac it runs on
 export type Link = { bridge: string; app: string }
@@ -109,7 +109,23 @@ export type Link = { bridge: string; app: string }
 // The app's own prompt open in a chat and waiting on the person: allow a command or a tool, answer its question, approve its plan.
 // `id` is the tool call's, `text` the prompt's own short description, `title` the work it came from when not the chat's own thread,
 // `at` when it opened. `link` on Shared opens that chat in the Claude app on its own Mac
-export type Prompt = { id: string; text: string; title?: string; at: number }
+// `kind` says what the person does (allow a call, answer a question, approve a plan), `detail` what exactly (the command, the message,
+// the page), `yes` and `no` what each answer does. Once answered it moves to Shared's `answeredPrompts`: `answered` is what the person
+// did (yes, no, an answer to a question, or nothing as it ended first), `isRunning` while an allowed call still runs, `endedAt` when
+// it ended, after which it shows a minute more
+export type Prompt = {
+  id: string
+  text: string
+  title?: string
+  at: number
+  kind?: 'allow' | 'question' | 'plan'
+  detail?: string
+  yes?: string
+  no?: string
+  answered?: 'yes' | 'no' | 'stopped'
+  isRunning?: boolean
+  endedAt?: number
+}
 
 // The card that has the pane to itself, by id; empty while the small cards show
 // `open` names what is unfolded in that card's chat: a run of tool steps by the number of steps before it, a long message by that number negated less one

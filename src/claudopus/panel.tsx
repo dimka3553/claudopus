@@ -70,6 +70,9 @@ const panelHooks = (on: On) => {
     const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
     const chat = await read($, me)
     const at = await $.clock.now()
+    // Prompts answered here and in other chats, for a minute after their call ended
+    const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
+    const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
     const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince)
@@ -818,22 +821,56 @@ const panelHooks = (on: On) => {
       )
     }
 
-    // The app's own prompt open in a chat, amber at the top of that chat's cards: what it asks in its own few words, the work it came
-    // from, and where to answer it. A chat of the Claude app on this Mac opens at a press; the panel answers no prompt itself
+    // The app's own prompt open in a chat, amber at the top of that chat's cards, in plain words: which work asks, what it asks, exactly
+    // what (the command, the message), what a yes and a no each do, and where to answer it. A chat of the Claude app on this Mac opens
+    // at a press; the panel answers no prompt itself
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
       <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
         <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
         <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
           <Box flexDirection="column">
-            <Text bold wrap="truncate-end">{p.title || 'Needs your input'}</Text>
-            <Text dimColor wrap="truncate-end">{where}</Text>
+            <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+            <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
           </Box>
           <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
-          {c ? (
+          {p.detail ? (
+            <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
+              <Text mono wrap="wrap">{p.detail}</Text>
+            </Box>
+          ) : null}
+          {p.yes || p.no ? (
+            <Box flexDirection="column">
+              {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
+              {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
+            </Box>
+          ) : null}
+          <Text dimColor wrap="wrap">{where}</Text>
+          {c && pressOf(c) ? (
             <Box flexDirection="row">
               <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
             </Box>
           ) : null}
+        </Box>
+      </Box>
+    )
+    // Where a prompt is answered: in this chat, the box Claude Code shows at its bottom
+    const answerHere = (p: Prompt) => (p.kind === 'question' ? 'Pick your answer in the box at the bottom of this chat.' : 'Answer Yes or No in the box at the bottom of this chat.')
+    // The same prompt once answered, for a minute after its call ends: what the person said and what is happening now, in the colour
+    // of what came of it (purple while it runs, grey once over)
+    const saidOf = (p: Prompt) => {
+      if (p.answered === 'stopped') return 'It ended before you answered · nothing happened'
+      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · it carries on without your answer' : p.kind === 'plan' ? 'You said no · it keeps planning' : 'You said no · it did not happen, and the work was told'
+      if (p.kind === 'question') return p.isRunning ? 'You answered · it is taking your answer' : 'You answered · it carries on with your answer'
+      if (p.kind === 'plan') return 'You approved the plan · it is carrying it out'
+      return p.isRunning ? 'You allowed it · it is running now' : 'You allowed it · it ran and is done'
+    }
+    const answeredCard = (p: Prompt, key: string, c?: Shared) => (
+      <Box key={`answered-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+        <Box width={1} flexShrink={0} backgroundColor={p.isRunning ? LIVE : FILL} />
+        <Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
+          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+          <Text wrap="wrap" color={p.isRunning ? LIVE : undefined} bold={p.isRunning}>{saidOf(p)}</Text>
+          <Text dimColor wrap="wrap">{p.text}</Text>
         </Box>
       </Box>
     )
@@ -877,7 +914,7 @@ const panelHooks = (on: On) => {
     // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none of these and no prompt
     // is not listed at all, however many are open: the app's own list of chats has them
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
-    const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
+    const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length || answeredOf(c.answeredPrompts).length)
     const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
@@ -1052,7 +1089,7 @@ const panelHooks = (on: On) => {
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     // A password or key box stays above it: the runner waits on it
-    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{screen}</Box>
+    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{doneNotesPart(ui, at)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
     return (
@@ -1101,6 +1138,7 @@ const panelHooks = (on: On) => {
         ) : null}
         {!alone ? boxesPart($, ui) : null}
         {!alone ? gatesPart($, ui) : null}
+        {!alone ? doneNotesPart(ui, at) : null}
         {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
@@ -1108,8 +1146,9 @@ const panelHooks = (on: On) => {
           : [
               // This chat's work first, named as this chat's once another chat's is shown; work that needs the person's hands comes first
               // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
-              ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-              ...waiting.map(p => promptCard(p, `this-${p.id}`, 'Answer it in this chat')),
+              ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
+              ...waiting.map(p => promptCard(p, `this-${p.id}`, answerHere(p))),
+              ...promptsAnswered.map(p => answeredCard(p, `this-${p.id}`)),
               ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, those that wait on the person first
               ...listedChats.flatMap(c => {
@@ -1118,7 +1157,8 @@ const panelHooks = (on: On) => {
                 // In a chat another Mac's app runs here, that Mac opens it
                 const url = pressOf(c)
                 const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', url ? c : undefined))
-                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...cards.map(one => small(one))]
+                const answered = answeredOf(c.answeredPrompts).map(p => answeredCard(p, `${c.host}-${c.chat}-${p.id}`, c))
+                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...answered, ...cards.map(one => small(one))]
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}

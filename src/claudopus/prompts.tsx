@@ -17,24 +17,59 @@ const askedFor = (agent: string | undefined, tool: string, input: unknown) => {
   if (one) asked = asked.filter(other => other !== one)
   return one?.id
 }
-// What the prompt asks, in its own few words: a command's description, the file, the site, the question
-const promptText = (tool: string, input: unknown) => {
+// What the prompt asks, in plain words and never a tool's own name: what is asked, exactly what (the command, the message, the page),
+// and what a yes and a no each do. A message names the work it goes to, by its card
+type Asks = Pick<Prompt, 'text' | 'kind' | 'detail' | 'yes' | 'no'>
+const NO_SKIPS = 'No: it does not happen; the work is told you said no and carries on without it.'
+const promptOf = (tool: string, input: unknown, list: Todo[]): Asks => {
   const given = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
   const field = (key: string) => (typeof given[key] === 'string' ? oneLine(given[key] as string) : '')
+  const whole = (key: string, max: number) => (typeof given[key] === 'string' ? cut((given[key] as string).trim(), max) : '')
   const file = (path: string) => path.split('/').filter(Boolean).pop() ?? ''
-  if (tool === 'Bash' || tool === 'PowerShell') return `Allow a command: ${cut(field('description') || field('command'), 90) || 'one with no words'}`
-  if (tool === 'Write') return `Allow writing ${file(field('file_path')) || 'a file'}`
-  if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit') return `Allow editing ${file(field('file_path') || field('notebook_path')) || 'a file'}`
-  if (tool === 'WebFetch') return `Allow opening ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'a web page'}`
-  if (tool === 'WebSearch') return `Allow a web search: ${cut(field('query'), 80)}`
+  const workNamed = (id: string) => {
+    if (!id) return ''
+    if (id === 'main' || id === 'parent') return 'this chat'
+    const card = list.find(one => one.id === id) ?? list.find(one => id.startsWith(one.id) || one.id.startsWith(id))
+    return card ? `“${titleOf(card)}”` : 'a piece of work'
+  }
+  const allow = (text: string, yes: string, detail = '', no = NO_SKIPS): Asks => ({ text, kind: 'allow', ...(detail ? { detail } : {}), yes: `Yes: ${yes}`, no })
+  if (tool === 'Bash' || tool === 'PowerShell')
+    return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'one with no words'}`, 'the command runs on this Mac.', whole('command', 400))
+  if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'the file is saved, replacing any file of that name.', field('file_path'))
+  if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit')
+    return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'the change is made to the file.', field('file_path') || field('notebook_path'))
+  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'it reads the file; nothing is changed.', field('file_path'))
+  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'it searches; nothing is changed.', field('path'))
+  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'it reads the page; nothing is sent but the address.', field('url'))
+  if (tool === 'WebSearch') return allow(`Search the web for “${cut(field('query'), 80)}”`, 'it searches the web and reads the results.')
+  if (tool === 'SendMessage') {
+    const to = workNamed(field('to'))
+    return allow(
+      to === 'this chat' ? 'Pass a message back to this chat' : `Pass a message to the work ${to}`,
+      to === 'this chat' ? 'the chat gets the message.' : 'that work gets the message and acts on it.',
+      whole('message', 400) || field('summary'),
+      to === 'this chat' ? NO_SKIPS : 'No: that work does not get it and goes on as it was; the chat is told you said no.',
+    )
+  }
+  if (tool === 'Agent' || tool === 'Task')
+    return allow(`Start a piece of work: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), 'No: it is not started; the chat is told you said no.')
+  if (tool === 'TaskStop') return allow(`Stop the work ${workNamed(field('task_id') || field('id'))}`, 'that work is stopped where it is.', '', 'No: that work keeps running.')
+  if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`, 'it loads those instructions and follows them.')
   if (tool === 'AskUserQuestion') {
     const first = Array.isArray(given.questions) ? (given.questions[0] as { question?: unknown } | undefined)?.question : undefined
-    return typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 90)}` : 'Answer a question'
+    return {
+      text: typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 120)}` : 'Answer a question',
+      kind: 'question',
+      yes: 'Pick an answer: it goes back and the work carries on with it.',
+      no: 'Skip it: the work carries on without your answer.',
+    }
   }
-  if (tool === 'ExitPlanMode') return 'Approve a plan'
+  if (tool === 'ExitPlanMode')
+    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: it starts doing what the plan says.', no: 'No: it keeps planning; say what to change.' }
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
-  if (mcp) return `Allow ${(mcp[2] ?? '').replace(/_/g, ' ')} (${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '')})`
-  return `Allow ${tool}`
+  const words = field('description') || field('text') || field('query') || field('title') || field('name') || field('url')
+  if (mcp) return allow(`Use “${(mcp[2] ?? '').replace(/_/g, ' ')}” from ${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '').replace(/[_-]/g, ' ')}`, 'it runs that action.', cut(words, 300))
+  return allow(words ? `Use a tool: ${cut(words, 90)}` : 'Use one of its tools', 'it runs.', '')
 }
 // The start of a command up to its first quote, `$` or line break, as a running shell shows it whatever the quoting
 const snippetOf = (tool: string, input: unknown) => {
@@ -54,7 +89,7 @@ const opened = async ($: EngineInterface, agent: string | undefined, tool: strin
   const id = askedFor(agent, tool, input) ?? `pr-${at}-${Math.random().toString(36).slice(2, 8)}`
   const list = await read($, todos)
   const card = agent !== undefined ? list.find(one => one.id === topOf(list, agent)) : undefined
-  const one: Waiting = { id, text: promptText(tool, input), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input) }
+  const one: Waiting = { id, ...promptOf(tool, input, list), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input) }
   waiting = [...waiting.filter(other => other.id !== id), one]
   redraw($)
   void shareMine($).catch(() => undefined)
@@ -75,14 +110,42 @@ const tellWaiting = async ($: EngineInterface) => {
   const chat = title.trim() || cwd.split('/').filter(Boolean).pop() || 'A chat'
   for (const one of due) await aloud($, 'prompt', `${one.title ?? chat} needs your OK`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`))
 }
-// The prompt of a call goes: by its id, else the oldest one of the same loop and tool whose id was not known
-const settle = ($: EngineInterface, id: string, agent?: string, tool?: string) => {
+// The prompt of a call goes: by its id, else the oldest one of the same loop and tool whose id was not known. With what came of it,
+// it stays, answered: allowed and running, then ended (allowed and run, refused, or ended before an answer) for PROMPT_SHOWN more.
+// Without (a settings hook answered it), it goes at once: nothing was put to the person
+type Outcome = 'running' | 'ran' | 'no' | 'stopped'
+let answeredPrompts: Waiting[] = []
+const PROMPT_SHOWN = 60_000
+const answeredShown = (at: number) => answeredPrompts.filter(one => !one.endedAt || at - one.endedAt < PROMPT_SHOWN)
+const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, outcome?: Outcome) => {
+  const byTool = (one: Waiting) => one.id.startsWith('pr-') && one.tool === tool && one.agent === (agent ?? '')
   const exact = waiting.find(one => one.id === id)
-  const gone = exact ?? (tool ? waiting.find(one => one.id.startsWith('pr-') && one.tool === tool && one.agent === (agent ?? '')) : undefined)
-  if (!gone) return
-  waiting = waiting.filter(one => one !== gone)
+  const gone = exact ?? (tool ? waiting.find(byTool) : undefined)
+  const was = gone ? undefined : (answeredPrompts.find(one => one.id === id && !one.endedAt) ?? (tool ? answeredPrompts.find(one => byTool(one) && !one.endedAt) : undefined))
+  if (!gone && !was) return
+  if (gone) waiting = waiting.filter(one => one !== gone)
+  if (outcome) {
+    void $.clock.now().then(now => {
+      const before = gone ?? was
+      if (!before) return
+      const isEnd = outcome !== 'running'
+      const answered: Prompt['answered'] = outcome === 'no' ? 'no' : outcome === 'stopped' ? (before.answered === 'yes' ? 'yes' : 'stopped') : 'yes'
+      const after: Waiting = { ...before, answered, isRunning: !isEnd, ...(isEnd ? { endedAt: now } : {}) }
+      answeredPrompts = [...answeredShown(now).filter(one => one.id !== before.id), after].slice(-10)
+      redraw($)
+      void shareMine($).catch(() => undefined)
+      if (isEnd) $.clock.after(PROMPT_SHOWN + 100, () => (redraw($), void shareMine($).catch(() => undefined)))
+    })
+  }
   redraw($)
   void shareMine($).catch(() => undefined)
+}
+// What came of a call, as it ended: refused, ended before it ran (interrupted), or run
+const outcomeOf = (r: { deny?: unknown; result?: unknown } | undefined): Outcome => {
+  if (!r) return 'stopped'
+  if (r.deny) return 'no'
+  const text = typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? '').slice(0, 2000)
+  return /doesn't want to proceed|tool use was rejected|user (denied|rejected)/i.test(text) ? 'no' : 'ran'
 }
 // A command allowed starts at once: a process on this Mac running it ends its prompt before the command itself ends
 let isLooking = false
@@ -93,17 +156,24 @@ const lookForStarted = async ($: EngineInterface) => {
   try {
     const lines = await running($)
     if (!lines) return
-    for (const one of sought) if (countOf(lines, one.snippet) > (one.seen ?? 0)) settle($, one.id)
+    for (const one of sought) if (countOf(lines, one.snippet) > (one.seen ?? 0)) settle($, one.id, undefined, undefined, 'running')
   } finally {
     isLooking = false
   }
 }
+
+const OWN_CALLS = ['SendMessage', 'TaskStop']
+const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
 const promptHooks = (on: On) => {
 
   // A prompt the app is about to put to the person shows amber in every panel; the mod passes the request on untouched and never
   // answers it. A settings hook that answered it put nothing to the person
   on('tool.check', async ($, e, next) => {
+    // The mod's own calls carry out what the person already chose: their reply passed on to work, a Stop they pressed. The engine
+    // would put each to them again as "Allow SendMessage", a prompt that says nothing of what it is, and no hook of the mod sees that
+    // call end, so it never left the panel. Only these two tools, and only the mod's own calls of them, are allowed here
+    if (OWN_CALLS.includes(e.tool) && e.tool_use_id && isOwnCall(next as { origin?: { plugin?: string } })) return { decision: 'allow' }
     const r = await next(e)
     if (r.decision === 'ask' && e.tool_use_id && e.approver) {
       asked = [...asked.filter(one => one.id !== e.tool_use_id), { agent: e.agentId ?? '', tool: e.tool, input: inputKey(e.input), id: e.tool_use_id }].slice(-50)
@@ -124,7 +194,7 @@ const promptHooks = (on: On) => {
   // running pill
   on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => {
     const id = e.props.tool_use_id
-    if (waiting.some(one => one.id === id)) void Promise.resolve().then(() => settle($, id))
+    if (waiting.some(one => one.id === id)) void Promise.resolve().then(() => settle($, id, undefined, undefined, 'running'))
     return next(e)
   })
 

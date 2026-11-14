@@ -43,7 +43,7 @@ const workHooks = (on: On) => {
       } finally {
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
-        settle($, e.tool_use_id, e.agentId, e.tool)
+        settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never))
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
         if (grants.length && !(e as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
       }
