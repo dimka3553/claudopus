@@ -86,6 +86,7 @@ const chatHooks = (on: On) => {
     // reached nothing. Keys no load before used make it take each button afresh: the moment of the load, with room for a thousand presses
     if ((await $.ui.panes().catch(() => [])).length) presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000
     await loadSettings($)
+    await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)
     $.clock.after(3000, () => closeUndrawn($))

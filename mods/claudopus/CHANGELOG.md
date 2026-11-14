@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.87 · 13 November 2026
+- Admin commands ask before they run: when work wants to run a command as administrator, its card shows the exact command and the Mac, with Allow once, Always allow this command and Deny. Only your press in the panel allows it; nothing typed in a chat does, and Deny tells the work you refused it.
+- Config has a new part, Admin commands: ask each time (as shipped), once for a piece of work and its helpers until it ends, or never, as before. It lists the commands you always allow, each with Remove.
+- The admin tool itself now refuses a command you did not allow, so a script or another route to it is refused too. A setting or a list entry that work wrote for itself allows nothing.
+- New choice for the admin password: Let macOS ask, keep nothing. macOS asks for the password on this Mac's screen each time and none is kept; it works on this Mac only, and in a chat reached from another device admin commands are then refused. A kept password can be read by any process running as you, so only this choice is a wall.
+
 ## 0.2.86 · 13 November 2026
 - An ask now carries what it is about right under its question, on the card and in the chat's notice: a "Release it?" shows what goes out with it, instead of pointing at an explanation that only arrived with the work's report after it. Above the prompt, such an ask says the rest is in the chat and on its card.
 - Work that asks "as explained in the chat" without the explanation is refused and asks again with it.

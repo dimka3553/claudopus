@@ -130,6 +130,10 @@ const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
     }),
   ),
   config: await readConfig($, dir),
+  gate: await (async () => {
+    const [gate, kept] = [await gateOf($), await validAllowed($)]
+    return { mode: gate.mode, unsealed: gate.unsealed, password: gate.password, allowed: kept.valid.map(({ host, command }) => ({ host, command })), unsealedAllowed: kept.unsealed, isAfar: isRunFromAfar }
+  })(),
   // A config.json that does not read is said at once: until it is fixed every setting is as shipped
   failed:
     configFailed ||
@@ -176,6 +180,10 @@ const configActs = ($: EngineInterface) => ({
       // Automatic updates turned back on look at once when a look is due, not at the next quarter hour
       if (key === 'updates' && value === undefined) void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`))
     }),
+  // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
+  gateMode: (mode: 'each' | 'work' | 'never') => configAct($, 'Not saved', () => regate($, { mode })),
+  gatePassword: (value: 'keep' | 'macos') => configAct($, 'Not saved', () => setAdminPassword($, value)),
+  gateRemove: (host: string, command: string) => configAct($, 'Not removed', () => regate($, { remove: { host, command } })),
   // A press while a check runs does nothing: the tab shows it checking
   check: () => {
     if (updateCheck.isChecking) return

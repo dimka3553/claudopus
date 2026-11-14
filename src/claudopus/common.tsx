@@ -74,7 +74,8 @@ const isLingering = (one: { id: string; status: string; endedAt: number }, at: n
 // Work acting on the person's reply in their own words to an ask it keeps open: at work, drawn in the work's purple, with the ask
 // still there to answer. Only once it stops again with the ask open does it wait on the person
 const isActingOnReply = (one: { status: string; ask?: { replied?: unknown } }) => one.status === 'working' && Boolean(one.ask?.replied)
-const needsPerson = (one: { status: string; ask?: { replied?: unknown } }) => Boolean(one.ask) && !isActingOnReply(one)
+// An admin command held for the person's press needs them whatever else the work does
+const needsPerson = (one: { status: string; ask?: { replied?: unknown }; admins?: unknown[] }) => Boolean(one.admins?.length) || (Boolean(one.ask) && !isActingOnReply(one))
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set<string>()
 // The engine's list of agents is read again this often, and the minutes move on

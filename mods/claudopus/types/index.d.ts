@@ -69,6 +69,9 @@ export type Todo = {
   // `replied`: the person's reply in their own words that did not settle it; the ask stays open while the work acts on it, until a button, the work clearing it or asking again
   // `isCommand`: `copy` is a command the person types in a terminal opened in `cwd`. `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card). `pictures` are the picture files the ask is about, shown with it in the chat. `details` is what the ask is about, in full, shown with it on the card and in the chat
   ask?: { text: string; details?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; replied?: { text: string; at: number } }
+  // Admin commands it, or a helper of it, wants to run, each held until the person presses Allow or Deny on this card: the Mac
+  // (`here` or an ssh host), the exact command, the agent that runs it, and whether Allow covers the whole piece of work
+  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean }[]
   startedAt: number
   // 0 while it works
   endedAt: number
