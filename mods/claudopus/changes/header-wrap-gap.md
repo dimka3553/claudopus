@@ -1,0 +1,1 @@
+- The panel header's buttons keep a gap between rows when a narrow panel wraps them onto two lines.
