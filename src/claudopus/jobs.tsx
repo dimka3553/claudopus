@@ -5,7 +5,7 @@
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; pct?: string; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; isOwn?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -69,16 +69,16 @@ const keepDetached = async ($: EngineInterface, agent: string, call: { tool: str
   // not known); the process is the one `echo $!` printed. Without both it is not followed, so nothing stays on a card for ever
   const here = await $.session.cwd()
   const base = found.cd ? (found.cd.startsWith('/') ? found.cd : `${here}/${found.cd}`) : here
-  const log = found.log.startsWith('/') || found.log.startsWith('~/') ? found.log : `${base}/${found.log}`
-  if (!found.cd && !found.log.startsWith('/') && !found.log.startsWith('~/') && !(await $.fs.exists(log).catch(() => false))) return
-  // Only a command that printed its own process number with `echo $!`; another number it printed, as an http code, is not one
+  const logFile = found.log.startsWith('/') || found.log.startsWith('~/') ? found.log : `${base}/${found.log}`
+  if (!found.cd && !found.log.startsWith('/') && !found.log.startsWith('~/') && !(await $.fs.exists(logFile).catch(() => false))) return
+  // Only a command that printed its process with `echo $!` is followed by it: any other number it printed is no process
   const pid = /\$!/.test(command) ? pidOf(String((result as { stdout?: unknown } | undefined)?.stdout ?? '')) : undefined
   if (!pid) return
   const what = oneLine(String(call.description ?? '') || found.core).slice(0, 160)
   const now = await $.clock.now()
   const id = `detached-${String(call.tool_use_id ?? now)}`
   await update($, todos, list =>
-    list.map(one => (one.id === agent ? { ...one, detached: [...(one.detached ?? []), { id, what, at: now, cmd: oneLine(command).slice(0, 400), log, pid }].slice(-BG_KEPT) } : one)),
+    list.map(one => (one.id === agent ? { ...one, detached: [...(one.detached ?? []), { id, what, at: now, cmd: oneLine(command).slice(0, 400), log: logFile, pid }].slice(-BG_KEPT) } : one)),
   )
 }
 
@@ -171,8 +171,10 @@ const lookJobs = async ($: EngineInterface) => {
     const seen = latestOf(text)
     const was = jobLog.get(id)
     const wait = waits.find(w => w.id === id)
-    const next: Seen = { ...seen, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
+    // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
+    const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
+    const next: Seen = { ...seen, ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true
