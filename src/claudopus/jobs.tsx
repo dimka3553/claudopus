@@ -43,7 +43,8 @@ const jobsOf = (one: Todo, at: number): Job[] =>
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
-  const label = job.kind === 'wait' ? job.label.replace(/^wait(s|ing)?\s+/i, '') : job.label
+  // A wait leads with what it waits for, its own words after
+  const label = job.kind === 'wait' ? (job.waitsFor ?? job.label.replace(/^wait(s|ing)?\s+/i, '')) : job.label
   return `${kind} · ${label}`
 }
 

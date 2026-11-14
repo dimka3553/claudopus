@@ -53,12 +53,15 @@ export const portOf = (text: string) =>
   text.match(/(?:--port[= ]|-p |localhost:|127\.0\.0\.1:|0\.0\.0\.0:|\[::\]:|\bport )(\d{2,5})\b/i)?.[1] ?? text.match(/http\.server (\d{2,5})\b/)?.[1]
 
 // A percent is progress when a bar follows it (tqdm and the like), whatever words the line holds; else the first percent on a line
-// that also counts toward a total, a rate or a time left. A score, a coverage figure or a table cell is not
+// right beside a count toward a total. A score, a coverage figure or a table cell is not
 const pctOf = (line: string) => {
   const bar = line.match(/(\d{1,3}(?:\.\d+)?)\s?%\s*(\|[█▉▊▋▌▍▎▏░▒▓#\s]*\||\[[=#>.\s-]*\]|[█▉▊▋▌▍▎▏░▒▓])/)
   if (bar) return `${bar[1]}%`
-  const counts = /\b\d+\s?\/\s?\d+\b|\b\d+ of \d+\b|\b(it|s)\/s\b|[kMG]i?B\/s\b|\beta\b/i.test(line)
-  return counts ? line.match(/\b(\d{1,3}(?:\.\d+)?)\s?%/)?.[1]?.concat('%') : undefined
+  const before = line.match(/[█▉▊▋▌▍▎▏░▒▓#━]{4,}\s*(\d{1,3}(?:\.\d+)?)\s?%/)
+  if (before) return `${before[1]}%`
+  // Else a percent right beside a count toward a total, either way round
+  const near = line.match(/\b\d+\s?(?:\/|of)\s?\d+\b\D{0,8}?\b(\d{1,3}(?:\.\d+)?)\s?%/i) ?? line.match(/\b(\d{1,3}(?:\.\d+)?)\s?%\D{0,8}?\b\d+\s?(?:\/|of)\s?\d+\b/i)
+  return near ? `${near[1]}%` : undefined
 }
 // The engine's own last line on the output of a background command that has ended
 export const isOutputEnded = (text: string) => /\[exited with code [^\]\n]*\]\s*$/.test(text)
@@ -110,7 +113,7 @@ export const labelOf = (what: string, cmd: string) => {
 export type Wait = { what: string; pattern?: string; pid?: string; file?: string; isStart?: boolean }
 // A quoted word, blanked so what it holds splits nothing
 const unquoted = (text: string) => text.replace(/"(\\.|[^"\\])*"|'[^']*'/g, '""')
-const LIGHT = /^(date|tail|head|grep|rg|ls|cat|echo|printf|cut|wc|stat|du|sort|uniq|awk|sed|jq|true|cd|uptime|pwd|python3? -c ""|python3? -c ''|python3? -c ['"]import json)\b/
+const LIGHT = /^(date|tail|head|grep|rg|ls|cat|echo|printf|cut|wc|stat|du|sort|uniq|awk|sed|jq|true|cd|uptime|pwd)\b/
 const nameOf = (path: string) => path.replace(/^["']|["']$/g, '').split('/').filter(Boolean).at(-1) ?? path
 export const waitOf = (cmd: string): Wait | undefined => {
   const cd = cmd.match(/^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&/)?.[1]?.replace(/^["']|["']$/g, '')

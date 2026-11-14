@@ -488,7 +488,7 @@ const panelHooks = (on: On) => {
       const room = Math.max(12, width - side.length - 1)
       // The latest line, unless it is only a progress bar its percent already says, in the room the name leaves; a wait says what
       // it waits for
-      const latest = job.kind === 'wait' ? (job.waitsFor ?? '') : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
+      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
       const name = cut(jobHead(job), room)
       const rest = room - name.length - 3
       const detail = latest && rest >= 10 ? cut(latest, rest) : ''
@@ -506,7 +506,14 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
           <Box flexShrink={0}>
-            <Text color={isWarn ? NEEDS : job.pct ? JOB_COLOR.download : undefined} dimColor={!isWarn && !job.pct}>{side}</Text>
+            {job.pct && !isWarn && side.startsWith(job.pct) ? (
+              <Box flexDirection="row">
+                <Text color={JOB_COLOR.download}>{job.pct}</Text>
+                <Text dimColor>{side.slice(job.pct.length)}</Text>
+              </Box>
+            ) : (
+              <Text color={isWarn ? NEEDS : undefined} dimColor={!isWarn}>{side}</Text>
+            )}
           </Box>
         </Box>
       )

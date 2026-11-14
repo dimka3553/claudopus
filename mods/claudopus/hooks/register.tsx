@@ -6955,7 +6955,8 @@ const jobsOf = (one: Todo, at: number): Job[] =>
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
-  const label = job.kind === 'wait' ? job.label.replace(/^wait(s|ing)?\s+/i, '') : job.label
+  // A wait leads with what it waits for, its own words after
+  const label = job.kind === 'wait' ? (job.waitsFor ?? job.label.replace(/^wait(s|ing)?\s+/i, '')) : job.label
   return `${kind} · ${label}`
 }
 
@@ -8650,7 +8651,7 @@ const panelHooks = (on: On) => {
       const room = Math.max(12, width - side.length - 1)
       // The latest line, unless it is only a progress bar its percent already says, in the room the name leaves; a wait says what
       // it waits for
-      const latest = job.kind === 'wait' ? (job.waitsFor ?? '') : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
+      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
       const name = cut(jobHead(job), room)
       const rest = room - name.length - 3
       const detail = latest && rest >= 10 ? cut(latest, rest) : ''
@@ -8668,7 +8669,14 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
           <Box flexShrink={0}>
-            <Text color={isWarn ? NEEDS : job.pct ? JOB_COLOR.download : undefined} dimColor={!isWarn && !job.pct}>{side}</Text>
+            {job.pct && !isWarn && side.startsWith(job.pct) ? (
+              <Box flexDirection="row">
+                <Text color={JOB_COLOR.download}>{job.pct}</Text>
+                <Text dimColor>{side.slice(job.pct.length)}</Text>
+              </Box>
+            ) : (
+              <Text color={isWarn ? NEEDS : undefined} dimColor={!isWarn}>{side}</Text>
+            )}
           </Box>
         </Box>
       )
