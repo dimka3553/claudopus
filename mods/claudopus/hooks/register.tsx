@@ -557,7 +557,7 @@ const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, ans
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
 const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks: the answer reached it from the card, so it needs no second copy.`
 // What the chat is told when it sends work an answer of the person's that reached it from the card a moment ago
-const ANSWER_ALREADY_SENT = (said: string) => `Not sent: {name}'s answer "${said}" reached that work from its card already, and a second copy would only start it again. Send nothing more about it.`
+const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer {name} gave on that work's card, which reached it from there, and it has asked nothing since. A second copy would only start it again. Should {name} mean those words for something new, send them with what they are for.`
 // How long an answer given on the card counts as the one the chat would send again
 const ANSWER_ECHO = 60 * 60_000
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
@@ -895,14 +895,13 @@ const handedBack = new Map<string, string>()
 const endedByHandback = new Set<string>()
 // Work stopped by the chat or the panel: whatever the engine still lists of it is going, so it is never said to have left something running
 const stoppedHere = new Set<string>()
-// How many of its own background tasks the engine said were still in flight as each piece of work last stopped
-const inFlightAtStop = new Map<string, number>()
 // Work that ended with nothing of its own running that the mod or the engine's stop knew of: the engine still listing it as held
 // (once, for a whole evening, on nothing any tool showed open) is no sign it left something running
 const leftNothing = new Set<string>()
-// Nothing of its own runs: no command or watch it started that has not ended, no helper at work, none in flight as it last stopped
-const ownsNothing = (list: Todo[], id: string) =>
-  !list.find(one => one.id === id)?.bg?.length && !list.some(kid => kid.parentId === id && kid.status === 'working') && !inFlightAtStop.get(id)
+// Nothing of its own runs: no command or watch it started that has not ended, no helper at work. The engine's list of what is in
+// flight as work stops is the whole session's, every other work's too, so it says nothing of this work's own (what it lists that
+// this work started is let go of from its card as it ends, at its stop)
+const ownsNothing = (list: Todo[], id: string) => !list.find(one => one.id === id)?.bg?.length && !list.some(kid => kid.parentId === id && kid.status === 'working')
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
@@ -4465,7 +4464,7 @@ const holdTimes = ($: EngineInterface) => {
 const freeTimes = () => void ((typing += 1), (isTyping = false))
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
-type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean }
+type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean; isCard?: boolean }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -4526,7 +4525,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   if (isReply) freeTimes()
   const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line })
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
   void askGone($, one, said)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
@@ -4534,8 +4533,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
   // Marked on its way once written, so a step that began before it never counts as reading it
   const told = working ? await tell($, target, to) : undefined
-  if (told && !told.deny) return void (writtenIn(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line }), redraw($))
-  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line })
+  if (told && !told.deny) return void (writtenIn(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true }), redraw($))
+  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true })
 }
 // A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
 // and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its
@@ -4558,7 +4557,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   drafts.delete(one.id)
   freeTimes()
   const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line })
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
   // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
   if (inChat.has(one.id)) (inChat.delete(one.id), void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
@@ -4566,7 +4565,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const to = `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) return void (writtenIn(target, one.id), redraw($))
-  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line })
+  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true })
 }
 // An answer to work that has ended starts that work again with it, as a message to it: the chat then gets the work's report as
 // it gets any, and nothing goes into the chat in the person's place.
@@ -7793,10 +7792,10 @@ const workHooks = (on: On) => {
       // The chat passing on an answer the person gave on the card, which reached the work from there already, sends nothing: a
       // second copy started work that had ended again, with nothing to do but say it was done
       const given = target && e.agentId === undefined ? sentReplies.get(target.id) : undefined
-      // Words that answer a newer ask of its own still go
-      const isNewAnswer = Boolean(target?.ask && target.ask.at > (given?.at ?? 0) && settles(target.ask, message, true))
-      if (given && (given.to === 'work' || given.to === 'read') && now - given.at < ANSWER_ECHO && plainWords(message) === plainWords(given.text) && !isNewAnswer) {
-        await log($, `refused a second copy of an answer to ${target?.id}`)
+      // Only the very words given on the card, to work that has asked nothing since: words for a newer question still go
+      const isRepeat = Boolean(given?.isCard && (given.to === 'work' || given.to === 'read') && now - given.at < ANSWER_ECHO && plainWords(message) === plainWords(given.text))
+      if (given && target && isRepeat && !(target.ask && target.ask.at > given.at)) {
+        await log($, `refused a second copy of an answer to ${target.id}`)
         return { deny: named(ANSWER_ALREADY_SENT(cut(given.text, 120))) }
       }
       // The person's words passed on to work whose card asks them something answer that ask, as a press on the card does: the card's
@@ -7972,7 +7971,6 @@ const workHooks = (on: On) => {
     const hold = r.block ? '' : await holdAtStop($, e.agent_id, 'stop').catch(() => '')
     if (hold) return { ...r, block: hold }
     const live = e.background_tasks
-    if (Array.isArray(live)) inFlightAtStop.set(e.agent_id, live.length)
     if (dir && Array.isArray(live)) {
       const ids = new Set(live.map(one => one.id))
       const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)

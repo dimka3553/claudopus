@@ -194,7 +194,7 @@ const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, ans
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
 const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks: the answer reached it from the card, so it needs no second copy.`
 // What the chat is told when it sends work an answer of the person's that reached it from the card a moment ago
-const ANSWER_ALREADY_SENT = (said: string) => `Not sent: {name}'s answer "${said}" reached that work from its card already, and a second copy would only start it again. Send nothing more about it.`
+const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer {name} gave on that work's card, which reached it from there, and it has asked nothing since. A second copy would only start it again. Should {name} mean those words for something new, send them with what they are for.`
 // How long an answer given on the card counts as the one the chat would send again
 const ANSWER_ECHO = 60 * 60_000
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
