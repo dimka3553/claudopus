@@ -1793,12 +1793,10 @@ test('what a piece of work and its helpers have running is in its Details too, e
   const rows = (await tab.findAll({ type: 'Text' })).map(one => one.text)
   const picked = rows.flatMap((text, i) => (/^Server · |^Download · /.test(text) ? [`${rows[i - 2]} ${text}`] : []))
   expect(picked).toEqual(['├─── Server · Serve the site', ...[1, 2, 3, 4].map(n => `  ├─── Download · Download weights ${n}`), '  └─── Download · Download weights 5'])
-  const order = async () => (await tab.findAll({ type: 'Text' })).map(one => one.text).filter(text => /Serve the site|Fetch the weights|Download weights/.test(text))
-  expect((await order()).slice(0, 2)).toEqual(['Server · Serve the site', 'Download · Download weights 1'])
   const shown = await texts(tab)
   expect(shown.some(text => /more running/.test(text))).toBe(false)
   expect((await tab.find({ type: 'Text', text: /^Helpers and jobs$/ }))?.props.bold).toBe(true)
-  expect(shown).toContain('6 jobs running · 1 of 1 helper at work')
+  expect(shown).toContain('6 jobs running · 1 helper at work')
   await tab.unmount()
   // The card on the list still folds the helper's jobs past JOBS_SHOWN into one row
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)

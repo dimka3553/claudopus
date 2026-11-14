@@ -8849,7 +8849,7 @@ const panelHooks = (on: On) => {
       if (!under.length && !jobs) return null
       const running = under.filter(kid => kid.status === 'working').length
       // Beside the jobs, the helpers are named, so neither count reads as the other's
-      const helpers = !jobs ? (running ? `${running} at work · ${under.length} in all` : `${under.length} in all`) : running ? `${running} of ${under.length} ${under.length === 1 ? 'helper' : 'helpers'} at work` : `${under.length} ${under.length === 1 ? 'helper' : 'helpers'}`
+      const helpers = !jobs ? (running ? `${running} at work · ${under.length} in all` : `${under.length} in all`) : running === under.length ? `${running} ${running === 1 ? 'helper' : 'helpers'} at work` : running ? `${running} of ${under.length} helpers at work` : `${under.length} ${under.length === 1 ? 'helper' : 'helpers'}`
       const side = [jobs ? `${jobs} ${jobs === 1 ? 'job' : 'jobs'} running` : '', under.length ? helpers : ''].filter(Boolean).join(' · ')
       return part(
         'part-helpers',
