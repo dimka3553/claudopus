@@ -378,8 +378,9 @@ test('every button of the results list and of a result takes a new key whenever 
   const tab = await $.ui.mount({ ...LIST, requestId: 'report-header', props: { ...LIST.props, title: 'Rethink the panel header', bodyColumns: 80 }, surface: 'desktop' } as never)
   expect(await tab.find({ type: 'Text', text: /^Rethink the panel header$/ })).toBeDefined()
   const tabKeys = (await tab.findAll({ type: 'Button' })).map(one => String(one.key))
-  // The result's own tab follows the same rule: an answer changes it, and every key moves
-  await pressed(tab, 'report-say-0-Not now')
+  // The result's own tab follows the same rule: answered on another Mac, it changes with no press here, and every key moves
+  put({ id: 'header', title: 'Rethink the panel header', at: 1_699_000_100_000, waiting: [{ text: 'Reopen the M4 chat?', answer: 'Not now' } as { text: string }] })
+  await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't2', query: 'found' } as never)
   expect(await until(async () => ((await tab.findAll({ type: 'Button' })).some(one => one.props.label === 'Yes') ? undefined : true))).toBe(true)
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.key)).filter(key => tabKeys.includes(key))).toEqual([])
 })

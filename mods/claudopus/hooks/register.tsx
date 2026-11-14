@@ -1912,8 +1912,17 @@ const paneOf = (r: Report) => {
 }
 // Which picture each open report shows, by its pane
 const pictureAt = new Map<string, number>()
-// A mark of what one drawing shows, in digits, for its buttons' keys
-const drawingMark = (shown: unknown[]) => mark(JSON.stringify(shown)).replace(/\D/g, '')
+// A number for what one pane's drawing shows, for its buttons' keys: it moves each time that drawing differs from the one before
+const drawings = new Map<string, { look: string; n: number }>()
+const drawingMark = (pane: string, shown: unknown[]) => {
+  const look = JSON.stringify(shown)
+  const was = drawings.get(pane)
+  if (was?.look === look) return String(was.n)
+  // The first number of a load starts past any key an earlier load drew, so a pane that stayed up across a reload is taken afresh
+  const n = (was?.n ?? presses * 1000) + 1
+  drawings.set(pane, { look, n })
+  return String(n)
+}
 const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
 // Opens a pane from a press, in front: the app leaves a pane already open where it is, behind another tab, so one open but not
 // shown is opened again
@@ -2120,7 +2129,7 @@ let isEarlierOpen = false
 let isArchivedOpen = false
 // When, as short as it fits its place: the time today, the day this year, the year before that
 const when = (at: number, now: number) => (day(at, now) === day(now, now) ? time(at, now) : new Date(at).getFullYear() === new Date(now).getFullYear() ? day(at, now) : String(new Date(at).getFullYear()))
-const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, line: number) => {
+const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, line: number, height = 0) => {
   const { Box, Button, Text } = ui
   const list = all.filter(r => !r.archived)
   const gone = entriesOf(all.filter(r => r.archived))
@@ -2134,7 +2143,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
   // The app keeps each button it drew by its key, with the handle of its first drawing; the engine gives every button a new handle
   // whenever anything in the drawing changes (a result arriving, a fold, a time). A key that stayed then pressed a dead handle and
   // nothing opened, press after press. So every key here carries a mark of what the drawing shows, which moves whenever it changes
-  const gen = drawingMark([presses, line, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui, ...[waiting, recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
+  const gen = drawingMark(REPORTS_PANE, [presses, line, height, fresh, isEarlierOpen, isArchivedOpen, 'isTerminal' in ui, ...[waiting, recent, earlier, gone].map(group => group.map(entry => (entry[0] ? `${entry[0].id}|${entry[0].title}|${when(entry[0].at, now)}` : '')))])
   const fold = (key: string, label: string, isOpen: boolean, onPress: () => void) => (
     <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" alignItems="flex-start" flexShrink={0}>
       {/* In the rows' title column */}
@@ -2215,7 +2224,7 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
 // A report opened in its own pane: what it is and when; the question it waits on, with its answers; what it found; its pictures,
 // with the one press that opens them all; the report itself; then how to carry on from it, and the other rounds of its work
 type Thumb = { source: string; width: number; height: number } | null
-const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb) => {
+const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: Report[], now: number, at: number, thumb: Thumb, height = 0) => {
   const { Box, Button, Markdown, Text } = ui
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   // The other rounds of its work first, as the list shows them as one row; then what it started from or started, and the subject's others
@@ -2227,7 +2236,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
     [one.id === r.from ? 'this started from it' : one.from === r.id ? 'started from this' : rounds.includes(one) ? (one.at < r.at ? 'earlier round' : 'later round') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
   // As in the list: each key carries a mark of what this drawing shows, so the app never keeps a button whose handle is gone
-  const gen = drawingMark([presses, r, mark(text), at, Boolean(thumb), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
+  const gen = drawingMark(pane, [presses, height, r, mark(text), at, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
   const show = (to: number) => void ((presses += 1), pictureAt.set(pane, to), redraw($))
   return (
     <Box key={`report-${r.id}`} flexDirection="column" gap={1} flexGrow={1}>
@@ -2282,8 +2291,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
               <Box flexDirection="column">
                 {pictures.map((one, n) => (
                   <Box key={`report-pic-${n}`} flexDirection="column">
-                    <Button key={`report-pic-open-${n}`} label={one.file} plain hotkey={n < 9 ? String(n + 1) : undefined} onPress={press => void showPicture($, one.path, '', '', press.surface)} />
-                    {pictureSaidRow($, ui, `report-pic-said-${n}`, one.path)}
+                    <Button key={`report-pic-open-${n}-${gen}`} label={one.file} plain hotkey={n < 9 ? String(n + 1) : undefined} onPress={press => void showPicture($, one.path, '', '', press.surface)} />
+                    {pictureSaidRow($, ui, `report-pic-said-${n}-${gen}`, one.path)}
                   </Box>
                 ))}
                 <Text dimColor wrap="wrap">{termFrom ? 'A press sends the picture to the device you are at' : 'A press opens the picture'}</Text>
@@ -9562,7 +9571,7 @@ const tabHooks = (on: On) => {
     const line = Math.max(24, Math.floor((e.props.bodyColumns - 8) * (e.surface === 'terminal' ? 1 : 1.25)))
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportsView($, uiOf($, e), kept, await $.clock.now(), line)}
+        {reportsView($, uiOf($, e), kept, await $.clock.now(), line, e.props.scroll.bodyRows)}
       </Box>
     )
   })
@@ -9630,7 +9639,7 @@ const tabHooks = (on: On) => {
     const picture = e.surface === 'terminal' ? null : RASTER.test(file) ? await thumbOf($, thumbPath(r, file)) : /\.svg$/i.test(file) ? await svgOf($, `${reportPath(r)}/${file}`) : null
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture)}
+        {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows)}
       </Box>
     )
   })
