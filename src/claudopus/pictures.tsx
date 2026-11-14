@@ -360,8 +360,15 @@ const loadWork = async ($: EngineInterface, id: string) => {
 // The pictures an ask is about, drawn small on its card under what it is about, so the person decides there without waiting for
 // the chat to send them (14 Nov: a card asked to pick one of four designs, and the designs came only later, in the chat). Each
 // small copy is smaller than a chat's: a card's pictures are drawn in the list, beside every other card, and the list is one drawing
-const ASK_THUMB_SIZES = ['480', '400', '320', '240']
-const ASK_THUMB_BYTES = 22_000
+// Each is made twice as wide as it is drawn, so its words stay readable on a sharp screen: smaller files first by a lower quality,
+// then by a narrower copy
+const ASK_THUMB_SIZES: [string, string][] = [
+  ['600', '45'],
+  ['600', '35'],
+  ['480', '40'],
+  ['360', '40'],
+]
+const ASK_THUMB_BYTES = 25_000
 // How wide an ask's small picture is drawn at most, and how tall, in the panel's pixels
 const ASK_PIC_WIDE = 300
 const ASK_PIC_TALL = 240
@@ -370,7 +377,7 @@ const sizedAskPic = (width: number, height: number) => {
   return { width: Math.round(width * scale), height: Math.round(height * scale) }
 }
 // The most characters every ask's small pictures together take in one drawing; one past that is a row that opens it
-const ASK_PICS_CHARS = 120_000
+const ASK_PICS_CHARS = 140_000
 // Each ask's pictures as last made, by the work, its ask and its pictures; made out of the drawing, which is drawn again once they are
 const askPics = new Map<string, Pic[]>()
 const askLoading = new Set<string>()
@@ -383,13 +390,20 @@ const askPicOf = async ($: EngineInterface, path: string): Promise<Pic | null> =
   if (/\.svg$/i.test(path) && stat.size <= SVG_CHARS) {
     const text = await readOr($, path)
     const from = text.indexOf('<svg')
-    if (from >= 0) thumb = { source: text.slice(from), width: 0, height: 0 }
+    if (from >= 0) {
+      // Its own size, from its width and height or its viewBox, so it is drawn within the card like any other
+      const head = /<svg[^>]*>/i.exec(text.slice(from))?.[0] ?? ''
+      const box = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(head)
+      const width = Number(/\swidth="([\d.]+)(px)?"/i.exec(head)?.[1] ?? box?.[1] ?? 0)
+      const height = Number(/\sheight="([\d.]+)(px)?"/i.exec(head)?.[1] ?? box?.[2] ?? 0)
+      thumb = { source: text.slice(from), width: width && height ? width : 0, height: width && height ? height : 0 }
+    }
   } else if (RASTER.test(path)) {
     const to = `${dir}/thumbs/ask-${slug(path).slice(-60)}-${mark(path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
     if (!(await $.fs.exists(to))) {
       await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
-      for (const size of ASK_THUMB_SIZES) {
-        await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', path, '--out', to])
+      for (const [size, quality] of ASK_THUMB_SIZES) {
+        await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to])
         if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= ASK_THUMB_BYTES) break
       }
     }
@@ -411,7 +425,7 @@ const askPicturesOf = ($: EngineInterface, one: Todo): Pic[] | undefined => {
         const pic = await askPicOf($, path).catch(() => null)
         if (pic) made.push(pic)
       }
-      if (askPics.size >= 20) askPics.delete(askPics.keys().next().value ?? '')
+      if (askPics.size >= 60) askPics.delete(askPics.keys().next().value ?? '')
       askPics.set(key, made)
     })()
       .catch(err => log($, `pictures of an ask not made: ${String(err)}`))

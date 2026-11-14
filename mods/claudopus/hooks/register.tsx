@@ -3366,8 +3366,15 @@ const loadWork = async ($: EngineInterface, id: string) => {
 // The pictures an ask is about, drawn small on its card under what it is about, so the person decides there without waiting for
 // the chat to send them (14 Nov: a card asked to pick one of four designs, and the designs came only later, in the chat). Each
 // small copy is smaller than a chat's: a card's pictures are drawn in the list, beside every other card, and the list is one drawing
-const ASK_THUMB_SIZES = ['480', '400', '320', '240']
-const ASK_THUMB_BYTES = 22_000
+// Each is made twice as wide as it is drawn, so its words stay readable on a sharp screen: smaller files first by a lower quality,
+// then by a narrower copy
+const ASK_THUMB_SIZES: [string, string][] = [
+  ['600', '45'],
+  ['600', '35'],
+  ['480', '40'],
+  ['360', '40'],
+]
+const ASK_THUMB_BYTES = 25_000
 // How wide an ask's small picture is drawn at most, and how tall, in the panel's pixels
 const ASK_PIC_WIDE = 300
 const ASK_PIC_TALL = 240
@@ -3376,7 +3383,7 @@ const sizedAskPic = (width: number, height: number) => {
   return { width: Math.round(width * scale), height: Math.round(height * scale) }
 }
 // The most characters every ask's small pictures together take in one drawing; one past that is a row that opens it
-const ASK_PICS_CHARS = 120_000
+const ASK_PICS_CHARS = 140_000
 // Each ask's pictures as last made, by the work, its ask and its pictures; made out of the drawing, which is drawn again once they are
 const askPics = new Map<string, Pic[]>()
 const askLoading = new Set<string>()
@@ -3389,13 +3396,20 @@ const askPicOf = async ($: EngineInterface, path: string): Promise<Pic | null> =
   if (/\.svg$/i.test(path) && stat.size <= SVG_CHARS) {
     const text = await readOr($, path)
     const from = text.indexOf('<svg')
-    if (from >= 0) thumb = { source: text.slice(from), width: 0, height: 0 }
+    if (from >= 0) {
+      // Its own size, from its width and height or its viewBox, so it is drawn within the card like any other
+      const head = /<svg[^>]*>/i.exec(text.slice(from))?.[0] ?? ''
+      const box = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(head)
+      const width = Number(/\swidth="([\d.]+)(px)?"/i.exec(head)?.[1] ?? box?.[1] ?? 0)
+      const height = Number(/\sheight="([\d.]+)(px)?"/i.exec(head)?.[1] ?? box?.[2] ?? 0)
+      thumb = { source: text.slice(from), width: width && height ? width : 0, height: width && height ? height : 0 }
+    }
   } else if (RASTER.test(path)) {
     const to = `${dir}/thumbs/ask-${slug(path).slice(-60)}-${mark(path).replace(':', '-')}-${Math.round(stat.mtimeMs)}.jpg`
     if (!(await $.fs.exists(to))) {
       await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
-      for (const size of ASK_THUMB_SIZES) {
-        await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', path, '--out', to])
+      for (const [size, quality] of ASK_THUMB_SIZES) {
+        await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to])
         if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= ASK_THUMB_BYTES) break
       }
     }
@@ -3417,7 +3431,7 @@ const askPicturesOf = ($: EngineInterface, one: Todo): Pic[] | undefined => {
         const pic = await askPicOf($, path).catch(() => null)
         if (pic) made.push(pic)
       }
-      if (askPics.size >= 20) askPics.delete(askPics.keys().next().value ?? '')
+      if (askPics.size >= 60) askPics.delete(askPics.keys().next().value ?? '')
       askPics.set(key, made)
     })()
       .catch(err => log($, `pictures of an ask not made: ${String(err)}`))
@@ -7669,7 +7683,7 @@ const panelHooks = (on: On) => {
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
     if (large) {
-      const back = (key: string) => <Button key={`${key}-${presses}`} label="← Back to Details" plain onPress={() => ((presses += 1), pictureBack($, paneId))} />
+      const back = (key: string) => <Button key={`${key}-${presses}`} label={paneId === LIST ? '← Back to the list' : '← Back to Details'} plain onPress={() => ((presses += 1), pictureBack($, paneId))} />
       return (
         <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
           {back('pic-back-top')}
@@ -7789,21 +7803,26 @@ const panelHooks = (on: On) => {
     // what the app draws in one tab beside the chat's own small pictures; one past that is a row that opens it
     let askChars = 0
     const askPictures = (one: Todo, key: string, isWhole: boolean) => {
-      const made = askPicturesOf($, one)
-      if (!one.ask?.pictures?.length) return null
-      if (!made) return <Text key={`${key}-pics`} dimColor>Making its pictures small…</Text>
-      if (!made.length) return null
+      const paths = one.ask?.pictures ?? []
+      if (!paths.length) return null
+      // An ask of a chat on another Mac names that Mac's files, which are not here: a file at the same path here is another picture
+      if (one.chat?.host) return <Text key={`${key}-pics`} dimColor wrap="wrap">{`Its ${paths.length === 1 ? 'picture is' : `${paths.length} pictures are`} on the Mac that chat runs on, and shown in that chat.`}</Text>
       const drawing = uiOf($, e)
       const canDraw = e.surface !== 'terminal' && 'Svg' in drawing
+      // The terminal draws no picture: a row each that opens it, with no small copy made
+      const made = canDraw ? askPicturesOf($, one) : paths.map(path => ({ name: fileName(path), path, thumb: null }) as Pic)
+      if (!made) return <Text key={`${key}-pics`} dimColor>Making its pictures small…</Text>
+      if (!made.length) return null
+      // In Details the chat's own small pictures are drawn too: all of them together stay near what that tab keeps for pictures
       const chatChars = isWhole ? [...(shots.get(one.id)?.shots.values() ?? [])].flat().reduce((sum, pic) => sum + (pic.thumb?.source.length ?? 0), 0) : 0
-      const most = isWhole ? Math.min(ASK_PICS_CHARS, 230_000 - chatChars) : ASK_PICS_CHARS
+      const most = isWhole ? Math.min(ASK_PICS_CHARS, PICTURES_CHARS + 30_000 - chatChars) : ASK_PICS_CHARS
       return (
         <Box key={`${key}-pics`} flexDirection="row" flexWrap="wrap" alignItems="flex-start" gap={1} width="100%">
           {made.map((pic, n) => {
             const isDrawn = canDraw && pic.thumb !== null && askChars + pic.thumb.source.length <= most
             if (isDrawn && pic.thumb) askChars += pic.thumb.source.length
             const row = `${key}-pic-${n}`
-            // Drawn at most ASK_PIC_WIDE across from a copy twice as sharp, so two sit side by side on a usual sidebar
+            // Drawn at most ASK_PIC_WIDE across, from a copy up to twice as wide, so two sit side by side on a wide sidebar
             const size = pic.thumb && pic.thumb.width && pic.thumb.height ? sizedAskPic(pic.thumb.width, pic.thumb.height) : undefined
             return (
               <Box key={row} flexDirection="column" alignItems="flex-start" flexShrink={1} minWidth={0}>

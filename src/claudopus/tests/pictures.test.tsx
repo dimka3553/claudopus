@@ -167,8 +167,13 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   const shots = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(n => `/w/designs/${n}.png`)
   const sips = (argv: string[]) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 480\npixelHeight: 300' : '')
   // Each small copy as large as an ask's may be: 22000 bytes, about 29400 characters of base64
-  const bytes = (path: string) => (path.includes('/thumbs/ask-') ? 'A'.repeat(29_400) : undefined)
-  const { files, logged, shown } = world(on, { sips, bytes })
+  // Each ask copy as large as one may be, 25000 bytes; the chat's own copies, of the same pictures it sent, as large as theirs may be
+  const bytes = (path: string) => (path.includes('/thumbs/ask-') ? 'A'.repeat(33_400) : path.includes('/thumbs/') ? 'A'.repeat(48_000) : undefined)
+  const talk = [
+    { role: 'user', text: 'Draw the designs.', toolUses: [] },
+    { role: 'assistant', text: 'Here they are.', toolUses: [{ tool_use_id: 'u1', tool: 'SendUserFile', input: { files: shots, status: 'normal' } }] },
+  ]
+  const { files, logged, shown } = world(on, { sips, bytes, talk })
   for (const path of shots) files.set(path, 'png')
   await $.session.start(start)
   await $.prompt.submit({ text: 'pick a design', wait: false, origin: composer })
@@ -180,6 +185,8 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   const small = (await list.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))
   // Four fit in what every ask's pictures may take; the rest are rows that open them
   expect(small.map(one => String(one.props.alt))).toEqual(['Picture: a.png', 'Picture: b.png', 'Picture: c.png', 'Picture: d.png'])
+  // Each drawn at most 300 across, from a copy twice as wide
+  expect(small.map(one => [one.props.width, one.props.height])).toEqual(Array(4).fill([300, 188]))
   const rows = (await list.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => label.startsWith('⤢'))
   expect(rows).toEqual(['⤢ Open large: a.png', '⤢ Open large: b.png', '⤢ Open large: c.png', '⤢ Open large: d.png', '⤢ Open: e.png', '⤢ Open: f.png', '⤢ Open: g.png'])
   expect(await drawnChars(list)).toBeLessThan(APP_DRAWING_CHARS)
@@ -190,7 +197,9 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   // In Details too, under what it is about
   await pressed(list, 'open-a1')
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
-  expect((await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:')).length).toBe(4)
+  for (let tries = 0; tries < 50 && (await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:')).length < 4; tries += 1) await new Promise(done => setTimeout(done, 20))
+  // The chat's own small copies of the same pictures and the ask's together stay under what the app draws in one tab
+  expect((await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:')).length).toBeGreaterThanOrEqual(4)
   expect(await drawnChars(tab)).toBeLessThan(APP_DRAWING_CHARS)
   await tab.unmount()
   await list.unmount()
@@ -198,6 +207,7 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   const term = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   expect((await term.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))).toEqual([])
   expect((await term.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(label => label.startsWith('⤢')).length).toBe(7)
+  expect(await term.find({ type: 'Text', text: /Making its pictures small/ })).toBeUndefined()
   await term.unmount()
   // Only the ask's notice in the chat is logged: nothing failed
   expect(logged.filter(line => !line.startsWith('The work "Pick a design" needs the person'))).toEqual([])
