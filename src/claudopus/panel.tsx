@@ -486,8 +486,9 @@ const panelHooks = (on: On) => {
         const compact = job.total ? `${job.done}/${job.total}` : job.done
         // its speed only while it writes: a speed a minute old is no longer how fast it goes
         const rate = job.rate && !warn && job.wroteAt && quiet < 60_000 ? [job.rate] : []
-        const most = Math.max(12, width - 20, Math.min(width - 13, 26))
-        return { text: firstFit([[full, ...rate, ...pct, state, time], [full, ...pct, state, time], [full, ...pct, short, time], [full, ...pct, short], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
+        // the side takes about half the row, so the name stays readable; a third when the latest line is not the progress, so it shows
+        const most = job.isEarlier ? Math.max(12, Math.floor(width / 3)) : Math.max(12, Math.floor(width / 2) + 4, Math.min(width - 13, 26))
+        return { text: firstFit([[full, ...rate, ...pct, state, time], [full, ...pct, state, time], [full, ...pct, short, time], [compact, ...pct, short, time], [full, ...pct, short], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
       }
       const text = firstFit([[...pct, state, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
       return { text, isWarn: warn }

@@ -58,7 +58,7 @@ test('a score a command prints is no progress: the 14 Nov "99.2%" was a coverage
   expect(latestOf('| model A | 99.2% |\n').pct).toBeUndefined()
   expect(latestOf('95% of tests passed\n').pct).toBeUndefined()
   expect(latestOf('frame 81/120 coverage 99.2%\n').pct).toBe('67%')
-  expect(latestOf('######################                   47.2%\n').pct).toBe('47.2%')
+  expect(latestOf('######################                   47.2%\n').pct).toBe('47%')
   expect(latestOf('Rendering ━━━━━━━━━━  45% 0:00:10\n').pct).toBe('45%')
   expect(isOutputEnded('1794640530\n\n[exited with code 0]\n')).toBe(true)
   expect(isOutputEnded('frame 81/120\n')).toBe(false)
@@ -137,6 +137,19 @@ test('how far a run is, read from the progress tools print and the line work is 
   expect(of('job finished with score 3/4').done).toBeUndefined()
   expect(of('Tests: 3/4 passed').done).toBeUndefined()
   expect(of('accuracy 95% on 1000/1000 samples').pct).toBeUndefined()
+  expect(of('step 300/1000 | loss 0.12 | 12.3GB/24.0GB | 45.0MB/s')).toMatchObject({ done: '300', total: '1,000' })
+  expect(of('| model-a | 12/50 | 24% |').done).toBeUndefined()
+  expect(of('no progress: 3/6 were skipped').done).toBeUndefined()
+  expect(of('progress: 7/6').done).toBeUndefined()
+  // More shapes: Keras, a plain sentence, a count with what it counts after it, make's percent, az's long percent
+  expect(of('450/1000 [=====>....] - ETA: 12s')).toMatchObject({ done: '450', total: '1,000', pct: '45%' })
+  expect(of('Downloaded 460 MB of 1 GB (45%)')).toMatchObject({ done: '460 MB', total: '1 GB', pct: '45%' })
+  expect(of('Processed 450/1000 images')).toMatchObject({ done: '450', total: '1,000' })
+  expect(of('[ 45%] Building CXX object').pct).toBe('45%')
+  expect(of('Alive[#####      ]  8.0123%').pct).toBe('8%')
+  // The work's own line with a unit after each number, and a word after the total that is no unit
+  expect(of('progress: 4.2 GB / 10 GB uploading')).toMatchObject({ done: '4.2 GB', total: '10 GB', pct: '42%' })
+  expect(of('progress: 3/6 fitting')).toMatchObject({ done: '3', total: '6' })
   // A bar's count is the one after it
   expect(of('Epoch 1/10 100%|██████████| 500/500 [00:10<00:00]')).toEqual({ pct: '100%', done: '500', total: '500', rate: undefined })
   // The work's own line after a log's time or level, its numbers as written
@@ -144,6 +157,7 @@ test('how far a run is, read from the progress tools print and the line work is 
   // An error after a download is the latest line: no progress hides it, and the work's own line above it says it is earlier
   expect(of(' 45 1024M   45  460M    0     0  10.2M      0  0:01:40  0:00:45  0:00:55 10.5M\ncurl: (56) Recv failure').done).toBeUndefined()
   expect(latestOf('progress: 3/6 steps fitting\nRuntimeError: CUDA out of memory\n')).toMatchObject({ done: '3', isEarlier: true, latest: 'RuntimeError: CUDA out of memory' })
+  expect(latestOf(`progress: 3/6 steps\n${'loss 0.1\n'.repeat(40)}`)).toMatchObject({ done: '3', isEarlier: true })
   expect(of('HEADLINE two-way mean: 0.804 mm (coverage 99.2% within 2 mm)').pct).toBeUndefined()
 })
 

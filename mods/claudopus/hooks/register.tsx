@@ -7006,7 +7006,7 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; isOwn?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -7172,7 +7172,9 @@ const lookJobs = async ($: EngineInterface) => {
     const seen = latestOf(text)
     const was = jobLog.get(id)
     const wait = waits.find(w => w.id === id)
-    const next: Seen = { ...seen, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
+    // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
+    const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
+    const next: Seen = { ...seen, ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
     const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
     if (isSame) continue
     jobLog.set(id, next)
@@ -8768,8 +8770,9 @@ const panelHooks = (on: On) => {
         const compact = job.total ? `${job.done}/${job.total}` : job.done
         // its speed only while it writes: a speed a minute old is no longer how fast it goes
         const rate = job.rate && !warn && job.wroteAt && quiet < 60_000 ? [job.rate] : []
-        const most = Math.max(12, width - 20, Math.min(width - 13, 26))
-        return { text: firstFit([[full, ...rate, ...pct, state, time], [full, ...pct, state, time], [full, ...pct, short, time], [full, ...pct, short], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
+        // the side takes about half the row, so the name stays readable; a third when the latest line is not the progress, so it shows
+        const most = job.isEarlier ? Math.max(12, Math.floor(width / 3)) : Math.max(12, Math.floor(width / 2) + 4, Math.min(width - 13, 26))
+        return { text: firstFit([[full, ...rate, ...pct, state, time], [full, ...pct, state, time], [full, ...pct, short, time], [compact, ...pct, short, time], [full, ...pct, short], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
       }
       const text = firstFit([[...pct, state, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
       return { text, isWarn: warn }
