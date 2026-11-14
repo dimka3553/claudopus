@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.92 · 14 November 2026
+- A card that asks you something now shows its pictures on the card itself, small, each with a row that opens it large, so you can decide there without waiting for the chat to send them. In the terminal each picture is a row that opens it on your device.
+
 ## 0.2.91 · 14 November 2026
 - A chat your Claude app runs on another Mac over SSH keeps its work going when your Mac goes away: if the app ends the chat's process there while work runs, that Mac starts the chat again by itself within about a minute, under its own sign-in, and the cut-off work carries on. When the chat's process still runs there but the sign-in your app lent it has lapsed, Claudopus ends that process so the same happens at once.
 - Work cut off that way says so on its card ("Cut off at 00:14 … going again since 00:15"), and one notice tells you, on your phone too where Claude Code's push notifications and Remote Control are on.

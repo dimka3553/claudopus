@@ -358,7 +358,7 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which logo do you want?', choices: ['A', 'B'], pictures: ['/w/shots/a.png', '/w/shots/b.png', '/w/shots/gone.png', 'rel.png'] } as never)
   expect(String(asked.result)).toContain('shown in the chat as a notice from the panel')
-  expect(String(asked.result)).toContain('Its 2 pictures are named with it')
+  expect(String(asked.result)).toContain('Its 2 pictures are drawn small on the card')
   expect(String(asked.result)).toContain('2 of the pictures given are no picture file found here')
   // The chat shows the ask as the mod's notice, never a prompt in the person's place, with what it asks, its answers and its pictures
   await clock.advance(10)
