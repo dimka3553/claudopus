@@ -19,10 +19,11 @@ const lookAt = (n: number, anon = 1583261) =>
     '68719476736',
     '10',
     '@@IO@@',
+    '              disk0 ',
     '    KB/t xfrs   MB ',
     `   19.03 42547108 ${1000 + n * 300} `,
     '@@NET@@',
-    `en0        1500  <Link#15>   aa:5e:ce:07:52:eb 1     0 ${n * 5_000_000} 2     0 0     0`,
+    `en0        1500  <Link#15>   02:00:00:00:00:01 1     0 ${n * 5_000_000} 2     0 0     0`,
     '@@TOP@@',
     'PID    MEM',
     '852    3000M',
@@ -60,7 +61,7 @@ test('while work runs, the line above the prompt shows memory, the processor, th
   // The terminal draws no pictures: the same line in words, with small meters of cells
   const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
   const line = await term.find({ type: 'Text', text: /^mem/ })
-  expect(line?.text).toMatch(/^mem▰+▱* 29GB cpu▰+▱* 50% disk 63MB\/s net 1MB\/s$/)
+  expect(line?.text).toMatch(/^mem[▰▱]{3} 29GB cpu[▰▱]{3} 50% disk 63MB\/s net 1MB\/s$/)
   expect(line?.props.wrap).toBe('truncate-end')
   await term.unmount()
 
@@ -72,4 +73,18 @@ test('while work runs, the line above the prompt shows memory, the processor, th
   const amber = await until(async () => (await high.find({ type: 'Text', text: /^59 GB$/ })) ?? undefined)
   expect(amber?.props.color).toBe('#E5A50A')
   await high.unmount()
+})
+
+test('a look that gives nothing waits as long as one that works, so a broken look is not tried each second', async ($, on) => {
+  const asked: boolean[] = []
+  let isBroken = true
+  const { clock } = world(on, { usage: () => (asked.push(true), isBroken ? '' : lookAt(asked.length)) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  for (let s = 0; s < 9; s++) await clock.advance(1000)
+  // Nine seconds of a broken look: tried twice, five seconds apart, not each second
+  expect(asked.length).toBeLessThanOrEqual(2)
+  isBroken = false
+  for (let s = 0; s < 6; s++) await clock.advance(1000)
+  expect(asked.length).toBeLessThanOrEqual(3)
 })

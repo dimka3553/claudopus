@@ -8186,6 +8186,8 @@ const toolHooks = (on: On) => {
 
 let usageKept: UsageKept | undefined
 let usageBusy = false
+// When this chat last tried a look, whether or not it gave figures: a look that fails waits as long as one that works
+let usageTriedAt = 0
 let usageFile = ''
 // The shared file, in the person's own temporary folder (on Linux, their cache folder: /tmp is everyone's)
 const usagePathOf = async ($: EngineInterface) => {
@@ -8196,22 +8198,28 @@ const usagePathOf = async ($: EngineInterface) => {
   return usageFile
 }
 
-// One look when the last is due: a fresh one another chat left is taken as it is
+// One look when the last is due: a fresh one another chat left is taken as it is, and a chat that is looking says so first in a
+// small file beside it, so chats that fall due together look once
 const lookUsage = async ($: EngineInterface) => {
   const now = await $.clock.now()
-  if (usageBusy || (usageKept && now - usageKept.at < USAGE_EVERY - 500 && now >= usageKept.at)) return
+  const isFresh = (at: number) => now >= at && now - at < USAGE_EVERY - 500
+  if (usageBusy || isFresh(usageTriedAt) || (usageKept && isFresh(usageKept.at))) return
   usageBusy = true
+  usageTriedAt = now
   try {
     const path = await usagePathOf($)
     const shared = keptOf(await $.fs.read(path).catch(() => ''))
-    if (shared && now - shared.at < USAGE_EVERY - 500 && now >= shared.at) return void (usageKept = shared)
+    if (shared && isFresh(shared.at)) return void (usageKept = shared)
+    const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
+    if (taking && now >= taking && now - taking < USAGE_EVERY / 2) return
+    await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
     const base = shared && shared.at <= now && (!usageKept || shared.at > usageKept.at) ? shared : usageKept
-    const isTop = !isLinux && (!base?.footprint || now - base.footprint.at >= FOOTPRINT_EVERY)
+    // top, the costly part, at most once a minute, answered or not
+    const isTop = !isLinux && (base?.topAt === undefined || now < base.topAt || now - base.topAt >= FOOTPRINT_EVERY)
     const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
-    const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux) : undefined
+    const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
     if (!kept) return
     usageKept = kept
-    if (isLinux) await $.process.run(['mkdir', '-p', path.replace(/\/[^/]*$/, '')]).catch(() => undefined)
     await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
   } finally {
     usageBusy = false
@@ -8253,8 +8261,8 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
     f.net === undefined ? null : one('usage-net', usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
   ]
 }
-// The line as text, for the terminal, short enough for a phone's: a word for each, and four-cell meters with Claude's cells purple
-const USAGE_CELLS = 4
+// The line as text, for the terminal, short enough for a phone's: a word for each, and three-cell meters with Claude's cells purple
+const USAGE_CELLS = 3
 const usageText = (ui: Ui, f: UsageFigures) => {
   const { Text } = ui
   const isHigh = isMemoryHigh(f)
@@ -8369,12 +8377,13 @@ const bandHooks = (on: On) => {
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
     return (
-      <Box flexDirection="row" alignItems="center" gap={2} height={1} overflow="hidden">
+      <Box flexDirection="row" alignItems="center" gap={e.surface === 'terminal' ? 1 : 2} height={1} overflow="hidden">
         {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
         {figures ? (e.surface === 'terminal' ? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box> : usageDrawn(ui, figures) ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box>) : null}
+        {/* Beside the figures the hint is the command alone, so the line still fits a phone's terminal */}
         {isPanelAway ? (
           <Box flexShrink={0}>
-            <Text dimColor>· /claudopus shows the panel</Text>
+            <Text dimColor>{figures ? '· /claudopus' : '· /claudopus shows the panel'}</Text>
           </Box>
         ) : null}
       </Box>

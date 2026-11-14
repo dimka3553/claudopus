@@ -22,12 +22,13 @@ export const USAGE_LINUX =
 // A process: its parent, its processor time in seconds, its memory in bytes, its name
 export type UsageProc = { pid: string; ppid: string; cpu: number; mem: number; name: string }
 // One look's running totals. busy and all are the whole computer's processor seconds where it counts them (Linux); disk and net are
-// bytes moved since it started
-export type UsageRaw = { at: number; cpu: Record<string, number>; claude: string[]; claudeMem: number; memUsed: number; memTotal: number; ncpu: number; disk: number; net: number; busy?: number; all?: number }
+// bytes moved since it started, by each disk and port, so one that comes or goes between looks moves no speed
+export type UsageRaw = { at: number; cpu: Record<string, number>; claude: string[]; claudeMem: number; memUsed: number; memTotal: number; ncpu: number; disk: Record<string, number>; net: Record<string, number>; busy?: number; all?: number }
 // What the line shows: bytes, parts of the whole processor (0 to 1), bytes a second
 export type UsageFigures = { memUsed: number; memTotal: number; memClaude: number; cpu?: number; cpuClaude?: number; disk?: number; net?: number }
-// What is kept between looks, in the shared file: the last look, its figures, and top's memory of each process when last asked
-export type UsageKept = { at: number; raw: UsageRaw; figures: UsageFigures; footprint?: { at: number; byPid: Record<string, number> } }
+// What is kept between looks, in the shared file: the last look, its figures, top's memory of each process when last had, and when
+// top was last asked, whether or not it answered
+export type UsageKept = { at: number; raw: UsageRaw; figures: UsageFigures; footprint?: { at: number; byPid: Record<string, number> }; topAt?: number }
 
 const sectionsOf = (text: string) => {
   const out: Record<string, string> = {}
@@ -74,16 +75,19 @@ export const rawOfMac = (text: string, at: number, footprint?: Record<string, nu
   if (!procs.length || !memTotal) return undefined
   // As Activity Monitor's Memory Used: app memory, wired and compressed
   const memUsed = Math.max(0, pages('Anonymous pages') - pages('Pages purgeable') + pages('Pages wired down') + pages('Pages occupied by compressor')) * page
-  // iostat -I: each disk's KB/t, transfers and megabytes since it started
-  const ioRow = (s.IO ?? '').split('\n').map(line => line.trim()).filter(line => /^[\d.\s]+$/.test(line) && line).pop() ?? ''
-  const disk = ioRow.split(/\s+/).map(Number).filter((_, i) => i % 3 === 2).reduce((sum, mb) => sum + mb * 1024 * 1024, 0)
+  // iostat -I: the disks by name, then each one's KB/t, transfers and megabytes since it started
+  const ioLines = (s.IO ?? '').split('\n').map(line => line.trim())
+  const names = (ioLines.find(line => /^disk\d/.test(line)) ?? '').split(/\s+/)
+  const ioRow = ioLines.filter(line => /^[\d.\s]+$/.test(line) && line).pop() ?? ''
+  const disk: Record<string, number> = {}
+  ioRow.split(/\s+/).map(Number).forEach((mb, i) => void (i % 3 === 2 && (disk[names[(i - 2) / 3] ?? `disk-${i}`] = mb * 1024 * 1024)))
   // The Mac's own network ports (en*), not the tunnels that carry the same bytes again
-  let net = 0
+  const net: Record<string, number> = {}
   for (const line of (s.NET ?? '').split('\n')) {
     const t = line.trim().split(/\s+/)
     if (!/^en\d+$/.test(t[0] ?? '') || !(t[2] ?? '').startsWith('<Link')) continue
     const [inAt, outAt] = t.length >= 11 ? [6, 9] : [5, 8]
-    net += Number(t[inAt] ?? 0) + Number(t[outAt] ?? 0)
+    net[t[0] ?? ''] = Number(t[inAt] ?? 0) + Number(t[outAt] ?? 0)
   }
   const claude = claudeOf(procs, (s.SELF ?? '').trim())
   const claudeMem = procs.filter(p => claude.has(p.pid)).reduce((sum, p) => sum + (footprint?.[p.pid] ?? p.mem), 0)
@@ -110,18 +114,18 @@ export const rawOfLinux = (text: string, at: number): UsageRaw | undefined => {
   const memTotal = kb('MemTotal')
   if (!procs.length || !memTotal) return undefined
   // Whole disks only, not their partitions: 512-byte sectors read and written
-  let disk = 0
+  const disk: Record<string, number> = {}
   for (const line of (s.DISK ?? '').split('\n')) {
     const f = line.trim().split(/\s+/)
-    if (/^(sd[a-z]+|vd[a-z]+|xvd[a-z]+|hd[a-z]+|nvme\d+n\d+|mmcblk\d+)$/.test(f[2] ?? '')) disk += (Number(f[5]) + Number(f[9])) * 512
+    if (/^(sd[a-z]+|vd[a-z]+|xvd[a-z]+|hd[a-z]+|nvme\d+n\d+|mmcblk\d+)$/.test(f[2] ?? '')) disk[f[2] ?? ''] = (Number(f[5]) + Number(f[9])) * 512
   }
   // The machine's own ports, not loopback, tunnels or containers' bridges
-  let net = 0
+  const net: Record<string, number> = {}
   for (const line of (s.NET ?? '').split('\n')) {
     const m = /^\s*([^:\s]+):\s*(.*)$/.exec(line)
-    if (!m || /^(lo|tailscale|docker|veth|br-|virbr|wg|tun|tap|cni|flannel|cali|zt)/.test(m[1] ?? '')) continue
+    if (!m || /^(lo|tailscale|docker|veth|br-|virbr|vnet|vmnet|lxc|podman|wg|tun|tap|ip6tnl|cni|flannel|cali|zt)/.test(m[1] ?? '')) continue
     const f = (m[2] ?? '').trim().split(/\s+/).map(Number)
-    net += (f[0] ?? 0) + (f[8] ?? 0)
+    net[m[1] ?? ''] = (f[0] ?? 0) + (f[8] ?? 0)
   }
   const claude = claudeOf(procs, (s.SELF ?? '').trim())
   const claudeMem = procs.filter(p => claude.has(p.pid)).reduce((sum, p) => sum + p.mem, 0)
@@ -129,6 +133,9 @@ export const rawOfLinux = (text: string, at: number): UsageRaw | undefined => {
 }
 
 const clamp = (n: number) => Math.min(1, Math.max(0, n))
+// Bytes moved between two looks by the disks or ports that were in both
+const movedOf = (prev: Record<string, number>, cur: Record<string, number>) =>
+  Object.entries(cur).reduce((sum, [name, n]) => sum + (typeof prev[name] === 'number' ? Math.max(0, n - (prev[name] ?? 0)) : 0), 0)
 // The figures from two looks: memory from the newer alone, the rest from what moved between them
 export const figuresOf = (prev: UsageRaw | undefined, cur: UsageRaw): UsageFigures => {
   const memory = { memUsed: cur.memUsed, memTotal: cur.memTotal, memClaude: Math.min(cur.claudeMem, cur.memUsed || cur.claudeMem) }
@@ -146,22 +153,23 @@ export const figuresOf = (prev: UsageRaw | undefined, cur: UsageRaw): UsageFigur
   }
   const whole = cur.all !== undefined && prev.all !== undefined && cur.all > prev.all ? cur.all - prev.all : span * cur.ncpu
   const cpu = cur.busy !== undefined && prev.busy !== undefined && cur.all !== undefined && prev.all !== undefined && cur.all > prev.all ? clamp((cur.busy - prev.busy) / whole) : clamp(used / whole)
-  return { ...memory, cpu, cpuClaude: Math.min(cpu, clamp(mine / whole)), disk: Math.max(0, cur.disk - prev.disk) / span, net: Math.max(0, cur.net - prev.net) / span }
+  return { ...memory, cpu, cpuClaude: Math.min(cpu, clamp(mine / whole)), disk: movedOf(prev.disk ?? {}, cur.disk) / span, net: movedOf(prev.net ?? {}, cur.net) / span }
 }
 
 // The next kept state from a look: top's memory kept for a minute, the figures against the look before
-export const nextKept = (was: UsageKept | undefined, text: string, at: number, isLinux: boolean): UsageKept | undefined => {
+export const nextKept = (was: UsageKept | undefined, text: string, at: number, isLinux: boolean, isTop = false): UsageKept | undefined => {
   const top = isLinux ? {} : footprintOf(sectionsOf(text).TOP ?? '')
   const footprint = Object.keys(top).length ? { at, byPid: top } : was?.footprint && at - was.footprint.at < FOOTPRINT_EVERY * 3 ? was.footprint : undefined
   const raw = isLinux ? rawOfLinux(text, at) : rawOfMac(text, at, footprint?.byPid)
   if (!raw) return undefined
-  return { at, raw, figures: figuresOf(was?.raw, raw), ...(footprint ? { footprint } : {}) }
+  const topAt = isTop ? at : was?.topAt
+  return { at, raw, figures: figuresOf(was?.raw, raw), ...(footprint ? { footprint } : {}), ...(topAt !== undefined ? { topAt } : {}) }
 }
 // The shared file's state, when it reads as one
 export const keptOf = (text: string): UsageKept | undefined => {
   try {
     const kept = JSON.parse(text) as UsageKept
-    return typeof kept?.at === 'number' && kept.raw && kept.figures ? kept : undefined
+    return typeof kept?.at === 'number' && kept.raw && typeof kept.raw.disk === 'object' && kept.figures ? kept : undefined
   } catch {
     return undefined
   }
@@ -176,7 +184,7 @@ export const gbText = (bytes: number) => {
 // A speed in the fewest characters: MB/s, a tenth under ten, GB/s past a thousand megabytes
 export const rateText = (perSecond: number): [string, string] => {
   const mb = perSecond / 1e6
-  if (mb >= 1000) return [(mb / 1000).toFixed(1).replace(/\.0$/, ''), 'GB/s']
+  if (mb >= 999.5) return [(mb / 1000).toFixed(1).replace(/\.0$/, ''), 'GB/s']
   if (mb >= 9.95) return [String(Math.round(mb)), 'MB/s']
   return [mb.toFixed(1).replace(/\.0$/, ''), 'MB/s']
 }
@@ -194,8 +202,10 @@ export const meterOf = (claude: number, used: number, steps: number) => {
 export const USAGE_PURPLE = '#8A63F0'
 export const USAGE_AMBER = '#E5A50A'
 export const USAGE_GREY = '#9A9A9A'
+// The icons a little lighter than the meters' grey, as the numbers beside them are
+const ICON_GREY = '#BDBDBD'
 const TRACK = 'rgba(154,154,154,0.28)'
-const ICON = 14
+const ICON = 15
 const METER_W = 18
 const METER_H = 8
 const H = 16
@@ -215,15 +225,20 @@ const icons: Record<'memory' | 'cpu' | 'disk' | 'net', (c: string) => string> = 
 // An icon alone, or with its meter: Claude's part purple, the rest in use grey (amber when memory is near full), the room left faint
 export const usageSvg = (icon: keyof typeof icons, meter?: { claude: number; used: number; isHigh?: boolean }) => {
   const color = meter?.isHigh ? USAGE_AMBER : USAGE_GREY
+  const iconColor = meter?.isHigh ? USAGE_AMBER : ICON_GREY
   const width = (meter ? ICON + 3 + METER_W : ICON) + 3
   const top = (H - ICON) / 2
-  const parts = [`<g transform="translate(0 ${top})">${icons[icon](color)}</g>`]
+  const parts = [`<g transform="translate(0 ${top}) scale(${ICON / 14})">${icons[icon](iconColor)}</g>`]
   if (meter) {
-    const { mine, rest } = meterOf(meter.claude, meter.used, METER_W)
+    // Claude's part at least two pixels, so a small one is still seen beside amber
+    const parts18 = meterOf(meter.claude, meter.used, METER_W)
+    const mine = parts18.mine ? Math.max(2, parts18.mine) : 0
+    const rest = Math.max(0, Math.min(METER_W, parts18.mine + parts18.rest, METER_W) - mine)
+    const clip = `meter-${icon}`
     const x = ICON + 3
     const y = (H - METER_H) / 2
     parts.push(
-      `<clipPath id="m"><rect x="${x}" y="${y}" width="${METER_W}" height="${METER_H}" rx="2"/></clipPath><g clip-path="url(#m)"><rect x="${x}" y="${y}" width="${METER_W}" height="${METER_H}" fill="${TRACK}"/>${mine ? `<rect x="${x}" y="${y}" width="${mine}" height="${METER_H}" fill="${USAGE_PURPLE}"/>` : ''}${rest ? `<rect x="${x + mine}" y="${y}" width="${rest}" height="${METER_H}" fill="${color}"/>` : ''}</g>`,
+      `<clipPath id="${clip}"><rect x="${x}" y="${y}" width="${METER_W}" height="${METER_H}" rx="2"/></clipPath><g clip-path="url(#${clip})"><rect x="${x}" y="${y}" width="${METER_W}" height="${METER_H}" fill="${TRACK}"/>${mine ? `<rect x="${x}" y="${y}" width="${mine}" height="${METER_H}" fill="${USAGE_PURPLE}"/>` : ''}${rest ? `<rect x="${x + mine}" y="${y}" width="${rest}" height="${METER_H}" fill="${color}"/>` : ''}</g>`,
     )
   }
   return { source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${H}" viewBox="0 0 ${width} ${H}">${parts.join('')}</svg>`, width, height: H }
