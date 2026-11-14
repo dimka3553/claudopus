@@ -1,0 +1,2 @@
+- A card now names the step its work is on, as "Step 13 of 16", under its line of facts; with no step in hand it names the next one, dim
+- Past 14 steps, a card's coloured edge still shows the step being done in its lighter shade, between what is done and what is left
