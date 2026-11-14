@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.97 · 14 November 2026
+- A piece of work's Details shows what it and its helpers have running, the same job rows as its card, every one of them under the one that started it; a helper's own Details shows its own
+
 ## 0.2.96 · 14 November 2026
 - The panel header's buttons keep a gap between rows when a narrow panel wraps them onto two lines.
 

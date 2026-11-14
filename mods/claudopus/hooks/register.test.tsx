@@ -1776,6 +1776,43 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   await tab.unmount()
 })
 
+test('what a piece of work and its helpers have running is in its Details too, every job under the one that started it, and in a helper\'s own Details', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'run the site', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'run the site' } as never)
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Fetch the weights', prompt: 'go', parentAgentId: 'a1' } as never)
+  const call = (agentId: string, id: string, command: string, description: string) =>
+    $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command, description, run_in_background: true } as never)
+  await call('a1', 'b1', 'npm run dev', 'Serve the site')
+  for (const n of [1, 2, 3, 4, 5]) await call('a2', `d${n}`, `curl -o w${n}.bin https://example.com/w${n}.bin`, `Download weights ${n}`)
+  const texts = async (view: { findAll: (q: { type: 'Text' }) => Promise<{ text: string }[]> }) => (await view.findAll({ type: 'Text' })).map(one => one.text)
+  // The work's Details: its own server first under it, then the helper with all five of its downloads, none folded into a count
+  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
+  // In drawing order, with the tree's lines: the server on the work's own line, the helper, its downloads one level under it
+  const rows = (await tab.findAll({ type: 'Text' })).map(one => one.text)
+  const picked = rows.flatMap((text, i) => (/^Server · |^Download · /.test(text) ? [`${rows[i - 2]} ${text}`] : []))
+  expect(picked).toEqual(['├─── Server · Serve the site', ...[1, 2, 3, 4].map(n => `  ├─── Download · Download weights ${n}`), '  └─── Download · Download weights 5'])
+  const shown = await texts(tab)
+  expect(shown.some(text => /more running/.test(text))).toBe(false)
+  expect((await tab.find({ type: 'Text', text: /^Helpers and jobs$/ }))?.props.bold).toBe(true)
+  expect(shown).toContain('6 jobs running · 1 helper at work')
+  await tab.unmount()
+  // The card on the list still folds the helper's jobs past JOBS_SHOWN into one row
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
+  expect((await texts(list)).filter(text => /Download weights/.test(text))).toHaveLength(3)
+  expect((await texts(list)).some(text => /^2 more running/.test(text))).toBe(true)
+  await list.unmount()
+  // The helper's own Details, with no helpers of its own, shows what it has running
+  const helperTab = await $.ui.mount({ ...LIST, requestId: 'work-a2', props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
+  const its = await texts(helperTab)
+  expect((await helperTab.find({ type: 'Text', text: /^Running$/ }))?.props.bold).toBe(true)
+  expect(its).toContain('5 jobs running')
+  expect(its.filter(text => /Download weights/.test(text))).toHaveLength(5)
+  expect(its.some(text => /Serve the site/.test(text))).toBe(false)
+  await helperTab.unmount()
+})
+
 test('long work keeps only its newest ended helpers, and none of work that was forgotten', async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)
