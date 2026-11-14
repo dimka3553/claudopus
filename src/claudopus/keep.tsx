@@ -31,8 +31,10 @@ const startKeeper = async ($: EngineInterface, id: string) => {
   if (!dir || !/^[A-Za-z0-9-]{1,80}$/.test(id) || (await isKeptCopy($))) return
   // $PPID is the chat's process, which runs this shell; perl's setsid takes the keeper out of its process group, which the
   // app ends with the process
-  const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$PPID" "$2" "$3" "$4" >/dev/null 2>&1 </dev/null &`
-  const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/keep`, id, cwd, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$PPID" "$2" "$3" "$4" "$5" >/dev/null 2>&1 </dev/null &`
+  // The mod's own folder goes to the copy whole: a folder it is loaded from may have spaces in its path, which ps would split
+  const own = $.plugin.root.includes('/.claude/plugins/cache/') ? '' : $.plugin.root
+  const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/keep`, id, cwd, dir, own]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   await log($, r.exitCode === 0 ? `keeper started for ${id}` : `keeper not started: ${r.stderr.slice(0, 200)}`)
 }
 
@@ -50,62 +52,74 @@ const parsedOr = <T,>(text: string, or: T): T => {
     return or
   }
 }
-// What was at work when the chat's process last ended, read as it starts again, before this load writes its own
+// What was at work when the chat's process last ended, read as it starts again, before this load writes its own; when the
+// keeper saw that process end (or stopped its copy for the app); and what a load of the mod already did about that cut
+type CutHandled = { at?: number; pid?: string; isDone?: boolean }
 const readCut = async ($: EngineInterface, id: string) => {
-  const was = parsedOr<{ ids?: unknown; at?: unknown; pid?: unknown }>(await readOr($, keepFile(id)), {})
+  const was = parsedOr<{ ids?: unknown }>(await readOr($, keepFile(id)), {})
   const state = parsedOr<KeepState>(await readOr($, keepFile(id, 'state')), {})
+  const handled = parsedOr<CutHandled>(await readOr($, keepFile(id, 'cut')), {})
   const ids = Array.isArray(was.ids) ? was.ids.filter((one): one is string => typeof one === 'string' && /^[\w-]{1,80}$/.test(one)) : []
-  return { ids, at: typeof was.at === 'number' ? was.at : 0, pid: typeof was.pid === 'string' ? was.pid : '', state }
+  // The copy stopped for the app is a cut of its own: its work is started again in the app's chat
+  const cutAt = typeof state.backAt === 'number' ? state.backAt : typeof state.cutAt === 'number' ? state.cutAt : 0
+  return { ids, cutAt, state, handled }
 }
+const markCut = ($: EngineInterface, id: string, handled: CutHandled) => $.fs.write(keepFile(id, 'cut'), JSON.stringify(handled)).catch(err => log($, `cut-off work not noted: ${String(err)}`))
 // The words the work is started again with
 const CUT_TELL = (cutAt: number, here: boolean) =>
   `From Claudopus, not {name}: this chat's process was ended at ${hhmm(cutAt)} while you were at work, not by {name}, and the chat has started again${here ? ' on this Mac by itself, under its own sign-in' : ''}. Carry on from where you were: first check what you already have, and whether a command you started still runs (one started detached goes on), then go on with your to-dos.`
 const hhmm = (at: number) => new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 
-// As the chat starts in a new process: work that was at work when the last one ended was cut off, though Claude Code may have
-// started it again already. A reload of the mod in the same process changes nothing
+// As the chat starts: only a cut the keeper saw counts (a chat with no keeper, or one quit before any, starts nothing again),
+// once, by the first process to start after it; a reload of the mod in that process before it was done takes it up again
 const noteCut = async ($: EngineInterface, id: string) => {
   keepSign = ''
   if (!dir) return
   enginePid = await pidOfEngine($)
   const cut = await readCut($, id)
-  if (!cut.ids.length || cut.pid === enginePid) return
+  if (!cut.ids.length || !cut.cutAt) return
+  if (cut.handled.at === cut.cutAt && cut.handled.isDone) return
   const now = await $.clock.now()
-  const cutAt = cut.state.cutAt && cut.state.cutAt >= cut.at - 60_000 ? cut.state.cutAt : now
-  if (now - cutAt > CUT_OLD) return void log($, `work cut off at ${hhmm(cutAt)} is too old to start again: ${cut.ids.join(', ')}`)
+  if (now - cut.cutAt > CUT_OLD) return void log($, `work cut off at ${hhmm(cut.cutAt)} is too old to start again: ${cut.ids.join(', ')}`)
   const isCopy = await isKeptCopy($)
-  await log($, `work cut off at ${hhmm(cutAt)}${isCopy ? ', the chat going on here as a copy' : ''}: ${cut.ids.join(', ')}`)
-  $.clock.after(CUT_LOOK, () => void bringBack($, cut.ids, cutAt, isCopy).catch(err => log($, `cut-off work not started again: ${String(err)}`)))
+  await markCut($, id, { at: cut.cutAt, pid: enginePid, isDone: false })
+  await log($, `work cut off at ${hhmm(cut.cutAt)}${isCopy ? ', the chat going on here as a copy' : ''}: ${cut.ids.join(', ')}`)
+  $.clock.after(CUT_LOOK, () => void bringBack($, id, cut.ids, cut.cutAt, isCopy).catch(err => log($, `cut-off work not started again: ${String(err)}`)))
 }
 
-// Each piece of cut-off work: one Claude Code started again by itself is marked; any other is sent a message, which starts it
-// again; one that cannot be is marked cut off and left ended. Then one notice for all of them
-const bringBack = async ($: EngineInterface, ids: string[], cutAt: number, isCopy: boolean) => {
+// Each piece of cut-off work: one Claude Code started again by itself is marked; one the person stopped since is left; any other
+// is sent a message, which starts it again; one that cannot be is marked cut off and left ended. Then one notice for all of them
+const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: number, isCopy: boolean) => {
+  const handled = parsedOr<CutHandled>(await readOr($, keepFile(id, 'cut')), {})
+  if (handled.at === cutAt && handled.isDone) return
+  await markCut($, id, { at: cutAt, pid: enginePid, isDone: true })
   await sync($).catch(() => undefined)
   const live = await $.agent.list().catch(() => [])
   const back: string[] = []
   const lost: string[] = []
-  for (const one of ids) {
+  for (const one of ids.filter(one => !stoppedHere.has(one))) {
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
     const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? back : lost).push(one)
     if (!r.isDelivered) await log($, `cut-off work ${one} not started again: ${r.reason}`)
   }
+  if (!back.length && !lost.length) return
   const now = await $.clock.now()
   await update($, todos, list => {
     const known = new Set(list.map(one => one.id))
-    const added = ids.filter(one => !known.has(one)).map(one => ({ ...started(one, '', '', '', cutAt), status: 'stopped' as const, endedAt: cutAt }))
+    const added = [...back, ...lost].filter(one => !known.has(one)).map(one => ({ ...started(one, '', '', '', cutAt), status: 'stopped' as const, endedAt: cutAt }))
     return [...list, ...added].map(one =>
       back.includes(one.id) ? { ...(one.status === 'working' ? one : resumed(one, now)), parentId: '', cutAt, backAt: now } : lost.includes(one.id) ? { ...(one.status === 'working' ? ended(one, 'stopped', cutAt) : one), parentId: '', cutAt, backAt: undefined } : one,
     )
   })
   await saveKeep($)
   redraw($)
-  const titles = (await read($, todos)).filter(one => ids.includes(one.id)).map(one => titleOf(one))
+  const cards = await read($, todos)
+  const titled = (one: string) => `"${titleOf(cards.find(card => card.id === one) ?? started(one, '', '', '', cutAt))}"`
   const where = isCopy ? 'on this Mac by itself' : 'again'
   const text = [
-    back.length ? `${back.length === 1 ? `"${titles[ids.indexOf(back[0] ?? '')] ?? 'Work'}" was cut off at ${hhmm(cutAt)} and goes` : `${back.length} pieces of work were cut off at ${hhmm(cutAt)} and go`} on ${where} since ${hhmm(now)}.` : '',
-    lost.length ? `${lost.length === 1 ? 'One piece of work' : `${lost.length} pieces of work`} cut off at ${hhmm(cutAt)} could not be started again.` : '',
+    back.length ? `${back.length === 1 ? `${titled(back[0] ?? '')} was cut off at ${hhmm(cutAt)} and has been going ${where}` : `${back.length} pieces of work were cut off at ${hhmm(cutAt)} and have been going ${where}`} since ${hhmm(now)}.` : '',
+    lost.length ? `${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} pieces of work`} cut off at ${hhmm(cutAt)} could not be started again.` : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -123,4 +137,4 @@ const tellDevice = async ($: EngineInterface, text: string) => {
 
 // The line on a card of cut-off work: when, and whether it goes on again
 const cutLine = (one: Todo) =>
-  one.cutAt ? (one.backAt ? `Cut off at ${hhmm(one.cutAt)} as the chat's process ended; going on again since ${hhmm(one.backAt)}.` : `Cut off at ${hhmm(one.cutAt)} as the chat's process ended; it could not be started again.`) : ''
+  one.cutAt ? (one.backAt ? `Cut off at ${hhmm(one.cutAt)} as the chat's process ended; going again since ${hhmm(one.backAt)}.` : `Cut off at ${hhmm(one.cutAt)} as the chat's process ended; it could not be started again.`) : ''

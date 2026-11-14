@@ -1,3 +1,3 @@
 - A chat your Claude app runs on another Mac over SSH keeps its work going when your Mac goes away: if the app ends the chat's process there while work runs, that Mac starts the chat again by itself within about a minute, under its own sign-in, and the cut-off work carries on.
-- Work cut off that way says so on its card ("Cut off at 00:14 … going on again since 00:15"), and one notice tells you, on your phone too where Claude Code's push notifications and Remote Control are on.
+- Work cut off that way says so on its card ("Cut off at 00:14 … going again since 00:15"), and one notice tells you, on your phone too where Claude Code's push notifications and Remote Control are on.
 - Work starts long commands detached and follows their logs, so a training or a build goes on even when the chat's process ends.
