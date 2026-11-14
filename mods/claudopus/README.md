@@ -99,7 +99,7 @@ More on each, and on editing the rules, in the [guide](docs/guide.md#settings).
 ## Privacy
 
 - Everything it keeps is in `~/.claude/claudopus` on your Mac. Delete the folder and it is gone.
-- It sends only to Claude, through Claude Code, and to your own Macs over SSH if you name them. Unless `updates` is off, once an hour it reads a version number from claudopus.ai, and when it changes, Claude Code fetches the new release from GitHub. No telemetry.
+- It sends only to Claude, through Claude Code, and to your own Macs over SSH if you name them. Unless `updates` is off, once an hour it reads a version number from claudopus.ai, and when it changes, Claude Code fetches the new release from GitHub; a copy run from a folder of its code brings that folder up to date with git, only as a fast-forward that leaves uncommitted work alone. No telemetry.
 - Passwords and keys stay in this Mac's keychain. An admin command runs only after you allow it on its card; a kept password can be read by any process running as you, so only "Let macOS ask, keep nothing" is a wall.
 - The two small notification apps are committed built; `notifier/checksums.txt` holds the SHA-256 of each of their files, and every release checks the committed apps still match it; the full account says how to rebuild them and compare, and what differs on another toolchain.
 

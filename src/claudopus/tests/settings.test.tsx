@@ -110,8 +110,8 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
 })
 
 test('Check for updates in Config shows it is checking, then what it found; a second press meanwhile starts no second look', async ($, on) => {
-  world(on)
-  // The tests run the mod from a folder of its code, as its maker does: only the version page is read, and nothing is downloaded
+  const { files, gitRan } = world(on)
+  // The tests run the mod from a folder of its code, as its maker does: a newer version brings that folder up to date with git
   let page = '{"version":"0.1.0"}'
   let answer: (() => void) | undefined
   let fetches = 0
@@ -135,12 +135,26 @@ test('Check for updates in Config shows it is checking, then what it found; a se
   release()
   expect(await until(() => config.find({ type: 'Text', text: /^You're on the newest version \(v0\.1\.0\)/ }))).toBeDefined()
   expect(fetches).toBe(1)
-  // A newer release: said, with what to do for a copy run from its folder
+  // The folder is newest already: git is never run
+  expect(gitRan).toEqual([])
+  // A newer release, with changes in the folder that the update would overwrite: git refuses and nothing is changed
   page = '{"version":"0.1.2"}'
+  files.set('git:online', '0.1.2')
+  files.set('git:merge', 'error: Your local changes to the following files would be overwritten by merge:\n\ta.tsx')
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  expect(await until(() => config.find({ type: 'Text', text: /^v0\.1\.2 is out\. This copy runs from a folder of its code/ }))).toBeDefined()
+  const kept = await until(() => config.find({ type: 'Text', text: /^Couldn't update to v0\.1\.2: changes in its folder that aren't committed/ }))
+  expect(kept?.props.color).toBe('error')
+  expect(files.get('manifest')).toBeUndefined()
+  // Pressed again once that is sorted: the folder moves forward to it, and the box says so
+  files.delete('git:merge')
+  await pressed(config, 'config-check')
+  await until(async () => answer)
+  release()
+  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it, or it switches by itself in a moment.' }))).toBeDefined()
+  expect(gitRan).toContain('merge --ff-only --quiet @{u}')
+  files.delete('git:online')
   // No answer that reads as a version: said as a failure, in the error colour
   page = 'oops'
   await pressed(config, 'config-check')
