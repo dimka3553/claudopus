@@ -4896,6 +4896,38 @@ const leaveHere = ($: EngineInterface, folder: string, name: string, body: unkno
     .write(`${liveDir()}/${folder}/${name}.part`, JSON.stringify(body))
     .then(() => $.process.run(['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
     .catch(err => ({ exitCode: -1, stderr: String(err) }))
+const leaveAnswer = async ($: EngineInterface, chat: { id: string; host: string }, answer: Answer) => {
+  const name = `${answer.at}-${Math.random().toString(36).slice(2, 8)}`
+  const mac = chat.host ? macs.find(m => m === chat.host) : undefined
+  const folder = `${ANSWERS}/${chat.id}`
+  return !chat.host
+    ? await leaveHere($, folder, name, answer)
+    : mac
+      ? await $.process
+          .run(ssh(mac, `d=~/.claude/claudopus/${LIVE_DIR}/${folder} && mkdir -p $d && cat > $d/${name}.part && mv $d/${name}.part $d/${name}.json`), { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
+          .catch(err => ({ exitCode: -1, stderr: String(err) }))
+      : isKey(chat.host) && pushedFrom.has(chat.host)
+        ? await leaveHere($, `${OUTBOX}/${chat.host}`, name, { ...answer, chat: chat.id })
+        : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
+}
+// A Yes or No pressed here on another chat's prompt, left for that chat as an answer whose card is `prompt:<its id>`: that chat answers
+// its prompt as if pressed there. Until that chat's file moves it to answered, its card here says what was pressed in place of buttons
+const PROMPT_ANSWER = 'prompt:'
+const promptsPressed = new Map<string, 'yes' | 'no'>()
+const answerPromptElsewhere = async ($: EngineInterface, c: Shared, p: Prompt, said: 'yes' | 'no') => {
+  presses += 1
+  const key = `${c.host}:${c.chat}:${p.id}`
+  if (promptsPressed.has(key) || !/^[A-Za-z0-9_-]+$/.test(c.chat)) return
+  promptsPressed.set(key, said)
+  redraw($)
+  const at = await $.clock.now()
+  const r = await leaveAnswer($, { id: c.chat, host: c.host }, { card: `${PROMPT_ANSWER}${p.id}`, choice: said, isReply: false, ask: p.text, askAt: p.at, at })
+  if (r.exitCode !== 0) {
+    promptsPressed.delete(key)
+    redraw($)
+    await log($, `answer to a prompt of the chat ${c.chat}${c.host ? ` on ${c.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)
+  }
+}
 const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, isReply: boolean) => {
   const ask = one.ask
   const said = choice.trim()
@@ -4914,18 +4946,7 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line: lineOf(one), isHeld })
   redraw($)
   const answer: Answer = { card: chat.agent, choice: said, isReply, ask: ask.text, askAt: ask.at, at }
-  const name = `${at}-${Math.random().toString(36).slice(2, 8)}`
-  const mac = chat.host ? macs.find(m => m === chat.host) : undefined
-  const folder = `${ANSWERS}/${chat.id}`
-  const r = !chat.host
-    ? await leaveHere($, folder, name, answer)
-    : mac
-      ? await $.process
-          .run(ssh(mac, `d=~/.claude/claudopus/${LIVE_DIR}/${folder} && mkdir -p $d && cat > $d/${name}.part && mv $d/${name}.part $d/${name}.json`), { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
-          .catch(err => ({ exitCode: -1, stderr: String(err) }))
-      : isKey(chat.host) && pushedFrom.has(chat.host)
-        ? await leaveHere($, `${OUTBOX}/${chat.host}`, name, { ...answer, chat: chat.id })
-        : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
+  const r = await leaveAnswer($, chat, answer)
   if (r.exitCode !== 0) {
     answeredHere.delete(mark)
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost', at, line: lineOf(one) })
@@ -4951,6 +4972,12 @@ const readAnswers = async ($: EngineInterface) => {
     const answer = answerOf(await readOr($, path))
     await $.process.run(['rm', '-f', path]).catch(() => undefined)
     const now = await $.clock.now()
+    // A Yes or No another chat pressed on this chat's prompt answers it while it is still held; one too late does nothing
+    if (answer?.card.startsWith(PROMPT_ANSWER)) {
+      const isTaken = (answer.choice === 'yes' || answer.choice === 'no') && now - answer.at <= ANSWER_KEPT && answerPrompt($, answer.card.slice(PROMPT_ANSWER.length), answer.choice)
+      if (!isTaken) await log($, `answer to a prompt from another chat dropped: it no longer waits`)
+      continue
+    }
     const card = answer ? (await read($, todos)).find(one => one.id === answer.card && !one.parentId) : undefined
     const isSame = Boolean(answer && card?.ask && (answer.askAt ? answer.askAt === card.ask.at : answer.ask === card.ask.text))
     // A reply in words to work whose ask was answered a moment ago, as a second message after a press, still reaches it
@@ -5830,7 +5857,8 @@ const gatesPart = ($: EngineInterface, ui: Ui) =>
 // ---- The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel ----
 // The engine raises PermissionRequest as it puts a prompt to the person, and says nothing of the answer but a refusal: an allowed
 // call just runs and ends. So a prompt goes when its call ends (refused, interrupted or run), when the terminal draws its running
-// pill, or, for a command, as soon as a process running it is seen on this Mac. The mod never answers a prompt
+// pill, or, for a command, as soon as a process running it is seen on this Mac. A prompt to allow a call is also answered by a press
+// on its card: the engine runs its PermissionRequest hooks beside its own box, and the first answer, the box's or the hook's, stands
 type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean; input?: Record<string, string> }
 let waiting: Waiting[] = []
 // The tool calls whose permission check asked, newest last, so the prompt that follows is known by its call's id: the one of the same
@@ -5958,7 +5986,8 @@ const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, o
   // Its own id first, open or answered; only then the oldest open one of the same loop and tool whose id was not known. That one says
   // what came of it only when the call asked with the very same words; else it may be another call's, and it goes with no word
   const exact = waiting.find(one => one.id === id)
-  const was = exact ? undefined : answeredPrompts.find(one => one.id === id && !one.endedAt)
+  // One answered on its card and still running, whose id was not known, is the same call only when it asked with the very same words
+  const was = exact ? undefined : (answeredPrompts.find(one => one.id === id && !one.endedAt) ?? answeredPrompts.find(one => !one.endedAt && one.isRunning && byTool(one) && isSameCall(one)))
   const guessed = exact || was || !tool ? undefined : (waiting.find(one => byTool(one) && isSameCall(one)) ?? waiting.find(byTool))
   const gone = exact ?? guessed
   if (!gone && !was) return
@@ -6026,6 +6055,48 @@ const lookForStarted = async ($: EngineInterface) => {
   }
 }
 
+// A press on a prompt's card, by the prompt's id, read by its hold between two looks; the prompts held now
+const promptSaid = new Map<string, 'yes' | 'no'>()
+const promptHeld = new Set<string>()
+const PRESSED_NO = 'The person said no to this on its card in the Claudopus panel. It did not run. Wait for what they say next.'
+const PRESSED_NO_WORK = 'The person said no to this on its card in the Claudopus panel. It did not run: do not try it another way; carry on without it.'
+const markHeld = ($: EngineInterface, id: string, isHeld: boolean) => {
+  waiting = waiting.map(one => (one.id !== id ? one : isHeld ? { ...one, isHeld: true } : (({ isHeld: _held, ...rest }) => rest)(one)))
+  redraw($)
+  void shareMine($).catch(() => undefined)
+}
+// Holds the prompt until a press on its card, its call ends (the box was answered), the engine gives up on the hook, or this copy of
+// the mod is replaced. As the admin gate does, the wait is a one-second sleep run by the engine, whose time the hook's own budget
+// does not count. Its buttons show only while it is held, so none is ever pressed for nothing
+const holdPrompt = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, id: string): Promise<'yes' | 'no' | undefined> => {
+  promptHeld.add(id)
+  markHeld($, id, true)
+  let said: 'yes' | 'no' | undefined
+  try {
+    for (;;) {
+      said = promptSaid.get(id)
+      if (said) break
+      if (!waiting.some(one => one.id === id) || next.signal?.aborted || (next.budget?.remainingMs ?? Infinity) < 1500 || (await isReplaced($))) break
+      await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
+    }
+  } finally {
+    promptHeld.delete(id)
+    promptSaid.delete(id)
+    if (waiting.some(one => one.id === id)) markHeld($, id, false)
+  }
+  return said
+}
+// A press on Yes or No, here or left by another chat: the prompt is answered at once and its card says so, as one answered in the box
+const answerPrompt = ($: EngineInterface, id: string, said: 'yes' | 'no') => {
+  presses += 1
+  if (!promptHeld.has(id) || promptSaid.has(id)) return false
+  const one = waiting.find(other => other.id === id)
+  if (!one) return false
+  promptSaid.set(id, said)
+  settle($, id, one.agent || undefined, one.tool, said === 'yes' ? 'running' : 'no')
+  return true
+}
+
 const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
@@ -6048,8 +6119,18 @@ const promptHooks = (on: On) => {
   on('classic.PermissionRequest', async ($, e, next) => {
     const id = dir && !isEnded ? await opened($, e.agent_id, e.tool_name, e.tool_input).catch(err => (void log($, `prompt not shown: ${String(err)}`), '')) : ''
     const r = await next(e)
-    if (id && r?.decision) settle($, id)
-    return r
+    if (id && r?.decision) {
+      settle($, id)
+      return r
+    }
+    // A call to allow waits for a press on its card while the person can see one; a question or a plan is the person's own box's
+    const one = waiting.find(other => other.id === id)
+    if (!one || one.kind !== 'allow' || !(await $.session.surfaces().catch(() => [])).length) return r
+    const said = await holdPrompt($, next, id)
+    if (!said) return r
+    if (said === 'yes') return { ...r, decision: { behavior: 'allow' } }
+    // No from the chat's own thread stops its turn, as the box's No does; work is told, and carries on without it
+    return { ...r, decision: { behavior: 'deny', message: one.agent ? PRESSED_NO_WORK : PRESSED_NO, ...(one.agent ? {} : { interrupt: true }) } }
   })
   on('classic.Notification', async ($, e, next) => {
     if (e.notification_type === 'permission_prompt' && waiting.length) await tellWaiting($).catch(err => log($, `prompt not told: ${String(err)}`))
@@ -8380,8 +8461,21 @@ const panelHooks = (on: On) => {
     }
 
     // The app's own prompt open in a chat, amber at the top of that chat's cards, in plain words: which work asks, what it asks, exactly
-    // what (the command, the message), what a yes and a no each do, and where to answer it. A chat of the Claude app on this Mac opens
-    // at a press; the panel answers no prompt itself
+    // what (the command, the message), what a yes and a no each do, and Yes and No that answer it while its chat holds it. Not held
+    // (a question, a plan, a chat of an older version), it says where to answer it, and a chat of the Claude app on this Mac opens at a
+    // press. Another chat's Yes or No is left for that chat, and the card says what was pressed until that chat's file moves it on
+    const promptButtons = (p: Prompt, key: string, c?: Shared) => {
+      const pressed = c ? promptsPressed.get(`${c.host}:${c.chat}:${p.id}`) : undefined
+      if (pressed) return <Text key={`prompt-sent-${key}`} color={LIVE} bold wrap="wrap">{pressed === 'yes' ? 'You said yes · it goes to that chat' : 'You said no · it goes to that chat'}</Text>
+      const press = (said: 'yes' | 'no') => (c ? () => void answerPromptElsewhere($, c, p, said).catch(err => log($, `prompt answer not left: ${String(err)}`)) : () => void (answerPrompt($, p.id, said), redraw($)))
+      return (
+        <Box key={`prompt-buttons-${key}`} flexDirection="row" gap={1}>
+          <Button key={`prompt-yes-${key}-${presses}`} label="Yes" onPress={press('yes')} />
+          <Button key={`prompt-no-${key}-${presses}`} label="No" onPress={press('no')} />
+        </Box>
+      )
+    }
+    const isHeldHere = (p: Prompt, c?: Shared) => Boolean(p.isHeld && (c || promptHeld.has(p.id)))
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
       <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
         <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
@@ -8402,8 +8496,8 @@ const panelHooks = (on: On) => {
               {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
             </Box>
           ) : null}
-          <Text dimColor wrap="wrap">{where}</Text>
-          {c && pressOf(c) ? (
+          {isHeldHere(p, c) ? promptButtons(p, key, c) : <Text dimColor wrap="wrap">{where}</Text>}
+          {c && pressOf(c) && !isHeldHere(p, c) ? (
             <Box flexDirection="row">
               <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
             </Box>

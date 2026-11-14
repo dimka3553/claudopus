@@ -63,6 +63,7 @@ export const promptsOf = (list: unknown): Prompt[] =>
         ...(one.answered === 'yes' || one.answered === 'no' || one.answered === 'stopped' ? { answered: one.answered } : {}),
         ...(one.isRunning === true ? { isRunning: true } : {}),
         ...(one.isCut === true ? { isCut: true } : {}),
+        ...(one.isHeld === true ? { isHeld: true } : {}),
         ...(typeof one.endedAt === 'number' ? { endedAt: one.endedAt } : {}),
       }
     })

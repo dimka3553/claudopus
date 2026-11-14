@@ -119,7 +119,8 @@ export type Link = { bridge: string; app: string }
 // the page), `yes` and `no` what each answer does. Once answered it moves to Shared's `answeredPrompts`: `answered` is what the person
 // did (yes, no, an answer to a question, or nothing as it ended first), `isRunning` while an allowed call still runs, `endedAt` when
 // it ended, after which it shows a minute more; `done` how its end is said once allowed ("it was sent"), `isCut` an allowed call
-// that was stopped before it finished
+// that was stopped before it finished; `isHeld` while the chat that raised it waits for a press on its card's Yes or No, which
+// answers it as Claude Code's own box would
 export type Prompt = {
   id: string
   text: string
@@ -134,6 +135,7 @@ export type Prompt = {
   isCut?: boolean
   isRunning?: boolean
   endedAt?: number
+  isHeld?: boolean
 }
 
 // The card that has the pane to itself, by id; empty while the small cards show

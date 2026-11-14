@@ -3,7 +3,8 @@
 // ---- The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel ----
 // The engine raises PermissionRequest as it puts a prompt to the person, and says nothing of the answer but a refusal: an allowed
 // call just runs and ends. So a prompt goes when its call ends (refused, interrupted or run), when the terminal draws its running
-// pill, or, for a command, as soon as a process running it is seen on this Mac. The mod never answers a prompt
+// pill, or, for a command, as soon as a process running it is seen on this Mac. A prompt to allow a call is also answered by a press
+// on its card: the engine runs its PermissionRequest hooks beside its own box, and the first answer, the box's or the hook's, stands
 type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean; input?: Record<string, string> }
 let waiting: Waiting[] = []
 // The tool calls whose permission check asked, newest last, so the prompt that follows is known by its call's id: the one of the same
@@ -131,7 +132,8 @@ const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, o
   // Its own id first, open or answered; only then the oldest open one of the same loop and tool whose id was not known. That one says
   // what came of it only when the call asked with the very same words; else it may be another call's, and it goes with no word
   const exact = waiting.find(one => one.id === id)
-  const was = exact ? undefined : answeredPrompts.find(one => one.id === id && !one.endedAt)
+  // One answered on its card and still running, whose id was not known, is the same call only when it asked with the very same words
+  const was = exact ? undefined : (answeredPrompts.find(one => one.id === id && !one.endedAt) ?? answeredPrompts.find(one => !one.endedAt && one.isRunning && byTool(one) && isSameCall(one)))
   const guessed = exact || was || !tool ? undefined : (waiting.find(one => byTool(one) && isSameCall(one)) ?? waiting.find(byTool))
   const gone = exact ?? guessed
   if (!gone && !was) return
@@ -199,6 +201,48 @@ const lookForStarted = async ($: EngineInterface) => {
   }
 }
 
+// A press on a prompt's card, by the prompt's id, read by its hold between two looks; the prompts held now
+const promptSaid = new Map<string, 'yes' | 'no'>()
+const promptHeld = new Set<string>()
+const PRESSED_NO = 'The person said no to this on its card in the Claudopus panel. It did not run. Wait for what they say next.'
+const PRESSED_NO_WORK = 'The person said no to this on its card in the Claudopus panel. It did not run: do not try it another way; carry on without it.'
+const markHeld = ($: EngineInterface, id: string, isHeld: boolean) => {
+  waiting = waiting.map(one => (one.id !== id ? one : isHeld ? { ...one, isHeld: true } : (({ isHeld: _held, ...rest }) => rest)(one)))
+  redraw($)
+  void shareMine($).catch(() => undefined)
+}
+// Holds the prompt until a press on its card, its call ends (the box was answered), the engine gives up on the hook, or this copy of
+// the mod is replaced. As the admin gate does, the wait is a one-second sleep run by the engine, whose time the hook's own budget
+// does not count. Its buttons show only while it is held, so none is ever pressed for nothing
+const holdPrompt = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, id: string): Promise<'yes' | 'no' | undefined> => {
+  promptHeld.add(id)
+  markHeld($, id, true)
+  let said: 'yes' | 'no' | undefined
+  try {
+    for (;;) {
+      said = promptSaid.get(id)
+      if (said) break
+      if (!waiting.some(one => one.id === id) || next.signal?.aborted || (next.budget?.remainingMs ?? Infinity) < 1500 || (await isReplaced($))) break
+      await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
+    }
+  } finally {
+    promptHeld.delete(id)
+    promptSaid.delete(id)
+    if (waiting.some(one => one.id === id)) markHeld($, id, false)
+  }
+  return said
+}
+// A press on Yes or No, here or left by another chat: the prompt is answered at once and its card says so, as one answered in the box
+const answerPrompt = ($: EngineInterface, id: string, said: 'yes' | 'no') => {
+  presses += 1
+  if (!promptHeld.has(id) || promptSaid.has(id)) return false
+  const one = waiting.find(other => other.id === id)
+  if (!one) return false
+  promptSaid.set(id, said)
+  settle($, id, one.agent || undefined, one.tool, said === 'yes' ? 'running' : 'no')
+  return true
+}
+
 const OWN_CALLS = ['SendMessage', 'TaskStop']
 const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
@@ -221,8 +265,18 @@ const promptHooks = (on: On) => {
   on('classic.PermissionRequest', async ($, e, next) => {
     const id = dir && !isEnded ? await opened($, e.agent_id, e.tool_name, e.tool_input).catch(err => (void log($, `prompt not shown: ${String(err)}`), '')) : ''
     const r = await next(e)
-    if (id && r?.decision) settle($, id)
-    return r
+    if (id && r?.decision) {
+      settle($, id)
+      return r
+    }
+    // A call to allow waits for a press on its card while the person can see one; a question or a plan is the person's own box's
+    const one = waiting.find(other => other.id === id)
+    if (!one || one.kind !== 'allow' || !(await $.session.surfaces().catch(() => [])).length) return r
+    const said = await holdPrompt($, next, id)
+    if (!said) return r
+    if (said === 'yes') return { ...r, decision: { behavior: 'allow' } }
+    // No from the chat's own thread stops its turn, as the box's No does; work is told, and carries on without it
+    return { ...r, decision: { behavior: 'deny', message: one.agent ? PRESSED_NO_WORK : PRESSED_NO, ...(one.agent ? {} : { interrupt: true }) } }
   })
   on('classic.Notification', async ($, e, next) => {
     if (e.notification_type === 'permission_prompt' && waiting.length) await tellWaiting($).catch(err => log($, `prompt not told: ${String(err)}`))

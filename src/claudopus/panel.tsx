@@ -828,8 +828,21 @@ const panelHooks = (on: On) => {
     }
 
     // The app's own prompt open in a chat, amber at the top of that chat's cards, in plain words: which work asks, what it asks, exactly
-    // what (the command, the message), what a yes and a no each do, and where to answer it. A chat of the Claude app on this Mac opens
-    // at a press; the panel answers no prompt itself
+    // what (the command, the message), what a yes and a no each do, and Yes and No that answer it while its chat holds it. Not held
+    // (a question, a plan, a chat of an older version), it says where to answer it, and a chat of the Claude app on this Mac opens at a
+    // press. Another chat's Yes or No is left for that chat, and the card says what was pressed until that chat's file moves it on
+    const promptButtons = (p: Prompt, key: string, c?: Shared) => {
+      const pressed = c ? promptsPressed.get(`${c.host}:${c.chat}:${p.id}`) : undefined
+      if (pressed) return <Text key={`prompt-sent-${key}`} color={LIVE} bold wrap="wrap">{pressed === 'yes' ? 'You said yes · it goes to that chat' : 'You said no · it goes to that chat'}</Text>
+      const press = (said: 'yes' | 'no') => (c ? () => void answerPromptElsewhere($, c, p, said).catch(err => log($, `prompt answer not left: ${String(err)}`)) : () => void (answerPrompt($, p.id, said), redraw($)))
+      return (
+        <Box key={`prompt-buttons-${key}`} flexDirection="row" gap={1}>
+          <Button key={`prompt-yes-${key}-${presses}`} label="Yes" onPress={press('yes')} />
+          <Button key={`prompt-no-${key}-${presses}`} label="No" onPress={press('no')} />
+        </Box>
+      )
+    }
+    const isHeldHere = (p: Prompt, c?: Shared) => Boolean(p.isHeld && (c || promptHeld.has(p.id)))
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
       <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
         <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
@@ -850,8 +863,8 @@ const panelHooks = (on: On) => {
               {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
             </Box>
           ) : null}
-          <Text dimColor wrap="wrap">{where}</Text>
-          {c && pressOf(c) ? (
+          {isHeldHere(p, c) ? promptButtons(p, key, c) : <Text dimColor wrap="wrap">{where}</Text>}
+          {c && pressOf(c) && !isHeldHere(p, c) ? (
             <Box flexDirection="row">
               <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
             </Box>
