@@ -1,0 +1,1 @@
+- Automatic updates find Claude Code where its installer puts it, so a chat started without a login shell (as in tmux over ssh on Linux) updates too, instead of failing to find claude.
