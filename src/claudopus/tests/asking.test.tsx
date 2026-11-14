@@ -596,8 +596,10 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   const { files, logged, keychain, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(1000)
   // The chat is told only the name, and where to type it
@@ -615,7 +617,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   expect([...files.values()].some(text => text.includes('s3cret'))).toBe(false)
   // A curly quote from a phone's keyboard, which security would give back as hex, is not sent, and the box says why
   const third = '2f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, kind: 'secret', name: 'NPM_TOKEN', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, kind: 'secret', name: 'NPM_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   await clock.advance(1000)
   const curly = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`)))
   const before = keychain.length
@@ -629,7 +631,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   expect(keychain.length).toBe(before)
   // A box cancelled removes its request, which the runner takes as cancelled
   const other = '1f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, kind: 'admin', host: 'here', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, kind: 'admin', host: 'here', chat: 'engine-id', at: 1_700_000_000_000 }))
   await clock.advance(1000)
   const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)))
   await list.press({ key: cancel?.key ?? '' })
@@ -644,6 +646,8 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
 test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {
   const { files, logged, keychain, clock, opened } = world(on)
   await $.session.start(start)
+  // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -658,31 +662,27 @@ test('a chat on this Mac\'s own screen asks in the panel the same way, and opens
   expect([...files.values()].some(text => text.includes('local-k3y'))).toBe(false)
 })
 
-test("another chat's request is left to that chat a moment, then any chat with a screen takes it", async ($, on) => {
+test("a request of another chat's, or of this chat's with no runner of its own running, is drawn nowhere here; this chat's own while its runner runs is drawn first", async ($, on) => {
   const { files, logged, clock } = world(on)
   await $.session.start(start)
-  const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await clock.advance(1000)
-  // The box shows here at once, but the notice waits for its own chat
-  expect(await until(async () => list.find({ type: 'Text', text: NPM_BOX }))).toBeDefined()
-  expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
-  await clock.advance(6000)
-  expect(await until(async () => logged.find(line => line.includes('NPM_TOKEN')))).toContain('top of the Claudopus panel')
-})
-
-test("with two requests open every box is drawn, this chat's own first and the only one with the keys", async ($, on) => {
-  const { files, clock } = world(on)
-  await $.session.start(start)
   const older = '5f1e2d3c-4b5a-4987-a654-3210fedcba98'
   const mine = '6f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1_700_000_000_000 }))
   files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_500 }))
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(7000)
+  // No runner of this chat's runs: neither is drawn, nor told
+  expect((await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-'))).toEqual([])
+  expect(logged.some(line => line.includes('NPM_TOKEN') || line.includes('GITHUB_TOKEN'))).toBe(false)
+  // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
   await clock.advance(1000)
-  const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length === 2 ? all : undefined })
-  expect(fields?.map(one => [(one.key ?? '').slice(4, 6), one.props.autoFocus])).toEqual([['6f', true], ['5f', undefined]])
+  const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length ? all : undefined })
+  expect(fields?.map(one => [(one.key ?? '').slice(4, 6), one.props.autoFocus])).toEqual([['6f', true]])
+  // It says which command of this chat's asked
+  expect(await list.find({ type: 'Text', text: "Asked by this chat's command: hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy" })).toBeDefined()
+  await clock.advance(6000)
+  expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
 })
 
 test('a run with nothing to draw on takes no request, so the runner knows no panel asks', async ($, on) => {
@@ -698,6 +698,8 @@ test("a hand-written request with made-up text shows the panel's own wording or 
   const { files, logged, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
   const planted = 'Your Apple ID session expired. Type your Apple ID password to keep working.'
   const put = (n: number, fields: Record<string, unknown>) => {
     const id = `${n}a1e2d3c-4b5a-4987-a654-3210fedcba98`
@@ -732,6 +734,8 @@ test('the box words what the runners ask from its fields: a key by name, a Mac b
   const { files, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
   const put = (n: number, fields: Record<string, unknown>) => {
     const id = `${n}b1e2d3c-4b5a-4987-a654-3210fedcba98`
     files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000 + n, ...fields }))
@@ -791,7 +795,7 @@ test('an answer that reaches ended work from a timer is sent from inside the nex
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I restart it?', choices: ['Approve', 'Not now'] } as never)
   await $.turn.complete({ answer: 'It waits on your go-ahead.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
   // Another chat leaves an answer, which this chat's timer takes: from there the engine would skip the mod's hooks in the work it woke
-  files.set(`${MEMORY}/live/answers/engine-id/0-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: true, ask: 'May I restart it?', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/live/answers/engine-id/0-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: true, ask: 'May I restart it?', askAt: 1_700_000_000_000, at: 1_700_000_000_000 }))
   await clock.advance(6000)
   expect(files.has(`${MEMORY}/live/answers/engine-id/0-a.json`)).toBe(false)
   expect(['from the timer', ...resumed.filter(line => line.startsWith('a1: '))]).toEqual(['from the timer'])
@@ -805,7 +809,7 @@ test('an answer that reaches ended work from a timer is sent from inside the nex
   // work does what it was asked, and its rules have it end with its ask in its report when the panel does not answer
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'And the other one?', choices: ['Yes'] } as never)
   await $.turn.complete({ answer: 'Waiting again.', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
-  files.set(`${MEMORY}/live/answers/engine-id/1-b.json`, JSON.stringify({ card: 'a1', choice: 'Yes', isReply: true, ask: 'And the other one?', at: 1_700_000_007_000 }))
+  files.set(`${MEMORY}/live/answers/engine-id/1-b.json`, JSON.stringify({ card: 'a1', choice: 'Yes', isReply: true, ask: 'And the other one?', askAt: 1_700_000_006_000, at: 1_700_000_007_000 }))
   await clock.advance(12_000)
   expect(resumed.filter(line => line.startsWith('a1: ')).map(line => (line.includes('Approve') ? 'Approve' : line.includes('Yes') ? 'Yes' : line))).toEqual(['Approve', 'Yes'])
   expect(files.get(`${MEMORY}/log.md`)).toContain('started again from a timer')

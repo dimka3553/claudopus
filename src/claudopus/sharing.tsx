@@ -56,7 +56,10 @@ const shareMine = async ($: EngineInterface) => {
   // and would show what is there as running for good
   const isLive = (one: Todo) => one.status === 'working' || Boolean(one.ask)
   const ended = cards.filter(one => !isLive(one))
-  await $.fs.write(ownLive(id), JSON.stringify({ ...s, cards: cards.filter(isLive), ...(ended.length ? { ended } : {}) }))
+  // Every kept key and admin password is hidden in it, as in what a tool answers; a file that could not be checked is not written
+  const text = await hiddenJson($, JSON.stringify({ ...s, cards: cards.filter(isLive), ...(ended.length ? { ended } : {}) }))
+  if (text === undefined) return void log($, "this chat's file not shared: it could not be checked for kept keys")
+  await $.fs.write(ownLive(id), text)
   sharedSign = sign
   sharedAt = now
 }
@@ -355,26 +358,10 @@ const leaveAnswer = async ($: EngineInterface, chat: { id: string; host: string 
         ? await leaveHere($, `${OUTBOX}/${chat.host}`, name, { ...answer, chat: chat.id })
         : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
 }
-// A Yes or No pressed here on another chat's prompt, left for that chat as an answer whose card is `prompt:<its id>`: that chat answers
-// its prompt as if pressed there. Until that chat's file moves it to answered, its card here says what was pressed in place of buttons
+// An answer some file leaves for one of this chat's prompts (card `prompt:<its id>`, as versions before 0.2.106 left) answers nothing:
+// a prompt of Claude Code's is answered only in its own chat, by a press on its card there or in Claude Code's own box, never by a file
+// anything on this Mac, or on another Mac, could write
 const PROMPT_ANSWER = 'prompt:'
-const promptsPressed = new Map<string, 'yes' | 'no'>()
-const answerPromptElsewhere = async ($: EngineInterface, c: Shared, p: Prompt, said: 'yes' | 'no') => {
-  presses += 1
-  const key = `${c.host}:${c.chat}:${p.id}`
-  if (promptsPressed.has(key) || !/^[A-Za-z0-9_-]+$/.test(c.chat)) return
-  promptsPressed.set(key, said)
-  redraw($)
-  const at = await $.clock.now()
-  const r = await leaveAnswer($, { id: c.chat, host: c.host }, { card: `${PROMPT_ANSWER}${p.id}`, choice: said, isReply: false, ask: p.text, askAt: p.at, at })
-  // Said for a minute at most: that chat's file has moved it on by then, or the answer came too late and its buttons show again
-  $.clock.after(PROMPT_SHOWN, () => void (promptsPressed.get(key) === said && (promptsPressed.delete(key), redraw($))))
-  if (r.exitCode !== 0) {
-    promptsPressed.delete(key)
-    redraw($)
-    await log($, `answer to a prompt of the chat ${c.chat}${c.host ? ` on ${c.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)
-  }
-}
 const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, isReply: boolean) => {
   const ask = one.ask
   const said = choice.trim()
@@ -403,41 +390,52 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
     await log($, `answer for the chat ${chat.id}${chat.host ? ` on ${chat.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)
   }
 }
-// Answers other chats left for this one's work: each acted on as if pressed here, once, then put away. A press answers the ask it
-// was pressed for and no later one, even in the same words; a reply in words goes to the work whatever it asks now; an answer that
-// waited past ANSWER_KEPT is dropped
+// Answers other chats left for this one's work: each acted on as if pressed here, once, then put away. Each answers only the ask open
+// on its card now, named by when that ask was asked, and a reply in words after a press only the ask that press answered: an answer to
+// no open ask does nothing. One dated more than ANSWER_SKEW ahead of this Mac's clock, one that waited past ANSWER_KEPT, the same answer
+// a second time and a file too big to be one are dropped, and a look reads at most ANSWERS_A_LOOK of them
 const takenAnswers = new Set<string>()
+const answersActed = new Set<string>()
+const ANSWER_SKEW = 60_000
+const ANSWERS_A_LOOK = 20
+const ANSWER_BYTES = 16_000
 const readAnswers = async ($: EngineInterface) => {
   const { id } = await read($, me)
   if (!id || !dir) return
   const folder = `${liveDir()}/${ANSWERS}/${id}`
   const all = (await $.fs.list(folder).catch(() => [])).filter(entry => entry.name.endsWith('.json'))
-  // One taken already and left again, as an answer another Mac's trip carried twice, is put away unread
-  for (const entry of all.filter(one => takenAnswers.has(one.name))) await $.process.run(['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
-  const entries = all.filter(entry => !takenAnswers.has(entry.name))
-  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+  // One taken already and left again, as an answer another Mac's trip carried twice, is put away unread; so is one too big to be one
+  for (const entry of all.filter(one => takenAnswers.has(one.name) || one.size > ANSWER_BYTES)) await $.process.run(['rm', '-f', `${folder}/${entry.name}`]).catch(() => undefined)
+  const entries = all.filter(entry => !takenAnswers.has(entry.name) && entry.size <= ANSWER_BYTES)
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name)).slice(0, ANSWERS_A_LOOK)) {
     takenAnswers.add(entry.name)
     const path = `${folder}/${entry.name}`
     const answer = answerOf(await readOr($, path))
     await $.process.run(['rm', '-f', path]).catch(() => undefined)
     const now = await $.clock.now()
-    // A Yes or No another chat pressed on this chat's prompt answers it while it is still held; one too late does nothing
     if (answer?.card.startsWith(PROMPT_ANSWER)) {
-      const isTaken = (answer.choice === 'yes' || answer.choice === 'no') && now - answer.at <= ANSWER_KEPT && answerPrompt($, answer.card.slice(PROMPT_ANSWER.length), answer.choice)
-      if (!isTaken) await log($, `answer to a prompt from another chat dropped: it no longer waits`)
+      await log($, `answer to a prompt left in a file dropped: a prompt is answered only in its own chat`)
       continue
     }
     const card = answer ? (await read($, todos)).find(one => one.id === answer.card && !one.parentId) : undefined
-    const isSame = Boolean(answer && card?.ask && (answer.askAt ? answer.askAt === card.ask.at : answer.ask === card.ask.text))
-    // A reply in words to work whose ask was answered a moment ago, as a second message after a press, still reaches it
-    if (answer && card && !card.ask && answer.isReply && now - answer.at <= ANSWER_KEPT) {
+    const isFresh = Boolean(answer) && now - (answer?.at ?? 0) <= ANSWER_KEPT && (answer?.at ?? 0) - now <= ANSWER_SKEW
+    const acted = answer ? `${answer.card}:${answer.askAt}:${answer.isReply ? 'reply' : 'press'}:${answer.choice}` : ''
+    if (!answer || !isFresh || !answer.askAt || answersActed.has(acted)) {
+      await log($, `answer from another chat dropped: ${!answer ? 'unreadable' : !isFresh ? 'it is not of now' : !answer.askAt ? 'it names no ask' : 'it came twice'}`)
+      continue
+    }
+    // A reply in words to work whose ask was answered a moment ago, as a second message after a press, still reaches it: only the ask
+    // that press answered
+    if (card && !card.ask && answer.isReply && answeredAt.get(card.id) === answer.askAt) {
+      answersActed.add(acted)
       await replyAfter($, card, answer.choice, answer.ask)
       continue
     }
-    if (!answer || !card?.ask || now - answer.at > ANSWER_KEPT || (!answer.isReply && !isSame)) {
-      await log($, `answer from another chat dropped: ${!answer ? 'unreadable' : now - answer.at > ANSWER_KEPT ? 'it waited too long' : `its ask is gone from ${answer.card}`}`)
+    if (!card?.ask || answer.askAt !== card.ask.at) {
+      await log($, `answer from another chat dropped: its ask is gone from ${answer.card}`)
       continue
     }
+    answersActed.add(acted)
     await answerAsk($, card, answer.choice, answer.isReply)
   }
 }

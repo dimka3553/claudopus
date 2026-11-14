@@ -81,10 +81,10 @@ test('Config lists each thing a person can set with what is in force, edits a te
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, sound: false })
   await pressed(config, 'config-sound-back')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 })
-  // Automatic updates are on as shipped; Off writes updates: false, and On takes the key out again
-  await pressed(config, 'config-updates-off')
-  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, updates: false })
+  // Automatic updates are off as shipped; On writes updates: true, and Off takes the key out again
   await pressed(config, 'config-updates-on')
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, updates: true })
+  await pressed(config, 'config-updates-off')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 })
   await config.input({ key: 'config-name-input', text: 'Alex' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').name).toBe('Alex')
@@ -152,7 +152,8 @@ test('Check for updates in Config shows it is checking, then what it found; a se
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it, or it switches by itself in a moment.' }))).toBeDefined()
+  // With automatic updates off, as shipped, a chat switches only when /reload-plugins is typed in it
+  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it.' }))).toBeDefined()
   expect(gitRan).toContain('merge --ff-only --quiet @{u}')
   files.delete('git:online')
   // No answer that reads as a version: said as a failure, in the error colour

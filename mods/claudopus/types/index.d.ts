@@ -71,7 +71,8 @@ export type Todo = {
   ask?: { text: string; details?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; replied?: { text: string; at: number; isWaking?: boolean } }
   // Admin commands it, or a helper of it, wants to run, each held until the person presses Allow or Deny on this card: the Mac
   // (`here` or an ssh host), the exact command, the agent that runs it, and whether Allow covers the whole piece of work
-  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean }[]
+  // What waits for the person's press: an admin command, a release to main ('release'), or a change to a file of theirs ('file')
+  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file' }[]
   startedAt: number
   // 0 while it works
   endedAt: number

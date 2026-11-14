@@ -93,6 +93,13 @@ grant good here 'id -u'
 expect 'a sealed grant for this Mac and this command: past the gate' 3 "$PAST" -- "$admin" here 'id -u'
 [ ! -e "$memory/admin-grants/good.json" ] && echo "ok - the grant was taken" || { echo "NOT OK - the grant was left"; failed=1; }
 expect 'the same command again, its grant taken: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+# What root runs has the system's own PATH, never the caller's: a program planted earlier on the caller's PATH is not the one run
+mkdir -p "$tmp/planted" && printf '#!/bin/sh\necho planted\n' >"$tmp/planted/id" && chmod +x "$tmp/planted/id"
+[ -n "$mac" ] && system_path=/usr/bin:/bin:/usr/sbin:/sbin || system_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+grant path here 'id -u'
+shown=$(PATH="$tmp/planted:$PATH" CLAUDOPUS_ADMIN_SHOW=1 "$admin" here 'id -u' 2>&1)
+n=$((n + 1))
+if [ "$shown" = "PATH=$system_path; export PATH; id -u" ]; then echo "ok $n - a caller's PATH does not reach what root runs"; else echo "NOT OK $n - root was handed: $shown"; failed=1; fi
 
 config '{"admin":"never"}'
 expect '"never" with no seal: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
@@ -130,6 +137,12 @@ rm -f "$memory"/admin-grants/*
 config "{\"admin\":\"never\",\"adminSealed\":\"$old_never\"}"
 expect '"never" sealed before the key changed: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
 config '{}'
+# The secret runner reads only its own keys: a setting in its environment never points it at the kept admin passwords
+printf '%s\n' 'admin-pass-1' | "$here/keyring" set claudopus-admin m9 'Claudopus admin: m9'
+listed=$(env CLAUDOPUS_SECRET_SERVICE=claudopus-admin "$here/secret" --list 2>&1)
+n=$((n + 1))
+if [ -z "$listed" ]; then echo "ok $n - the secret runner cannot be pointed at the admin passwords"; else echo "NOT OK $n - the secret runner listed: $listed"; failed=1; fi
+"$here/keyring" delete claudopus-admin m9 >/dev/null 2>&1
 expect 'forgetting a password needs no grant' 0 'No password was kept' -- "$admin" here --forget
 expect 'with no command it says how it is used' 2 'usage' -- "$admin" here
 

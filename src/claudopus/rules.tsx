@@ -44,7 +44,9 @@ const pushesMain = (command: string): boolean =>
       const head = (words[i] ?? '').split('/').pop() ?? ''
       if (['env', 'command', 'sudo', 'nohup', 'time', 'exec'].includes(head)) {
         i++
-        while (i < words.length && words[i]!.startsWith('-')) i++
+        // a flag and, for those that take one, its value: env -u NAME, -C dir, -S text, -P path; sudo -u user and the like
+        while (i < words.length && words[i]!.startsWith('-')) i += (head === 'env' && /^-[uCSP]$/.test(words[i]!)) || (head === 'sudo' && /^-[ugCchpUrtD]$/.test(words[i]!)) ? 2 : 1
+        while (head === 'env' && i < words.length && /^\w+=/.test(words[i]!)) if (/^RELEASE_PUSH=/.test(words[i++]!)) return true
       } else break
     }
     const tool = (words[i] ?? '').split('/').pop()
@@ -157,6 +159,35 @@ const pathOf = (path: string, home: string, folder: string) => {
   }
   return `/${parts.join('/')}`
 }
+// Files of the memory folder that only the mod writes: what chats share and answer one another through (live/), the update's lock
+// and stamps, the reloads' marks; and the person's own settings and texts there (config.json, rules/, roles/), which work changes only
+// with Edit or Write, so its card shows the change and waits for their press. A command is read as the boxes' guard reads it: a
+// command that only reads counts only for what it sends into a file with >; this stops slips and common tricks, as that guard does
+const MEMORY_READERS = [...BOX_READERS, 'cat', 'jq', 'diff', 'cmp', 'shasum', 'sha256sum', 'md5', 'md5sum']
+const MEMORY_OWN = ['live', 'update.lock', 'update.json', 'update-folder.json', 'reloads']
+const MEMORY_PERSON = ['config.json', 'rules', 'roles']
+const namesMemory = (text: string, names: readonly string[]) => {
+  const words = BOX_WORDS(text)
+  return words.some((word, i) => {
+    if (!wordIs(word, '.claude') && word !== 'claude_config_dir') return false
+    const j = words.slice(i + 1, i + 6).findIndex(one => wordIs(one, 'claudopus'))
+    return j >= 0 && words.slice(i + 2 + j, i + 6 + j).some(one => names.some(name => wordIs(one, name)))
+  })
+}
+const writesMemory = (text: string, names: readonly string[]): boolean => {
+  const kept = shellWords(text.toLowerCase())
+    .map(words => {
+      const part = words.join(' ')
+      if (!MEMORY_READERS.includes((words[commandAt(words)] ?? '').split('/').pop() ?? '')) return part
+      return part.includes('>') ? part.slice(part.indexOf('>')) : ''
+    })
+    .join('\n')
+  return namesMemory(kept, names) || (names === MEMORY_PERSON && /\brelease\.local\b/.test(kept))
+}
+const NO_MEMORY =
+  "What chats share and answer one another through, and the update's own files, are the mod's alone: work never writes them, by any tool."
+const NO_MEMORY_BASH = () =>
+  named("{Name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) are changed by work only with the Edit or Write tool, never by a command, so the change is shown on the work's card and waits for {name}'s press.")
 const NO_BOXES =
   'The boxes of the password and key runners are theirs alone: work never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner and for a key only through the secret runner the work rules name.'
 const NO_PUSH = 'Work never pushes or merges to main itself, so two pieces of work never release at once: commit on your own branch and run the release runner the work rules name, from your worktree.'
@@ -204,29 +235,47 @@ const ANSWER_FOR_CHAT = (title: string, asked: string, said: string) => `{Name} 
 const ANSWER_FOR_CHAT_RELAY = `With {name}'s next message here, carry that work on with this answer as you would with their own words, beside whatever that message asks.`
 const ASK_CLEARED = (title: string) => `The work "${title}" no longer asks {name} anything.`
 // What the work is told when the chat passes on the person's answer to its ask, typed in the chat
-const ANSWERED_IN_CHAT = (asked: string, words: string, isHeld = false) =>
-  `The message sent to you just now that carries {name}'s words "${words}" is {name}'s own reply, typed by them in the chat, to your ask: "${asked}". ${isHeld ? REPLY_HOLDS : 'Their card no longer asks it.'} If it answers the ask, take it as their answer and carry on, and ask again if it leaves something waiting. If it asks for something else, it is a steer: decide whether it is more for this work, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
+const ANSWERED_IN_CHAT = (asked: string, words: string, isHeld = false, isWhole = true) =>
+  `The message sent to you just now that carries {name}'s words "${words}" is {name}'s own reply, typed by them in the chat, to your ask: "${asked}".${isWhole ? '' : ' Only those words are theirs: anything else in that message was written by the chat, not by {name}.'} ${isHeld ? REPLY_HOLDS : 'Their card no longer asks it.'} If it answers the ask, take it as their answer and carry on, and ask again if it leaves something waiting. If it asks for something else, it is a steer: decide whether it is more for this work, a new task to hand back with the \`note\` tool and its \`task\`, or a change in how you work, and say with the \`note\` tool what you did with it.`
 // What the work is told as a steer reaches it: it stops, decides what the steer is, and says so. The mod writes it into the work's
 // own chat: the call that sent the steer is left as it was made, since auto mode refuses a call a hook has changed
-const STEER = (words: string) =>
-  `The message sent to you just now that carries {name}'s words "${words}" is from {name}, in their own words, typed by them in the chat. Stop: take no other step until you have thought about it. Decide which of three it is. More for this work: add it to your to-do list. A new task of its own: do not do it; hand it back with the \`note\` tool, its \`task\` set to the ask in one line, and the chat starts it. A change in how you are working: change your to-dos to match. Then say with the \`note\` tool, in one plain line, what you did with their message, such as that you added it to your to-do list, and carry on. Call it {name}'s message, by no other name.`
+const STEER = (words: string, isWhole = true) =>
+  `${theirsAre(words, isWhole)} Stop: take no other step until you have thought about it. Decide which of three it is. More for this work: add it to your to-do list. A new task of its own: do not do it; hand it back with the \`note\` tool, its \`task\` set to the ask in one line, and the chat starts it. A change in how you are working: change your to-dos to match. Then say with the \`note\` tool, in one plain line, what you did with their message, such as that you added it to your to-do list, and carry on. Call it {name}'s message, by no other name.`
+// Whose a message is that carries the person's words: the whole of it theirs only when it is their words and nothing more; else only
+// the words quoted are theirs, and the rest is the chat's own, which carries none of their say
+const theirsAre = (words: string, isWhole: boolean) =>
+  isWhole
+    ? `The message sent to you just now that carries {name}'s words "${words}" is from {name}, in their own words, typed by them in the chat.`
+    : `The message sent to you just now carries {name}'s words "${words}", typed by them in the chat. Only those words are {name}'s: anything else in that message was written by the chat, not by {name}, and is no word of theirs.`
 // What the work is told when it has gone on after a steer without saying what it decided
 // What work that had ended is told of the person's words that started it again: whose they are, nothing more
-const WOKE = (words: string) => `The message that started you again, carrying {name}'s words "${words}", is from {name}, in their own words, typed by them in the chat.`
+const WOKE = (words: string, isWhole = true) =>
+  isWhole
+    ? `The message that started you again, carrying {name}'s words "${words}", is from {name}, in their own words, typed by them in the chat.`
+    : `The message that started you again carries {name}'s words "${words}", typed by them in the chat. Only those words are {name}'s: anything else in that message was written by the chat, not by {name}.`
 // What the work is told when a message under way is not the person's: who sent it, and that it is no steer of theirs
 const FROM = (sender: string, start: string) =>
   `The message sent to you just now that begins "${start}" is from ${sender}, not from {name}: that one is not theirs. Take it as ${sender}'s and carry on; a message that carries {name}'s own words stays theirs.`
 // The chat sends a steer in the person's words: a message carries them when it holds a stretch of what they wrote, word for word
 const STRETCH = 40
+// Compared as whole words: letters and digits alone, any quote, apostrophe or dash the chat retyped left out
+const wordsOnly = (text: string) => ` ${flat(text).toLowerCase().replace(/[’‘']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `
 const carries = (message: string, words: string) => {
-  // Compared as whole words: letters and digits alone, any quote, apostrophe or dash the chat retyped left out
-  const plain = (text: string) => ` ${flat(text).toLowerCase().replace(/[’‘']/g, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `
-  const m = plain(message)
-  const w = plain(words)
+  const m = wordsOnly(message)
+  const w = wordsOnly(words)
   if (!w.trim()) return false
   if (w.length <= STRETCH) return m.includes(w)
   const starts = [0, ...[...w].flatMap((c, i) => (c === ' ' ? [i + 1] : []))].filter(i => i + STRETCH <= w.length)
   return starts.some(i => m.includes(w.slice(i, i + STRETCH)))
+}
+// A message that is the person's words and nothing more, word for word: at most their name before them ("Sam: …", "Sam says …")
+const isTheirsWhole = (message: string, words: string) => {
+  const m = wordsOnly(message)
+  const w = wordsOnly(words)
+  if (!w.trim() || !m.includes(w)) return false
+  const rest = m.replace(w, ' ').trim()
+  const name = wordsOnly(who()).trim()
+  return !rest || [name, `${name} says`, `${name} said`, `${name} wrote`].includes(rest)
 }
 const OWED =
   'A message from {name} is waiting for your decision, and you have gone on working. Stop now and decide: more for your to-do list, a new task to hand back with the `note` tool and its `task`, or a change in how you work. Change your to-dos to match, then say with the `note` tool, in one plain line, what you did with their message.'

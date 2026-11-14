@@ -9,7 +9,9 @@
 // that reaches it some other way (a script, another spelling of its path, a command built by the shell) is refused there. The
 // commands always allowed (admin-allowed.json) and a "work" or "never" in config.json count only with the same seal, which only a
 // press in Config or on a card makes; whatever takes one back makes a new key, so an old seal put back counts for nothing.
-// The seal is as strong as the keychain: what runs as the person and reads the keychain can make one, as it can read a kept password
+// The seal is as strong as the keychain: what runs as the person and reads the keychain can make one, as it can read a kept password.
+// The same press gates two more things work could do in the person's place: a release to a repo's main branch (bin/release takes a
+// grant as bin/admin does) and a change to the person's own settings and texts in the memory folder (config.json, rules/, roles/)
 type Gate = NonNullable<Todo['admins']>[number]
 type GateSaid = 'once' | 'always' | 'deny'
 type AdminCall = { host: string; command: string }
@@ -21,11 +23,12 @@ const gateSaid = new Map<string, GateSaid>()
 let looseGates: Gate[] = []
 // The pieces of work allowed under "work", by card: taken out as the work ends (ended, in cards), so one that comes back asks again
 const workAllowed = new Set<string>()
-const GATE_DENIED = () =>
-  named('Refused by {name}: {name} pressed Deny on this admin command, so it did not run. Do not try to run it another way. Carry on without it, or say what it is needed for and ask again.')
-const GATE_GONE = () => named('This admin command did not run: the wait for {name} to allow it was cut short. Run it again if it is still needed.')
-const GATE_LATE = () => named('This admin command did not run: {name} did not answer in the time a call can be held. Run it again when it is needed, and {name} is asked again.')
-const GATE_BLIND = () => named('This admin command did not run: {name} is asked before every admin command, on a card in the Claudopus panel, and no panel is drawn for this chat.')
+const GATE_DENIED = (gate?: Pick<Gate, 'kind'>) =>
+  named(`Refused by {name}: {name} pressed Deny on this ${gate?.kind === 'release' ? 'release, so nothing was released. Do not try to release it another way' : gate?.kind === 'file' ? 'change, so the file was not changed. Do not try to change it another way' : 'admin command, so it did not run. Do not try to run it another way'}. Carry on without it, or say what it is needed for and ask again.`)
+const gateThing = (gate?: Pick<Gate, 'kind'>) => (gate?.kind === 'release' ? 'This release did not run' : gate?.kind === 'file' ? 'This change was not made' : 'This admin command did not run')
+const GATE_GONE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: the wait for {name} to allow it was cut short. Run it again if it is still needed.`)
+const GATE_LATE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {name} did not answer in the time a call can be held. Run it again when it is needed, and {name} is asked again.`)
+const GATE_BLIND = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {name} is asked first, on a card in the Claudopus panel, and no panel is drawn for this chat.`)
 const GATE_UNSEALED = () => `This admin command did not run: what was allowed could not be sealed in ${keptWhere()}. Run it again.`
 const NO_GATE_TOUCH = () =>
   named('The list of admin commands {name} always allows, what {name} allowed and the key that seals them are never read or written by work: only {name} adds to them, with a press on a card or in Config.')
@@ -34,10 +37,14 @@ const MACOS_ONLY_HERE = () =>
 const MACOS_AFAR = () =>
   named("This admin command did not run: {name} set admin commands to let macOS ask for the password and keep none. macOS asks on this Mac's own screen, which {name} cannot see from this chat, so nothing runs as admin here until {name} is at this Mac or changes that in Config.")
 
+// What a gate asks, in words, by its kind
+const gateWhat = (gate: Gate) =>
+  gate.kind === 'release' ? `Wants to release ${gate.host} to its main branch` : gate.kind === 'file' ? `Wants to change ${gate.host}` : `Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
+
 // The admin commands a Bash command runs, as the shell splits it: bin/admin by any spelling of its path, after what runs a
 // command it is handed, and inside a shell's -c or an eval. What the shell would build (a variable, a substitution) is read as
 // written, so the grant names what was shown and bin/admin refuses what differs
-const isAdminPath = (word: string, root: string) => {
+const isAdminPath = (word: string, root: string, name = 'admin') => {
   const parts: string[] = []
   for (const part of word.split('/')) {
     if (part === '..' && parts.length && parts.at(-1) !== '..' && parts.at(-1) !== '') parts.pop()
@@ -46,7 +53,7 @@ const isAdminPath = (word: string, root: string) => {
   const path = parts.join('/')
   // Reached from its own folder, by the mod's own path, or by a path that names the mod or is filled in by the shell: another
   // tool that happens to be called admin is none of this
-  return path === 'admin' || path === 'bin/admin' || (path.endsWith('/bin/admin') && (path === `${root}/bin/admin` || /claudopus/i.test(path) || path.includes('$')))
+  return path === name || path === `bin/${name}` || (path.endsWith(`/bin/${name}`) && (path === `${root}/bin/${name}` || /claudopus/i.test(path) || path.includes('$')))
 }
 const adminCalls = (command: string, root: string, depth = 0): AdminCall[] => {
   if (depth > 4) return []
@@ -108,11 +115,16 @@ const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new', message
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
 }
 
+// Let macOS ask, keep nothing, is kept beside the gate's key too (account "password" of GATE_SERVICE), where only a press in Config
+// puts it and takes it away: a config.json changed by anything else never switches it back to keeping passwords
+const PASSWORD_ACCOUNT = 'password'
+const isMacosKept = async ($: EngineInterface) =>
+  (await $.process.run([`${$.plugin.root}/bin/keyring`, 'get', GATE_SERVICE, PASSWORD_ACCOUNT], { timeoutMs: 15_000 }).catch(() => undefined))?.stdout.trim() === 'macos'
 // What is in force: "work" or "never" only as Config sealed it, every command asked otherwise; and where the password comes from
 const gateOf = async ($: EngineInterface) => {
   const config = await readConfig($, dir)
   const said: 'each' | 'work' | 'never' = config.admin === 'work' || config.admin === 'never' ? config.admin : 'each'
-  const password = config.adminPassword === 'macos' ? ('macos' as const) : ('keep' as const)
+  const password = config.adminPassword === 'macos' || (await isMacosKept($)) ? ('macos' as const) : ('keep' as const)
   if (said === 'each') return { mode: 'each' as const, unsealed: '', password }
   const seal = (await sealed($, 'read', [`mode\n${said}`]))?.[0]
   const isSealed = Boolean(seal) && seal === config.adminSealed
@@ -182,16 +194,23 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
 // "Let macOS ask, keep nothing": every password kept for an admin command leaves the keychain
 const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; else d=${XDG_DATA_HOME:-$HOME/.local/share}; case $d in /*) ;; *) d=$HOME/.local/share ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; fi'
 const setAdminPassword = async ($: EngineInterface, value: 'keep' | 'macos') => {
+  const keyring = `${$.plugin.root}/bin/keyring`
+  const r = await (value === 'macos'
+    ? $.process.run([keyring, 'set', GATE_SERVICE, PASSWORD_ACCOUNT, 'Claudopus admin password'], { stdin: 'macos\n', timeoutMs: 15_000 })
+    : $.process.run([keyring, 'delete', GATE_SERVICE, PASSWORD_ACCOUNT], { timeoutMs: 15_000 })
+  ).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  if (value === 'macos' && r.exitCode !== 0) throw new Error(`it could not be kept in ${keptWhere()}`)
   await setConfig($, dir, 'adminPassword', value === 'macos' ? 'macos' : undefined)
   if (value === 'macos') await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
 }
 
 // What a press allowed, for bin/admin to take once: the Mac and the exact command, sealed. One nothing took goes as its call ends
 const grantsDir = () => `${dir}/admin-grants`
-const issueGrant = async ($: EngineInterface, id: string, call: AdminCall) => {
+// A release's grant is sealed under a word of its own, so neither runner ever takes the other's
+const issueGrant = async ($: EngineInterface, id: string, call: AdminCall, word: 'grant' | 'release-grant' = 'grant') => {
   const at = await $.clock.now()
   const name = `${id.replace(/[^A-Za-z0-9_-]/g, '')}-${at}`
-  const seal = (await sealed($, 'make', [`grant\n${name}\n${at}\n${call.host}\n${call.command}`]))?.[0]
+  const seal = (await sealed($, 'make', [`${word}\n${name}\n${at}\n${call.host}\n${call.command}`]))?.[0]
   if (!seal) return ''
   // Grants a call sent to the background never took are cleared as the next one is made
   await $.process.run(['/usr/bin/find', grantsDir(), '-type', 'f', '-mmin', '+10', '-delete'], { timeoutMs: 10_000 }).catch(() => undefined)
@@ -203,10 +222,14 @@ const dropGrants = async ($: EngineInterface, names: string[]) => {
 }
 
 // A tool call that would read or write the list, the grants or the key itself
+// A command is read as written and again with its quotes and backslashes taken out, so `-"w"` or `claudopus-admin-"gate"` is read as
+// the shell reads it. Any command that names the keychain's admin services (the gate's key and what Config chose, and the kept admin
+// passwords) with security or the keyring runner counts, whatever it does with them
+const unquoted = (command: string) => command.replace(/["'\\]/g, '')
 const touchesGate = (e: ToolCallInput) => {
   if (e.tool === 'Bash') {
     const command = String((e as { command?: unknown }).command ?? '')
-    return /claudopus\/admin-(?:allowed\.json|grants)\b/.test(command) || (/\bsecurity\b/.test(command) && command.includes(GATE_SERVICE))
+    return [command, unquoted(command)].some(one => /claudopus\/admin-(?:allowed\.json|grants)\b/.test(one) || (/\b(?:security|keyring)\b/.test(one) && /claudopus-admin\b/.test(one)))
   }
   const path = String((e as { file_path?: unknown; notebook_path?: unknown }).file_path ?? (e as { notebook_path?: unknown }).notebook_path ?? '')
   return ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool) && /\/claudopus\/admin-(?:allowed\.json$|grants(?:\/|$))/.test(path)
@@ -231,11 +254,10 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
   await openList($).catch(() => undefined)
   const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
-  const where = gate.host === 'here' ? thisMac() : gate.host
-  const text = `Wants to run an admin command on ${where}: ${cut(oneLine(gate.command), 200)}`
-  await (card ? askAloud($, card, text) : aloud($, 'ask', 'An admin command needs you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
+  const text = `${gateWhat(gate)}: ${cut(oneLine(gate.command), 200)}`
+  await (card ? askAloud($, card, text) : aloud($, 'ask', gate.kind === 'release' ? 'A release needs you' : gate.kind === 'file' ? 'A change to your settings needs you' : 'An admin command needs you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
   $.ui.log(
-    `${card ? `The work "${titleOf(card)}"` : 'This chat'} wants to run an admin command on ${where}: ${cut(oneLine(gate.command), 300)} · Press ${gate.isWork ? 'Allow for this work' : 'Allow once'}, Always allow this command or Deny ${card ? 'on its card' : 'at the top'} in the Claudopus panel (/claudopus opens it). Nothing typed in the chat allows it.`,
+    `${card ? `The work "${titleOf(card)}"` : 'This chat'} ${gateWhat(gate).replace(/^Wants/, 'wants')}: ${cut(oneLine(gate.command), 300)} · Press ${gate.kind ? 'Allow once or Deny' : `${gate.isWork ? 'Allow for this work' : 'Allow once'}, Always allow this command or Deny`} ${card ? 'on its card' : 'at the top'} in the Claudopus panel (/claudopus opens it). Nothing typed in the chat allows it.`,
   )
   let said: GateSaid | 'gone' | 'late' | undefined
   try {
@@ -252,7 +274,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
     gateSaid.delete(gate.id)
     await setGates($, top, list => list.filter(one => one.id !== gate.id)).catch(() => undefined)
   }
-  await log($, `admin command on ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
+  await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
   return said
 }
 const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
@@ -262,11 +284,13 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
     gateSaid.set(id, said)
     void noteDone($, {
       id: `gate-${id}`,
-      head: `An admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
+      head: gate.kind === 'release' ? `A release of ${gate.host}` : gate.kind === 'file' ? `A change to ${gate.host}` : `An admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
       said:
         said === 'deny'
-          ? 'You denied it · it did not run, and the work was told'
-          : said === 'always'
+          ? `You denied it · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}, and the work was told`
+          : gate.kind
+            ? `You allowed it once · ${gate.kind === 'release' ? 'it releases now' : 'the change is made now'}`
+            : said === 'always'
             ? 'You always allow this command · it runs now, and will not ask again'
             : gate.isWork
               ? "You allowed this work's admin commands · it runs now"
@@ -314,19 +338,117 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
   return { grants }
 }
 
+// A release to main waits for the person's press on its card, as an admin command does, whatever Config says of admin commands: the
+// release runner named by any spelling of its path, from the folder the command runs it in (a cd before it moves that). Allowed, it gets
+// a grant naming that worktree and its branch, which bin/release takes once; its --status asks nothing
+type ReleaseCall = { folder: string; branch: string }
+const releaseCalls = (command: string, root: string, from: string): ReleaseCall[] => {
+  let folder = from
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const found: ReleaseCall[] = []
+  for (const words of shellWords(command)) {
+    const i = commandAt(words)
+    const name = (words[i] ?? '').split('/').pop() ?? ''
+    if ((name === 'cd' || name === 'pushd') && words[i + 1]) {
+      folder = pathOf(words[i + 1]!, home, folder)
+      continue
+    }
+    // Run by a shell handed it as a script, or by itself
+    const at = ['bash', 'sh', 'zsh'].includes(name) ? i + 1 + words.slice(i + 1).findIndex(one => !one.startsWith('-')) : i
+    if (at < i || !isAdminPath(words[at] ?? '', root, 'release')) continue
+    const args = words.slice(at + 1)
+    if (args[0] === '--status') continue
+    const rest = args[0] === '-m' ? args.slice(2) : args
+    found.push({ folder, branch: rest[0] ?? '' })
+  }
+  return found
+}
+const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<{ deny?: string; grants: string[] }> => {
+  const calls = releaseCalls(String((e as { command?: unknown }).command ?? ''), $.plugin.root, cwd || dir.replace(/\/\.claude\/claudopus$/, ''))
+  if (!calls.length || !dir) return { grants: [] }
+  const list = await read($, todos)
+  const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
+  const card = list.find(one => one.id === top)
+  const grants: string[] = []
+  for (const [n, call] of calls.entries()) {
+    const git = (args: string[]) => $.process.run(['git', '-C', call.folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '')
+    const repo = await git(['rev-parse', '--show-toplevel'])
+    const branch = call.branch || (await git(['rev-parse', '--abbrev-ref', 'HEAD']))
+    // Not a repo, or no branch: the runner itself says what is wrong, and it releases nothing without a grant
+    if (!repo || !branch || branch === 'HEAD') continue
+    const id = `${e.tool_use_id}-r${n}`
+    const said = await holdGate($, next, { id, kind: 'release', host: repo.split('/').pop() ?? repo, command: `${branch} from ${repo}`, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
+    if (said !== 'once') {
+      await dropGrants($, grants)
+      const gate = { kind: 'release' as const }
+      return { deny: said === 'deny' ? GATE_DENIED(gate) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate), grants: [] }
+    }
+    const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
+    if (!grant) {
+      await dropGrants($, grants)
+      return { deny: GATE_UNSEALED(), grants: [] }
+    }
+    grants.push(grant)
+  }
+  return { grants }
+}
+// The person's own settings and texts in the memory folder: config.json (the admin gate's mode, the Macs reached, the name every
+// text uses) and their copies of the rules and roles every chat and work runs on. Config's own acts write them without a tool call;
+// work's Write or Edit there waits for the person's press on its card, showing the file and the change
+const ownFileOf = (path: string) => {
+  if (!dir) return ''
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const full = pathOf(path, home, cwd || home)
+  const memory = dir.toLowerCase()
+  const lower = full.toLowerCase()
+  if (lower === `${memory}/config.json`) return 'your Claudopus settings (config.json)'
+  if (lower === `${memory}/rules` || lower.startsWith(`${memory}/rules/`)) return `your rules (${full.slice(dir.length + 1)})`
+  if (lower === `${memory}/roles` || lower.startsWith(`${memory}/roles/`)) return `your role text (${full.slice(dir.length + 1)})`
+  // A repo's release.local, which its release runner reads as this Mac's own settings
+  if (/\/\.git\/release\.local$/.test(full)) return `this Mac's release settings (${full})`
+  return ''
+}
+const FILE_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']
+const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?: AbortSignal; budget?: { remainingMs: number } }): Promise<string> => {
+  if (!FILE_TOOLS.includes(e.tool)) return ''
+  const input = e as { file_path?: unknown; notebook_path?: unknown; content?: unknown; new_string?: unknown; old_string?: unknown; edits?: unknown; new_source?: unknown }
+  const file = ownFileOf(String(input.file_path ?? input.notebook_path ?? ''))
+  if (!file) return ''
+  const change =
+    typeof input.content === 'string'
+      ? input.content
+      : typeof input.new_string === 'string'
+        ? `${typeof input.old_string === 'string' && input.old_string ? `In place of:\n${input.old_string}\n\nIt writes:\n` : ''}${input.new_string}`
+        : Array.isArray(input.edits)
+          ? input.edits.map(one => String((one as { new_string?: unknown })?.new_string ?? '')).join('\n…\n')
+          : String(input.new_source ?? '')
+  const list = await read($, todos)
+  const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
+  const card = list.find(one => one.id === top)
+  const said = await holdGate($, next, { id: `${e.tool_use_id}-f`, kind: 'file', host: file, command: cut(change, 2000), at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
+  const gate = { kind: 'file' as const }
+  return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
+}
+
 // On the card: what it wants to run, whole, and the three presses. Another chat's panel shows it with no buttons: only the chat
 // that holds the call allows it
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
   <ui.Box key={key} flexDirection="column" gap={1}>
-    <ui.Text wrap="wrap" color={NEEDS} bold>{`Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`}</ui.Text>
+    <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
     <ui.Box backgroundColor={FILL} paddingLeft={2}>
       <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
     </ui.Box>
-    <ui.Text wrap="wrap">{`Allow: it runs with admin rights${gate.isWork ? ', and this work runs its next admin commands without asking' : ''}. Deny: it does not run, and the work is told.`}</ui.Text>
+    <ui.Text wrap="wrap">
+      {gate.kind === 'release'
+        ? 'Allow: this branch is merged into main, checked and pushed, with its version and tag. Deny: nothing is released, and the work is told.'
+        : gate.kind === 'file'
+          ? 'Allow: the change is made to this file of yours. Deny: the file stays as it is, and the work is told.'
+          : `Allow: it runs with admin rights${gate.isWork ? ', and this work runs its next admin commands without asking' : ''}. Deny: it does not run, and the work is told.`}
+    </ui.Text>
     {gateHeld.has(gate.id) && !isElsewhere ? (
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
         <ui.Button key={`${key}-once-${loadMark}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate, 'once')} />
-        <ui.Button key={`${key}-always-${loadMark}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always')} />
+        {gate.kind ? null : <ui.Button key={`${key}-always-${loadMark}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always')} />}
         <ui.Button key={`${key}-deny-${loadMark}`} label="Deny" onPress={() => answerGate($, gate, 'deny')} />
       </ui.Box>
     ) : (

@@ -163,9 +163,12 @@ let person = ''
 // config.json can say which model does which work; the chat's and the work's rules name them
 let models: Models = modelsOf({})
 // The settings read again: at a session's start, and after a change in the Config tab
+// Whether the person turned automatic updates on in Config: off as shipped, a chat then switches to a newer version only when typed
+let isAutoUpdate = false
 const loadSettings = async ($: EngineInterface) => {
   const config = await readConfig($, dir)
   isOff = config.agents === false
+  isAutoUpdate = config.updates === true
   person = typeof config.name === 'string' ? config.name.trim() : ''
   models = modelsOf(config)
   macs = (Array.isArray((config as { macs?: unknown }).macs) ? ((config as { macs: unknown[] }).macs) : []).filter(isMac).slice(0, 4)

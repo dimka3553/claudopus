@@ -10,6 +10,7 @@ let isUpdating = false
 // chat that closed mid-look is moved aside by exactly one chat once it is old (by what it says, else by when it was written).
 // Taken, the act runs and only this chat's own lock is removed after it; held by another chat, nothing runs and 'busy' comes back
 const UPDATE_BUSY = 'busy' as const
+const LOCK_SKEW = 60_000
 const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): Promise<T | typeof UPDATE_BUSY> => {
   const lock = `${dir}/update.lock`
   const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
@@ -18,7 +19,8 @@ const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): P
   if (!(await take())) {
     const now = await $.clock.now()
     const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
-    if (now - at < UPDATE_LOOK) return UPDATE_BUSY
+    // A lock dated ahead of this Mac's clock, past what two chats' clocks can differ by, was never taken by a chat here: it is stale
+    if (now - at < UPDATE_LOOK && at - now <= LOCK_SKEW) return UPDATE_BUSY
     const aside = `${lock}.${token.split(' ')[1]}`
     if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
     await $.process.run(['rm', '-f', aside]).catch(() => undefined)
@@ -71,8 +73,9 @@ const lookAt = async ($: EngineInterface, from: ReturnType<typeof installedFrom>
 const selfUpdate = async ($: EngineInterface) => {
   const from = installedFrom($.plugin.root)
   if (isUpdating || !dir) return
-  // Automatic updates turned off in Config leave the installed version alone
-  if ((await readConfig($, dir)).updates === false) return
+  // Automatic updates are off as shipped, as Claude Code leaves them off for a marketplace other than Anthropic's own: only the
+  // person turning them on in Config lets a look install a new version by itself; else it waits for Check for updates
+  if ((await readConfig($, dir)).updates !== true) return
   const stampPath = stampFor(from)
   if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now())) return
   isUpdating = true
@@ -80,7 +83,7 @@ const selfUpdate = async ($: EngineInterface) => {
     await underUpdateLock($, async () => {
       // Another chat may have looked between this chat's reading and its lock, and the person may have turned automatic updates
       // off while this chat waited for it
-      if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now()) || (await readConfig($, dir)).updates === false) return
+      if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now()) || (await readConfig($, dir)).updates !== true) return
       await lookAt($, from)
     })
   } finally {
@@ -104,7 +107,7 @@ const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isEr
         const look = await underUpdateLock($, () => lookAt($, from))
         if (look !== UPDATE_BUSY) {
           await log($, `Claudopus checked for updates from Config: ${look.kind}${'version' in look && look.version ? ` ${look.version}` : ''}`)
-          return checkSaid(look, loaded, isRunFromAfar || isReloadRefused, !from)
+          return checkSaid(look, loaded, isRunFromAfar || isReloadRefused || (await readConfig($, dir)).updates !== true, !from)
         }
       } finally {
         isUpdating = false
@@ -169,8 +172,11 @@ const holdOldCopies = async ($: EngineInterface) => {
   if (before?.version === copy.version && now >= at && now - at < RELOAD_AGAIN / 2) return
   await $.fs.write(mark, JSON.stringify({ version: copy.version, from: loaded, at: now }))
 }
+// Only with automatic updates on, which the person chose in Config: else a chat switches to a newer version only when they type
+// /reload-plugins, and the header says one is installed
 const reloadToInstalled = async ($: EngineInterface) => {
   if (!dir || reloadAsked || isRunFromAfar) return
+  if ((await readConfig($, dir)).updates !== true) return
   const loaded = (await versionsOf($)).version
   const copy = await installedCopy($)
   if (!loaded || !copy?.version || !isNewer(copy.version, loaded)) return

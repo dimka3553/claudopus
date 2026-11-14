@@ -16,15 +16,43 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   if (e.tool !== 'Bash') return false
   const command = String(input.command ?? '')
   if (touchesBoxes(command)) return true
+  for (const text of await scriptsRun($, command)) if (touchesBoxes(text)) return true
+  return false
+}
+// The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners, bin/admin and bin/secret,
+// are let through unread
+const scriptsRun = async ($: EngineInterface, command: string) => {
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const root = $.plugin.root
+  const texts: string[] = []
   for (const path of filesRun(command, home, cwd || home)) {
     const runner = /\/bin\/(admin|secret)$/.exec(path)?.[1]
     if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret)$`).test(path))) continue
     const text = (await readOr($, path)).slice(0, 1_000_000)
     if (runner && text && text === (await readOr($, `${root}/bin/${runner}`))) continue
-    if (touchesBoxes(text)) return true
+    if (text) texts.push(text)
   }
-  return false
+  return texts
+}
+// A command, or a script it runs, that would print a kept key or password: read as written and with its quotes taken out
+const readsKept = async ($: EngineInterface, command: string) =>
+  [command, unquoted(command)].some(one => KEYCHAIN_READ.test(one)) || (await scriptsRun($, command)).some(text => KEYCHAIN_READ.test(text) || KEYCHAIN_READ.test(unquoted(text)))
+// A tool call that writes a file of the memory folder only the mod writes (refused outright), or the person's own settings and texts
+// by a command (refused: work changes those with Edit or Write, which wait for the person's press)
+const writesOwnFiles = (e: { tool: string }): string => {
+  if (!dir) return ''
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown }
+  if (e.tool === 'Bash') {
+    const command = String(input.command ?? '')
+    if ([command, unquoted(command)].some(one => writesMemory(one, MEMORY_OWN))) return NO_MEMORY
+    if ([command, unquoted(command)].some(one => writesMemory(one, MEMORY_PERSON))) return NO_MEMORY_BASH()
+    return ''
+  }
+  if (!['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return ''
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const path = pathOf(String(input.file_path ?? input.notebook_path ?? ''), home, cwd || home).toLowerCase()
+  const memory = dir.toLowerCase()
+  return MEMORY_OWN.some(name => path === `${memory}/${name}` || path.startsWith(`${memory}/${name}/`)) ? NO_MEMORY : ''
 }
 
 // bin/keyring and its store, the runners' alone: on a Mac a way into the keychain, on Linux files that hold every kept password and
@@ -75,6 +103,7 @@ const workHooks = (on: On) => {
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
         if (grants.length && !(e as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
+        runnerEnded(e.tool_use_id, Boolean((e as { run_in_background?: unknown }).run_in_background), await $.clock.now())
       }
     }
     let grants: string[] = []
@@ -82,9 +111,14 @@ const workHooks = (on: On) => {
       await log($, `refused ${e.tool} touching the password and key boxes`)
       return { deny: NO_BOXES }
     }
-    if ((e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) || touchesKeyring(e)) {
+    if ((e.tool === 'Bash' && (await readsKept($, String((e as { command?: unknown }).command ?? '')))) || touchesKeyring(e)) {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
+    }
+    const ownFiles = writesOwnFiles(e)
+    if (ownFiles) {
+      await log($, `refused ${e.tool} writing the memory folder's own files`)
+      return { deny: ownFiles }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
@@ -96,11 +130,26 @@ const workHooks = (on: On) => {
       await log($, `refused ${e.tool} on the admin gate's own files`)
       return { deny: NO_GATE_TOUCH() }
     }
-    // An admin command waits for the person's press on its card, unless they chose never to be asked
-    if (e.tool === 'Bash') {
+    // An admin command waits for the person's press on its card, unless they chose never to be asked; a release always does, and so
+    // does a change to the person's own settings and texts. Never for a call the chat's own thread is refused below: nothing is asked
+    // or granted for a call that does not run
+    const isRefusedHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
+    if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       if (gated.deny) return { deny: gated.deny }
       grants = gated.grants
+      const released = await gateRelease($, e, raw as never)
+      if (released.deny) {
+        await dropGrants($, grants)
+        return { deny: released.deny }
+      }
+      grants = [...grants, ...released.grants]
+      // A command that runs a runner may ask for a password or key in a box: the box is drawn only while one runs
+      if (/\bbin\/(?:admin|secret)\b/.test(String((e as { command?: unknown }).command ?? ''))) runnerBegun(e.tool_use_id, String((e as { command?: unknown }).command ?? ''), await $.clock.now())
+    }
+    if (!isRefusedHere) {
+      const fileSaid = await gateOwnFile($, e, raw as never)
+      if (fileSaid) return { deny: fileSaid }
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
@@ -123,11 +172,14 @@ const workHooks = (on: On) => {
     let message = ''
     let woke = ''
     let words = ''
+    let isWhole = false
     if (dir && e.tool === 'SendMessage') {
       const to = String((e as { to?: unknown }).to ?? '')
       message = String((e as { message?: unknown }).message ?? '')
       const theirs = e.agentId === undefined ? heard.findLast(one => carries(message, one)) : undefined
       words = theirs ? quoted(theirs, 600) : ''
+      // Their words and nothing more: else only the words quoted are told as theirs, and the rest as the chat's
+      isWhole = Boolean(theirs) && isTheirsWhole(message, theirs ?? '')
       const now = await $.clock.now()
       const list = await read($, todos)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
@@ -206,7 +258,7 @@ const workHooks = (on: On) => {
       // message of its own instead, read once it reaches it
       // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
       // chat's own note that landed after the person's words once marked their words as not theirs
-      const line = named(answered ? ANSWERED_IN_CHAT(answered, words, Boolean(answer && !settles(answer.ask, words, true))) : woke ? WOKE(woke) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words))
+      const line = named(answered ? ANSWERED_IN_CHAT(answered, words, Boolean(answer && !settles(answer.ask, words, true)), isWhole) : woke ? WOKE(woke, isWhole) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words, isWhole))
       if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? sendOwn($, { to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
       return sent
     }
@@ -256,6 +308,7 @@ const workHooks = (on: On) => {
     const isPaste = Boolean(dir) && (readPath === `${dir}/pastes` || readPath.startsWith(`${dir}/pastes/`))
     if (READS.includes(e.tool) && !isPaste) return next(e)
     await log($, `refused ${e.tool} in a chat's own thread`)
+    if (grants.length) await dropGrants($, grants).catch(() => undefined)
 
     return { deny: REFUSED }
   })
@@ -278,17 +331,19 @@ const workHooks = (on: On) => {
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-    // A step the app sends to an older model or to Haiku (it moves work to an older model after its safeguards flag a message) goes
-    // to a model work runs on instead, and the work's card says which model it was kept off
-    const instead = id !== undefined && !chosen && !isOff ? rightModel(e.model) : undefined
-    if (id !== undefined && instead && !sentElsewhere.has(`${id} ${e.model}`)) {
+    // A step the app sends to an older model (it moves work there after its safeguards flag a message) is left where the app sent it,
+    // even for work the person moved to a model of their own, and the card says which model it runs on now. A step sent to Haiku (the
+    // model some kinds of helper start on, which the person never wants) goes to Sonnet, or to the model the person picked
+    const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !/haiku/i.test(e.model)
+    const instead = id !== undefined && !isOff && !isMovedByApp && !chosen ? rightModel(e.model) : undefined
+    if (id !== undefined && (isMovedByApp || instead) && !sentElsewhere.has(`${id} ${e.model}`)) {
       sentElsewhere.add(`${id} ${e.model}`)
-      await log($, `work ${id} was sent to ${modelName(e.model)} by the app: its steps go to ${modelName(instead)}`)
+      await log($, `work ${id} was sent to ${modelName(e.model)} by the app: ${instead ? `its steps go to ${modelName(instead)}` : 'its steps stay there'}`)
     }
-    // The card says so only while it holds: not once the app sends its steps to a right model again, or the person picked one
-    const moved = instead ? modelName(e.model) : undefined
+    // The card says so only while it holds: not once the app sends its steps to a right model again
+    const moved = isMovedByApp ? modelName(e.model) : undefined
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
-    const to = chosen && modelName(chosen) !== modelName(e.model) ? chosen : instead
+    const to = chosen && !isMovedByApp && modelName(chosen) !== modelName(e.model) ? chosen : instead
     const r = yield* next(to ? { ...e, model: to } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model

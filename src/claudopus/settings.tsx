@@ -79,24 +79,35 @@ async function saveText($: EngineInterface, root: string, memory: string, path: 
 
 // Kept keys stay out of every chat: a command that would read one from the keychain is refused, and once any key is kept, what a
 // tool answers comes back with every kept value hidden. The values never reach the mod: `bin/secret --hide` swaps them in a pipe
-let secrets = { at: -SECRETS_MS, names: [] as string[] }
+let secrets = { at: -SECRETS_MS, names: [] as string[], isAdminKept: false }
+// The names of the kept keys, and whether an admin password is kept, read again at most every SECRETS_MS (and with each use of a
+// runner): a list that cannot be read keeps what was known before, so hiding never stops on a failure
+const knowKept = async ($: EngineInterface, isNow = false) => {
+  const now = await $.clock.now()
+  if (now - secrets.at < SECRETS_MS && !isNow) return secrets
+  const listed = await $.process.run([`${$.plugin.root}/bin/secret`, '--list']).catch(() => undefined)
+  const admins = await $.process.run([`${$.plugin.root}/bin/keyring`, 'list', 'claudopus-admin']).catch(() => undefined)
+  if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean), isAdminKept: admins?.exitCode === 0 ? Boolean(admins.stdout.trim()) : secrets.isAdminKept }
+  return secrets
+}
+// A JSON text with every kept value hidden inside its strings, kept admin passwords too; undefined when it could not be checked
+const hiddenJson = async ($: EngineInterface, text: string) => {
+  const { names, isAdminKept } = await knowKept($)
+  if (!names.length && !isAdminKept) return text
+  const hidden = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json', ...names], { stdin: text }).catch(() => undefined)
+  return hidden && hidden.exitCode === 0 && !hidden.isStdoutTruncated && hidden.stdout.trim() ? hidden.stdout : undefined
+}
 async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult): Promise<ToolCallResult> {
   const command = e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
   if (r.deny || OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return r
-  const runner = `${$.plugin.root}/bin/secret`
-  const now = await $.clock.now()
-  if (now - secrets.at >= SECRETS_MS || command.includes('bin/secret')) {
-    // A list that cannot be read keeps the names known before, so hiding never stops on a failure
-    const listed = await $.process.run([runner, '--list']).catch(() => undefined)
-    if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean) }
-  }
-  if (!secrets.names.length) return r
+  const { names, isAdminKept } = await knowKept($, command.includes('bin/secret') || command.includes('bin/admin'))
+  if (!names.length && !isAdminKept) return r
   try {
     const text = JSON.stringify({ result: r.result, context: r.context })
-    const hidden = await $.process.run([runner, '--hide', '--json', ...secrets.names], { stdin: text })
-    if (hidden.exitCode !== 0 || hidden.isStdoutTruncated) throw new Error('not hidden')
-    if (hidden.stdout === text) return r
-    const swapped = JSON.parse(hidden?.stdout ?? '') as { result: typeof r.result; context: typeof r.context }
+    const hidden = await hiddenJson($, text)
+    if (hidden === undefined) throw new Error('not hidden')
+    if (hidden === text) return r
+    const swapped = JSON.parse(hidden) as { result: typeof r.result; context: typeof r.context }
     return { ...r, result: swapped.result, context: swapped.context } as ToolCallResult
   } catch {
     return { deny: `${e.tool} ran, and what it answered was withheld: it could not be checked for kept keys.` }
@@ -175,8 +186,8 @@ const configActs = ($: EngineInterface) => ({
   set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) =>
     configAct($, 'Not saved', async () => {
       await setConfig($, dir, key, value, role)
-      // Automatic updates turned back on look at once when a look is due, not at the next quarter hour
-      if (key === 'updates' && value === undefined) void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`))
+      // Automatic updates turned on look at once when a look is due, not at the next quarter hour
+      if (key === 'updates' && value === true) void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`))
     }),
   // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
   gateMode: (mode: 'each' | 'work' | 'never') => configAct($, 'Not saved', () => regate($, { mode })),

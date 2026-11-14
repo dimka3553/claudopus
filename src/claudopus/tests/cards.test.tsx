@@ -321,7 +321,8 @@ test('a steer is sent as written and the work is told it is one, the work is rem
   // The chat's call goes on as it was made; the work is told in its own chat what a steer asks of it
   expect(sent[0]).toBe('Sam: “Also make me a chart of the ears.”')
   expect(appended).toHaveLength(1)
-  expect(appended[0]).toContain('a1: The message sent to you just now that carries the person\'s words "Also make me a chart of the ears." is from the person, in their own words')
+  // The chat put a name before their words: only the words quoted are told as theirs
+  expect(appended[0]).toContain('a1: The message sent to you just now carries the person\'s words "Also make me a chart of the ears.", typed by them in the chat. Only those words are the person\'s')
   expect(appended[0]).toContain('Decide which of three it is')
   expect(appended[0]).toContain('added it to your to-do list')
   expect(appended.join('\n')).not.toMatch(/steer/i)
@@ -387,7 +388,7 @@ test("only the person's words sent on by the chat are their steer: a helper's re
   // The person's words, sent on by the chat, are their steer, and the card keeps them
   await $.prompt.submit({ text: 'Make the left nostril a little wider than the right one.', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's5', to: 'a1', message: 'Sam on the nose, in their words: “Make the left nostril — a little wider than the right one”' } as never)
-  expect(appended.at(-1)).toContain('is from the person, in their own words')
+  expect(appended.at(-1)).toContain('carries the person\'s words "Make the left nostril a little wider than the right one.", typed by them in the chat. Only those words are the person\'s')
   await steps('a1')
   expect(appended.at(-1)).toContain('a1: A message from the person is waiting for your decision')
   // The same words sent by a piece of work are still not the person's steer
@@ -408,7 +409,7 @@ test("the person's words sent to work that has ended are theirs, and the chat's 
   await $.prompt.submit({ text: 'Yes, build the nose into the app', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'From Sam, as they said it: "Yes, build the nose into the app"' } as never)
   const all = [...appended, ...sent].join('\n')
-  expect(all).toContain('The message that started you again, carrying the person\'s words "Yes, build the nose into the app", is from the person, in their own words')
+  expect(all).toContain('The message that started you again carries the person\'s words "Yes, build the nose into the app", typed by them in the chat. Only those words are the person\'s')
   expect(all).not.toContain('not from the person')
   // The work, started again, is working when the chat's own note follows: that line names the note, not their words
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1' } as never)
@@ -580,7 +581,7 @@ test("a card's title, its line of facts and every line under them start at one l
   await expectOneEdge(4)
 })
 
-test('work the app moves to an older model, or a helper it starts on Haiku, has each step sent to a model work runs on, and its card says what it was kept off', async ($, on) => {
+test('work the app moves to an older model stays on it and its card says so; a helper it starts on Haiku runs on Sonnet', async ($, on) => {
   const { stepped, files } = world(on, { model: 'claude-fable-5-2' })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -594,41 +595,42 @@ test('work the app moves to an older model, or a helper it starts on Haiku, has 
   // On the model it was started on, nothing is changed and the card says nothing more
   await step(0, 'claude-opus-5-5')
   expect(stepped).toEqual(['claude-opus-5-5'])
-  expect(await line()).not.toContain('kept off')
+  expect(await line()).not.toContain('by the app')
 
-  // The app's safeguards flagged a message and the app sends the next steps to Opus 4.8: they go to Fable 5.2
+  // The app's safeguards flagged a message and the app sends the next steps to Opus 4.8: they stay there, and the card says so
   await step(1, 'claude-opus-4-8')
   await step(2, 'claude-opus-4-8')
-  expect(stepped).toEqual(['claude-opus-5-5', 'claude-fable-5-2', 'claude-fable-5-2'])
-  expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Fable 5.2')
-  expect(await line()).toContain('kept off Opus 4.8')
-  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was sent to Opus 4.8 by the app: its steps go to Fable 5.2').length).toBe(2)
+  expect(stepped).toEqual(['claude-opus-5-5', 'claude-opus-4-8', 'claude-opus-4-8'])
+  expect(await line()).toContain('moved to Opus 4.8 by the app')
+  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was sent to Opus 4.8 by the app: its steps stay there').length).toBe(2)
 
   // Once the app sends its steps to a right model again, a newer one too, nothing is changed and the card no longer says so
   await step(3, 'claude-opus-5-6')
   expect(stepped.at(-1)).toBe('claude-opus-5-6')
-  expect(await line()).not.toContain('kept off')
+  expect(await line()).not.toContain('by the app')
   await step(4, 'claude-opus-4-8')
-  expect(await line()).toContain('kept off Opus 4.8')
+  expect(await line()).toContain('moved to Opus 4.8 by the app')
 
-  // A helper of an agent type the app runs on Haiku runs on Sonnet 5.5; an older Sonnet too
+  // A helper of an agent type the app runs on Haiku runs on Sonnet 5.5; an older Sonnet the app moved it to stays
   await $.agent.spawn({ ...spawn, description: 'Look it up', prompt: 'look it up', parentAgentId: 'a1' } as never)
   await step(0, 'claude-haiku-5-5', 'a2')
   await step(1, 'claude-sonnet-5', 'a2')
-  expect(stepped.slice(-2)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5-5'])
+  expect(stepped.slice(-2)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5'])
 
   // The chat's own thread runs on the model the person picked for it, whichever that is
   await step(0, 'claude-opus-4-8', '')
   expect(stepped.at(-1)).toBe('claude-opus-4-8')
 
-  // A model the person picks on the card wins over the app's move
+  // A model the person picks on the card is used for the steps the app sends to a right model, never in place of the app's move
   await pressed(pane, 'model-a1')
   await pressed(pane, 'pick-a1-claude-sonnet-5-5')
-  await step(5, 'claude-opus-4-8')
+  await step(5, 'claude-opus-5-5')
   expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
-  expect(await line()).not.toContain('kept off')
+  await step(6, 'claude-opus-4-8')
+  expect(stepped.at(-1)).toBe('claude-opus-4-8')
+  expect(await line()).toContain('moved to Opus 4.8 by the app')
 
-  // An agent a workflow's script started has no card of its own: its step is moved all the same, and the log says so
+  // An agent a workflow's script started has no card of its own: Haiku is moved all the same, and the log says so
   await step(0, 'claude-haiku-5-5', 'w1')
   expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
   expect(files.get(`${MEMORY}/log.md`)).toContain('work w1 was sent to Haiku 5.5 by the app: its steps go to Sonnet 5.5')

@@ -22,7 +22,25 @@ type Fetched = { mac: string; text: string; fetchedAt: number; triedAt: number; 
 // This Mac's own chats' files, as handed to the other Macs: those written in the last three minutes, never another Mac's copies
 const ownFiles = async ($: EngineInterface, now: number) => {
   const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && !(entry.mtimeMs && now - entry.mtimeMs > 180_000))
-  return (await Promise.all(listed.map(entry => readOr($, `${liveDir()}/${entry.name}`)))).filter(text => text.trim().startsWith('{'))
+  return (await Promise.all(listed.map(entry => readOr($, `${liveDir()}/${entry.name}`)))).filter(text => text.trim().startsWith('{')).map(forOtherMac)
+}
+// What leaves this Mac for another: a chat's file less the text an ask gives to paste (a code or a token; a command to type stays) and
+// the command or text a prompt shows whole. Both stay on this Mac's own cards and in its chats
+const forOtherMac = (text: string) => {
+  try {
+    const one = JSON.parse(text) as { cards?: unknown; ended?: unknown; prompts?: unknown; answeredPrompts?: unknown }
+    const card = (c: unknown) => {
+      const ask = (c as { ask?: { copy?: unknown; isCommand?: unknown } } | null)?.ask
+      if (!ask || ask.isCommand || ask.copy === undefined) return c
+      const { copy: _copy, ...rest } = ask
+      return { ...(c as object), ask: rest }
+    }
+    const prompt = (p: unknown) => (p && typeof p === 'object' ? (({ detail: _detail, ...rest }) => rest)(p as { detail?: unknown }) : p)
+    const each = (list: unknown, fn: (one: unknown) => unknown) => (Array.isArray(list) ? list.map(fn) : list)
+    return JSON.stringify({ ...one, cards: each(one.cards, card), ended: each(one.ended, card), prompts: each(one.prompts, prompt), answeredPrompts: each(one.answeredPrompts, prompt) })
+  } catch {
+    return text
+  }
 }
 // Each other Mac is reached by whichever chat here finds its copy older than FETCH_EVERY: one trip for every chat on this Mac. A trip
 // hands that Mac this Mac's chats, brings back its chats and the answers pressed there for this Mac's chats. What a trip that failed

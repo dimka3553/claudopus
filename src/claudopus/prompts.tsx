@@ -248,7 +248,7 @@ const holdPrompt = async ($: EngineInterface, next: { signal?: AbortSignal; budg
   }
   return said
 }
-// A press on Yes or No, here or left by another chat: the prompt is answered at once and its card says so, as one answered in the box
+// A press on Yes or No on its card in this chat's own panel, the only answer the mod gives: the prompt is answered at once and its card says so, as one answered in the box
 const answerPrompt = ($: EngineInterface, id: string, said: 'yes' | 'no') => {
   presses += 1
   if (!promptHeld.has(id) || promptSaid.has(id)) return false
@@ -270,8 +270,9 @@ const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugi
 
 const promptHooks = (on: On) => {
 
-  // A prompt the app is about to put to the person shows amber in every panel; the mod passes the request on untouched and never
-  // answers it. A settings hook that answered it put nothing to the person
+  // A prompt the app is about to put to the person shows amber in every panel. The mod answers only two kinds itself: its own messages
+  // and Stops below, and a prompt the person answers with Yes or No on its card in this chat's own panel (PermissionRequest). A
+  // settings hook that answered it put nothing to the person
   on('tool.check', async ($, e, next) => {
     // The mod's own calls carry out what the person already chose: their reply passed on to work, a Stop they pressed. The engine
     // would put each to them again as "Allow SendMessage", a prompt that says nothing of what it is, and no hook of the mod sees that

@@ -10,7 +10,22 @@
 // word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
 // any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
 // it is no wall against code set on getting round it
-type Asked = { id: string; text: string; at: number; chat?: string }
+type Asked = { id: string; text: string; at: number; chat?: string; command?: string }
+// The Bash calls of this chat that run bin/admin or bin/secret, by call id, with their command: a box is drawn only for a request of
+// this chat's own while one of them runs (one sent to the background for BOX_OLD after it began), and says which command asked. A
+// request no runner of this chat could have made, however it is worded, is drawn nowhere
+const runnerCalls = new Map<string, { command: string; at: number; until: number }>()
+const runnerBegun = (id: string, command: string, at: number) => void runnerCalls.set(id, { command, at, until: Infinity })
+const runnerEnded = (id: string, isBackground: boolean, at: number) => {
+  const one = runnerCalls.get(id)
+  if (!one) return
+  if (isBackground) runnerCalls.set(id, { ...one, until: one.at + BOX_OLD })
+  else runnerCalls.delete(id)
+  for (const [key, other] of [...runnerCalls]) if (other.until < at) runnerCalls.delete(key)
+}
+// The command that asked: the one of this chat's running runners begun last before the request
+const runnerOf = (at: number, now: number) => [...runnerCalls.values()].filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0]
+const BOX_SKEW = 60_000
 // What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
 const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
 const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/
@@ -110,10 +125,12 @@ const lookBoxes = async ($: EngineInterface) => {
     try {
       const one = JSON.parse(await readOr($, `${boxesDir()}/${entry.name}`)) as Record<string, unknown>
       const text = one && typeof one === 'object' ? boxWording(one) : undefined
-      if (one.id === id && text && typeof one.at === 'number' && now - one.at < BOX_OLD) found.push({ id, text, at: one.at, chat: typeof one.chat === 'string' && one.chat ? one.chat : undefined })
+      // Only this chat's own request, dated no later than now, while a runner of this chat's that could have made it runs
+      const runner = typeof one.at === 'number' ? runnerOf(one.at, now) : undefined
+      if (one.id === id && text && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
-      else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) {
+      else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
         await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`]).catch(() => undefined)
         await boxKeyring($, 'delete', id)
       }
@@ -209,6 +226,7 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
   return shown.map((one, n) => (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
+      {one.command ? <ui.Text dimColor wrap="wrap">{`Asked by this chat's command: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
       <ui.Text dimColor wrap="wrap">What you type here shows as you type it. It goes only into {keptWhere()}, never into a chat.</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input

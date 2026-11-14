@@ -17,7 +17,6 @@ case $- in *p*) ;; *) exec /bin/bash -p "$0" "$@" ;; esac
 set -u
 unset PERL5OPT PERL5LIB PERLLIB PERL5DB
 # The runner uses only the system's own programs, so nothing earlier on the PATH is handed the password
-user_path=$PATH
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 mac=${1:-}
 command=${2:-}
@@ -25,7 +24,8 @@ if [ -z "$mac" ] || [ -z "$command" ] || [ "${mac#-}" != "$mac" ]; then
   echo "usage: admin here|<ssh host> '<command>' | here|<ssh host> --forget" >&2
   exit 2
 fi
-service=${CLAUDOPUS_ADMIN_SERVICE:-claudopus-admin}
+# The keychain's service is fixed: nothing the caller sets points the runner at another store
+service=claudopus-admin
 # This Mac's keychain, or on Linux a folder only this user reads: bin/keyring beside this runner
 keyring=$(cd -P "$(dirname "$0")" && pwd)/keyring
 # What this computer is called in what is said: a Mac, or on Linux this machine
@@ -45,13 +45,16 @@ fi
 # two minutes old and carries the right seal, and it is taken (removed) as it is found
 memory=$HOME/.claude/claudopus
 gate_key() { "$keyring" get claudopus-admin-gate seal 2>/dev/null; }
+# "Let macOS ask, keep nothing" is kept beside the gate's key as well, where only a press in Config puts it: a config.json that no
+# longer says so never switches this runner back to keeping passwords
+macos_kept=$("$keyring" get claudopus-admin-gate password 2>/dev/null)
 gate=$(gate_key | perl -MJSON::PP -MDigest::SHA=hmac_sha256_hex -e '
   my $k = <STDIN>; $k = "" unless defined $k; chomp $k;
-  my ($config, $grants, $host, $command) = @ARGV;
+  my ($config, $grants, $host, $command, $macos) = @ARGV;
   my $read = sub { my $text = do { local $/; open(my $f, "<", $_[0]) or return {}; <$f> }; my $j = eval { decode_json($text) }; ref $j eq "HASH" ? $j : {} };
   my $bytes = sub { my $v = shift; return "" if !defined $v || ref $v; $v = "$v"; utf8::encode($v); $v };
   my $c = $read->($config);
-  my $pw = $bytes->($c->{adminPassword}) eq "macos" ? "macos" : "keep";
+  my $pw = $bytes->($c->{adminPassword}) eq "macos" || $macos eq "macos" ? "macos" : "keep";
   if (length $k && $bytes->($c->{admin}) eq "never" && $bytes->($c->{adminSealed}) eq hmac_sha256_hex("mode\nnever", $k)) { print "never $pw"; exit }
   my $ok = 0;
   if (length $k && opendir(my $d, $grants)) {
@@ -68,7 +71,7 @@ gate=$(gate_key | perl -MJSON::PP -MDigest::SHA=hmac_sha256_hex -e '
     }
   }
   print(($ok ? "granted" : "refused"), " $pw");
-' "$memory/config.json" "$memory/admin-grants" "$mac" "$command")
+' "$memory/config.json" "$memory/admin-grants" "$mac" "$command" "$macos_kept")
 case $gate in
 never\ * | granted\ *) ;;
 *)
@@ -154,9 +157,14 @@ ask() {
     "$text" 2>/dev/null
 }
 
-# On this Mac the command keeps the PATH it was given; over SSH, that Mac's own
+# On this Mac the command runs as root with the system's own PATH, never the caller's: a program it names by its bare name is the
+# system's, not one a caller put earlier on its PATH. A program kept anywhere else is named by its full path. Over SSH, that Mac's own
+root_path=/usr/bin:/bin:/usr/sbin:/sbin
+[ "$machine" = 'this Mac' ] || root_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 with_path=''
-[ "$mac" = here ] && with_path="PATH=$(printf '%q' "$user_path"); export PATH; "
+[ "$mac" = here ] && with_path="PATH=$root_path; export PATH; "
+# For its test only: past the gate, it prints the shell line root would be handed and runs nothing, asking for no password
+if [ -n "${CLAUDOPUS_ADMIN_SHOW:-}" ]; then printf '%s\n' "${with_path}$command"; exit 0; fi
 
 # "Let macOS ask, keep nothing": macOS asks for the password in its own box on this Mac's screen, each time, and runs the command;
 # no password is kept, typed into the panel or read here. Only on this Mac, and only where its screen is seen

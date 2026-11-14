@@ -146,9 +146,11 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       {below}
     </Box>
   )
-  // On and Off side by side, the one in force filled
+  // On and Off side by side, the one in force filled. Each is on as shipped but automatic updates, which are off until turned on
+  const isOffShipped = (key: string) => key === 'updates'
+  const setTo = (key: 'agents' | 'sound' | 'notifications' | 'updates', value: boolean) => (isOffShipped(key) ? (value ? true : undefined) : value ? undefined : false)
   const onOff = (key: 'agents' | 'sound' | 'notifications' | 'updates') => {
-    const isOn = config[key] !== false
+    const isOn = isOffShipped(key) ? config[key] === true : config[key] !== false
     return (
       // The terminal has no fill to mark the one in force: there it is a filled dot before it, an empty one before the other
       'isTerminal' in ui ? (
@@ -157,7 +159,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             isOn === value ? (
               <Text key={`config-${key}-${value ? 'on' : 'off'}`} bold>{`● ${value ? 'On' : 'Off'}`}</Text>
             ) : (
-              <Button key={`config-${key}-${value ? 'on' : 'off'}-${presses}`} label={`○ ${value ? 'On' : 'Off'}`} plain dimColor onPress={() => acts.set(key, value ? undefined : false)} />
+              <Button key={`config-${key}-${value ? 'on' : 'off'}-${presses}`} label={`○ ${value ? 'On' : 'Off'}`} plain dimColor onPress={() => acts.set(key, setTo(key, value))} />
             ),
           )}
         </Box>
@@ -165,7 +167,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       <Box key={`config-${key}-switch`} flexDirection="row" flexShrink={0} backgroundColor={FILL} height={1}>
         {[true, false].map(value => (
           <Box key={`config-${key}-${value ? 'on' : 'off'}`} width={5} height={1} justifyContent="center" alignItems="center" flexShrink={0} backgroundColor={isOn === value ? SEGMENT : undefined}>
-            {isOn === value ? <Text bold>{value ? 'On' : 'Off'}</Text> : <Button key={`config-${key}-${value ? 'on' : 'off'}-${presses}`} label={value ? 'On' : 'Off'} plain dimColor onPress={() => acts.set(key, value ? undefined : false)} />}
+            {isOn === value ? <Text bold>{value ? 'On' : 'Off'}</Text> : <Button key={`config-${key}-${value ? 'on' : 'off'}-${presses}`} label={value ? 'On' : 'Off'} plain dimColor onPress={() => acts.set(key, setTo(key, value))} />}
           </Box>
         ))}
       </Box>
@@ -309,12 +311,12 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           {toggle(
             'updates',
             'Automatic updates',
-            'Every hour Claudopus gets its newest release, and chats switch to it once they are idle. Off, it stays on the version you have until you update it yourself.',
+            'On, every hour Claudopus gets its newest release by itself, and chats switch to it once they are idle. Off, as shipped, it stays on the version you have until you press Check for updates.',
           )}
           {item(
             'config-check',
             shown.version ? `This chat runs v${shown.version}` : 'Check for updates',
-            'Looks for a newer release now and gets it, also with automatic updates off.',
+            'Looks for a newer release now and gets it; with automatic updates off, type /reload-plugins in a chat to switch it.',
             shown.check.isChecking ? (
               <Text key="config-check-checking" dimColor>Checking…</Text>
             ) : (

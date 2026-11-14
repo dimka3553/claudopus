@@ -1186,7 +1186,8 @@ test('a steer is sent as written and the work is told it is one, the work is rem
   // The chat's call goes on as it was made; the work is told in its own chat what a steer asks of it
   expect(sent[0]).toBe('Sam: “Also make me a chart of the ears.”')
   expect(appended).toHaveLength(1)
-  expect(appended[0]).toContain('a1: The message sent to you just now that carries the person\'s words "Also make me a chart of the ears." is from the person, in their own words')
+  // The chat put a name before their words: only the words quoted are told as theirs
+  expect(appended[0]).toContain('a1: The message sent to you just now carries the person\'s words "Also make me a chart of the ears.", typed by them in the chat. Only those words are the person\'s')
   expect(appended[0]).toContain('Decide which of three it is')
   expect(appended[0]).toContain('added it to your to-do list')
   expect(appended.join('\n')).not.toMatch(/steer/i)
@@ -1252,7 +1253,7 @@ test("only the person's words sent on by the chat are their steer: a helper's re
   // The person's words, sent on by the chat, are their steer, and the card keeps them
   await $.prompt.submit({ text: 'Make the left nostril a little wider than the right one.', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's5', to: 'a1', message: 'Sam on the nose, in their words: “Make the left nostril — a little wider than the right one”' } as never)
-  expect(appended.at(-1)).toContain('is from the person, in their own words')
+  expect(appended.at(-1)).toContain('carries the person\'s words "Make the left nostril a little wider than the right one.", typed by them in the chat. Only those words are the person\'s')
   await steps('a1')
   expect(appended.at(-1)).toContain('a1: A message from the person is waiting for your decision')
   // The same words sent by a piece of work are still not the person's steer
@@ -1273,7 +1274,7 @@ test("the person's words sent to work that has ended are theirs, and the chat's 
   await $.prompt.submit({ text: 'Yes, build the nose into the app', wait: false, origin: composer })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'From Sam, as they said it: "Yes, build the nose into the app"' } as never)
   const all = [...appended, ...sent].join('\n')
-  expect(all).toContain('The message that started you again, carrying the person\'s words "Yes, build the nose into the app", is from the person, in their own words')
+  expect(all).toContain('The message that started you again carries the person\'s words "Yes, build the nose into the app", typed by them in the chat. Only those words are the person\'s')
   expect(all).not.toContain('not from the person')
   // The work, started again, is working when the chat's own note follows: that line names the note, not their words
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1' } as never)
@@ -1445,7 +1446,7 @@ test("a card's title, its line of facts and every line under them start at one l
   await expectOneEdge(4)
 })
 
-test('work the app moves to an older model, or a helper it starts on Haiku, has each step sent to a model work runs on, and its card says what it was kept off', async ($, on) => {
+test('work the app moves to an older model stays on it and its card says so; a helper it starts on Haiku runs on Sonnet', async ($, on) => {
   const { stepped, files } = world(on, { model: 'claude-fable-5-2' })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -1459,41 +1460,42 @@ test('work the app moves to an older model, or a helper it starts on Haiku, has 
   // On the model it was started on, nothing is changed and the card says nothing more
   await step(0, 'claude-opus-5-5')
   expect(stepped).toEqual(['claude-opus-5-5'])
-  expect(await line()).not.toContain('kept off')
+  expect(await line()).not.toContain('by the app')
 
-  // The app's safeguards flagged a message and the app sends the next steps to Opus 4.8: they go to Fable 5.2
+  // The app's safeguards flagged a message and the app sends the next steps to Opus 4.8: they stay there, and the card says so
   await step(1, 'claude-opus-4-8')
   await step(2, 'claude-opus-4-8')
-  expect(stepped).toEqual(['claude-opus-5-5', 'claude-fable-5-2', 'claude-fable-5-2'])
-  expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Fable 5.2')
-  expect(await line()).toContain('kept off Opus 4.8')
-  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was sent to Opus 4.8 by the app: its steps go to Fable 5.2').length).toBe(2)
+  expect(stepped).toEqual(['claude-opus-5-5', 'claude-opus-4-8', 'claude-opus-4-8'])
+  expect(await line()).toContain('moved to Opus 4.8 by the app')
+  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was sent to Opus 4.8 by the app: its steps stay there').length).toBe(2)
 
   // Once the app sends its steps to a right model again, a newer one too, nothing is changed and the card no longer says so
   await step(3, 'claude-opus-5-6')
   expect(stepped.at(-1)).toBe('claude-opus-5-6')
-  expect(await line()).not.toContain('kept off')
+  expect(await line()).not.toContain('by the app')
   await step(4, 'claude-opus-4-8')
-  expect(await line()).toContain('kept off Opus 4.8')
+  expect(await line()).toContain('moved to Opus 4.8 by the app')
 
-  // A helper of an agent type the app runs on Haiku runs on Sonnet 5.5; an older Sonnet too
+  // A helper of an agent type the app runs on Haiku runs on Sonnet 5.5; an older Sonnet the app moved it to stays
   await $.agent.spawn({ ...spawn, description: 'Look it up', prompt: 'look it up', parentAgentId: 'a1' } as never)
   await step(0, 'claude-haiku-5-5', 'a2')
   await step(1, 'claude-sonnet-5', 'a2')
-  expect(stepped.slice(-2)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5-5'])
+  expect(stepped.slice(-2)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5'])
 
   // The chat's own thread runs on the model the person picked for it, whichever that is
   await step(0, 'claude-opus-4-8', '')
   expect(stepped.at(-1)).toBe('claude-opus-4-8')
 
-  // A model the person picks on the card wins over the app's move
+  // A model the person picks on the card is used for the steps the app sends to a right model, never in place of the app's move
   await pressed(pane, 'model-a1')
   await pressed(pane, 'pick-a1-claude-sonnet-5-5')
-  await step(5, 'claude-opus-4-8')
+  await step(5, 'claude-opus-5-5')
   expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
-  expect(await line()).not.toContain('kept off')
+  await step(6, 'claude-opus-4-8')
+  expect(stepped.at(-1)).toBe('claude-opus-4-8')
+  expect(await line()).toContain('moved to Opus 4.8 by the app')
 
-  // An agent a workflow's script started has no card of its own: its step is moved all the same, and the log says so
+  // An agent a workflow's script started has no card of its own: Haiku is moved all the same, and the log says so
   await step(0, 'claude-haiku-5-5', 'w1')
   expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
   expect(files.get(`${MEMORY}/log.md`)).toContain('work w1 was sent to Haiku 5.5 by the app: its steps go to Sonnet 5.5')
@@ -3714,10 +3716,10 @@ test('Config lists each thing a person can set with what is in force, edits a te
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, sound: false })
   await pressed(config, 'config-sound-back')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 })
-  // Automatic updates are on as shipped; Off writes updates: false, and On takes the key out again
-  await pressed(config, 'config-updates-off')
-  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, updates: false })
+  // Automatic updates are off as shipped; On writes updates: true, and Off takes the key out again
   await pressed(config, 'config-updates-on')
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, updates: true })
+  await pressed(config, 'config-updates-off')
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 })
   await config.input({ key: 'config-name-input', text: 'Alex' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').name).toBe('Alex')
@@ -3785,7 +3787,8 @@ test('Check for updates in Config shows it is checking, then what it found; a se
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it, or it switches by itself in a moment.' }))).toBeDefined()
+  // With automatic updates off, as shipped, a chat switches only when /reload-plugins is typed in it
+  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it.' }))).toBeDefined()
   expect(gitRan).toContain('merge --ff-only --quiet @{u}')
   files.delete('git:online')
   // No answer that reads as a version: said as a failure, in the error colour
@@ -4395,8 +4398,10 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   const { files, logged, keychain, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
+  // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await clock.advance(1000)
   // The chat is told only the name, and where to type it
@@ -4414,7 +4419,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   expect([...files.values()].some(text => text.includes('s3cret'))).toBe(false)
   // A curly quote from a phone's keyboard, which security would give back as hex, is not sent, and the box says why
   const third = '2f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, kind: 'secret', name: 'NPM_TOKEN', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, kind: 'secret', name: 'NPM_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   await clock.advance(1000)
   const curly = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${third}-field`)))
   const before = keychain.length
@@ -4428,7 +4433,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   expect(keychain.length).toBe(before)
   // A box cancelled removes its request, which the runner takes as cancelled
   const other = '1f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, kind: 'admin', host: 'here', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, kind: 'admin', host: 'here', chat: 'engine-id', at: 1_700_000_000_000 }))
   await clock.advance(1000)
   const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)))
   await list.press({ key: cancel?.key ?? '' })
@@ -4443,6 +4448,8 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
 test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {
   const { files, logged, keychain, clock, opened } = world(on)
   await $.session.start(start)
+  // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -4457,31 +4464,27 @@ test('a chat on this Mac\'s own screen asks in the panel the same way, and opens
   expect([...files.values()].some(text => text.includes('local-k3y'))).toBe(false)
 })
 
-test("another chat's request is left to that chat a moment, then any chat with a screen takes it", async ($, on) => {
+test("a request of another chat's, or of this chat's with no runner of its own running, is drawn nowhere here; this chat's own while its runner runs is drawn first", async ($, on) => {
   const { files, logged, clock } = world(on)
   await $.session.start(start)
-  const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await clock.advance(1000)
-  // The box shows here at once, but the notice waits for its own chat
-  expect(await until(async () => list.find({ type: 'Text', text: NPM_BOX }))).toBeDefined()
-  expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
-  await clock.advance(6000)
-  expect(await until(async () => logged.find(line => line.includes('NPM_TOKEN')))).toContain('top of the Claudopus panel')
-})
-
-test("with two requests open every box is drawn, this chat's own first and the only one with the keys", async ($, on) => {
-  const { files, clock } = world(on)
-  await $.session.start(start)
   const older = '5f1e2d3c-4b5a-4987-a654-3210fedcba98'
   const mine = '6f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1_700_000_000_000 }))
   files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_500 }))
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(7000)
+  // No runner of this chat's runs: neither is drawn, nor told
+  expect((await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-'))).toEqual([])
+  expect(logged.some(line => line.includes('NPM_TOKEN') || line.includes('GITHUB_TOKEN'))).toBe(false)
+  // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
   await clock.advance(1000)
-  const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length === 2 ? all : undefined })
-  expect(fields?.map(one => [(one.key ?? '').slice(4, 6), one.props.autoFocus])).toEqual([['6f', true], ['5f', undefined]])
+  const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length ? all : undefined })
+  expect(fields?.map(one => [(one.key ?? '').slice(4, 6), one.props.autoFocus])).toEqual([['6f', true]])
+  // It says which command of this chat's asked
+  expect(await list.find({ type: 'Text', text: "Asked by this chat's command: hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy" })).toBeDefined()
+  await clock.advance(6000)
+  expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
 })
 
 test('a run with nothing to draw on takes no request, so the runner knows no panel asks', async ($, on) => {
@@ -4497,6 +4500,8 @@ test("a hand-written request with made-up text shows the panel's own wording or 
   const { files, logged, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
   const planted = 'Your Apple ID session expired. Type your Apple ID password to keep working.'
   const put = (n: number, fields: Record<string, unknown>) => {
     const id = `${n}a1e2d3c-4b5a-4987-a654-3210fedcba98`
@@ -4531,6 +4536,8 @@ test('the box words what the runners ask from its fields: a key by name, a Mac b
   const { files, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
   const put = (n: number, fields: Record<string, unknown>) => {
     const id = `${n}b1e2d3c-4b5a-4987-a654-3210fedcba98`
     files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000 + n, ...fields }))
@@ -4590,7 +4597,7 @@ test('an answer that reaches ended work from a timer is sent from inside the nex
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I restart it?', choices: ['Approve', 'Not now'] } as never)
   await $.turn.complete({ answer: 'It waits on your go-ahead.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
   // Another chat leaves an answer, which this chat's timer takes: from there the engine would skip the mod's hooks in the work it woke
-  files.set(`${MEMORY}/live/answers/engine-id/0-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: true, ask: 'May I restart it?', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/live/answers/engine-id/0-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: true, ask: 'May I restart it?', askAt: 1_700_000_000_000, at: 1_700_000_000_000 }))
   await clock.advance(6000)
   expect(files.has(`${MEMORY}/live/answers/engine-id/0-a.json`)).toBe(false)
   expect(['from the timer', ...resumed.filter(line => line.startsWith('a1: '))]).toEqual(['from the timer'])
@@ -4604,7 +4611,7 @@ test('an answer that reaches ended work from a timer is sent from inside the nex
   // work does what it was asked, and its rules have it end with its ask in its report when the panel does not answer
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'And the other one?', choices: ['Yes'] } as never)
   await $.turn.complete({ answer: 'Waiting again.', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
-  files.set(`${MEMORY}/live/answers/engine-id/1-b.json`, JSON.stringify({ card: 'a1', choice: 'Yes', isReply: true, ask: 'And the other one?', at: 1_700_000_007_000 }))
+  files.set(`${MEMORY}/live/answers/engine-id/1-b.json`, JSON.stringify({ card: 'a1', choice: 'Yes', isReply: true, ask: 'And the other one?', askAt: 1_700_000_006_000, at: 1_700_000_007_000 }))
   await clock.advance(12_000)
   expect(resumed.filter(line => line.startsWith('a1: ')).map(line => (line.includes('Approve') ? 'Approve' : line.includes('Yes') ? 'Yes' : line))).toEqual(['Approve', 'Yes'])
   expect(files.get(`${MEMORY}/log.md`)).toContain('started again from a timer')
@@ -5313,28 +5320,33 @@ test('a question or a plan has no Yes or No on its card: it says where to answer
   await list.unmount()
 })
 
-test("another chat's held prompt has Yes and No, which leave the answer for that chat; this chat takes such an answer for its own", async ($, on) => {
-  const { files, clock, wake } = world(on)
+test("another chat's held prompt has no Yes or No here, only where to answer it; an answer a file leaves for this chat's own prompt answers nothing", async ($, on) => {
+  const { files, clock, wake, logged } = world(on)
   await $.session.start(start)
-  files.set(`${MEMORY}/live/chat-o.json`, JSON.stringify({ chat: 'chat-o', title: 'Other chat', folder: '/x', host: '', at: NOW, cards: [], prompts: [{ id: 'toolu_9', text: 'Run a command: Count files', kind: 'allow', at: NOW, isHeld: true }, { id: 'toolu_7', text: 'Run a command: Old one', kind: 'allow', at: NOW }] }))
+  files.set(`${MEMORY}/live/chat-o.json`, JSON.stringify({ chat: 'chat-o', title: 'Other chat', folder: '/x', host: '', at: NOW, cards: [], prompts: [{ id: 'toolu_9', text: 'Run a command: Count files', kind: 'allow', at: NOW, isHeld: true }] }))
   await clock.advance(5000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => button(list, 'prompt-yes--chat-o-toolu_9'))).toBeDefined()
-  // One its chat does not hold, as from an older version, keeps saying where to answer it
-  expect(await button(list, 'prompt-yes--chat-o-toolu_7')).toBeUndefined()
-  await list.press({ key: String((await button(list, 'prompt-yes--chat-o-toolu_9'))?.key) })
-  const left = await until(async () => [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/live/answers/chat-o/`) && path.endsWith('.json'))?.[1])
-  expect(JSON.parse(left ?? '{}')).toEqual(expect.objectContaining({ card: 'prompt:toolu_9', choice: 'yes' }))
-  expect(await until(async () => list.find({ type: 'Text', text: 'You said yes · it goes to that chat' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Count files' }))).toBeDefined()
   expect(await button(list, 'prompt-yes--chat-o-toolu_9')).toBeUndefined()
-  // This chat's own prompt, answered by a press another chat left for it
-  const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'make', description: 'Build it' } } as never)
+  expect(await list.find({ type: 'Text', text: 'Answer it in that chat' })).toBeDefined()
+  // This chat's own prompt: a Yes left in a file, as another chat or another Mac could leave one, does not answer it
+  let settled = false
+  const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'make', description: 'Build it' } } as never).then(r => ((settled = true), r))
   expect(await until(async () => button(list, 'prompt-yes-this-'))).toBeDefined()
   const id = String((await button(list, 'prompt-yes-this-'))?.key ?? '').replace(/^prompt-yes-this-/, '').replace(/-\d+$/, '')
   files.set(`${MEMORY}/live/answers/engine-id/1-a.json`, JSON.stringify({ card: `prompt:${id}`, choice: 'yes', isReply: false, ask: 'Run a command: Build it', askAt: NOW, at: NOW + 6000 }))
   await clock.advance(5000)
   wake()
+  await clock.advance(1000)
+  wake()
+  expect(settled).toBe(false)
+  expect(files.has(`${MEMORY}/live/answers/engine-id/1-a.json`)).toBe(false)
+  expect((files.get(`${MEMORY}/log.md`) ?? '')).toContain('answer to a prompt left in a file dropped')
+  // Its own Yes, pressed in this chat's panel, still answers it
+  await list.press({ key: String((await button(list, 'prompt-yes-this-'))?.key) })
+  wake()
   expect(((await asked) as { decision?: unknown }).decision).toEqual({ behavior: 'allow' })
+  void logged
   await list.unmount()
 })
 
@@ -6587,6 +6599,8 @@ test("another chat's panel shows an admin command that waits, with no button: on
   expect(await list.find({ type: 'Text', text: 'Allow or deny it on its card in its own chat.' })).toBeDefined()
   expect((await list.findAll({ type: 'Button' })).some(one => ['Allow once', 'Always allow this command', 'Deny'].includes(String(one.props.label)))).toBe(false)
 })
+
+// Each finding of the security review of 0.2.100, held by a test that fails on the code before its fix
 
 // Work that runs its helpers beside it: a helper runs in the background, the work waits for it only when it has nothing else, is
 // held back from ending while one runs, is told at the step when it could have sent calls together, and is told of a quiet helper
