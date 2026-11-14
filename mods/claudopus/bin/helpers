@@ -1,16 +1,21 @@
 #!/bin/sh
-# Waits for a piece of work's helpers, run by the work itself with Bash: back as soon as the helpers it has running change (one
-# ended, or one started), or after three minutes, then prints how each is doing. The mod keeps the file it is given: its first
-# line names the helpers running, the rest says how each is doing.
+# Waits for a piece of work's helpers, run by the work itself with Bash: back once the helpers it has running change (one ended,
+# or one started), which the mod writes within about 20 seconds, or after 110 seconds, inside Bash's own two-minute limit; then
+# prints how each is doing. The file's first line names the helpers running ("running: <ids>"), the rest says how each is doing.
 f="$1"
 [ -f "$f" ] || { echo "No helper of yours is running."; exit 0; }
 first=$(head -n 1 "$f")
-[ -n "$first" ] || { tail -n +2 "$f"; exit 0; }
+[ "$first" = "running: " ] && { echo "No helper of yours is running."; tail -n +2 "$f"; exit 0; }
+changed=''
 i=0
-while [ "$i" -lt 90 ]; do
-  [ "$(head -n 1 "$f")" != "$first" ] && break
+while [ "$i" -lt 55 ]; do
+  now=$(head -n 1 "$f")
+  # A file read while it is being written has no first line yet: that is no change
+  case "$now" in
+    "running: "*) [ "$now" != "$first" ] && { changed=1; break; } ;;
+  esac
   sleep 2
   i=$((i + 1))
 done
-[ "$(head -n 1 "$f")" != "$first" ] && echo "Your helpers changed: one ended (its result comes to you as a message) or one started." || echo "No helper ended in 3 minutes."
+if [ -n "$changed" ]; then echo "Your helpers changed: one ended (its result comes to you as a message) or one started."; else echo "No helper ended in the last two minutes."; fi
 tail -n +2 "$f"

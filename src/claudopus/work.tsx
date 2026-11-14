@@ -183,7 +183,7 @@ const workHooks = (on: On) => {
     }
     // A report handed back is kept as the turn's answer only once the handback went through: refused, the work carries on
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
-      const hold = await holdAtStop($, e.agentId).catch(() => '')
+      const hold = await holdAtStop($, e.agentId, 'handback').catch(() => '')
       if (hold) return { deny: hold }
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
@@ -211,6 +211,7 @@ const workHooks = (on: On) => {
       const stopId = String((e as { task_id?: unknown }).task_id ?? '')
       if (!r.deny && stopId) {
         stoppedHere.add(stopId)
+        await stopHelpers($, stopId)
         await dropBackground($, [stopId])
         const now = await $.clock.now()
         await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
@@ -271,7 +272,7 @@ const workHooks = (on: On) => {
   // As a piece of work stops, the engine says what background work is still in flight: what its card kept that is not, has ended
   on('classic.SubagentStop', async ($, e, next) => {
     const r = await next(e)
-    const hold = r.block ? '' : await holdAtStop($, e.agent_id).catch(() => '')
+    const hold = r.block ? '' : await holdAtStop($, e.agent_id, 'stop').catch(() => '')
     if (hold) return { ...r, block: hold }
     const live = e.background_tasks
     if (dir && Array.isArray(live)) {

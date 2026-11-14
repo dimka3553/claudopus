@@ -10,10 +10,12 @@ const LOOKUP_TOOLS = ['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch']
 const LOOKUP_COMMAND = /^\s*(?:cd \S+ && )?(?:cat|head|tail|less|wc|ls|rg|grep|find|sed -n|jq|git (?:-C \S+ )?(?:log|show|diff|status|blame|grep))\b/
 const isLookup = (tool: string, input: unknown) =>
   LOOKUP_TOOLS.includes(tool) || (tool === 'Bash' && !(input as { run_in_background?: unknown })?.run_in_background && LOOKUP_COMMAND.test(String((input as { command?: unknown })?.command ?? '')))
+// The wait for helpers, which is no run of its own
+const WAIT_RUN = /\/bin\/helpers['"]? /
 // A commit: what a second look, pictures and docs can start from
 const COMMIT = /\bgit (?:-C \S+ )?commit\b/
 // A helper that looks for what is wrong: a second look
-const CHECKER = /\b(check|review|second look|look for what|verify|audit)/i
+const CHECKER = /\b(check|checks|review|second look|look for what|what is wrong|verify|audit)\b/i
 // Single lookups in a row before a line says to send them together
 const LOOKUPS_IN_A_ROW = 3
 // A run this long is a long one; two of one kind in a row, each alone in its step, could have run side by side
@@ -29,7 +31,7 @@ const LOOKUP_RUN = (n: number) =>
 const SERIAL_RUNS = (what: string) =>
   `Two long runs of one kind (${what}) went one after the other, each alone in its step. When they do not need each other, run them side by side: each in its own throwaway chat, worktree, terminal session or background command, or each as a helper, all started in one step.`
 const BOOK_ALONE =
-  'That step held only to-do, note or memory calls. They cost a turn of their own: send them in the same step as your next work call.'
+  'That step held only to-do and note calls. They cost a turn of their own: send them in the same step as your next work call.'
 const LOOK_NOW =
   'You committed. The second look, the pictures and the docs need nothing more than this: start them now, as helpers in the same step as your next work, not after the rest is done.'
 
@@ -47,7 +49,7 @@ const callStarted = (id: string, at: number) => {
 const kindOf = (command: string) => oneLine(command.replace(/^\s*cd \S+ && /, '')).split(' ').slice(0, 2).join(' ')
 
 // What one step of an agent tells it, in the order the patterns are looked at; at most LINES_EACH of each kind per agent
-const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs: number }[], wait = '') => {
+const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs: number }[], wait = '', isTop = true) => {
   const seen = stepsSeen.get(agent) ?? { lookups: 0, told: {}, steps: 0, singles: 0 }
   if (!stepsSeen.has(agent) && stepsSeen.size >= STEPS_KEPT) stepsSeen.delete(stepsSeen.keys().next().value ?? '')
   stepsSeen.set(agent, seen)
@@ -61,7 +63,7 @@ const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs:
   seen.steps += 1
   if (work.length === 1) seen.singles += 1
   if (!work.length) {
-    if (calls.some(one => isTool(one.tool, 'todo') || isTool(one.tool, 'note') || one.tool === 'TodoWrite')) say('book', BOOK_ALONE)
+    if (calls.every(one => isTool(one.tool, 'todo') || isTool(one.tool, 'note') || one.tool === 'TodoWrite')) say('book', BOOK_ALONE)
     return lines
   }
   const helpers = work.filter(one => one.tool === 'Agent')
@@ -77,11 +79,11 @@ const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs:
   // Long runs of one kind, each alone in its step
   const one = work.length === 1 ? work[0] : undefined
   const command = one?.tool === 'Bash' ? String((one.input as { command?: unknown })?.command ?? '') : ''
-  const kind = one && command && one.tookMs >= LONG_RUN && !isLookup(one.tool, one.input) ? kindOf(command) : ''
+  const kind = one && command && one.tookMs >= LONG_RUN && !isLookup(one.tool, one.input) && !WAIT_RUN.test(command) ? kindOf(command) : ''
   if (kind && seen.lastRun === kind) say('serial', SERIAL_RUNS(kind))
   seen.lastRun = kind || (one ? undefined : seen.lastRun)
   // A commit with no second look started
-  if (seen.checkerAt === undefined && work.some(call => call.tool === 'Bash' && COMMIT.test(String((call.input as { command?: unknown })?.command ?? '')))) say('look', LOOK_NOW)
+  if (isTop && seen.checkerAt === undefined && work.some(call => call.tool === 'Bash' && COMMIT.test(String((call.input as { command?: unknown })?.command ?? '')))) say('look', LOOK_NOW)
   return lines
 }
 
@@ -168,7 +170,8 @@ const stepHooks = (on: On) => {
     const now = await $.clock.now()
     const calls = e.tool_calls.map(call => ({ tool: call.tool_name, input: call.tool_input, tookMs: now - (callStarts.get(call.tool_use_id) ?? now) }))
     for (const call of e.tool_calls) callStarts.delete(call.tool_use_id)
-    const lines = stepLines(agent, calls, waitCommand($, agent))
+    const card = (await read($, todos)).find(one => one.id === agent)
+    const lines = stepLines(agent, calls, waitCommand($, agent), !card?.parentId)
     if (!lines.length) return r
     await log($, `work ${agent} told of its step: ${lines.map(line => line.slice(0, 40)).join(' / ')}`)
     return { ...r, additionalContext: [...(r.additionalContext ?? []), ...lines] }
@@ -178,13 +181,13 @@ const stepHooks = (on: On) => {
 // ---- Helpers run in the background, and their work waits for them only when it has nothing else ----
 
 // How long one wait for helpers lasts before it comes back with how each is doing: the steady look-in
-const HELPERS_WAIT = 3 * 60_000
+const HELPERS_WAIT = 110_000
 // How many times a piece of work that tries to end while its helpers run is held back in one stretch, before it is let go
 const HELD_AT_STOP = 6
 const heldAtStop = new Map<string, number>()
 
 // The helpers an agent started that are still at work
-const runningHelpers = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working')
+const runningHelpers = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working' && !one.answeredAt)
 // One line per helper, for the work that started it: what, how long, its steps, when it last showed something new, what it runs now
 const helperRoll = (list: Todo[], id: string, at: number) =>
   list
@@ -197,8 +200,8 @@ const helperRoll = (list: Todo[], id: string, at: number) =>
     })
     .join('\n')
 // The command the work waits for its helpers with: a Bash call of its own, so no hook waits
-const waitCommand = ($: EngineInterface, agent: string) => `"${$.plugin.root}/bin/helpers" "${rollPath(agent)}"`
-const WAIT_HOW = (command: string) => `When nothing is left that needs nothing from them, wait for them with this Bash command (timeout 600000): ${command} . It comes back as soon as one ends, or after three minutes with how each is doing.`
+const waitCommand = ($: EngineInterface, agent: string) => `'${$.plugin.root}/bin/helpers' '${rollPath(agent)}'`
+const WAIT_HOW = (command: string) => `When nothing is left that needs nothing from them, wait for them with this Bash command (timeout 600000): ${command} . It comes back as soon as one ends, or after about two minutes with how each is doing.`
 const HELD_AT_END = (n: number, command: string) =>
   `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Do not finish yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Carry on with what needs nothing from ${n === 1 ? 'it' : 'them'}, or wait with this Bash command (timeout 600000): ${command} ; stop one you no longer need with TaskStop.`
 const HELPERS_STARTED = (command: string) => `Your helpers run in the background: each call came back at once and each result comes to you as a message when it ends. Carry on now with your own part. ${WAIT_HOW(command)}`
@@ -213,7 +216,7 @@ const writeRolls = async ($: EngineInterface, isNow = false) => {
   for (const id of parents) {
     const parent = list.find(one => one.id === id)
     if (!parent || parent.status !== 'working') continue
-    const head = runningHelpers(list, id).map(one => one.id).join(',')
+    const head = `running: ${runningHelpers(list, id).map(one => one.id).join(',')}`
     const last = rollsWritten.get(id)
     if (!isNow && last && last.head === head && now - last.at < 60_000) continue
     rollsWritten.set(id, { head, at: now })
@@ -224,16 +227,30 @@ const writeRolls = async ($: EngineInterface, isNow = false) => {
 // What a piece of work, or a helper, starts with the Agent tool runs in the background: the call comes back at once and the
 // helper's result comes as a message when it ends, as the chat's own work does
 const isHelperSpawn = (e: { parentAgentId?: string; workflow?: unknown; resume?: unknown; fork: boolean; isTeammate?: true; background: boolean }) =>
-  Boolean(e.parentAgentId) && !e.workflow && !e.resume && !e.fork && !e.isTeammate && !e.background && !isOff && Boolean(dir)
+  Boolean(e.parentAgentId) && !flowAgents.has(e.parentAgentId ?? '') && !e.workflow && !e.resume && !e.fork && !e.isTeammate && !e.background && !isOff && Boolean(dir)
 
 // Work that ends its turn while its helpers run is held back, so their results come to it and not to the chat
-const holdAtStop = async ($: EngineInterface, agent: string): Promise<string> => {
-  if (!dir || isOff) return ''
+const holdAtStop = async ($: EngineInterface, agent: string, at: 'stop' | 'handback'): Promise<string> => {
+  if (!dir || isOff || flowAgents.has(agent)) return ''
+  // Its report went through: what ends after it is no longer held
+  if (at === 'stop' && handedBack.has(agent)) return ''
   const running = runningHelpers(await read($, todos), agent).length
-  const held = heldAtStop.get(agent) ?? 0
-  if (!running || held >= HELD_AT_STOP) return (heldAtStop.delete(agent), '')
-  heldAtStop.set(agent, held + 1)
-  await log($, `work ${agent} held at its end: ${running} helpers run`)
+  const key = `${agent} ${at}`
+  if (!running) return (heldAtStop.delete(key), '')
+  const held = heldAtStop.get(key) ?? 0
+  if (held >= HELD_AT_STOP) return ''
+  heldAtStop.set(key, held + 1)
+  await log($, `work ${agent} held at its ${at === 'stop' ? 'end' : 'report'}: ${running} helpers run`)
   await writeRolls($, true)
   return HELD_AT_END(running, waitCommand($, agent))
+}
+
+// Work that is stopped takes the helpers it has running with it: they run in the background, and would go on spending, their
+// results reaching the chat
+const stopHelpers = async ($: EngineInterface, id: string) => {
+  const list = await read($, todos)
+  for (const one of underOf(list, id).filter(kid => kid.status === 'working')) {
+    const r = await $.tool.call({ tool: 'TaskStop', task_id: one.id }).catch(err => ({ deny: String(err) }))
+    if ((r as { deny?: unknown }).deny) await log($, `helper ${one.id} of ${id} not stopped: ${String((r as { deny?: unknown }).deny)}`)
+  }
 }

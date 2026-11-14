@@ -28,7 +28,7 @@ test('a step is told when it started a helper alone, held only to-dos, or made a
   expect(await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'Read the nose code' } }]))).toContain('started one helper and nothing else')
   // Sent with other calls, a helper is no line
   expect(await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'Read' } }, { tool: 'Agent', input: { description: 'Draw' } }, { tool: 'mcp__claudopus__note' }]))).toBe('')
-  expect(await toldOf(batch($, 'a1', [{ tool: 'mcp__claudopus__todo' }, { tool: 'mcp__claudopus__note' }]))).toContain('only to-do, note or memory calls')
+  expect(await toldOf(batch($, 'a1', [{ tool: 'mcp__claudopus__todo' }, { tool: 'mcp__claudopus__note' }]))).toContain('only to-do and note calls')
   expect(await toldOf(batch($, 'a1', [{ tool: 'Bash', input: { command: 'git commit -m "Nose"' } }]))).toContain('start them now')
   // Each kind of line is said at most twice to one agent
   await batch($, 'a1', [{ tool: 'Agent', input: { description: 'One more' } }])
@@ -73,17 +73,17 @@ test('the work waits for its helpers with a command of its own: a file it waits 
   await $.agent.spawn({ ...spawn, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' } as never)
   await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw', parentAgentId: 'a1' } as never)
   const roll = () => files.get(`${MEMORY}/helpers/a1.txt`) ?? ''
-  expect(roll().split('\n')[0]).toBe('a2,a3')
+  expect(roll().split('\n')[0]).toBe('running: a2,a3')
   expect(roll()).toContain('"Read the nose code" (a2): running')
   // Told once, as it starts them, that they run beside it and how it waits for them
   const told = await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'Read the nose code' } }, { tool: 'Agent', input: { description: 'Draw the nose' } }]))
   expect(told).toContain('Your helpers run in the background')
-  expect(told).toMatch(/bin\/helpers" "\/home\/sam\/\.claude\/claudopus\/helpers\/a1\.txt"/)
+  expect(told).toMatch(/bin\/helpers' '\/home\/sam\/\.claude\/claudopus\/helpers\/a1\.txt'/)
   expect(await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'A third' } }, { tool: 'Read' }]))).toBe('')
   agents.a2 = 'completed'
   await $.turn.complete({ answer: 'nose.ts', durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' } as never)
   await clock.advance(21_000)
-  expect(roll().split('\n')[0]).toBe('a3')
+  expect(roll().split('\n')[0]).toBe('running: a3')
   expect(roll()).toContain('"Read the nose code" (a2): ended')
 })
 
@@ -119,4 +119,23 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   expect((await pane.find({ type: 'Text', text: /1 quiet for 5\+ min/ }))?.text).toBeDefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
+})
+
+test('a helper that already answered holds nothing, a report given lets the end go, and work stopped takes its running helpers with it', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const { stopped } = world(on, { agents })
+  on('classic.SubagentStop', () => ({}) as never)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Serve the page', prompt: 'serve', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw', parentAgentId: 'a1' } as never)
+  const stop = () => ($ as unknown as { classic: { SubagentStop: (e: object) => Promise<{ block?: string }> } }).classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: 'a1', background_tasks: [] })
+  // The server helper answered and left its server running: it still works, but holds nothing; the other still does
+  agents.a2 = 'waiting'
+  await $.turn.complete({ answer: `The page is served on port 3100, and it keeps running for you to look at. ${'It shows the nose as drawn, at every size. '.repeat(14)}`, durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' } as never)
+  expect((await stop()).block).toContain('a helper still running')
+  // Stopped from its card or by the chat, the work's running helpers are stopped with it
+  await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
+  expect(stopped).toEqual(expect.arrayContaining(['a1', 'a3']))
 })

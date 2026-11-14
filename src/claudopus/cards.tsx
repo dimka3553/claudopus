@@ -198,6 +198,7 @@ const stop = async ($: EngineInterface, id: string) => {
   const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
   if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
   stoppedHere.add(id)
+  await stopHelpers($, id)
   const now = await $.clock.now()
   // What finished work left running is stopped with it
   await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === id && one.leftSince ? { ...one, leftSince: undefined } : one)))
