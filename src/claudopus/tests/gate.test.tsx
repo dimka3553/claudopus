@@ -4,7 +4,7 @@ const ADMIN = '/plug/claudopus/bin/admin'
 const GRANTS = `${MEMORY}/admin-grants/`
 const ALLOWED = `${MEMORY}/admin-allowed.json`
 // A piece of work under way in a chat of Sam's, and the panel
-const gated = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, config: Record<string, unknown> = {}, options: Parameters<typeof world>[1] = {}) => {
+const gated = async ($: Parameters<TestBody>[0], on: On, config: Record<string, unknown> = {}, options: Parameters<typeof world>[1] = {}) => {
   const w = world(on, options)
   w.files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', ...config }))
   await $.session.start(start)

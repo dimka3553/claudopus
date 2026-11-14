@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.100 · 14 November 2026
+- The Claudopus page on GitHub names the newest version as its latest release again, with what changed in it; it had stopped at 0.2.51. Every release now posts itself there, and a release that cannot do so says it failed.
+
 ## 0.2.99 · 14 November 2026
 - Every result in the Results list opens on a click again, and the buttons inside a result work too. When the list changed while it was open (a result arriving, a time moving), the app kept pressing buttons the list had already replaced, so nothing happened however often you clicked; now each button takes a new name whenever the list changes, and the app always presses the live one.
 

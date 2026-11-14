@@ -8,7 +8,7 @@ test('a new person gets a welcome once: it opens the panel, names /claudopus, an
     const pane = await $.ui.mount({ ...LIST, surface } as never)
     expect((await pane.find({ type: 'Text', text: 'Welcome to Claudopus' }))?.props.bold).toBe(true)
     expect(await pane.find({ type: 'Text', text: /Type \/claudopus to bring it back/ })).toBeDefined()
-    expect(await pane.find({ type: 'Button', label: 'Index my old chats' })).toBeDefined()
+    expect((await pane.findAll({ type: 'Button' })).some(b => b.props.label === 'Index my old chats')).toBe(true)
     await pane.unmount()
   }
   // A reload of the same session keeps it

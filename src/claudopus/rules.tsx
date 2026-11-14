@@ -24,7 +24,7 @@ const shellWords = (command: string) => {
     const c = command[i]!
     if (quote) {
       if (c === quote) quote = ''
-      else if (c === '\\' && quote === '"' && i + 1 < command.length && '$`"\\\n'.includes(command[i + 1]!)) word += command[++i]
+      else if (c === '\\' && quote === '"' && i + 1 < command.length && '$`"\\\n'.includes(command[i + 1]!)) word = (word ?? '') + command[++i]
       else word += c
     } else if (c === "'" || c === '"') (quote = c), (word ??= '')
     else if (c === '\\' && i + 1 < command.length) word = (word ?? '') + command[++i]

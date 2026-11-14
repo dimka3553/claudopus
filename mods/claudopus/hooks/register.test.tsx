@@ -1,5 +1,6 @@
 // Made by src/claudopus/build.mjs from the parts in src/claudopus/tests: change them there and build again, never this file. Its tests run with the engine's plugin test.
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { headLine, headMood, OFF_LOOK, offOf, openTake, opensOf, shareable, stuckOf, trip } from './shared'
 import { timelineRows } from './stats'
@@ -1371,7 +1372,7 @@ test("a card's title, its line of facts and every line under them start at one l
     await pane.unmount()
     const column = (card?.children ?? []).filter(one => one && typeof one === 'object').at(-1) as Drawn
     const [head, ...rest] = (column.children ?? []).filter(one => one && typeof one === 'object') as Drawn[]
-    return [...(head.children ?? []), ...rest].filter(one => one && typeof one === 'object').map(line => insetOf(line, surface).join('+'))
+    return [...(head?.children ?? []), ...rest].filter(one => one && typeof one === 'object').map(line => insetOf(line, surface).join('+'))
   }
   const expectOneEdge = async (lines: number) => {
     // A desktop moves every line in by the step a plain Button pads its label with; a terminal draws each at the card's edge
@@ -3024,7 +3025,7 @@ test("in a chat the app runs on another Mac over ssh, a picture's row in Details
 // The most characters the app draws in one tab (its renderer throws a larger drawing away whole)
 const APP_DRAWING_CHARS = 262_144
 // How many characters a tab's drawing holds, as the app counts them before it draws one: its texts, labels and pictures' sources
-const drawnChars = async (tab: Awaited<ReturnType<EngineInterface['ui']['mount']>>) =>
+const drawnChars = async (tab: Awaited<ReturnType<Parameters<TestBody>[0]['ui']['mount']>>) =>
   (await tab.findAll({ type: 'Svg' })).reduce((sum, one) => sum + String(one.props.source).length + String(one.props.alt ?? '').length, 0) +
   (await tab.findAll({ type: 'Text' })).reduce((sum, one) => sum + String(one.text ?? '').length, 0) +
   (await tab.findAll({ type: 'Button' })).reduce((sum, one) => sum + String(one.props.label ?? '').length, 0)
@@ -3058,7 +3059,7 @@ test("in a chat the app runs on another Mac over ssh, a large screenshot opened 
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   await pressed(tab, 'pic-open-1-0')
   // The copy is made out of the drawing, which is drawn again once it is ready
-  for (let tries = 0; tries < 50 && !(await tab.findAll({ type: 'Svg' })).length; tries += 1) await new Promise(done => setTimeout(done, 20))
+  for (let tries = 0; tries < 50 && !(await tab.findAll({ type: 'Svg' })).length; tries += 1) await new Promise<void>(done => setTimeout(done, 20))
   const svgs = await tab.findAll({ type: 'Svg' })
   expect(svgs.length).toBeGreaterThan(0)
   // The bands, one under the other, are the whole picture at one width
@@ -3119,7 +3120,7 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Pick one of the designs', details: 'Each picture is one design.', choices: ['A', 'B'], pictures: shots } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   // Made out of the drawing, which is drawn again once they are
-  for (let tries = 0; tries < 50 && !(await list.findAll({ type: 'Svg' })).some(one => String(one.props.alt).startsWith('Picture:')); tries += 1) await new Promise(done => setTimeout(done, 20))
+  for (let tries = 0; tries < 50 && !(await list.findAll({ type: 'Svg' })).some(one => String(one.props.alt).startsWith('Picture:')); tries += 1) await new Promise<void>(done => setTimeout(done, 20))
   const small = (await list.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))
   // Four fit in what every ask's pictures may take; the rest are rows that open them
   expect(small.map(one => String(one.props.alt))).toEqual(['Picture: a.png', 'Picture: b.png', 'Picture: c.png', 'Picture: d.png'])
@@ -3138,7 +3139,7 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   const drawnIn = async () => (await tab.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).filter(alt => alt.startsWith('Picture:'))
   // Once the chat's own small copies are read: its newest three fill what the tab keeps for pictures, and of the ask's the first
   // alone still fits; the rest are rows that open them
-  for (let tries = 0; tries < 100 && !(await drawnIn()).includes('Picture: g.png'); tries += 1) await new Promise(done => setTimeout(done, 20))
+  for (let tries = 0; tries < 100 && !(await drawnIn()).includes('Picture: g.png'); tries += 1) await new Promise<void>(done => setTimeout(done, 20))
   expect((await drawnIn()).sort()).toEqual(['Picture: a.png', 'Picture: e.png', 'Picture: f.png', 'Picture: g.png'])
   expect(await drawnChars(tab)).toBeLessThan(APP_DRAWING_CHARS)
   await tab.unmount()
@@ -4504,7 +4505,7 @@ test('a new person gets a welcome once: it opens the panel, names /claudopus, an
     const pane = await $.ui.mount({ ...LIST, surface } as never)
     expect((await pane.find({ type: 'Text', text: 'Welcome to Claudopus' }))?.props.bold).toBe(true)
     expect(await pane.find({ type: 'Text', text: /Type \/claudopus to bring it back/ })).toBeDefined()
-    expect(await pane.find({ type: 'Button', label: 'Index my old chats' })).toBeDefined()
+    expect((await pane.findAll({ type: 'Button' })).some(b => b.props.label === 'Index my old chats')).toBe(true)
     await pane.unmount()
   }
   // A reload of the same session keeps it
@@ -5903,7 +5904,7 @@ test('in the terminal the octopus and the marks of work are cells that move in p
 })
 
 // A piece of work that drew one picture, its Details open in a terminal
-const pictured = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, options: { env?: Record<string, string>; tailscale?: string }) => {
+const pictured = async ($: Parameters<TestBody>[0], on: On, options: { env?: Record<string, string>; tailscale?: string }) => {
   const svg = '/tmp/work/chart.svg'
   const talk = [
     { role: 'user', text: 'Draw the chart.', toolUses: [] },
@@ -6098,7 +6099,7 @@ const ADMIN = '/plug/claudopus/bin/admin'
 const GRANTS = `${MEMORY}/admin-grants/`
 const ALLOWED = `${MEMORY}/admin-allowed.json`
 // A piece of work under way in a chat of Sam's, and the panel
-const gated = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, config: Record<string, unknown> = {}, options: Parameters<typeof world>[1] = {}) => {
+const gated = async ($: Parameters<TestBody>[0], on: On, config: Record<string, unknown> = {}, options: Parameters<typeof world>[1] = {}) => {
   const w = world(on, options)
   w.files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', ...config }))
   await $.session.start(start)

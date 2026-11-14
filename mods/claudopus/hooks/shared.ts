@@ -79,7 +79,7 @@ export const sharedOf = (text: string, now: number, host = ''): Shared | undefin
     if (typeof one.chat !== 'string' || !one.chat || typeof one.at !== 'number' || !Array.isArray(one.cards)) return undefined
     if (now - one.at > STALE) return undefined
     // Running work under `cards`, ended work apart under `ended`, so a version that reads `cards` alone never shows ended work as running
-    const cards = [...one.cards, ...(Array.isArray(one.ended) ? (one.ended as unknown[]) : [])].filter((card): card is Todo => Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)))
+    const cards = [...one.cards, ...(Array.isArray(one.ended) ? (one.ended as unknown[]) : [])].filter((card): card is Todo => typeof card === 'object' && card !== null && 'id' in card && typeof card.id === 'string' && Boolean(card.id) && 'items' in card && Array.isArray(card.items) && 'entries' in card && Array.isArray(card.entries))
     // A chat waiting on its own prompt is listed whether or not it has work
     const prompts = promptsOf(one.prompts).map(({ answered: _answered, isRunning: _running, isCut: _cut, endedAt: _ended, ...open }) => open)
     // Prompts answered there lately, said for a minute, so a chat is listed for them too

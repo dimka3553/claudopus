@@ -281,7 +281,9 @@ const termBox = (Box: Ui['Box']) => (props: BoxArgs) => {
 // (isTerminal) the views in other files read, which are handed the table alone
 const uiOf = <E extends Parameters<EngineInterface['ui']['resolve']>[0]>($: EngineInterface, e: E): Ui => {
   const ui = $.ui.resolve(e) as Ui
-  return e.surface === 'terminal' ? ({ ...ui, Box: termBox(ui.Box), isTerminal: true } as Ui) : ui
+  if (e.surface !== 'terminal') return ui
+  const marked = { ...ui, Box: termBox(ui.Box), isTerminal: true }
+  return marked
 }
 // One part of a report's view or of the list: a filled block with a bold heading and, at its right, a dim count
 const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => (

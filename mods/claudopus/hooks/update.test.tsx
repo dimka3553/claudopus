@@ -150,7 +150,7 @@ test('the moment changes only at UPDATED_SAYS and its end, so a panel drawn over
 
 test('the moment never shows a version but the one moved to', async () => {
   // The rolling number of 0.2.40 to 0.2.64 showed v0.2.65 to v0.2.69 on its way from 0.2.63 to 0.2.64
-  for (const [from, to] of [['0.2.63', '0.2.64'], ['0.2.59', '0.2.61'], ['0.2.99', '0.3.0']]) {
+  for (const [from, to] of [['0.2.63', '0.2.64'], ['0.2.59', '0.2.61'], ['0.2.99', '0.3.0']] as [string, string][]) {
     for (let t = 0; t < UPDATED_FOR; t += 10) {
       const shown = (updatedLook(to, t) ?? []).map(p => p.text).join('').match(/v?\d+(\.\d+)+/g) ?? []
       expect({ from, t, shown: shown.filter(one => one.replace(/^v/, '') !== to) }).toEqual({ from, t, shown: [] })
@@ -256,7 +256,7 @@ const folder = (have: string, page: string | undefined, online: string, git: Rec
       ran.push(argv)
       if (argv[0] !== 'env') return { exitCode: 0, stdout: '', stderr: '' }
       const args = argv.slice(argv.indexOf('-C') + 2)
-      const key = args.includes('--symbolic-full-name') ? 'upstream' : args[0] === 'rev-parse' ? `rev-parse ${args.at(-1)}` : args[0]
+      const key = args.includes('--symbolic-full-name') ? 'upstream' : args[0] === 'rev-parse' ? `rev-parse ${args.at(-1)}` : (args[0] ?? '')
       const plain: Record<string, string> = { 'rev-parse --show-toplevel': '/code/claudopus', 'symbolic-ref': 'main\n', upstream: 'origin/main\n', 'rev-parse @{u}': have === online ? 'aaa\n' : 'bbb\n', 'rev-parse HEAD': 'aaa\n' }
       const said = git[key] ?? { stdout: plain[key] ?? '' }
       const out = { exitCode: said.exitCode ?? 0, stdout: said.stdout ?? '', stderr: said.stderr ?? '' }

@@ -304,7 +304,9 @@ const termBox = (Box: Ui['Box']) => (props: BoxArgs) => {
 // (isTerminal) the views in other files read, which are handed the table alone
 const uiOf = <E extends Parameters<EngineInterface['ui']['resolve']>[0]>($: EngineInterface, e: E): Ui => {
   const ui = $.ui.resolve(e) as Ui
-  return e.surface === 'terminal' ? ({ ...ui, Box: termBox(ui.Box), isTerminal: true } as Ui) : ui
+  if (e.surface !== 'terminal') return ui
+  const marked = { ...ui, Box: termBox(ui.Box), isTerminal: true }
+  return marked
 }
 // One part of a report's view or of the list: a filled block with a bold heading and, at its right, a dim count
 const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element) => (
@@ -349,7 +351,7 @@ const shellWords = (command: string) => {
     const c = command[i]!
     if (quote) {
       if (c === quote) quote = ''
-      else if (c === '\\' && quote === '"' && i + 1 < command.length && '$`"\\\n'.includes(command[i + 1]!)) word += command[++i]
+      else if (c === '\\' && quote === '"' && i + 1 < command.length && '$`"\\\n'.includes(command[i + 1]!)) word = (word ?? '') + command[++i]
       else word += c
     } else if (c === "'" || c === '"') (quote = c), (word ??= '')
     else if (c === '\\' && i + 1 < command.length) word = (word ?? '') + command[++i]
@@ -1927,7 +1929,7 @@ const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
 // Opens a pane from a press, in front: the app leaves a pane already open where it is, behind another tab, so one open but not
 // shown is opened again
 // The tabs as the engine lists them, one word each: id, then s shown, f holding the keyboard, p drawn, for the log
-const rosterOf = (panes: { id: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }[]) =>
+const rosterOf = (panes: readonly { id: string; isShown: boolean; isFocused: boolean; isPlaced: boolean }[]) =>
   panes.map(pane => `${pane.id}:${pane.isShown ? 's' : ''}${pane.isFocused ? 'f' : ''}${pane.isPlaced ? 'p' : ''}`).join(' ') || 'none'
 // A button's onPress runs with the handle of the drawing it sits in, which the engine never counts as the person asking: a narrow
 // terminal (under 144 columns, a phone over ssh) left every tab a press opened undrawn, and the panel, opened again to take back the
@@ -5996,8 +5998,8 @@ type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: n
 let waiting: Waiting[] = []
 // The tool calls whose permission check asked, newest last, so the prompt that follows is known by its call's id: the one of the same
 // loop, tool and input, else the newest of the same loop and tool
-type Asked = { agent: string; tool: string; input: string; id: string }
-let asked: Asked[] = []
+type AskedCall = { agent: string; tool: string; input: string; id: string }
+let asked: AskedCall[] = []
 const inputKey = (input: unknown) => JSON.stringify(input ?? null).slice(0, 2000)
 const askedFor = (agent: string | undefined, tool: string, input: unknown) => {
   const same = asked.filter(one => one.agent === (agent ?? '') && one.tool === tool)

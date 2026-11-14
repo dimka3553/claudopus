@@ -114,7 +114,7 @@ if (isNewer(version, newest)) {
     console.error(`Version ${version} has no changelog entry: say what it changed for the person, in plain words, a "- " line each, in mods/claudopus/changes/<your branch>.md, commit it and release again.`)
     process.exit(1)
   }
-  if (!process.argv.includes('--check')) {
+  if (!process.argv.includes('--check') && !process.argv.includes('--notes')) {
     const date = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
     const entry = `## ${version} · ${date}\n${waiting.flatMap(one => one.lines).join('\n')}\n\n`
     const at = changelog.search(/^## /m)
@@ -123,6 +123,40 @@ if (isNewer(version, newest)) {
     for (const one of waiting) rmSync(join(CHANGES, one.name))
     console.log(`Changelog: ${version} from ${waiting.map(one => one.name).join(', ')}`)
   }
+}
+// `--notes` prints the GitHub release's text for plugin.json's version, from its changelog entry, and writes nothing: release
+// makes the version's GitHub release with it, so the repo page's latest release and its badge are always the version installs get
+if (process.argv.includes('--notes')) {
+  if (process.env.RELEASE_VERSION && process.env.RELEASE_VERSION !== version) {
+    console.error(`Release is making ${process.env.RELEASE_VERSION}, but plugin.json says ${version}.`)
+    process.exit(1)
+  }
+  const entry = versionsIn(changelog).find(v => v.version === version)
+  if (!entry?.changes.length) {
+    console.error(`Version ${version} has no changelog entry to make its GitHub release from.`)
+    process.exit(1)
+  }
+  console.log(
+    [
+      '**Claude Code, with eight arms.** One chat runs many jobs at once, on your own Mac, with a panel beside it that shows each one.',
+      '',
+      `## What changed in ${version}`,
+      '',
+      ...entry.changes.map(one => `- ${one}`),
+      '',
+      'Every version and what it changed: [the changelog](https://www.claudopus.ai/changelog.html).',
+      '',
+      'Install it with two lines in Claude Code:',
+      '',
+      '```',
+      '/plugin marketplace add dimka3553/claudopus',
+      '/plugin install claudopus@claudopus',
+      '```',
+      '',
+      'Installed copies update themselves. See the [README](https://github.com/dimka3553/claudopus#readme) and the [full guide](https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/docs/guide.md).',
+    ].join('\n'),
+  )
+  process.exit(0)
 }
 const escaped = text => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 // The site's page: the site's own look, each version a section

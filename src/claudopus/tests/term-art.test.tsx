@@ -45,7 +45,7 @@ test('in the terminal the octopus and the marks of work are cells that move in p
 })
 
 // A piece of work that drew one picture, its Details open in a terminal
-const pictured = async ($: Parameters<Parameters<typeof test>[1]>[0], on: On, options: { env?: Record<string, string>; tailscale?: string }) => {
+const pictured = async ($: Parameters<TestBody>[0], on: On, options: { env?: Record<string, string>; tailscale?: string }) => {
   const svg = '/tmp/work/chart.svg'
   const talk = [
     { role: 'user', text: 'Draw the chart.', toolUses: [] },
