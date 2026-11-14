@@ -1020,3 +1020,58 @@ test('long work keeps only its newest ended helpers, and none of work that was f
   expect(names.includes('Measure 6')).toBe(true)
   await tab.unmount()
 })
+
+test('a long run shows how far it is from what it prints: how much of how much, its percent and speed, and whether output still comes', SLOW, async ($, on) => {
+  let output = '  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n\r  5 1024M    5 51.2M    0     0  10.2M      0  0:01:40  0:00:05  0:01:35 10.5M\r 45 1024M   45  460M    0     0  10.2M      0  0:01:40  0:00:45  0:00:55 10.5M'
+  let wroteAt = 0
+  const { clock } = world(on, { jobs: { output: () => output, wroteAt: () => wroteAt } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  // The mocked clock starts where the world sets it
+  let now = 1_700_000_000_000
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fetch the scans', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fetch the scans', prompt: 'fetch the scans' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'a1', command: 'cd /w && nohup curl -L -o scans.zip https://example.com/scans.zip > fetch.log 2>&1 & echo $!', description: 'Fetch the CT scans' } as never)
+  wroteAt = now
+  await advance(20_000)
+  wroteAt = now - 3_000
+  await advance(20_000)
+  const texts = async (columns = 140) => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: columns }, surface: 'terminal' } as never)
+    const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
+    await list.unmount()
+    return all
+  }
+  // How much of how much and its speed lead the side, its percent in blue, then when it last wrote and its time
+  expect(await until(async () => ((await texts()).includes('460 MB of 1 GB · 10.5 MB/s · ') || undefined))).toBe(true)
+  const shown = await texts()
+  expect(shown).toContain('45%')
+  expect(shown.some(text => /^ · updated \d+s ago · /.test(text))).toBe(true)
+  // In a narrower panel its speed gives way first
+  expect(await texts(100)).toContain('460 MB of 1 GB · ')
+  // The work's own line, as its scripts are told to print it
+  output = 'loading\nprogress: 3/6 steps fitting\nframe 12 done\n'
+  wroteAt = now
+  await advance(20_000)
+  expect(await until(async () => ((await texts()).some(text => text.startsWith('3 of 6 steps · ')) || undefined))).toBe(true)
+  // Quiet for long, in words
+  wroteAt = now - 15 * 60_000
+  await advance(20_000)
+  expect(await until(async () => ((await texts()).some(text => /no new output for 1[5-9]m|quiet 1[5-9]m/.test(text)) || undefined))).toBe(true)
+})
+
+test('a run whose output cannot be found says so after a minute, so a blank row is never taken for one that moves', async ($, on) => {
+  const { clock } = world(on)
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fetch the scans', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fetch the scans', prompt: 'fetch the scans' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'a1', command: 'cd /w && nohup curl -L -o scans.zip https://example.com/scans.zip > fetch.log 2>&1 & echo $!', description: 'Fetch the CT scans' } as never)
+  await clock.advance(70_000)
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
+  const shown = (await list.findAll({ type: 'Text' })).map(one => one.text)
+  expect(shown.some(text => /^Download · Fetch the CT scans/.test(text))).toBe(true)
+  expect(shown.some(text => /^output not found · 1m 1\ds$/.test(text))).toBe(true)
+  await list.unmount()
+})
