@@ -1,0 +1,3 @@
+- Work that reports with nothing of its own still running now finishes by itself, even when Claude Code still lists it as waiting: its card stops its clock and leaves the running cards, and a question it still asks stays on the card to answer
+- A finished card no longer says it left something running in the background when nothing it started is still going
+- An answer you give on a card reaches the work once: the chat no longer passes the same answer on a second time, which used to start finished work again

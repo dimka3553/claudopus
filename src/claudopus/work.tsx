@@ -131,6 +131,15 @@ const workHooks = (on: On) => {
       const now = await $.clock.now()
       const list = await read($, todos)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
+      // The chat passing on an answer the person gave on the card, which reached the work from there already, sends nothing: a
+      // second copy started work that had ended again, with nothing to do but say it was done
+      const given = target && e.agentId === undefined ? sentReplies.get(target.id) : undefined
+      // Words that answer a newer ask of its own still go
+      const isNewAnswer = Boolean(target?.ask && target.ask.at > (given?.at ?? 0) && settles(target.ask, message, true))
+      if (given && (given.to === 'work' || given.to === 'read') && now - given.at < ANSWER_ECHO && plainWords(message) === plainWords(given.text) && !isNewAnswer) {
+        await log($, `refused a second copy of an answer to ${target?.id}`)
+        return { deny: named(ANSWER_ALREADY_SENT(cut(given.text, 120))) }
+      }
       // The person's words passed on to work whose card asks them something answer that ask, as a press on the card does: the card's
       // own work, or the helper that asked. Marked at once, so a press on the card at the same moment counts once; undone if refused
       const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => one.ask?.from === target.id)) : undefined
@@ -304,6 +313,7 @@ const workHooks = (on: On) => {
     const hold = r.block ? '' : await holdAtStop($, e.agent_id, 'stop').catch(() => '')
     if (hold) return { ...r, block: hold }
     const live = e.background_tasks
+    if (Array.isArray(live)) inFlightAtStop.set(e.agent_id, live.length)
     if (dir && Array.isArray(live)) {
       const ids = new Set(live.map(one => one.id))
       const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)

@@ -555,7 +555,11 @@ const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: stri
 const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
   `The background work "${title}" asked {name}, on its card and in this chat as a notice from the Claudopus panel that {name} sees and you do not: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, shown to {name} whole with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} has it already: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and start no work for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
-const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks.`
+const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks: the answer reached it from the card, so it needs no second copy.`
+// What the chat is told when it sends work an answer of the person's that reached it from the card a moment ago
+const ANSWER_ALREADY_SENT = (said: string) => `Not sent: {name}'s answer "${said}" reached that work from its card already, and a second copy would only start it again. Send nothing more about it.`
+// How long an answer given on the card counts as the one the chat would send again
+const ANSWER_ECHO = 60 * 60_000
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
 const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to the work "${title}" on its card: ${said}. It acts on that now, and asks again if it still needs {name}.`
 // What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
@@ -891,6 +895,14 @@ const handedBack = new Map<string, string>()
 const endedByHandback = new Set<string>()
 // Work stopped by the chat or the panel: whatever the engine still lists of it is going, so it is never said to have left something running
 const stoppedHere = new Set<string>()
+// How many of its own background tasks the engine said were still in flight as each piece of work last stopped
+const inFlightAtStop = new Map<string, number>()
+// Work that ended with nothing of its own running that the mod or the engine's stop knew of: the engine still listing it as held
+// (once, for a whole evening, on nothing any tool showed open) is no sign it left something running
+const leftNothing = new Set<string>()
+// Nothing of its own runs: no command or watch it started that has not ended, no helper at work, none in flight as it last stopped
+const ownsNothing = (list: Todo[], id: string) =>
+  !list.find(one => one.id === id)?.bg?.length && !list.some(kid => kid.parentId === id && kid.status === 'working') && !inFlightAtStop.get(id)
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
@@ -1019,7 +1031,7 @@ const sync = async ($: EngineInterface) => {
             ? ended(card, 'done', now)
           : // Work that handed in its report and that the engine still holds on its own background work left something running;
             // once nothing does, or it was stopped, not
-            !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id)) !== Boolean(card.leftSince)
+            !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id) && !leftNothing.has(card.id)) !== Boolean(card.leftSince)
             ? { ...card, leftSince: card.leftSince ? undefined : now }
           : card.parentId === HELPER && !one.parentId && ownCalls.has(one.description)
             ? { ...card, parentId: '', title: card.title || oneLine(one.description) }
@@ -6751,9 +6763,13 @@ const chatHooks = (on: On) => {
       // what it hands back on the way (an answer to a question while it waits) is no report, and its card stays at work
       const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
       const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || answer.length >= REPORT_LEAST)
+      // A report in words, with nothing of its own running, has finished the work as a handback does: the engine may hold it on what
+      // no tool shows open, and the chat need not stop it. Its card ends with its clock, and an ask it leaves stays to be answered
+      const isIdleReport = isReport && ownsNothing(await read($, todos), id)
       // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
       // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
-      const isHandedBack = how === 'done' && handedBack.has(id) && !isGoingOn
+      const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
+      if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
       // Work nothing holds any more has nothing of its own left running in the background
@@ -7774,6 +7790,15 @@ const workHooks = (on: On) => {
       const now = await $.clock.now()
       const list = await read($, todos)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
+      // The chat passing on an answer the person gave on the card, which reached the work from there already, sends nothing: a
+      // second copy started work that had ended again, with nothing to do but say it was done
+      const given = target && e.agentId === undefined ? sentReplies.get(target.id) : undefined
+      // Words that answer a newer ask of its own still go
+      const isNewAnswer = Boolean(target?.ask && target.ask.at > (given?.at ?? 0) && settles(target.ask, message, true))
+      if (given && (given.to === 'work' || given.to === 'read') && now - given.at < ANSWER_ECHO && plainWords(message) === plainWords(given.text) && !isNewAnswer) {
+        await log($, `refused a second copy of an answer to ${target?.id}`)
+        return { deny: named(ANSWER_ALREADY_SENT(cut(given.text, 120))) }
+      }
       // The person's words passed on to work whose card asks them something answer that ask, as a press on the card does: the card's
       // own work, or the helper that asked. Marked at once, so a press on the card at the same moment counts once; undone if refused
       const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => one.ask?.from === target.id)) : undefined
@@ -7947,6 +7972,7 @@ const workHooks = (on: On) => {
     const hold = r.block ? '' : await holdAtStop($, e.agent_id, 'stop').catch(() => '')
     if (hold) return { ...r, block: hold }
     const live = e.background_tasks
+    if (Array.isArray(live)) inFlightAtStop.set(e.agent_id, live.length)
     if (dir && Array.isArray(live)) {
       const ids = new Set(live.map(one => one.id))
       const gone = ((await read($, todos)).find(one => one.id === e.agent_id)?.bg ?? []).filter(b => !ids.has(b.id)).map(b => b.id)

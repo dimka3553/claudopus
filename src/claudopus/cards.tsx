@@ -41,6 +41,14 @@ const handedBack = new Map<string, string>()
 const endedByHandback = new Set<string>()
 // Work stopped by the chat or the panel: whatever the engine still lists of it is going, so it is never said to have left something running
 const stoppedHere = new Set<string>()
+// How many of its own background tasks the engine said were still in flight as each piece of work last stopped
+const inFlightAtStop = new Map<string, number>()
+// Work that ended with nothing of its own running that the mod or the engine's stop knew of: the engine still listing it as held
+// (once, for a whole evening, on nothing any tool showed open) is no sign it left something running
+const leftNothing = new Set<string>()
+// Nothing of its own runs: no command or watch it started that has not ended, no helper at work, none in flight as it last stopped
+const ownsNothing = (list: Todo[], id: string) =>
+  !list.find(one => one.id === id)?.bg?.length && !list.some(kid => kid.parentId === id && kid.status === 'working') && !inFlightAtStop.get(id)
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
@@ -169,7 +177,7 @@ const sync = async ($: EngineInterface) => {
             ? ended(card, 'done', now)
           : // Work that handed in its report and that the engine still holds on its own background work left something running;
             // once nothing does, or it was stopped, not
-            !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id)) !== Boolean(card.leftSince)
+            !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id) && !leftNothing.has(card.id)) !== Boolean(card.leftSince)
             ? { ...card, leftSince: card.leftSince ? undefined : now }
           : card.parentId === HELPER && !one.parentId && ownCalls.has(one.description)
             ? { ...card, parentId: '', title: card.title || oneLine(one.description) }
