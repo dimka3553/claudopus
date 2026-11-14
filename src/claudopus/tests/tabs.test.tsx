@@ -54,6 +54,12 @@ test('the bar keeps its buttons whole on a row of their own under the header, wr
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 30 }, surface: 'desktop' } as never)
   const row = (await pane.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')
   expect(row?.props.flexWrap).toBe('wrap')
+  // Wrapped rows are as far apart as the buttons beside each other, so they never touch
+  expect(row?.props.columnGap).toBe(1)
+  expect(row?.props.rowGap).toBe(1)
+  // A terminal's gap would be a whole blank line between the rows, so it has none
+  const term = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 30 }, surface: 'terminal' } as never)
+  expect((await term.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')?.props.rowGap).toBe(0)
   expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About'])
   // The chat's size is no longer squeezed beside the buttons
   expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
