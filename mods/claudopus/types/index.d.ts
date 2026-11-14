@@ -92,6 +92,12 @@ export type Todo = {
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number
+  // Work with helpers running: when the mod last looked in on them, how many ran and how many had shown nothing new for a while
+  lookedIn?: { at: number; running: number; quiet: number }
+  // A helper whose work was told it has shown nothing new: when it last had, so it is told once each quiet stretch
+  quietTold?: number
+  // A helper whose work was told it works through in order what could be split
+  serialTold?: boolean
   // Only work that is working has a card; one that has ended is kept, so a message to it brings its card back as it was
   status: 'working' | 'done' | 'stopped' | 'failed'
   // Set on a card another chat shares: that chat, the Mac it runs on when another (empty for this one), and the card's own id there.

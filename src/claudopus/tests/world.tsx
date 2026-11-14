@@ -76,6 +76,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   let spawned = 0
   let gateKeys = 0
   const sleepers: (() => void)[] = []
+  // Whether each agent started ran in the background, as the engine was asked
+  const backgrounds: boolean[] = []
   const wake = () => void sleepers.splice(0).forEach(one => one())
   // What each Bash call that ran the admin runner found waiting for it: the grants, as bin/admin would read them
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
@@ -354,6 +356,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   on('agent.spawn', (_, e) => {
     prompts.push(e.prompt)
+    backgrounds.push(e.background)
     const resume = (e as { resume?: { agentId?: string } }).resume
     return { model: options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
   })
@@ -378,13 +381,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('tool.describe', (_, e) => ({ description: e.description }))
   // The settings hooks beneath: none answers a permission request, unless a test lays one that allows
   on('classic.Notification', () => ({}) as never)
+  on('classic.PostToolBatch', () => ({}) as never)
   on('classic.PermissionRequest', () => (files.has('settings:allow') ? { decision: { behavior: 'allow' } } : {}) as never)
   on('session.compact', (_, e) => {
     compacts.push(e.instructions)
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
