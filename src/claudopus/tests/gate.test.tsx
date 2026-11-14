@@ -18,7 +18,7 @@ const gated = async ($: Parameters<TestBody>[0], on: On, config: Record<string, 
   const grants = () => [...w.files.keys()].filter(path => path.startsWith(GRANTS))
   // A press on a card's gate, and the second after which the held call reads it
   const press = async (key: string) => (await pressed(list, key), w.wake())
-  return { ...w, list, bash, labels, held, grants, press }
+  return { ...w, holding: w.held, list, bash, labels, held, grants, press }
 }
 
 test('an admin command is held however the runner is reached, and nothing else is taken for one', async ($, on) => {

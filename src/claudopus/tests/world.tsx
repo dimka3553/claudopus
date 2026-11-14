@@ -265,6 +265,12 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       files.set(told, '')
       return { value: { exitCode: isNew ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // A file made only where none is, as the update's lock is taken with the shell's noclobber
+    if (tool === 'sh' && rest[1] === 'set -C; printf %s "$2" > "$1"' && rest[3] !== undefined) {
+      if (files.has(String(rest[3]))) return ok('', 1)
+      files.set(String(rest[3]), String(rest[4] ?? ''))
+      return ok()
+    }
     // A shell run here: bringing results from another Mac lays there what the test laid as remote:<folder>/<file>, and a folder moved
     // into place goes only where none has its name
     if (tool === 'sh' || tool === 'bash') {
@@ -287,10 +293,22 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (tool === 'scutil') return { value: { exitCode: 0, stdout: 'Sams-MacBook-Air\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'rm') files.delete(String(rest.at(-1)))
     // A file moved aside
-    if (tool === 'mv') (files.set(String(rest[2]), files.get(String(rest[1])) ?? ''), files.delete(String(rest[1])))
+    if (tool === 'mv') (files.set(String(rest.at(-1)), files.get(String(rest.at(-2))) ?? ''), files.delete(String(rest.at(-2))))
     // A copy the mod makes of a file
     if (tool === 'cp') (copied.push(String(rest[2])), files.set(String(rest[2]), files.get(String(rest[1])) ?? ''))
     const isGone = killed.includes('700')
+    // bin/keyring, as the runners keep a value: laid by the test as keyring:<service>/<account>
+    if (tool?.endsWith('bin/keyring')) {
+      const key = `keyring:${rest[1]}/${rest[2]}`
+      if (rest[0] === 'get') return files.has(key) ? ok(files.get(key)) : ok('', 1)
+      if (rest[0] === 'set') return (files.set(key, String(e.init?.stdin ?? '').replace(/\n$/, '')), ok())
+      if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
+      if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))
+      return ok('', 2)
+    }
+    // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
+    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
+    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
     if (tool?.endsWith('bin/secret')) {

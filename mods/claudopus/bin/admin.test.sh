@@ -143,6 +143,60 @@ listed=$(env CLAUDOPUS_SECRET_SERVICE=claudopus-admin "$here/secret" --list 2>&1
 n=$((n + 1))
 if [ -z "$listed" ]; then echo "ok $n - the secret runner cannot be pointed at the admin passwords"; else echo "NOT OK $n - the secret runner listed: $listed"; failed=1; fi
 "$here/keyring" delete claudopus-admin m9 >/dev/null 2>&1
+# "Let macOS ask", kept beside the gate's key by Config, holds though config.json no longer says so
+printf 'macos\n' | "$here/keyring" set claudopus-admin-gate password 'Claudopus admin password'
+grant kept-macos here 'id -u'
+if [ -n "$mac" ]; then
+  expect 'macOS asks as Config kept it, with config.json silent: over SSH nothing runs' 7 'which nobody sees from a chat reached over SSH' -- "$admin" here 'id -u'
+else
+  expect 'macOS asks as Config kept it, with config.json silent, on Linux: nothing runs' 7 'only a Mac can do' -- "$admin" here 'id -u'
+fi
+"$here/keyring" delete claudopus-admin-gate password >/dev/null 2>&1
+rm -f "$memory"/admin-grants/*
+# A kept admin password is hidden in what the secret runner hides, as a kept key is
+printf '%s\n' 'adminpw-5678' | "$here/keyring" set claudopus-admin here 'Claudopus admin: here'
+hidden=$(printf 'the password is adminpw-5678\n' | "$here/secret" --hide)
+n=$((n + 1))
+if [ "$hidden" = 'the password is [hidden admin password of here]' ]; then echo "ok $n - a kept admin password is hidden in what is printed"; else echo "NOT OK $n - it printed: $hidden"; failed=1; fi
+"$here/keyring" delete claudopus-admin here >/dev/null 2>&1
+
+# The release runner: a release only with the person's press, and nothing of a branch's .release run
+r=$tmp/release
+mkdir -p "$r" && git init -q --bare "$r/origin.git" && git clone -q "$r/origin.git" "$r/work" 2>/dev/null
+(cd "$r/work" && git config user.email t@t && git config user.name t && git checkout -q -b main && printf 'CHECK=true\n' >.release && echo one >file && git add -A && git commit -q -m one && git push -q origin main)
+# A branch whose .release would run code of its own as it is read, push somewhere else, run a step after and replace bash
+(cd "$r/work" && git checkout -q -b fix-it && printf 'touch %q\nREMOTE=elsewhere\nAFTER="touch %q"\nbash() { touch %q; }\nCHECK=true\n' "$r/read" "$r/after" "$r/bash" >.release && echo two >file && git commit -q -am two)
+export RELEASE_LOCKS=$tmp/locks
+top=$(git -C "$r/work" rev-parse --show-toplevel)
+# release_grant <id> <seal word> <branch>
+release_grant() {
+  local at s
+  at=$(now)
+  s=$(seal "$(printf '%s\n%s\n%s\nrelease\n%s\n%s' "$2" "$1" "$at" "$top" "$3")")
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({id => $ARGV[0], host => "release", command => $ARGV[1], at => $ARGV[2] + 0, seal => $ARGV[3]})' "$1" "$top
+$3" "$at" "$s" >"$memory/admin-grants/$1.json"
+}
+release() { (cd "$r/work" && "$here/release"); }
+RELEASE_REFUSED='nothing was released, because this release was not allowed on its card'
+expect 'a release with no grant: refused' 6 "$RELEASE_REFUSED" -- release
+release_grant rel1 release-grant other-branch
+expect 'a release granted for another branch: refused' 6 "$RELEASE_REFUSED" -- release
+rm -f "$memory"/admin-grants/*
+release_grant rel2 grant fix-it
+expect "a release with an admin command's seal: refused" 6 "$RELEASE_REFUSED" -- release
+rm -f "$memory"/admin-grants/*
+n=$((n + 1))
+[ "$(git -C "$r/origin.git" rev-parse main)" = "$(git -C "$r/work" rev-parse main)" ] && echo "ok $n - main was not moved with no grant" || { echo "NOT OK $n - main moved with no grant"; failed=1; }
+release_grant rel3 release-grant fix-it
+expect 'a release granted for this worktree and branch: released' 0 'released' -- release
+n=$((n + 1))
+[ "$(git -C "$r/origin.git" show main:file)" = two ] && echo "ok $n - main has the branch" || { echo "NOT OK $n - main does not have the branch"; failed=1; }
+n=$((n + 1))
+[ ! -e "$memory/admin-grants/rel3.json" ] && echo "ok $n - the release's grant was taken" || { echo "NOT OK $n - the release's grant was left"; failed=1; }
+for mark in read after bash; do
+  n=$((n + 1))
+  [ ! -e "$r/$mark" ] && echo "ok $n - the branch's .release did not run its $mark" || { echo "NOT OK $n - the branch's .release ran its $mark"; failed=1; }
+done
 expect 'forgetting a password needs no grant' 0 'No password was kept' -- "$admin" here --forget
 expect 'with no command it says how it is used' 2 'usage' -- "$admin" here
 
