@@ -1005,21 +1005,24 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   await advance(20_000)
   wroteAt = now - 3_000
   await advance(20_000)
-  const texts = async () => {
-    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
+  const texts = async (columns = 140) => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: columns }, surface: 'terminal' } as never)
     const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
     await list.unmount()
     return all
   }
-  expect(await until(async () => ((await texts()).includes(' · 460 MB of 1 GB · 10.5 MB/s') || undefined))).toBe(true)
+  // How much of how much and its speed lead the side, its percent in blue, then when it last wrote and its time
+  expect(await until(async () => ((await texts()).includes('460 MB of 1 GB · 10.5 MB/s · ') || undefined))).toBe(true)
   const shown = await texts()
   expect(shown).toContain('45%')
   expect(shown.some(text => /^ · updated \d+s ago · /.test(text))).toBe(true)
+  // In a narrower panel its speed gives way first
+  expect(await texts(100)).toContain('460 MB of 1 GB · ')
   // The work's own line, as its scripts are told to print it
   output = 'loading\nprogress: 3/6 steps fitting\nframe 12 done\n'
   wroteAt = now
   await advance(20_000)
-  expect(await until(async () => ((await texts()).includes(' · 3 of 6 steps') || undefined))).toBe(true)
+  expect(await until(async () => ((await texts()).some(text => text.startsWith('3 of 6 steps · ')) || undefined))).toBe(true)
   // Quiet for long, in words
   wroteAt = now - 15 * 60_000
   await advance(20_000)

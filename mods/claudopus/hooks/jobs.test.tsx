@@ -112,8 +112,8 @@ test('how far a run is, read from the progress tools print and the line work is 
   // wget, its bar and its dots, the total from its Length
   expect(of('Length: 1073741824 (1.0G) [application/octet-stream]\nbig.bin   45%[=====>      ] 460.12M  10.2MB/s    eta 55s')).toEqual({ pct: '45%', done: '460 MB', total: '1 GB', rate: '10.2 MB/s' })
   expect(of('Length: 1073741824 (1.0G)\n  460800K .......... .......... .......... 45% 10.2M 55s')).toEqual({ pct: '45%', done: '450 MB', total: '1 GB', rate: '10.2 MB/s' })
-  expect(of('  1,234,567,890  45%   10.21MB/s    0:00:55 (xfr#3, to-chk=2/10)')).toEqual({ pct: '45%', done: '1.1 GB', total: undefined, rate: '10.2 MB/s' })
-  expect(of('45.2 %, 10 Done, 0 Failed, 90 Pending, 0 Skipped, 100 Total, 2-sec Throughput (Mb/s): 85.3')).toEqual({ pct: '45%', done: '10', total: '100 files', rate: '10.2 MB/s' })
+  expect(of('  1,234,567,890  45%   10.21MB/s    0:00:55 (xfr#3, to-chk=2/10)')).toEqual({ pct: '45%', done: '1.2 GB', total: undefined, rate: '10.2 MB/s' })
+  expect(of('45.2 %, 10 Done, 0 Failed, 90 Pending, 0 Skipped, 100 Total, 2-sec Throughput (Mb/s): 85.3')).toEqual({ pct: '45%', done: '10', total: '100 files', rate: '10.7 MB/s' })
   expect(of('Alive[################                ]  45.0000%').pct).toBe('45%')
   expect(of('   ━━━━━━━━━━━━━━━━╸━━━━━━━━━ 460.1/1024.0 MB 10.2 MB/s eta 0:00:55')).toEqual({ pct: '44%', done: '460 MB', total: '1 GB', rate: '10.2 MB/s' })
   expect(of('Completed 460.0 MiB/1.0 GiB (10.2 MiB/s) with 1 file(s) remaining')).toEqual({ pct: '44%', done: '460 MB', total: '1 GB', rate: '10.2 MB/s' })
@@ -126,6 +126,21 @@ test('how far a run is, read from the progress tools print and the line work is 
   // A date, a ratio and a score are not
   expect(of('14/11/2026 done')).toEqual({ pct: undefined, done: undefined, total: undefined, rate: undefined })
   expect(of('loss 3/4 of baseline').done).toBeUndefined()
+  // nor how full a memory or a disk is, a table cell, a log's date, a score or a test count (a second look on 15 Nov)
+  expect(of('epoch 3/10 step 100/1000 loss 0.5 mem 12.3G/80G')).toEqual({ pct: '30%', done: '3', total: '10', rate: undefined })
+  expect(of('disk 460G/1.0T 45% used').done).toBeUndefined()
+  expect(of('| 12 | 3/4 | 55 |').done).toBeUndefined()
+  expect(of('[11/15 12:00:01] starting').done).toBeUndefined()
+  expect(of('job finished with score 3/4').done).toBeUndefined()
+  expect(of('Tests: 3/4 passed').done).toBeUndefined()
+  expect(of('accuracy 95% on 1000/1000 samples').pct).toBeUndefined()
+  // A bar's count is the one after it
+  expect(of('Epoch 1/10 100%|██████████| 500/500 [00:10<00:00]')).toEqual({ pct: '100%', done: '500', total: '500', rate: undefined })
+  // The work's own line after a log's time or level, its numbers as written
+  expect(of('2026-11-15 12:00:01 INFO progress: 1200/5000 MB')).toEqual({ pct: '24%', done: '1200 MB', total: '5000 MB', rate: undefined })
+  // An error after a download is the latest line: no progress hides it, and the work's own line above it says it is earlier
+  expect(of(' 45 1024M   45  460M    0     0  10.2M      0  0:01:40  0:00:45  0:00:55 10.5M\ncurl: (56) Recv failure').done).toBeUndefined()
+  expect(latestOf('progress: 3/6 steps fitting\nRuntimeError: CUDA out of memory\n')).toMatchObject({ done: '3', isEarlier: true, latest: 'RuntimeError: CUDA out of memory' })
   expect(of('HEADLINE two-way mean: 0.804 mm (coverage 99.2% within 2 mm)').pct).toBeUndefined()
 })
 
@@ -137,4 +152,8 @@ test('a detached start is followed only by the process `echo $!` printed and a l
   expect(pidOf('0\n')).toBeUndefined()
   expect(detachedOf('nohup python t.py > $HOME/t.log 2>&1 & echo $!')?.log).toBe('~/t.log')
   expect(detachedOf('nohup python t.py > $OUT/t.log 2>&1 & echo $!')).toBeUndefined()
+  expect(detachedOf('S=/tmp/x && nohup python a.py > ${S:-/y}/run.log 2>&1 & echo $!')).toBeUndefined()
+  expect(detachedOf('export S=/tmp/x && nohup python a.py > $S/run.log 2>&1 & echo $!')?.log).toBe('/tmp/x/run.log')
+  // A status code printed beside the process leaves it unknown
+  expect(pidOf('200\n48213\n')).toBeUndefined()
 })

@@ -16,6 +16,7 @@ export type Job = {
   done?: string
   total?: string
   rate?: string
+  isEarlier?: boolean
   wroteAt?: number
   isPaused?: boolean
   count?: number
@@ -72,20 +73,25 @@ const pctOf = (line: string) => {
 // and how fast it goes when it says. Read from the progress shapes tools print (curl, wget, rsync, az and azcopy, aws, gsutil,
 // pip, git, docker, tqdm and the like) and the line work's own scripts are told to print: `progress: 3/6 steps fitting`,
 // `progress: 4.2/10 GB uploading`, `progress: 45%`
-export type Progress = { pct?: string; done?: string; total?: string; rate?: string }
-const UNIT: Record<string, number> = { '': 1, B: 1, K: 1024, M: 1024 ** 2, G: 1024 ** 3, T: 1024 ** 4, P: 1024 ** 5 }
-// A size as written (460M, 1.41G, 1,234,567,890, 460.0 MiB, 12.3k, 460800K) in bytes; undefined when it is no size
-const bytesOf = (number: string, unit = '') => {
+export type Progress = { pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean }
+// A size as written in bytes, with the base its unit counts in: KiB, MiB and a bare K, M or G as curl and wget print count in 1024s,
+// kB, MB and GB in 1000s; undefined when it is no size
+type Size = { bytes: number; base: number }
+const POWER: Record<string, number> = { '': 0, B: 0, K: 1, M: 2, G: 3, T: 4, P: 5 }
+const sizeOf = (number: string, unit = '', bare = 1024): Size | undefined => {
   const n = Number(number.replace(/,/g, ''))
-  const u = unit.trim().charAt(0).toUpperCase()
-  return Number.isFinite(n) && u in UNIT ? n * (UNIT[u] ?? 1) : undefined
+  const u = unit.trim()
+  const letter = u.charAt(0).toUpperCase()
+  if (!Number.isFinite(n) || !(letter in POWER) || (u && !/^([KMGTP](i?B)?|B|bytes?)$/i.test(u))) return undefined
+  const base = /i/.test(u) ? 1024 : /^[KMGTP]$/i.test(u) ? bare : 1000
+  return { bytes: n * base ** (POWER[letter] ?? 0), base }
 }
-// Bytes as a person reads them: 460 MB, 1.4 GB, 12 KB
-const sizeText = (bytes: number) => {
+// Bytes as a person reads them, in the base they were counted in: 460 MB, 1.4 GB, 12 KB
+const sizeText = ({ bytes, base }: Size) => {
   const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
   let n = bytes
   let i = 0
-  while (n >= 1000 && i < units.length - 1) ((n /= 1024), i++)
+  while (n >= 1000 && i < units.length - 1) ((n /= base), i++)
   return `${n >= 100 || i === 0 ? Math.round(n) : Number(n.toFixed(1))} ${units[i]}`
 }
 const countText = (n: number) => (Number.isInteger(n) ? n.toLocaleString('en-US') : String(Number(n.toFixed(2))))
@@ -94,96 +100,115 @@ const percentOf = (done: number, total: number) => (total > 0 && done <= total ?
 // A size with its unit right after (460.0 MiB, 1.41G, 460MB); the unit letter alone counts only where a size is meant
 const SIZE = String.raw`(\d[\d,]*(?:\.\d+)?)\s?([KMGTP]i?B|[KMGTP](?![a-z])|B\b|bytes?\b)`
 const RATE = new RegExp(String.raw`(\d+(?:\.\d+)?)\s?([KMGTP]i?B|[KMGTP]i?b|B|[KMGTP])(?:ps|/s)\b`, 'i')
-const rateOf = (line: string) => {
+const rateOf = (line: string, bare = 1000) => {
   const m = line.match(RATE) ?? line.match(/(\d+(?:\.\d+)?)\s?(it|items?|files?|frames?|steps?)\/s\b/i)
   if (!m) return undefined
   const [, n = '', unit = ''] = m
   if (/^[KMGTP]i?b$/.test(unit)) return `${n} ${unit.charAt(0).toUpperCase()}b/s`
-  const bytes = bytesOf(n, unit)
-  return bytes !== undefined && /^[KMGTPB]/i.test(unit) && !/^(it|item|file|frame|step)/i.test(unit) ? `${sizeText(bytes)}/s` : `${n} ${unit}/s`
+  const size = /^(it|item|file|frame|step)/i.test(unit) ? undefined : sizeOf(n, unit, bare)
+  return size ? `${sizeText(size)}/s` : `${n} ${unit}/s`
 }
-const COUNTED = /\b(step|stage|phase|frame|epoch|batch|file|item|chunk|part|iter(ation)?|sample|image|scan|case|job|task|run|shard|page|row|record|subject|volume|layer|object|blob|video|clip|mesh|fit|test)s?\b/i
+// What is counted, said right before its count (frame 81/120, Epoch: 3/10, step #4 of 6)
+const COUNTED = /\b(steps?|stages?|phases?|frames?|epochs?|batch(es)?|files?|items?|chunks?|parts?|iter(ation)?s?|samples?|images?|scans?|cases?|jobs?|tasks?|runs?|shards?|pages?|rows?|records?|subjects?|volumes?|layers?|objects?|blobs?|videos?|clips?|meshes|mesh|fits?)\s*[:#]?\s*$/i
+// A size pair that is how full something is, not how far a run is
+const HELD = /\b(mem(ory)?|ram|vram|gpu|disk|used|free|avail(able)?|alloc(ated)?|reserved|cache|swap|heap|rss)\b\W*$/i
+// A percent that is a score, not progress
+const SCORE = /\b(acc(uracy)?|score|coverage|precision|recall|f1|auc|iou|map|top-?\d|pass(ed)?|win|rate|util(i[sz]ation)?|cpu|gpu|mem(ory)?|load)\b[^%]{0,16}$/i
 // The progress one line shows, or undefined
 const lineProgress = (line: string): Progress | undefined => {
-  // The work's own line: progress: done/total [unit] [words], or progress: N%
-  const own = line.match(/^\s*progress:?\s+(.*)$/i)
+  // The work's own line: progress: done/total [unit] [words], or progress: N%, anywhere on a line (after a log's time or level)
+  const own = line.match(/(?:^|[\s\]|[])progress:\s*(.*)$/i)
   if (own) {
     const rest = own[1] ?? ''
     const pct = rest.match(/^(\d+(?:\.\d+)?)\s?%/)
     if (pct) return { pct: pctText(Number(pct[1])) }
     const m = rest.match(/^(\d[\d,]*(?:\.\d+)?)\s*(?:\/|of)\s*(\d[\d,]*(?:\.\d+)?)\s*([A-Za-z]+)?/)
     if (m) {
+      // Its own numbers and unit, as written
       const [, a = '', b = '', unit = ''] = m
-      const da = bytesOf(a, unit)
-      const db = bytesOf(b, unit)
-      const isSize = /^([KMGTP]i?B|B|bytes?)$/i.test(unit) && da !== undefined && db !== undefined
       const na = Number(a.replace(/,/g, ''))
       const nb = Number(b.replace(/,/g, ''))
-      return isSize
-        ? { done: sizeText(da), total: sizeText(db), pct: percentOf(da, db), rate: rateOf(rest) }
-        : { done: countText(na), total: `${countText(nb)}${unit ? ` ${unit}` : ''}`, pct: percentOf(na, nb), rate: rateOf(rest) }
+      const isSize = /^([KMGTP]i?B|B|bytes?)$/i.test(unit)
+      return { done: isSize ? `${a} ${unit}` : countText(na), total: `${isSize ? b : countText(nb)}${unit ? ` ${unit}` : ''}`, pct: percentOf(na, nb), rate: rateOf(rest) }
     }
   }
-  // curl's meter: % Total % Received % Xferd Average-speeds Times Current-speed
+  // curl's meter: % Total % Received % Xferd Average-speeds Times Current-speed, sizes in 1024s
   const curl = line.match(/^\s*(\d{1,3})\s+(\d[\d.]*[kMGTP]?)\s+(\d{1,3})\s+(\d[\d.]*[kMGTP]?)\s+\d{1,3}\s+\d[\d.]*[kMGTP]?\s+\d[\d.]*[kMGTP]?\s+\d[\d.]*[kMGTP]?\s+[-\d:]+\s+[-\d:]+\s+[-\d:]+\s+(\d[\d.]*[kMGTP]?)\s*$/)
   if (curl) {
     const [, , total = '', pct = '', done = '', speed = ''] = curl
-    const unit = (text: string) => text.match(/[kMGTP]$/)?.[0] ?? ''
-    const num = (text: string) => text.replace(/[kMGTP]$/, '')
-    const t = bytesOf(num(total), unit(total)) ?? 0
-    const d = bytesOf(num(done), unit(done)) ?? 0
-    const s = bytesOf(num(speed), unit(speed)) ?? 0
-    return { done: sizeText(d), ...(t > 0 ? { total: sizeText(t), pct: `${pct}%` } : {}), rate: `${sizeText(s)}/s` }
+    const of = (text: string) => sizeOf(text.replace(/[kMGTP]$/, ''), text.match(/[kMGTP]$/)?.[0] ?? '') ?? { bytes: 0, base: 1024 }
+    const t = of(total)
+    return { done: sizeText(of(done)), ...(t.bytes > 0 ? { total: sizeText(t), pct: `${pct}%` } : {}), rate: `${sizeText(of(speed))}/s` }
   }
   // azcopy: 45.2 %, 10 Done, 0 Failed, 90 Pending, 0 Skipped, 100 Total, 2-sec Throughput (Mb/s): 85.3
   const azcopy = line.match(/^\s*(\d+(?:\.\d+)?)\s?%,\s*(\d+) Done,.*?(\d+) Total\b(?:.*Throughput \(Mb\/s\):\s*([\d.]+))?/)
-  if (azcopy) return { pct: pctText(Number(azcopy[1])), done: azcopy[2], total: `${azcopy[3]} files`, ...(azcopy[4] ? { rate: `${sizeText((Number(azcopy[4]) * 1e6) / 8)}/s` } : {}) }
+  if (azcopy) return { pct: pctText(Number(azcopy[1])), done: azcopy[2], total: `${azcopy[3]} files`, ...(azcopy[4] ? { rate: `${sizeText({ bytes: (Number(azcopy[4]) * 1e6) / 8, base: 1000 })}/s` } : {}) }
   // wget, dot style: 460800K .......... .......... 45% 10.2M 55s
   const dots = line.match(/^\s*(\d+)K\s+[.\s]+\s(\d{1,3})%\s+([\d.]+[KMG])\s/)
-  if (dots) return { done: sizeText(Number(dots[1]) * 1024), pct: `${dots[2]}%`, rate: `${sizeText(bytesOf(dots[3]?.slice(0, -1) ?? '0', dots[3]?.slice(-1)) ?? 0)}/s` }
+  if (dots) return { done: sizeText({ bytes: Number(dots[1]) * 1024, base: 1024 }), pct: `${dots[2]}%`, rate: `${sizeText(sizeOf(dots[3]?.slice(0, -1) ?? '0', dots[3]?.slice(-1)) ?? { bytes: 0, base: 1024 })}/s`, wget: true } as Progress
+  // wget, bar style: big.bin   45%[=====>      ] 460.12M  10.2MB/s    eta 55s
+  const wget = line.match(/\s(\d{1,3})%\[[=> ]*\]\s+([\d.,]+)([KMGT]?)\s+([\d.]+\s?[KMG]?B\/s)/)
+  if (wget) return { done: sizeText(sizeOf(wget[2] ?? '0', wget[3]) ?? { bytes: 0, base: 1024 }), pct: `${wget[1]}%`, rate: rateOf(wget[4] ?? '', 1024), wget: true } as Progress
   // rsync: 1,234,567,890  45%   10.21MB/s    0:00:55
   const rsync = line.match(/^\s*(\d[\d,]*)\s+(\d{1,3})%\s+([\d.]+[kKMGT]?B\/s)\s+\d+:\d\d:\d\d/)
-  if (rsync) return { done: sizeText(Number(rsync[1]?.replace(/,/g, ''))), pct: `${rsync[2]}%`, rate: rateOf(rsync[3] ?? '') }
-  const pctSeen = pctOf(line)
-  // A size done of a size in all (tqdm, pip, aws, gsutil, docker, hf): 1.41G/3.00G, 460.1/1024.0 MB, 460.0 MiB/  1.0 GiB
+  if (rsync) return { done: sizeText({ bytes: Number(rsync[1]?.replace(/,/g, '')), base: 1000 }), pct: `${rsync[2]}%`, rate: rateOf(rsync[3] ?? '') }
+  const seen = pctOf(line)
+  const pctSeen = seen && !SCORE.test(line.slice(0, line.indexOf(seen))) ? seen : undefined
+  const hasBar = /[█▉▊▋▌▍▎▏░▒▓━]|#{3,}|\[[=#>.\s-]{3,}\]/.test(line)
+  // A count right after a bar is the bar's own (tqdm: 45%|████| 450/1000)
+  const barCount = line.match(/%\|(?:[^|]{0,80}\|)?\s*(\d[\d,]*)\/(\d[\d,]*)\b/)
+  // A size done of a size in all (tqdm, pip, aws, gsutil, docker, hf): 1.41G/3.00G, 460.1/1024.0 MB, 460.0 MiB/  1.0 GiB, where a
+  // percent, a bar or a speed says it moves and it is not how full a memory or a disk is
   const sizes =
     line.match(new RegExp(String.raw`${SIZE}\s*(?:\/|of)\s*${SIZE}`)) ??
     line.match(new RegExp(String.raw`(\d[\d,]*(?:\.\d+)?)()\s*\/\s*${SIZE}`))
-  if (sizes) {
+  if (sizes && (pctSeen || hasBar || RATE.test(line)) && !HELD.test(line.slice(0, sizes.index ?? 0))) {
     const [, a = '', ua = '', b = '', ub = ''] = sizes
-    const d = bytesOf(a, ua || ub)
-    const t = bytesOf(b, ub)
-    if (d !== undefined && t !== undefined && t > 0 && d <= t * 1.001) return { done: sizeText(d), total: sizeText(t), pct: pctSeen ?? percentOf(d, t), rate: rateOf(line.slice((sizes.index ?? 0) + sizes[0].length)) }
+    const d = sizeOf(a, ua || ub, 1000)
+    const t = sizeOf(b, ub, 1000)
+    if (d && t && t.bytes > 0 && d.bytes <= t.bytes * 1.001) return { done: sizeText(d), total: sizeText(t), pct: pctSeen ?? percentOf(d.bytes, t.bytes), rate: rateOf(line.slice((sizes.index ?? 0) + sizes[0].length)) }
   }
-  // A count toward a total, where a bar or a percent says it is progress, or a word or brackets say what is counted
-  const count = line.match(/(?:^|[\s[(|:#])(\d[\d,]*)\s?(?:\/|of)\s?(\d[\d,]*)\b(?![/.:]\d)/)
+  if (barCount) {
+    const a = Number(barCount[1]?.replace(/,/g, ''))
+    const b = Number(barCount[2]?.replace(/,/g, ''))
+    if (b > 0 && a <= b) return { done: countText(a), total: countText(b), pct: pctSeen ?? percentOf(a, b), rate: rateOf(line) }
+  }
+  // A count toward a total, said whole in brackets ([4/6], (450/1000)), right after what it counts (frame 81/120), or right beside
+  // its percent
+  const count = line.match(/(?:^|[\s[(:#])(\d[\d,]*)\s?(?:\/|of)\s?(\d[\d,]*)\b(?![/.:]\d)/)
   if (count) {
-    const before = line.slice(0, count.index ?? 0)
+    const before = line.slice(0, (count.index ?? 0) + (count[0].match(/^[\s[(:#]/) ? 1 : 0))
+    const after = line.slice((count.index ?? 0) + count[0].length)
     const a = Number(count[1]?.replace(/,/g, ''))
     const b = Number(count[2]?.replace(/,/g, ''))
-    const isBracketed = /^[[(]/.test(count[0]) || /[[(]\s*$/.test(before)
-    const isProgress = pctSeen || isBracketed || /[|█▉▊▋▌▍▎▏━]\s*$/.test(before) || COUNTED.test(before.split(/[,;|]/).at(-1) ?? '')
-    if (isProgress && b > 0 && a <= b) return { done: countText(a), total: countText(b), pct: pctSeen ?? percentOf(a, b), rate: rateOf(line) }
+    const isBracketed = /[[(]\s*$/.test(before) && /^\s*[\])]/.test(after)
+    const isBeside = Boolean(pctSeen) && pctOf(line.slice(Math.max(0, (count.index ?? 0) - 12), (count.index ?? 0) + count[0].length + 12)) === pctSeen
+    const isProgress = isBracketed || isBeside || COUNTED.test(before)
+    if (isProgress && b > 0 && a <= b) return { done: countText(a), total: countText(b), pct: isBeside ? pctSeen : percentOf(a, b), rate: rateOf(line) }
   }
   // Else a percent alone, with any size it says is done (git: Receiving objects: 45% (450/1000), 460.00 MiB | 10.20 MiB/s)
   if (pctSeen) {
     const size = line.match(new RegExp(String.raw`${SIZE}(?!\s?/s|ps)`))
-    const d = size ? bytesOf(size[1] ?? '', size[2]) : undefined
-    return { pct: pctSeen, ...(d !== undefined && /[KMGTP]/i.test(size?.[2] ?? '') ? { done: sizeText(d) } : {}), rate: rateOf(line) }
+    const d = size && /[KMGTP]/i.test(size[2] ?? '') ? sizeOf(size[1] ?? '', size[2]) : undefined
+    return { pct: pctSeen, ...(d ? { done: sizeText(d) } : {}), rate: rateOf(line) }
   }
   return undefined
 }
-const tidy = (p: Progress): Progress => Object.fromEntries(Object.entries(p).filter(([, v]) => v !== undefined && v !== '')) as Progress
-// The newest progress among a run's latest lines, with a total said once higher up (wget's Length) when the line has none
+const tidy = (p: Progress): Progress => Object.fromEntries(Object.entries(p).filter(([key, v]) => key !== 'wget' && v !== undefined && v !== '')) as Progress
+// How far a run is, from its last line; or else from the newest of the work's own progress lines a little higher up, which says
+// it is earlier than the last line, so the last line is still shown beside it (an error after a download is never hidden). wget's
+// total is its Length, said once above its bar
 export const progressOf = (lines: string[]): Progress => {
-  for (const line of lines.slice(-20).reverse()) {
-    const found = lineProgress(line)
-    if (!found || (!found.pct && !found.done)) continue
-    if (found.done && !found.total) {
-      const length = lines.map(l => l.match(/^Length:\s*(\d+)/)?.[1]).filter(Boolean).at(-1)
-      if (length && Number(length) > 0) return tidy({ ...found, total: sizeText(Number(length)) })
-    }
-    return tidy(found)
+  const last = lines.at(-1) ?? ''
+  const found = lineProgress(last)
+  if (found && (found.pct || found.done)) {
+    const length = (found as { wget?: boolean }).wget && !found.total ? lines.map(l => l.match(/^Length:\s*(\d+)/)?.[1]).filter(Boolean).at(-1) : undefined
+    return tidy(length && Number(length) > 0 ? { ...found, total: sizeText({ bytes: Number(length), base: 1024 }) } : found)
+  }
+  for (const line of lines.slice(-20, -1).reverse()) {
+    if (!/(?:^|[\s\]|[])progress:/i.test(line)) continue
+    const own = lineProgress(line)
+    if (own && (own.pct || own.done)) return tidy({ ...own, rate: undefined, isEarlier: true })
   }
   return {}
 }
@@ -219,8 +244,11 @@ export const detachedOf = (command: string) => {
   if (!written || written === '/dev/null') return undefined
   // A log or folder named by a shell variable the command sets itself (S=/tmp/x && nohup ... > $S/run.log) is named whole; one
   // named by any other variable is not followed, as a wrong file would leave its card blank for as long as the run lasts
-  const vars = new Map([...command.matchAll(/(?:^|&&|;|\n)\s*([A-Za-z_]\w*)=("[^"$`]*"|'[^']*'|[^\s;&|$`]+)(?=\s*(?:&&|;|\n))/g)].map(m => [m[1] ?? '', (m[2] ?? '').replace(/^["']|["']$/g, '')]))
-  const expand = (text: string) => text.replace(/\$\{?([A-Za-z_]\w*)\}?/g, (all, name: string) => (name === 'HOME' ? '~' : (vars.get(name) ?? all)))
+  const vars = new Map([...command.matchAll(/(?:^|&&|;|\n)\s*(?:export\s+)?([A-Za-z_]\w*)=("[^"$`]*"|'[^']*'|[^\s;&|$`]+)(?=\s*(?:&&|;|\n))/g)].map(m => [m[1] ?? '', (m[2] ?? '').replace(/^["']|["']$/g, '')]))
+  const expand = (text: string) => text.replace(/\$(?:\{([A-Za-z_]\w*)\}|([A-Za-z_]\w*))/g, (all, braced: string | undefined, bare: string | undefined) => {
+    const name = braced ?? bare ?? ''
+    return name === 'HOME' ? '~' : (vars.get(name) ?? all)
+  })
   const log = expand(written)
   const cd = command.match(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)\s*&&/)?.[1]?.replace(/^["']|["']$/g, '')
   if (log.includes('$') || cd?.includes('$')) return undefined
@@ -230,7 +258,11 @@ export const detachedOf = (command: string) => {
 // The process id a detached start printed, as `echo $!` does
 // (never 0 or a number with a leading zero: on 15 Nov a curl's "000" in the same output was taken for one, and `kill -0 0` always
 // succeeds, so a run long ended stayed on its card for hours)
-export const pidOf = (stdout: string) => stdout.match(/^\s*([1-9]\d{1,6})\s*$/m)?.[1]
+// Only when it is the one number printed: a status code another command printed beside it could be taken for it
+export const pidOf = (stdout: string) => {
+  const numbers = stdout.split('\n').filter(line => /^\s*\d+\s*$/.test(line))
+  return numbers.length === 1 ? numbers[0]?.match(/^\s*([1-9]\d{1,6})\s*$/)?.[1] : undefined
+}
 
 // A call that only waits (a sleep, a wait) is no job of its own
 export const isWaitOnly = (cmd: string) => /^\s*(sleep\s|wait\b|python3? -c ['"]import time; ?time\.sleep)/.test(cmd)

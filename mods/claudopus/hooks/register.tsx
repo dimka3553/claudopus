@@ -6989,7 +6989,7 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -7155,7 +7155,7 @@ const lookJobs = async ($: EngineInterface) => {
     const was = jobLog.get(id)
     const wait = waits.find(w => w.id === id)
     const next: Seen = { ...seen, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true
@@ -8739,11 +8739,22 @@ const panelHooks = (on: On) => {
         : job.wroteAt ? [`updated ${shortAgo(quiet)} ago`, false]
         // A job whose output cannot be found says so, so a blank row is never taken for one that moves (a command held open has no
         // output to read until it ends)
-        : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', true]
+        : !job.id.startsWith('call-') && !job.id.startsWith('more-') && job.kind !== 'watch' && at - job.at >= JOB_UNREAD ? ['output not found', true]
         : ['', false]
       const short = state.replace(/^no new output for /, 'quiet ').replace(/^output not found$/, 'no output').replace(/^updated (.*) ago$/, '$1 ago').replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still ')
+      const warn = Boolean(isWarn) && Boolean(state)
+      // A run that says how far it is puts how much of how much first, before its name: in full, then as done/total, its speed
+      // only where there is room, and it keeps whether it moves before its time; its name keeps what is left, 12 columns at least
+      if (job.done && job.kind !== 'wait') {
+        const full = job.total ? `${job.done} of ${job.total}` : job.done
+        const compact = job.total ? `${job.done}/${job.total}` : job.done
+        // its speed only while it writes: a speed a minute old is no longer how fast it goes
+        const rate = job.rate && !warn && job.wroteAt && quiet < 60_000 ? [job.rate] : []
+        const most = Math.max(12, width - 20, Math.min(width - 13, 26))
+        return { text: firstFit([[full, ...rate, ...pct, state, time], [full, ...pct, state, time], [full, ...pct, short, time], [full, ...pct, short], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
+      }
       const text = firstFit([[...pct, state, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
-      return { text, isWarn: Boolean(isWarn) && Boolean(state) }
+      return { text, isWarn: warn }
     }
     const jobRow = (t: Twig, scope: string) => {
       const job = t.job
@@ -8753,12 +8764,13 @@ const panelHooks = (on: On) => {
       const isMore = job.id.startsWith('more-')
       const { text: side, isWarn } = isMore ? { text: took(at - job.at), isWarn: false } : jobSide(job, width)
       const room = Math.max(12, width - side.length - 1)
+      // Its percent, in blue, where the side says it as a part of its own
+      const pctAt = job.pct && !isWarn ? (side.startsWith(`${job.pct} · `) || side === job.pct ? 0 : side.includes(` · ${job.pct}`) ? side.indexOf(` · ${job.pct}`) + 3 : -1) : -1
       // The latest line, unless it is only a progress bar its percent already says, in the room the name leaves; a wait says what
-      // it waits for. How much is done of how much, and how fast, stands in for the line it came from
-      const amount = job.done ? `${job.done}${job.total ? ` of ${job.total}` : ''}${job.rate ? ` · ${job.rate}` : ''}` : ''
-      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : amount || (job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : '')
-      // and an amount keeps its room before the name does
-      const name = cut(jobHead(job), amount && job.kind !== 'wait' ? Math.max(12, room - amount.length - 3) : room)
+      // it waits for. A run that says how far it is has that beside its time instead
+      // (one read from a progress line above the last still shows the last, such as an error after it)
+      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
+      const name = cut(jobHead(job), room)
       const rest = room - name.length - 3
       const detail = latest && rest >= 10 ? cut(latest, rest) : ''
       return (
@@ -8775,10 +8787,11 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
           <Box flexShrink={0}>
-            {job.pct && !isWarn && side.startsWith(job.pct) ? (
+            {pctAt >= 0 && job.pct ? (
               <Box flexDirection="row">
+                {pctAt > 0 ? <Text dimColor>{side.slice(0, pctAt)}</Text> : null}
                 <Text color={JOB_COLOR.download}>{job.pct}</Text>
-                <Text dimColor>{side.slice(job.pct.length)}</Text>
+                <Text dimColor>{side.slice(pctAt + job.pct.length)}</Text>
               </Box>
             ) : (
               <Text color={isWarn ? NEEDS : undefined} dimColor={!isWarn}>{side}</Text>
