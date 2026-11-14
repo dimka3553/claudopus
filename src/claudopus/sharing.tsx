@@ -45,10 +45,13 @@ const shareMine = async ($: EngineInterface) => {
     myLink = await readLink($, id).catch(() => myLink)
   }
   const cards = shareable(await read($, todos), now)
-  const prompts: Prompt[] = waiting.map(({ id: one, text, title: from, at }) => ({ id: one, text, ...(from ? { title: from } : {}), at }))
-  const sign = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}`
+  const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
+  const prompts: Prompt[] = waiting.map(shareOf)
+  // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open
+  const answeredNow: Prompt[] = answeredShown(now).map(shareOf)
+  const sign = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
-  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(prompts.length ? { prompts } : {}), ...(myLink ? { link: myLink } : {}) }
+  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(prompts.length ? { prompts } : {}), ...(answeredNow.length ? { answeredPrompts: answeredNow } : {}), ...(myLink ? { link: myLink } : {}) }
   // Ended work is written apart, under `ended`: a chat still running a version from before ended work was shared reads `cards` only,
   // and would show what is there as running for good
   const isLive = (one: Todo) => one.status === 'working' || Boolean(one.ask)
@@ -177,7 +180,7 @@ const readOthers = async ($: EngineInterface) => {
     // A card gone from its chat's list went with that chat, which is closed: nothing reads an answer left for it, so its ask goes too
     if (!s?.cards.some(card => remoteId(s, card.id) === key) && !vanished.has(key)) vanished.set(key, { chat: was.chat, card: { ...was.card, status: 'done', endedAt: now, ask: undefined }, at: now, of: was.of })
   }
-  for (const s of found) for (const card of s.cards.filter(one => one.status === 'working')) lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card, at: now, of: { ...s, cards: [], prompts: undefined } })
+  for (const s of found) for (const card of s.cards.filter(one => one.status === 'working')) lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card, at: now, of: { ...s, cards: [], prompts: undefined, answeredPrompts: undefined } })
   for (const [key, one] of [...vanished]) {
     const s = present.get(one.chat)
     if (!open.has(one.chat) || now - one.at > LINGER + LOOK_EVERY || s?.cards.some(card => remoteId(s, card.id) === key)) vanished.delete(key)
@@ -338,6 +341,40 @@ const leaveHere = ($: EngineInterface, folder: string, name: string, body: unkno
     .write(`${liveDir()}/${folder}/${name}.part`, JSON.stringify(body))
     .then(() => $.process.run(['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
     .catch(err => ({ exitCode: -1, stderr: String(err) }))
+const leaveAnswer = async ($: EngineInterface, chat: { id: string; host: string }, answer: Answer) => {
+  const name = `${answer.at}-${Math.random().toString(36).slice(2, 8)}`
+  const mac = chat.host ? macs.find(m => m === chat.host) : undefined
+  const folder = `${ANSWERS}/${chat.id}`
+  return !chat.host
+    ? await leaveHere($, folder, name, answer)
+    : mac
+      ? await $.process
+          .run(ssh(mac, `d=~/.claude/claudopus/${LIVE_DIR}/${folder} && mkdir -p $d && cat > $d/${name}.part && mv $d/${name}.part $d/${name}.json`), { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
+          .catch(err => ({ exitCode: -1, stderr: String(err) }))
+      : isKey(chat.host) && pushedFrom.has(chat.host)
+        ? await leaveHere($, `${OUTBOX}/${chat.host}`, name, { ...answer, chat: chat.id })
+        : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
+}
+// A Yes or No pressed here on another chat's prompt, left for that chat as an answer whose card is `prompt:<its id>`: that chat answers
+// its prompt as if pressed there. Until that chat's file moves it to answered, its card here says what was pressed in place of buttons
+const PROMPT_ANSWER = 'prompt:'
+const promptsPressed = new Map<string, 'yes' | 'no'>()
+const answerPromptElsewhere = async ($: EngineInterface, c: Shared, p: Prompt, said: 'yes' | 'no') => {
+  presses += 1
+  const key = `${c.host}:${c.chat}:${p.id}`
+  if (promptsPressed.has(key) || !/^[A-Za-z0-9_-]+$/.test(c.chat)) return
+  promptsPressed.set(key, said)
+  redraw($)
+  const at = await $.clock.now()
+  const r = await leaveAnswer($, { id: c.chat, host: c.host }, { card: `${PROMPT_ANSWER}${p.id}`, choice: said, isReply: false, ask: p.text, askAt: p.at, at })
+  // Said for a minute at most: that chat's file has moved it on by then, or the answer came too late and its buttons show again
+  $.clock.after(PROMPT_SHOWN, () => void (promptsPressed.get(key) === said && (promptsPressed.delete(key), redraw($))))
+  if (r.exitCode !== 0) {
+    promptsPressed.delete(key)
+    redraw($)
+    await log($, `answer to a prompt of the chat ${c.chat}${c.host ? ` on ${c.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)
+  }
+}
 const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, isReply: boolean) => {
   const ask = one.ask
   const said = choice.trim()
@@ -356,18 +393,7 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line: lineOf(one), isHeld })
   redraw($)
   const answer: Answer = { card: chat.agent, choice: said, isReply, ask: ask.text, askAt: ask.at, at }
-  const name = `${at}-${Math.random().toString(36).slice(2, 8)}`
-  const mac = chat.host ? macs.find(m => m === chat.host) : undefined
-  const folder = `${ANSWERS}/${chat.id}`
-  const r = !chat.host
-    ? await leaveHere($, folder, name, answer)
-    : mac
-      ? await $.process
-          .run(ssh(mac, `d=~/.claude/claudopus/${LIVE_DIR}/${folder} && mkdir -p $d && cat > $d/${name}.part && mv $d/${name}.part $d/${name}.json`), { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
-          .catch(err => ({ exitCode: -1, stderr: String(err) }))
-      : isKey(chat.host) && pushedFrom.has(chat.host)
-        ? await leaveHere($, `${OUTBOX}/${chat.host}`, name, { ...answer, chat: chat.id })
-        : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
+  const r = await leaveAnswer($, chat, answer)
   if (r.exitCode !== 0) {
     answeredHere.delete(mark)
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost', at, line: lineOf(one) })
@@ -393,6 +419,12 @@ const readAnswers = async ($: EngineInterface) => {
     const answer = answerOf(await readOr($, path))
     await $.process.run(['rm', '-f', path]).catch(() => undefined)
     const now = await $.clock.now()
+    // A Yes or No another chat pressed on this chat's prompt answers it while it is still held; one too late does nothing
+    if (answer?.card.startsWith(PROMPT_ANSWER)) {
+      const isTaken = (answer.choice === 'yes' || answer.choice === 'no') && now - answer.at <= ANSWER_KEPT && answerPrompt($, answer.card.slice(PROMPT_ANSWER.length), answer.choice)
+      if (!isTaken) await log($, `answer to a prompt from another chat dropped: it no longer waits`)
+      continue
+    }
     const card = answer ? (await read($, todos)).find(one => one.id === answer.card && !one.parentId) : undefined
     const isSame = Boolean(answer && card?.ask && (answer.askAt ? answer.askAt === card.ask.at : answer.ask === card.ask.text))
     // A reply in words to work whose ask was answered a moment ago, as a second message after a press, still reaches it
