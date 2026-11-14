@@ -112,7 +112,7 @@ const sentReplies = new Map<string, Sent>()
 const pending = new Map<string, string>()
 // Asks of another chat's work replied to here in words that hold them, by work and when it asked: acted on from the moment the reply
 // is left, until that chat's own file carries the reply
-const actingOn = new Set<string>()
+const actingOn = new Map<string, string>()
 // The asks of this chat's work already answered, by work and when it asked
 const answeredAsks = new Set<string>()
 // Answers on their way, so a press hook can wait for the one its press started (a button's handler does not await it)
@@ -172,12 +172,14 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   answeredAsks.add(key)
   const at = await $.clock.now()
   let isHeld = false
-  const isWaking = (await read($, todos)).find(card => card.id === target)?.status !== 'working'
+  // Acted on from now while the work is started again with it; never on a card no run of its own will end
+  const listed = await read($, todos)
+  const isWaking = listed.find(card => card.id === one.id)?.status !== 'working' && listed.find(card => card.id === target)?.status !== 'working'
   await update($, todos, list =>
     list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
-  // The box keeps its place, emptied, so the focus does not fall onto the ask's first button, which a stray key would press
+  // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
   drafts.delete(one.id)
   freeTimes()
   const line = lineOf(one)
@@ -307,8 +309,9 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   if (!isSent) return void answeredAsks.delete(a.key)
   // Words that do not settle an ask with buttons of its own leave it open, as a reply on the card does; a later answer still counts
   const isHeld = !settles(a.ask, a.words, true)
+  // Either way the ask is done with in the chat: the work asking again is sent to it afresh
   if (isHeld) answeredAsks.delete(a.key)
-  else inChat.delete(a.card.id)
+  inChat.delete(a.card.id)
   await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   drafts.delete(a.card.id)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })

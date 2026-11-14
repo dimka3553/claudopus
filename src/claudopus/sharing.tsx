@@ -352,7 +352,7 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   if (!isHeld) replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   if (isReply) freeTimes()
   answeredHere.add(mark)
-  if (isHeld) actingOn.add(`${one.id}:${ask.at}`)
+  if (isHeld) actingOn.set(`${one.id}:${ask.at}`, said)
   const at = await $.clock.now()
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line: lineOf(one), isHeld })
   redraw($)
