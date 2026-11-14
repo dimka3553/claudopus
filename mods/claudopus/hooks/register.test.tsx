@@ -530,6 +530,9 @@ test('work uses a kept key without reading it: the keychain is not read, and wha
   for (const [tool, field] of [['Read', 'file_path'], ['Write', 'file_path'], ['Grep', 'path'], ['Glob', 'path']] as const)
     expect((await $.tool.call({ tool, tool_use_id: `kf-${tool}`, [field]: '~/.local/share/claudopus/keyring/claudopus-admin/here', ...(tool === 'Write' ? { content: 'x' } : { pattern: '.' }), agentId: 'w1' } as never)).deny).toContain('never read')
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'kg', command: 'git commit -m "keyring for Linux"', agentId: 'w1' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'kd', command: 'git diff --no-index /dev/null ~/.local/share/claudopus/keyring/claudopus-admin/here', agentId: 'w1' } as never)).deny).toContain('never read')
+  expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'ku', path: '~/.local/share', pattern: '.', agentId: 'w1' } as never)).deny).toContain('never read')
+  expect((await $.tool.call({ tool: 'Grep', tool_use_id: 'kb', path: '~/GitHub', pattern: '.', glob: 'keyring/**', agentId: 'w1' } as never)).deny).toContain('never read')
 
   // Nothing kept: what the tool answers passes as it was
   expect(JSON.stringify((await $.tool.call({ tool: 'Bash', tool_use_id: 'k3', command: 'echo $API_KEY', agentId: 'w1' } as never)).result)).toContain('token is none')
