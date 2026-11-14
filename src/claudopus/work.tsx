@@ -284,6 +284,7 @@ const workHooks = (on: On) => {
   })
 
   on('agent.spawn', async ($, e, next) => {
+    agentStarted($, e.tool_use_id)
     // An agent a workflow's script starts belongs to its run's blue card, not a card of its own
     if (e.workflow) {
       const r = await next(e)

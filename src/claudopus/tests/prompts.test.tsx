@@ -269,3 +269,20 @@ test("another chat's held prompt has Yes and No, which leave the answer for that
   expect(((await asked) as { decision?: unknown }).decision).toEqual({ behavior: 'allow' })
   await list.unmount()
 })
+
+test("a No pressed after Claude Code's box said yes does not stand: the card says what the call did once it ends", async ($, on) => {
+  const { wake } = world(on)
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  void $.classic.PermissionRequest({ tool_name: 'WebFetch', tool_input: { url: 'https://example.com/a' } } as never)
+  expect(await until(async () => button(list, 'prompt-no-this-'))).toBeDefined()
+  await list.press({ key: String((await button(list, 'prompt-no-this-'))?.key) })
+  wake()
+  expect(await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' }))).toBeDefined()
+  // The box had allowed it first: the call runs and ends well
+  await $.tool.call({ tool: 'WebFetch', url: 'https://example.com/a' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it ran and is done' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' })).toBeUndefined()
+  await list.unmount()
+})
+

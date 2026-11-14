@@ -4923,6 +4923,8 @@ const answerPromptElsewhere = async ($: EngineInterface, c: Shared, p: Prompt, s
   redraw($)
   const at = await $.clock.now()
   const r = await leaveAnswer($, { id: c.chat, host: c.host }, { card: `${PROMPT_ANSWER}${p.id}`, choice: said, isReply: false, ask: p.text, askAt: p.at, at })
+  // Said for a minute at most: that chat's file has moved it on by then, or the answer came too late and its buttons show again
+  $.clock.after(PROMPT_SHOWN, () => void (promptsPressed.get(key) === said && (promptsPressed.delete(key), redraw($))))
   if (r.exitCode !== 0) {
     promptsPressed.delete(key)
     redraw($)
@@ -5860,7 +5862,9 @@ const gatesPart = ($: EngineInterface, ui: Ui) =>
 // call just runs and ends. So a prompt goes when its call ends (refused, interrupted or run), when the terminal draws its running
 // pill, or, for a command, as soon as a process running it is seen on this Mac. A prompt to allow a call is also answered by a press
 // on its card: the engine runs its PermissionRequest hooks beside its own box, and the first answer, the box's or the hook's, stands
-type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean; input?: Record<string, string> }
+// `isPressedNo` marks one refused by a press on its card: if Claude Code's own box had answered first and the call goes on, its end
+// says so in place of the press
+type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean; input?: Record<string, string>; isPressedNo?: boolean }
 let waiting: Waiting[] = []
 // The tool calls whose permission check asked, newest last, so the prompt that follows is known by its call's id: the one of the same
 // loop, tool and input, else the newest of the same loop and tool
@@ -5912,8 +5916,9 @@ const promptOf = (tool: string, input: unknown, list: Todo[], isWork = false): A
     }
   }
   if (tool === 'Agent' || tool === 'Task')
-    return { ...allow(`Start a piece of work: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), 'No: it is not started, and the chat stops to wait for what you say next.'), done: 'it was started' }
-  if (tool === 'TaskStop') return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that work is stopped where it is.', '', 'No: that work keeps running.'), done: 'it was stopped' }
+    return { ...allow(`Start a piece of work: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : 'No: it is not started, and the chat stops to wait for what you say next.'), done: 'it was started' }
+  if (tool === 'TaskStop')
+    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that work is stopped where it is.', '', isWork ? 'No: that work keeps running, and the work that asked is told you said no.' : 'No: that work keeps running, and the chat stops to wait for what you say next.'), done: 'it was stopped' }
   if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`, 'it loads those instructions and follows them.')
   if (tool === 'AskUserQuestion') {
     const first = Array.isArray(given.questions) ? (given.questions[0] as { question?: unknown } | undefined)?.question : undefined
@@ -5950,7 +5955,7 @@ const opened = async ($: EngineInterface, agent: string | undefined, tool: strin
   const list = await read($, todos)
   const card = agent !== undefined ? list.find(one => one.id === topOf(list, agent)) : undefined
   const strings = Object.fromEntries(Object.entries(input && typeof input === 'object' ? input : {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>
-  const one: Waiting = { id, ...promptOf(tool, input, list, Boolean(card)), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
+  const one: Waiting = { id, ...promptOf(tool, input, list, Boolean(agent)), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
   waiting = [...waiting.filter(other => other.id !== id), one]
   redraw($)
   void shareMine($).catch(() => undefined)
@@ -5987,9 +5992,13 @@ const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, o
   // Its own id first, open or answered; only then the oldest open one of the same loop and tool whose id was not known. That one says
   // what came of it only when the call asked with the very same words; else it may be another call's, and it goes with no word
   const exact = waiting.find(one => one.id === id)
-  // One answered on its card and still running, whose id was not known, is the same call only when it asked with the very same words
-  const was = exact ? undefined : (answeredPrompts.find(one => one.id === id && !one.endedAt) ?? answeredPrompts.find(one => !one.endedAt && one.isRunning && byTool(one) && isSameCall(one)))
-  const guessed = exact || was || !tool ? undefined : (waiting.find(one => byTool(one) && isSameCall(one)) ?? waiting.find(byTool))
+  const isOpen = (one: Waiting) => !one.endedAt || one.isPressedNo
+  let was = exact ? undefined : answeredPrompts.find(one => one.id === id && isOpen(one))
+  const sameOpen = exact || was || !tool ? undefined : waiting.find(one => byTool(one) && isSameCall(one))
+  // One answered on its card, whose id was not known, is the same call only when it asked with the very same words, and only when no
+  // open prompt did
+  if (!exact && !was && !sameOpen && tool) was = answeredPrompts.find(one => isOpen(one) && (one.isRunning || one.isPressedNo) && byTool(one) && isSameCall(one))
+  const guessed = exact || was || !tool ? undefined : (sameOpen ?? waiting.find(byTool))
   const gone = exact ?? guessed
   if (!gone && !was) return
   if (gone) waiting = waiting.filter(one => one !== gone)
@@ -5997,9 +6006,12 @@ const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, o
   if (outcome && before) {
     void $.clock.now().then(now => {
       const isEnd = outcome !== 'running'
+      // A no pressed on the card stands unless the call went on: then Claude Code's own box had said yes first
+      if (before.isPressedNo && outcome !== 'running' && outcome !== 'ran') return
       const wasAllowed = before.answered === 'yes'
       const answered: Prompt['answered'] = outcome === 'no' ? 'no' : outcome === 'stopped' && !wasAllowed ? 'stopped' : 'yes'
-      const after: Waiting = { ...before, answered, isRunning: !isEnd, ...(isEnd ? { endedAt: now } : { at: now }), ...(outcome === 'stopped' && wasAllowed ? { isCut: true } : {}) }
+      const { isHeld: _held, isPressedNo: _pressed, ...base } = before
+      const after: Waiting = { ...base, ...(outcome === 'no' && pressedNo.has(before.id) ? { isPressedNo: true } : {}), answered, isRunning: !isEnd, ...(isEnd ? { endedAt: now } : { at: now }), ...(outcome === 'stopped' && wasAllowed ? { isCut: true } : {}) }
       answeredPrompts = [...answeredShown(now).filter(one => one.id !== before.id), after].slice(-10)
       redraw($)
       void shareMine($).catch(() => undefined)
@@ -6059,6 +6071,9 @@ const lookForStarted = async ($: EngineInterface) => {
 // A press on a prompt's card, by the prompt's id, read by its hold between two looks; the prompts held now
 const promptSaid = new Map<string, 'yes' | 'no'>()
 const promptHeld = new Set<string>()
+const pressedNo = new Set<string>()
+// The longest a prompt waits for a press: past it the hook hands the prompt back to whatever else answers it
+const HOLD_LONGEST = 10 * 60_000
 const PRESSED_NO = 'The person said no to this on its card in the Claudopus panel. It did not run. Wait for what they say next.'
 const PRESSED_NO_WORK = 'The person said no to this on its card in the Claudopus panel. It did not run: do not try it another way; carry on without it.'
 const markHeld = ($: EngineInterface, id: string, isHeld: boolean) => {
@@ -6068,8 +6083,10 @@ const markHeld = ($: EngineInterface, id: string, isHeld: boolean) => {
 }
 // Holds the prompt until a press on its card, its call ends (the box was answered), the engine gives up on the hook, or this copy of
 // the mod is replaced. As the admin gate does, the wait is a one-second sleep run by the engine, whose time the hook's own budget
-// does not count. Its buttons show only while it is held, so none is ever pressed for nothing
+// does not count. Its buttons show only while it is held. Claude Code's box answers beside it, and that answer is seen only as the
+// call runs or ends; a press after it changes nothing, and the card then says what the call did
 const holdPrompt = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, id: string): Promise<'yes' | 'no' | undefined> => {
+  const since = await $.clock.now()
   promptHeld.add(id)
   markHeld($, id, true)
   let said: 'yes' | 'no' | undefined
@@ -6078,6 +6095,7 @@ const holdPrompt = async ($: EngineInterface, next: { signal?: AbortSignal; budg
       said = promptSaid.get(id)
       if (said) break
       if (!waiting.some(one => one.id === id) || next.signal?.aborted || (next.budget?.remainingMs ?? Infinity) < 1500 || (await isReplaced($))) break
+      if ((await $.clock.now()) - since > HOLD_LONGEST) break
       await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
     }
   } finally {
@@ -6094,8 +6112,14 @@ const answerPrompt = ($: EngineInterface, id: string, said: 'yes' | 'no') => {
   const one = waiting.find(other => other.id === id)
   if (!one) return false
   promptSaid.set(id, said)
+  if (said === 'no') pressedNo.add(id)
   settle($, id, one.agent || undefined, one.tool, said === 'yes' ? 'running' : 'no')
   return true
+}
+
+// Work an allowed Agent call started: its prompt was answered, so it leaves the amber and its buttons go
+const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
+  if (toolUseId && waiting.some(one => one.id === toolUseId)) settle($, toolUseId, undefined, undefined, 'running')
 }
 
 const OWN_CALLS = ['SendMessage', 'TaskStop']
@@ -7485,6 +7509,7 @@ const workHooks = (on: On) => {
   })
 
   on('agent.spawn', async ($, e, next) => {
+    agentStarted($, e.tool_use_id)
     // An agent a workflow's script starts belongs to its run's blue card, not a card of its own
     if (e.workflow) {
       const r = await next(e)

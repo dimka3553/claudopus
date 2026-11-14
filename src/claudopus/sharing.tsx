@@ -367,6 +367,8 @@ const answerPromptElsewhere = async ($: EngineInterface, c: Shared, p: Prompt, s
   redraw($)
   const at = await $.clock.now()
   const r = await leaveAnswer($, { id: c.chat, host: c.host }, { card: `${PROMPT_ANSWER}${p.id}`, choice: said, isReply: false, ask: p.text, askAt: p.at, at })
+  // Said for a minute at most: that chat's file has moved it on by then, or the answer came too late and its buttons show again
+  $.clock.after(PROMPT_SHOWN, () => void (promptsPressed.get(key) === said && (promptsPressed.delete(key), redraw($))))
   if (r.exitCode !== 0) {
     promptsPressed.delete(key)
     redraw($)
