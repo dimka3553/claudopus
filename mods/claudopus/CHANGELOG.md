@@ -2,6 +2,18 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.94 · 14 November 2026
+- Once you have answered an ask, by a button or in your own words, its card keeps no buttons, reply box or send: a reply in words turns it purple with the question and your reply under it while the work acts on it, in the panel, in other chats' panels, in Details and in the terminal's band
+- When the work asks again, or ends with the ask still open, the ask comes back with its answers and an empty box, and the chat is shown it afresh
+
+## 0.2.93 · 14 November 2026
+- The app's prompts in the panel say in plain words which work asks, what exactly (the command, the message and the work it goes to, the page), and what a yes and a no each do; no tool's own name such as "Allow SendMessage"
+- Once you answer one, the card says what you did and what is happening now (running, done, said no, or ended before you answered) for a minute, then goes, instead of staying or vanishing
+- Claudopus no longer asks you to allow its own messages that pass your reply on to work, or a Stop you pressed; those prompts used to pile up in every chat's panel and never clear
+- An admin command's card says what Allow and Deny each do, and after you press, or send or cancel a password or key box, the top of the panel says what you did and what happens now for a minute
+- A prompt to allow something has Yes and No on its card, in this chat's panel and in other chats' panels: pressing one answers Claude Code's prompt for real, with nothing to type. Claude Code's own box still works too, and whichever you answer first counts
+- A question or a plan from Claude Code has no Yes or No on its card, as Claude Code lets only its own box answer those: the card says where that box is
+
 ## 0.2.92 · 14 November 2026
 - A card that asks you something now shows its pictures on the card itself, small, each with a row that opens it large, so you can decide there without waiting for the chat to send them. In the terminal each picture is a row that opens it on your device.
 

@@ -39,7 +39,7 @@ export const shareable = (list: readonly Todo[], now = 0): Todo[] =>
 
 // What tells one shared state from another, the running times aside: a file is written again when it changes or its beat is due
 export const signOf = (cards: readonly Todo[]) =>
-  JSON.stringify(cards.map(one => [one.id, one.status, one.title, one.model, one.tokens, one.items, one.entries.at(-1)?.text ?? '', one.ask?.text ?? '', one.ask?.at ?? 0, one.ask?.copy ?? '', one.ask?.choices ?? [], one.ask?.replied?.at ?? 0]))
+  JSON.stringify(cards.map(one => [one.id, one.status, one.title, one.model, one.tokens, one.items, one.entries.at(-1)?.text ?? '', one.ask?.text ?? '', one.ask?.at ?? 0, one.ask?.copy ?? '', one.ask?.choices ?? [], one.ask?.replied?.at ?? 0, Boolean(one.ask?.replied?.isWaking)]))
 
 // The prompts a chat's file carries, as far as they are whole: at most a few, each cut short
 const PROMPTS_SHARED = 6
@@ -48,7 +48,25 @@ export const promptsOf = (list: unknown): Prompt[] =>
     .filter((one): one is Prompt => Boolean(one && typeof one.id === 'string' && one.id && typeof one.text === 'string' && one.text && typeof one.at === 'number'))
     .filter((one, i, all) => all.findIndex(other => other.id === one.id) === i)
     .slice(0, PROMPTS_SHARED)
-    .map(one => ({ id: one.id.slice(0, 80), text: plain(one.text).slice(0, 200), ...(typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {}), at: one.at }))
+    .map(one => {
+      const words = (key: 'detail' | 'yes' | 'no' | 'done', max: number) => (typeof one[key] === 'string' && plain(one[key] as string) ? { [key]: plain(one[key] as string).slice(0, max) } : {})
+      return {
+        id: one.id.slice(0, 80),
+        text: plain(one.text).slice(0, 200),
+        ...(typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {}),
+        at: one.at,
+        ...(one.kind === 'allow' || one.kind === 'question' || one.kind === 'plan' ? { kind: one.kind } : {}),
+        ...words('detail', 400),
+        ...words('yes', 200),
+        ...words('no', 200),
+        ...words('done', 60),
+        ...(one.answered === 'yes' || one.answered === 'no' || one.answered === 'stopped' ? { answered: one.answered } : {}),
+        ...(one.isRunning === true ? { isRunning: true } : {}),
+        ...(one.isCut === true ? { isCut: true } : {}),
+        ...(one.isHeld === true ? { isHeld: true } : {}),
+        ...(typeof one.endedAt === 'number' ? { endedAt: one.endedAt } : {}),
+      }
+    })
 // Text from another chat's file with no control characters, so nothing in it can move or colour the terminal
 const plain = (text: string) => text.replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trim()
 
@@ -63,10 +81,12 @@ export const sharedOf = (text: string, now: number, host = ''): Shared | undefin
     // Running work under `cards`, ended work apart under `ended`, so a version that reads `cards` alone never shows ended work as running
     const cards = [...one.cards, ...(Array.isArray(one.ended) ? (one.ended as unknown[]) : [])].filter((card): card is Todo => Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)))
     // A chat waiting on its own prompt is listed whether or not it has work
-    const prompts = promptsOf(one.prompts)
-    if (!cards.length && !prompts.length) return undefined
+    const prompts = promptsOf(one.prompts).map(({ answered: _answered, isRunning: _running, isCut: _cut, endedAt: _ended, ...open }) => open)
+    // Prompts answered there lately, said for a minute, so a chat is listed for them too
+    const answeredPrompts = promptsOf(one.answeredPrompts).filter(p => p.answered)
+    if (!cards.length && !prompts.length && !answeredPrompts.length) return undefined
     const link = linkOf(one.link)
-    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(prompts.length ? { prompts } : {}), ...(link ? { link } : {}) }
+    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(prompts.length ? { prompts } : {}), ...(answeredPrompts.length ? { answeredPrompts } : {}), ...(link ? { link } : {}) }
   } catch {
     return undefined
   }
@@ -103,7 +123,7 @@ const firstStart = (s: Shared) => {
   return running.length ? Math.min(...running.map(one => one.startedAt)) : Number.MAX_SAFE_INTEGER
 }
 // An ask whose work is at work on the person's reply to it does not wait on them
-const waits = (s: Shared) => (s.prompts?.length ? 2 : s.cards.some(one => one.ask && !(one.status === 'working' && one.ask.replied)) ? 1 : 0)
+const waits = (s: Shared) => (s.prompts?.length ? 2 : s.cards.some(one => one.ask && !(one.ask.replied && (one.status === 'working' || one.ask.replied.isWaking))) ? 1 : 0)
 export const ordered = (list: readonly Shared[]) =>
   [...list].sort((a, b) => waits(b) - waits(a) || firstStart(a) - firstStart(b) || chatName(a).localeCompare(chatName(b)))
 

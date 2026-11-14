@@ -43,7 +43,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Approve"')))).toContain('May I delete the old repo?')
   expect((await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')).toBeUndefined()
   // Or a reply in the person's own words, right on the small card: the reply goes to the work. One that is none of the ask's buttons,
-  // such as a question back, does not settle it: the ask stays open with the reply under it, and a button still answers it later
+  // such as a question back, does not settle it: the ask stays with the reply under it, and its answers go, as the person has answered
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5', agentId: 'a2', text: 'Submit it to the plugin directory.', choices: ['Submitted', 'Not now'] } as never)
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Reply…')).toBe(false)
   expect((await ears.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(true)
@@ -52,21 +52,22 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await list.input({ key: box?.key ?? '', text: 'Where do I do that?' })
   const toWork = (await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('Where do I do that?')))) ?? ''
   expect(toWork).toContain('Submit it to the plugin directory.')
-  expect(toWork).toContain('does not settle your ask, so it stays open')
-  // At work on the reply, the ask is drawn in the work's purple, not as waiting on the person, its buttons still there
+  expect(toWork).toContain('does not settle your ask by itself')
+  // At work on the reply, the ask is drawn in the work's purple, not as waiting on the person: its question with the reply under it,
+  // and no buttons, box or send, on the small card and in Details
   expect((await list.find({ type: 'Text', text: 'Submit it to the plugin directory.' }))?.props.color).toBe('#8A63F0')
   expect(await ears.find({ type: 'Text', text: 'Needs you now' })).toBeUndefined()
-  expect(await ears.find({ type: 'Text', text: 'Acting on your reply; it still asks' })).toBeDefined()
-  expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Submitted')).toBe(true)
-  const fresh = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
-  expect(fresh?.key).toBe(box?.key)
-  expect(fresh?.props.value ?? '').toBe('')
-  const waiting = '✓ You replied “Where do I do that?” · it reads this at its next step; it still asks this'
+  expect(await ears.find({ type: 'Text', text: 'Acting on your reply' })).toBeDefined()
+  for (const pane of [list, ears]) {
+    expect((await pane.findAll({ type: 'Button' })).some(b => b.props.label === 'Submitted' || b.props.label === 'Not now')).toBe(false)
+    expect((await pane.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(false)
+  }
+  const waiting = '✓ You replied “Where do I do that?” · it reads this at its next step'
   expect(await until(async () => list.find({ type: 'Text', text: waiting }))).toBeDefined()
   expect(await until(async () => ears.find({ type: 'Text', text: waiting }))).toBeDefined()
   for await (const _ of $.turn.step({ turnId: 'turn-9', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a2' })) void _
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Where do I do that?” · it is acting on it; it still asks this' }))).toBeDefined()
-  // The work asks again: amber again, with an empty box
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Where do I do that?” · it is acting on it' }))).toBeDefined()
+  // The work asks again: amber again, with its answers back and an empty box
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k5b', agentId: 'a2', text: 'It is under Manage, then Submit new. Done?' } as never)
   expect((await list.find({ type: 'Text', text: 'It is under Manage, then Submit new. Done?' }))?.props.color).toBe('#E5A50A')
   // With no buttons of its own, every ask offers Done and Not now
@@ -196,7 +197,7 @@ test('an ask outlives the work that made it: amber after the work ends, with or 
   await list.unmount()
 })
 
-test('a reply in words that does not settle an ask keeps it open, and the card active, until it is settled: the 13 Nov "Show me images first." to work that asked "Release it?" and handed in its report', async ($, on) => {
+test('a reply in words that does not settle an ask keeps it, and the card active, with nothing to press while the work acts on it, until it is settled: the 13 Nov "Show me images first." to work that asked "Release it?" and handed in its report', async ($, on) => {
   const { resumed, clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'second round of terminal fixes', wait: false, origin: composer })
@@ -213,22 +214,27 @@ test('a reply in words that does not settle an ask keeps it open, and the card a
   await clock.advance(60_000)
   expect(await until(async () => list.find({ type: 'Text', text: ASK }))).toBeDefined()
   expect(await labels()).toContain('Release it')
-  // The person replies in their own words, asking for something first: the work is started again with it and told the ask stays open
+  // The person replies in their own words, asking for something first: the work is started again with it and told the ask stays
   const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await list.input({ key: box?.key ?? '', text: 'Show me images first.' })
   const told = (await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('in their own words: Show me images first.')))) ?? ''
-  expect(told).toContain('stays open')
+  expect(told).toContain('does not settle your ask by itself')
   expect(told).toContain('this answer starts you again')
-  // The card stays among the running cards, at work, with its ask, its buttons and the reply under it; nothing is under Finished
-  expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Show me images first.” · it reads this at its next step; it still asks this' }))).toBeDefined()
+  // The card stays among the running cards, at work, with its question and the reply under it, and no buttons, box or send;
+  // nothing is under Finished
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Show me images first.” · it reads this at its next step' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: ASK })).toBeDefined()
-  expect(await labels()).toContain('Release it')
+  expect(await labels()).not.toContain('Release it')
+  expect((await list.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(false)
   expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
   // Woken from the timer, the work had no panel tools: it ran no step the mod saw, and ended with the ask as its report's first line.
-  // Its ask stays open and its card active; it is not started a second time with the same reply
+  // Its ask stays open and its card active, now with its answers back as it waits on the person again; it is not started a second
+  // time with the same reply
   await $.turn.complete({ answer: 'Release it? (Answers: Release it / Not now.) Here are the images.', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(60_000)
   expect(await list.find({ type: 'Text', text: ASK })).toBeDefined()
+  expect(await labels()).toContain('Release it')
+  expect((await list.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(true)
   expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
   expect(resumed.filter(line => line.startsWith('a1: '))).toHaveLength(1)
   // More words from the person keep it open still; Release it settles it, and the card finishes once the work has acted on it
@@ -248,7 +254,67 @@ test('a reply in words that does not settle an ask keeps it open, and the card a
   await list.unmount()
 })
 
-test('work acting on a reply in words to an ask it keeps open is purple, in the panel and the terminal, with its ask and buttons; stopped again it is amber: the 13 Nov "Explain to me the exact differences first." to "Release PR 54 to production?"', async ($, on) => {
+test('once the person has answered, by a button or in their own words, the card keeps no buttons, box or send; the same ask asked again comes back fresh, in the panel and the chat: the 14 Nov "I would say maybe stop it" to "Should I stop the depth job?"', async ($, on) => {
+  const { appended, logged, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'why the M4 is stuck', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Why the M4 is stuck', prompt: 'why the M4 is stuck' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const ASK = 'Should I stop the depth job on your other Mac?'
+  const DETAILS = 'Your other Mac is using 42 of its 44 GB of swap.'
+  const inputs = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => /-reply-/.test(one.key ?? ''))
+  const labels = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label))
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, details: DETAILS, choices: ['Stop it', 'Not now'] } as never)
+  expect(await until(async () => logged.find(line => line.includes(ASK)))).toBeDefined()
+  expect(await labels()).toEqual(expect.arrayContaining(['Stop it', 'Not now']))
+  // Typed in their own words: purple at once, the question with the reply under it, and no buttons, box, send or details
+  const [box] = await inputs()
+  await list.input({ key: box?.key ?? '', text: 'I would say maybe stop it and then tell it to release it' })
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('maybe stop it')))).toBeDefined()
+  expect(await until(async () => ((await list.find({ type: 'Text', text: ASK }))?.props.color === '#8A63F0' ? true : undefined))).toBe(true)
+  expect(await list.find({ type: 'Text', text: /^✓ You replied “I would say maybe stop it/ })).toBeDefined()
+  expect((await labels()).filter(label => label === 'Stop it' || label === 'Not now')).toEqual([])
+  expect(await inputs()).toEqual([])
+  expect(await list.find({ type: 'Text', text: DETAILS })).toBeUndefined()
+  // The chat is told it acts on the reply, not that it still asks
+  const toChat = (await until(async () => logged.find(line => line.includes('replied to the work "Why the M4 is stuck"')))) ?? ''
+  expect(toChat).toContain('asks again if it still needs')
+  expect(toChat).not.toContain('It still asks')
+  // The work asks the same again: amber, its answers and an empty box back, and the chat shown it afresh
+  await clock.advance(1000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: ASK, details: DETAILS, choices: ['Stop it', 'Not now'] } as never)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: ASK }))?.props.color === '#E5A50A' ? true : undefined))).toBe(true)
+  expect(await labels()).toEqual(expect.arrayContaining(['Stop it', 'Not now']))
+  const [again] = await inputs()
+  expect(again?.props.value ?? '').toBe('')
+  expect(again?.key).not.toBe(box?.key)
+  expect(await list.find({ type: 'Text', text: /^✓ You replied/ })).toBeUndefined()
+  expect(await until(async () => (logged.filter(line => line.includes(ASK) && !line.startsWith('✓')).length === 2 ? true : undefined))).toBe(true)
+  // A button pressed: the ask goes whole, nothing left to press or type
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop it')?.key ?? '' })
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Stop it"')))).toBeDefined()
+  expect(await until(async () => ((await list.find({ type: 'Text', text: ASK })) ? undefined : true))).toBe(true)
+  expect((await labels()).filter(label => label === 'Stop it' || label === 'Not now')).toEqual([])
+  expect(await inputs()).toEqual([])
+  expect(await until(async () => list.find({ type: 'Text', text: '✓ You answered “Stop it” · it reads this at its next step' }))).toBeDefined()
+  // Typed in the chat and passed on by it, the same: purple, nothing to press or type; asked again, shown in the chat afresh
+  await clock.advance(1000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: ASK, details: DETAILS, choices: ['Stop it', 'Not now'] } as never)
+  expect(await until(async () => (logged.filter(line => line.includes(ASK) && !line.startsWith('✓')).length === 3 ? true : undefined))).toBe(true)
+  await $.prompt.submit({ text: 'Show me the swap first', wait: false, origin: composer })
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 't1', to: 'a1', message: 'Their reply: “Show me the swap first”' } as never)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: ASK }))?.props.color === '#8A63F0' ? true : undefined))).toBe(true)
+  expect((await labels()).filter(label => label === 'Stop it' || label === 'Not now')).toEqual([])
+  expect(await inputs()).toEqual([])
+  await clock.advance(1000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a1', text: ASK, details: DETAILS, choices: ['Stop it', 'Not now'] } as never)
+  expect(await until(async () => (logged.filter(line => line.includes(ASK) && !line.startsWith('✓')).length === 4 ? true : undefined))).toBe(true)
+  expect(await labels()).toEqual(expect.arrayContaining(['Stop it', 'Not now']))
+  expect((await inputs()).length).toBe(1)
+  await list.unmount()
+})
+
+test('work acting on a reply in words to an ask it keeps open is purple, in the panel and the terminal, with its question and no buttons; stopped again it is amber with them: the 13 Nov "Explain to me the exact differences first." to "Release PR 54 to production?"', async ($, on) => {
   // What the engine lists of the work, as the terminal's engine does: running while it waits on a command it left running
   const agents: Record<string, string> = {}
   const { resumed, clock } = world(on, { agents })
@@ -277,7 +343,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
     deskEdges: await edges(desk),
     termEdges: await inTerminal(LIST, edges),
     buttons: [await desk.findAll({ type: 'Button' }), await inTerminal(LIST, pane => pane.findAll({ type: 'Button' })), await inTerminal(BAND, pane => pane.findAll({ type: 'Button' }))].map(all => all.map(b => b.props.label)),
-    heading: (await details.find({ type: 'Text', text: 'Needs you now' })) ? 'needs' : (await details.find({ type: 'Text', text: 'Acting on your reply; it still asks' })) ? 'acting' : 'none',
+    heading: (await details.find({ type: 'Text', text: 'Needs you now' })) ? 'needs' : (await details.find({ type: 'Text', text: 'Acting on your reply' })) ? 'acting' : 'none',
   })
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Release it', 'Not now'] } as never)
   await $.turn.complete({ answer: 'Release PR 54 to production? (Answers: Release it / Not now.)', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' } as never)
@@ -288,7 +354,8 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
     return l.desk === AMBER && l.term === AMBER && l.band === AMBER && l.heading === 'needs' && l.deskEdges.includes(AMBER) && l.termEdges.includes(AMBER) ? l : undefined
   })
   expect(before ?? (await look())).toMatchObject({ desk: AMBER, term: AMBER, band: AMBER, heading: 'needs' })
-  // The reply in words starts it again: purple while it acts on it, its ask and both buttons still there to press
+  // The reply in words starts it again: purple while it acts on it, its question still there and nothing to press, in the panel,
+  // in Details, in the terminal's panel and in its band
   const box = (await desk.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await desk.input({ key: box?.key ?? '', text: 'Explain to me the exact differences first.' })
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('Explain to me the exact differences first.')))).toBeDefined()
@@ -302,7 +369,9 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
   expect(now.termEdges.filter(c => c === AMBER)).toEqual([])
   expect(now.deskEdges.some(isPurple)).toBe(true)
   expect(now.termEdges.some(isPurple)).toBe(true)
-  for (const labels of now.buttons) expect(labels).toEqual(expect.arrayContaining(['Release it', 'Not now']))
+  for (const labels of now.buttons) expect(labels.filter(label => label === 'Release it' || label === 'Not now')).toEqual([])
+  expect((await details.findAll({ type: 'Button' })).some(b => b.props.label === 'Release it')).toBe(false)
+  expect((await details.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(false)
   // Its turn ends while a command it started in the background still runs, the engine listing it as running: it has not stopped,
   // and stays purple
   agents.a1 = 'running'
@@ -325,6 +394,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
     return l.desk === AMBER && l.term === AMBER && l.band === AMBER && l.heading === 'needs' && !l.deskEdges.some(isPurple) && !l.termEdges.some(isPurple) ? l : undefined
   })
   expect(after ?? (await look())).toMatchObject({ desk: AMBER, term: AMBER, band: AMBER, heading: 'needs' })
+  for (const labels of (await look()).buttons) expect(labels).toEqual(expect.arrayContaining(['Release it', 'Not now']))
   expect(await desk.find({ type: 'Text', text: '1 thing needs you' })).toBeDefined()
   // Release it pressed goes back to the work and the ask goes; the card is at work on it, purple, until the work is done
   await desk.press({ key: (await desk.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' })
@@ -535,6 +605,11 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)))
   await list.press({ key: cancel?.key ?? '' })
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${other}.json`) ? undefined : true))).toBe(true)
+  // Its place says what was done, for a minute
+  expect(await until(async () => list.find({ type: 'Text', text: 'You cancelled · nothing was saved, and what asked for it stops without it' }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'The admin password of this Mac' })).toBeDefined()
+  await clock.advance(61_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'The admin password of this Mac' })) ? undefined : true))).toBe(true)
 })
 
 test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {

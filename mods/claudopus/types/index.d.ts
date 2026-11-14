@@ -66,9 +66,9 @@ export type Todo = {
   waits?: string[]
   // What it needs the person's own hands for now, said with the `ask` tool: what to do, and the exact text to copy for it. Its card
   // stands out with the ask in view until the work clears it or ends
-  // `replied`: the person's reply in their own words that did not settle it; the ask stays open while the work acts on it, until a button, the work clearing it or asking again
+  // `replied`: the person's reply in their own words that did not settle it; the ask stays while the work acts on it, with nothing to press or type, until the work clears it or asks again, or ends with it open, when every answer is back. `isWaking`: the work had ended and is being started again with the reply
   // `isCommand`: `copy` is a command the person types in a terminal opened in `cwd`. `choices` are buttons the person answers with, sent back to `from`, the agent that asked (a helper's ask shows on its work's card). `pictures` are the picture files the ask is about, shown with it in the chat. `details` is what the ask is about, in full, shown with it on the card and in the chat
-  ask?: { text: string; details?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; replied?: { text: string; at: number } }
+  ask?: { text: string; details?: string; copy?: string; isCommand?: boolean; cwd?: string; choices?: string[]; pictures?: string[]; from?: string; at: number; replied?: { text: string; at: number; isWaking?: boolean } }
   // Admin commands it, or a helper of it, wants to run, each held until the person presses Allow or Deny on this card: the Mac
   // (`here` or an ssh host), the exact command, the agent that runs it, and whether Allow covers the whole piece of work
   admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean }[]
@@ -115,7 +115,7 @@ export type Todo = {
 
 // What one chat shares with the panels of the others, in ~/.claude/claudopus/live/<chat id>.json: its running work, and when it last
 // said so. `host` is the Mac it was fetched from, empty for this one
-export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; prompts?: Prompt[]; link?: Link }
+export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; prompts?: Prompt[]; answeredPrompts?: Prompt[]; link?: Link }
 // What opens a chat in the Claude app: its Remote Control id (session_…), which opens it from any Mac signed in to the same account,
 // and the app's own id for it (local_…), which opens it only on the Mac it runs on
 export type Link = { bridge: string; app: string }
@@ -123,7 +123,28 @@ export type Link = { bridge: string; app: string }
 // The app's own prompt open in a chat and waiting on the person: allow a command or a tool, answer its question, approve its plan.
 // `id` is the tool call's, `text` the prompt's own short description, `title` the work it came from when not the chat's own thread,
 // `at` when it opened. `link` on Shared opens that chat in the Claude app on its own Mac
-export type Prompt = { id: string; text: string; title?: string; at: number }
+// `kind` says what the person does (allow a call, answer a question, approve a plan), `detail` what exactly (the command, the message,
+// the page), `yes` and `no` what each answer does. Once answered it moves to Shared's `answeredPrompts`: `answered` is what the person
+// did (yes, no, an answer to a question, or nothing as it ended first), `isRunning` while an allowed call still runs, `endedAt` when
+// it ended, after which it shows a minute more; `done` how its end is said once allowed ("it was sent"), `isCut` an allowed call
+// that was stopped before it finished; `isHeld` while the chat that raised it waits for a press on its card's Yes or No, which
+// answers it as Claude Code's own box would
+export type Prompt = {
+  id: string
+  text: string
+  title?: string
+  at: number
+  kind?: 'allow' | 'question' | 'plan'
+  detail?: string
+  yes?: string
+  no?: string
+  done?: string
+  answered?: 'yes' | 'no' | 'stopped'
+  isCut?: boolean
+  isRunning?: boolean
+  endedAt?: number
+  isHeld?: boolean
+}
 
 // The card that has the pane to itself, by id; empty while the small cards show
 // `open` names what is unfolded in that card's chat: a run of tool steps by the number of steps before it, a long message by that number negated less one

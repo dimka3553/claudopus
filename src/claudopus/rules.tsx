@@ -194,9 +194,9 @@ const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, ans
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
 const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks.`
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
-const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to the work "${title}" on its card: ${said}. It still asks, while it acts on that.`
+const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to the work "${title}" on its card: ${said}. It acts on that now, and asks again if it still needs {name}.`
 // What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
-const REPLY_HOLDS = `That reply does not settle your ask, so it stays open on {name}'s card while you act on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still waits after you have done what they said, ask it again.`
+const REPLY_HOLDS = `That reply does not settle your ask by itself: act on it. Their card shows your question with their reply under it and nothing more to press or type while you do. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still waits after you have done what they said, ask it again, which brings back its answers.`
 // What work that had ended is told when the person answers its ask on the card: the answer starts it again
 const RESUMED_BY_ANSWER = `You had ended; this answer starts you again. Carry the work on with it, then end with your report as before.`
 // What the chat's model reads, and the person sees as a notice, when that work could not be started again with the answer

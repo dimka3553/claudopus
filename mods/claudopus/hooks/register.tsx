@@ -93,11 +93,14 @@ const RELOAD_GRACE = 30_000
 const pauseFrom = (one: { id: string; endedAt: number }) => Math.max(one.endedAt, lateFrom.get(`${one.id}:${one.endedAt}`) ?? 0)
 // Whether ended work is still in that pause at a time: a card that ended in the future, as from another clock, is not
 const isLingering = (one: { id: string; status: string; endedAt: number }, at: number) => one.status !== 'working' && one.endedAt > 0 && at >= pauseFrom(one) && at - pauseFrom(one) < LINGER
-// Work acting on the person's reply in their own words to an ask it keeps open: at work, drawn in the work's purple, with the ask
-// still there to answer. Only once it stops again with the ask open does it wait on the person
-const isActingOnReply = (one: { status: string; ask?: { replied?: unknown } }) => one.status === 'working' && Boolean(one.ask?.replied)
+// Work acting on the person's reply in their own words to an ask it keeps open: at work, drawn in the work's purple, its question
+// with the reply under it and nothing to press or type, as the person has answered. So from the moment the reply is sent: ended
+// work being started again with it (isWaking), and another chat's work until its own chat has taken the reply (actingOn). Only
+// once it stops again with the ask open does it wait on the person, with every answer back
+const isActingOnReply = (one: { id?: string; status: string; ask?: { at?: number; replied?: { isWaking?: boolean } } }) =>
+  Boolean(one.ask) && ((Boolean(one.ask?.replied) && (one.status === 'working' || Boolean(one.ask?.replied?.isWaking))) || actingOn.has(`${one.id}:${one.ask?.at}`))
 // An admin command held for the person's press needs them whatever else the work does
-const needsPerson = (one: { status: string; ask?: { replied?: unknown }; admins?: unknown[] }) => Boolean(one.admins?.length) || (Boolean(one.ask) && !isActingOnReply(one))
+const needsPerson = (one: { id?: string; status: string; ask?: { at?: number; replied?: { isWaking?: boolean } }; admins?: unknown[] }) => Boolean(one.admins?.length) || (Boolean(one.ask) && !isActingOnReply(one))
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set<string>()
 // The engine's list of agents is read again this often, and the minutes move on
@@ -515,9 +518,9 @@ const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, ans
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
 const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks.`
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
-const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to the work "${title}" on its card: ${said}. It still asks, while it acts on that.`
+const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to the work "${title}" on its card: ${said}. It acts on that now, and asks again if it still needs {name}.`
 // What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
-const REPLY_HOLDS = `That reply does not settle your ask, so it stays open on {name}'s card while you act on it. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still waits after you have done what they said, ask it again.`
+const REPLY_HOLDS = `That reply does not settle your ask by itself: act on it. Their card shows your question with their reply under it and nothing more to press or type while you do. Once it is settled, clear it with the \`ask\` tool and empty \`text\`; if it still waits after you have done what they said, ask it again, which brings back its answers.`
 // What work that had ended is told when the person answers its ask on the card: the answer starts it again
 const RESUMED_BY_ANSWER = `You had ended; this answer starts you again. Carry the work on with it, then end with your report as before.`
 // What the chat's model reads, and the person sees as a notice, when that work could not be started again with the answer
@@ -830,9 +833,10 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // Work that ends keeps its ask: what it needs of the person's hands outlives it, and goes only on their answer
 // What it kept of its own background work goes with it: started again, it keeps what it starts from then
 // What the person allowed it under "Ask once per piece of work" ends with it
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, status, endedAt: at, bg: undefined, waitsSince: undefined })
+// A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
 // a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
 // such command: it may run until stopped
@@ -4390,6 +4394,9 @@ const DETAILS_IN_RELAY = 2000
 const sentReplies = new Map<string, Sent>()
 // An answer on its way, by the work it was written into: that work's next step reads it, and the card it belongs to says so
 const pending = new Map<string, string>()
+// Asks of another chat's work replied to here in words that hold them, by work and when it asked: acted on from the moment the reply
+// is left, until that chat's own file carries the reply
+const actingOn = new Map<string, string>()
 // The asks of this chat's work already answered, by work and when it asked
 const answeredAsks = new Set<string>()
 // Answers on their way, so a press hook can wait for the one its press started (a button's handler does not await it)
@@ -4439,8 +4446,9 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   if (told && !told.deny) return void (writtenIn(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line }), redraw($))
   await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line })
 }
-// A reply in the person's own words that does not settle the ask: the ask stays open on the card, with the reply under it, and the
-// work is told so; its card stays among the running cards while the work acts on it. A button pressed later still answers it
+// A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
+// and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its
+// buttons and box go at once, and come back only when the work asks again, or ends with the ask still open
 const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, target: string) => {
   // The same words twice at once count once; typed again later, after an earlier reply, they go again
   const key = `${one.id}:${ask.at}:${ask.text}:reply:${ask.replied?.at ?? ''}:${said}`
@@ -4448,17 +4456,21 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   answeredAsks.add(key)
   const at = await $.clock.now()
   let isHeld = false
+  // Acted on from now while the work is started again with it; never on a card no run of its own will end
+  const listed = await read($, todos)
+  const isWaking = listed.find(card => card.id === one.id)?.status !== 'working' && listed.find(card => card.id === target)?.status !== 'working'
   await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
+    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
-  // The box keeps its place, emptied, so the focus does not fall onto the ask's first button, which a stray key would press
+  // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
   drafts.delete(one.id)
   freeTimes()
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line })
   redraw($)
-  if (inChat.has(one.id)) void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`)))
+  // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
+  if (inChat.has(one.id)) (inChat.delete(one.id), void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
   const to = `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
@@ -4481,6 +4493,8 @@ const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Se
 const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
+  // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
+  await update($, todos, list => list.map(card => (card.id === one.id && card.ask?.replied?.text === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? { ...card, ask: { ...card.ask, replied: { ...card.ask.replied, isWaking: true } } } : card)))
   sentReplies.set(one.id, { ...sent, to: 'work' })
   redraw($)
   // One message for a work: a second answer for the same one joins the first
@@ -4507,7 +4521,7 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
-    : await $.session.send({ to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    : await sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (!r.isDelivered) return wakeFailed($, wake, r.reason)
   // Only once it is on its way: work at work when the mod's own message reaches it would take that message for the chat's note
   await wakeCard($, wake.target)
@@ -4531,6 +4545,9 @@ const wakeCard = async ($: EngineInterface, target: string) => {
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
   if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
   await log($, `work ${target} not started again with an answer: ${reason}`)
+  // An ask its reply held waits on the person again, every answer back
+  const ids = new Set(answers.map(({ one }) => one.id))
+  await update($, todos, list => list.map(card => (ids.has(card.id) && card.ask?.replied?.isWaking ? { ...card, ask: { ...card.ask, replied: { text: card.ask.replied.text, at: card.ask.replied.at } } } : card)))
   for (const { one, sent } of answers) {
     sentReplies.set(one.id, { ...sent, to: 'chat' })
     const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))
@@ -4576,9 +4593,10 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   if (!isSent) return void answeredAsks.delete(a.key)
   // Words that do not settle an ask with buttons of its own leave it open, as a reply on the card does; a later answer still counts
   const isHeld = !settles(a.ask, a.words, true)
+  // Either way the ask is done with in the chat: the work asking again is sent to it afresh
   if (isHeld) answeredAsks.delete(a.key)
-  else inChat.delete(a.card.id)
-  await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at } } : undefined } : one)))
+  inChat.delete(a.card.id)
+  await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   drafts.delete(a.card.id)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
   writtenIn(to, a.card.id)
@@ -4620,7 +4638,7 @@ const sentLine = (one: Todo, now: number) => {
   const sent = sentReplies.get(one.id)
   // A held reply this copy did not send (before a reload, or from another chat) is still said under its ask
   const replied = one.ask?.replied
-  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You replied “${cut(replied.text, 60)}”; it still asks this`
+  if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You replied “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · it is acting on it' : '; it still asks this'}`
   if (!sent) return ''
   if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}”. That Mac could not be reached; answer it in its own chat` : ''
   const newer = lineOf(one) !== sent.line
@@ -4632,7 +4650,7 @@ const sentLine = (one: Todo, now: number) => {
     chat: 'left in the chat, which carries the work on',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose work reads it at its next step`,
   }[sent.to]
-  if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'it is acting on it' : 'it has read it') : how}; it still asks this`
+  if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'it is acting on it' : 'it has read it') : how}${isActingOnReply(one) ? '' : '; it still asks this'}`
   return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
 }
 
@@ -4683,10 +4701,13 @@ const shareMine = async ($: EngineInterface) => {
     myLink = await readLink($, id).catch(() => myLink)
   }
   const cards = shareable(await read($, todos), now)
-  const prompts: Prompt[] = waiting.map(({ id: one, text, title: from, at }) => ({ id: one, text, ...(from ? { title: from } : {}), at }))
-  const sign = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}`
+  const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
+  const prompts: Prompt[] = waiting.map(shareOf)
+  // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open
+  const answeredNow: Prompt[] = answeredShown(now).map(shareOf)
+  const sign = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
-  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(prompts.length ? { prompts } : {}), ...(myLink ? { link: myLink } : {}) }
+  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(prompts.length ? { prompts } : {}), ...(answeredNow.length ? { answeredPrompts: answeredNow } : {}), ...(myLink ? { link: myLink } : {}) }
   // Ended work is written apart, under `ended`: a chat still running a version from before ended work was shared reads `cards` only,
   // and would show what is there as running for good
   const isLive = (one: Todo) => one.status === 'working' || Boolean(one.ask)
@@ -4815,7 +4836,7 @@ const readOthers = async ($: EngineInterface) => {
     // A card gone from its chat's list went with that chat, which is closed: nothing reads an answer left for it, so its ask goes too
     if (!s?.cards.some(card => remoteId(s, card.id) === key) && !vanished.has(key)) vanished.set(key, { chat: was.chat, card: { ...was.card, status: 'done', endedAt: now, ask: undefined }, at: now, of: was.of })
   }
-  for (const s of found) for (const card of s.cards.filter(one => one.status === 'working')) lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card, at: now, of: { ...s, cards: [], prompts: undefined } })
+  for (const s of found) for (const card of s.cards.filter(one => one.status === 'working')) lastRunning.set(remoteId(s, card.id), { chat: chatKey(s), card, at: now, of: { ...s, cards: [], prompts: undefined, answeredPrompts: undefined } })
   for (const [key, one] of [...vanished]) {
     const s = present.get(one.chat)
     if (!open.has(one.chat) || now - one.at > LINGER + LOOK_EVERY || s?.cards.some(card => remoteId(s, card.id) === key)) vanished.delete(key)
@@ -4976,6 +4997,40 @@ const leaveHere = ($: EngineInterface, folder: string, name: string, body: unkno
     .write(`${liveDir()}/${folder}/${name}.part`, JSON.stringify(body))
     .then(() => $.process.run(['mv', '-f', `${liveDir()}/${folder}/${name}.part`, `${liveDir()}/${folder}/${name}.json`]))
     .catch(err => ({ exitCode: -1, stderr: String(err) }))
+const leaveAnswer = async ($: EngineInterface, chat: { id: string; host: string }, answer: Answer) => {
+  const name = `${answer.at}-${Math.random().toString(36).slice(2, 8)}`
+  const mac = chat.host ? macs.find(m => m === chat.host) : undefined
+  const folder = `${ANSWERS}/${chat.id}`
+  return !chat.host
+    ? await leaveHere($, folder, name, answer)
+    : mac
+      ? await $.process
+          .run(ssh(mac, `d=~/.claude/claudopus/${LIVE_DIR}/${folder} && mkdir -p $d && cat > $d/${name}.part && mv $d/${name}.part $d/${name}.json`), { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
+          .catch(err => ({ exitCode: -1, stderr: String(err) }))
+      : isKey(chat.host) && pushedFrom.has(chat.host)
+        ? await leaveHere($, `${OUTBOX}/${chat.host}`, name, { ...answer, chat: chat.id })
+        : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
+}
+// A Yes or No pressed here on another chat's prompt, left for that chat as an answer whose card is `prompt:<its id>`: that chat answers
+// its prompt as if pressed there. Until that chat's file moves it to answered, its card here says what was pressed in place of buttons
+const PROMPT_ANSWER = 'prompt:'
+const promptsPressed = new Map<string, 'yes' | 'no'>()
+const answerPromptElsewhere = async ($: EngineInterface, c: Shared, p: Prompt, said: 'yes' | 'no') => {
+  presses += 1
+  const key = `${c.host}:${c.chat}:${p.id}`
+  if (promptsPressed.has(key) || !/^[A-Za-z0-9_-]+$/.test(c.chat)) return
+  promptsPressed.set(key, said)
+  redraw($)
+  const at = await $.clock.now()
+  const r = await leaveAnswer($, { id: c.chat, host: c.host }, { card: `${PROMPT_ANSWER}${p.id}`, choice: said, isReply: false, ask: p.text, askAt: p.at, at })
+  // Said for a minute at most: that chat's file has moved it on by then, or the answer came too late and its buttons show again
+  $.clock.after(PROMPT_SHOWN, () => void (promptsPressed.get(key) === said && (promptsPressed.delete(key), redraw($))))
+  if (r.exitCode !== 0) {
+    promptsPressed.delete(key)
+    redraw($)
+    await log($, `answer to a prompt of the chat ${c.chat}${c.host ? ` on ${c.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)
+  }
+}
 const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, isReply: boolean) => {
   const ask = one.ask
   const said = choice.trim()
@@ -4990,24 +5045,15 @@ const answerElsewhere = async ($: EngineInterface, one: Todo, choice: string, is
   if (!isHeld) replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   if (isReply) freeTimes()
   answeredHere.add(mark)
+  if (isHeld) actingOn.set(`${one.id}:${ask.at}`, said)
   const at = await $.clock.now()
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line: lineOf(one), isHeld })
   redraw($)
   const answer: Answer = { card: chat.agent, choice: said, isReply, ask: ask.text, askAt: ask.at, at }
-  const name = `${at}-${Math.random().toString(36).slice(2, 8)}`
-  const mac = chat.host ? macs.find(m => m === chat.host) : undefined
-  const folder = `${ANSWERS}/${chat.id}`
-  const r = !chat.host
-    ? await leaveHere($, folder, name, answer)
-    : mac
-      ? await $.process
-          .run(ssh(mac, `d=~/.claude/claudopus/${LIVE_DIR}/${folder} && mkdir -p $d && cat > $d/${name}.part && mv $d/${name}.part $d/${name}.json`), { stdin: JSON.stringify(answer), timeoutMs: 15_000 })
-          .catch(err => ({ exitCode: -1, stderr: String(err) }))
-      : isKey(chat.host) && pushedFrom.has(chat.host)
-        ? await leaveHere($, `${OUTBOX}/${chat.host}`, name, { ...answer, chat: chat.id })
-        : { exitCode: -1, stderr: 'that Mac is no longer named in config.json' }
+  const r = await leaveAnswer($, chat, answer)
   if (r.exitCode !== 0) {
     answeredHere.delete(mark)
+    actingOn.delete(`${one.id}:${ask.at}`)
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'lost', at, line: lineOf(one) })
     redraw($)
     await log($, `answer for the chat ${chat.id}${chat.host ? ` on ${chat.host}` : ''} not left: ${r.stderr.trim().slice(0, 160)}`)
@@ -5031,6 +5077,12 @@ const readAnswers = async ($: EngineInterface) => {
     const answer = answerOf(await readOr($, path))
     await $.process.run(['rm', '-f', path]).catch(() => undefined)
     const now = await $.clock.now()
+    // A Yes or No another chat pressed on this chat's prompt answers it while it is still held; one too late does nothing
+    if (answer?.card.startsWith(PROMPT_ANSWER)) {
+      const isTaken = (answer.choice === 'yes' || answer.choice === 'no') && now - answer.at <= ANSWER_KEPT && answerPrompt($, answer.card.slice(PROMPT_ANSWER.length), answer.choice)
+      if (!isTaken) await log($, `answer to a prompt from another chat dropped: it no longer waits`)
+      continue
+    }
     const card = answer ? (await read($, todos)).find(one => one.id === answer.card && !one.parentId) : undefined
     const isSame = Boolean(answer && card?.ask && (answer.askAt ? answer.askAt === card.ask.at : answer.ask === card.ask.text))
     // A reply in words to work whose ask was answered a moment ago, as a second message after a press, still reaches it
@@ -5384,6 +5436,37 @@ const boxWording = (one: Record<string, unknown>): string | undefined => {
   return undefined
 }
 let boxes: Asked[] = []
+// What the person just did with a box or an admin command, shown a minute at the top of the panel where it was: what they did and
+// what happens now, so nothing that needed them just vanishes
+type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean }
+let doneNotes: DoneNote[] = []
+const DONE_SHOWN = 60_000
+const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
+  const at = await $.clock.now()
+  doneNotes = [...doneNotes.filter(one => one.id !== note.id && at - one.at < DONE_SHOWN), { ...note, at }].slice(-6)
+  $.ui.invalidate('ui.render')
+  // Drawn again as its minute ends, so it goes with nothing else to redraw the panel
+  $.clock.after(DONE_SHOWN + 100, () => $.ui.invalidate('ui.render'))
+}
+const doneNotesPart = (ui: Ui, at: number) =>
+  doneNotes
+    .filter(one => at - one.at < DONE_SHOWN)
+    .map(one => (
+      <ui.Box key={`done-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+        <ui.Box width={1} flexShrink={0} backgroundColor={one.isOn ? LIVE : FILL} />
+        <ui.Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
+          <ui.Text bold wrap="truncate-end">{one.head}</ui.Text>
+          <ui.Text wrap="wrap" color={one.isOn ? LIVE : undefined} bold={one.isOn}>{one.said}</ui.Text>
+          {one.what ? <ui.Text dimColor wrap="wrap">{one.what}</ui.Text> : null}
+        </ui.Box>
+      </ui.Box>
+    ))
+// What a box asks for, in a few words, for its note once answered
+const boxHead = (text: string) => {
+  const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
+  const mac = text.match(/admin password of (.+?) to run/)?.[1]
+  return mac ? `The admin password of ${mac}` : name ? `The key ${name}` : 'A key to save'
+}
 // What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
 const boxDrafts = new Map<string, string>()
 // A line under a box: what went wrong with what was sent
@@ -5473,7 +5556,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   }
   const request = `${boxesDir()}/${id}.json`
   // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
-  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id))
+  if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'It was no longer waiting · nothing was saved'))
   const escaped = value.replace(/[\\"]/g, '\\$&')
   const r = await $.process
     .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
@@ -5489,17 +5572,21 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   } else {
     boxSent.add(id)
     boxSaid.delete(id)
-    boxes = boxes.filter(one => one.id !== id)
+    const one = boxes.find(other => other.id === id)
+    boxes = boxes.filter(other => other.id !== id)
+    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: "You gave it · it is in this Mac's keychain, and what asked for it goes on now", what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   $.ui.invalidate('ui.render')
 }
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
-const cancelBox = async ($: EngineInterface, id: string) => {
+const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
   boxDrafts.delete(id)
   boxSent.add(id)
-  boxes = boxes.filter(one => one.id !== id)
+  const one = boxes.find(other => other.id === id)
+  boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
+  if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said, what: '' })
   $.ui.invalidate('ui.render')
 }
 
@@ -5777,9 +5864,26 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await log($, `admin command on ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
   return said
 }
-const answerGate = ($: EngineInterface, id: string, said: GateSaid) => {
+const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
   presses += 1
-  if (gateHeld.has(id)) gateSaid.set(id, said)
+  const id = gate.id
+  if (gateHeld.has(id)) {
+    gateSaid.set(id, said)
+    void noteDone($, {
+      id: `gate-${id}`,
+      head: `An admin command on ${gate.host === 'here' ? 'this Mac' : gate.host}`,
+      said:
+        said === 'deny'
+          ? 'You denied it · it did not run, and the work was told'
+          : said === 'always'
+            ? 'You always allow this command · it runs now, and will not ask again'
+            : gate.isWork
+              ? "You allowed this work's admin commands · it runs now"
+              : 'You allowed it once · it runs now',
+      what: cut(oneLine(gate.command), 200),
+      isOn: said !== 'deny',
+    }).catch(() => undefined)
+  }
   redraw($)
 }
 
@@ -5827,11 +5931,12 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
     <ui.Box backgroundColor={FILL} paddingLeft={2}>
       <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
     </ui.Box>
+    <ui.Text wrap="wrap">{`Allow: it runs with admin rights${gate.isWork ? ', and this work runs its next admin commands without asking' : ''}. Deny: it does not run, and the work is told.`}</ui.Text>
     {gateHeld.has(gate.id) && !isElsewhere ? (
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        <ui.Button key={`${key}-once-${presses}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate.id, 'once')} />
-        <ui.Button key={`${key}-always-${presses}`} label="Always allow this command" onPress={() => answerGate($, gate.id, 'always')} />
-        <ui.Button key={`${key}-deny-${presses}`} label="Deny" onPress={() => answerGate($, gate.id, 'deny')} />
+        <ui.Button key={`${key}-once-${presses}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate, 'once')} />
+        <ui.Button key={`${key}-always-${presses}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always')} />
+        <ui.Button key={`${key}-deny-${presses}`} label="Deny" onPress={() => answerGate($, gate, 'deny')} />
       </ui.Box>
     ) : (
       <ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : 'It no longer waits.'}</ui.Text>
@@ -5857,8 +5962,11 @@ const gatesPart = ($: EngineInterface, ui: Ui) =>
 // ---- The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel ----
 // The engine raises PermissionRequest as it puts a prompt to the person, and says nothing of the answer but a refusal: an allowed
 // call just runs and ends. So a prompt goes when its call ends (refused, interrupted or run), when the terminal draws its running
-// pill, or, for a command, as soon as a process running it is seen on this Mac. The mod never answers a prompt
-type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean }
+// pill, or, for a command, as soon as a process running it is seen on this Mac. A prompt to allow a call is also answered by a press
+// on its card: the engine runs its PermissionRequest hooks beside its own box, and the first answer, the box's or the hook's, stands
+// `isPressedNo` marks one refused by a press on its card: if Claude Code's own box had answered first and the call goes on, its end
+// says so in place of the press
+type Waiting = Prompt & { tool: string; agent: string; snippet: string; seen?: number; isTold?: boolean; input?: Record<string, string>; isPressedNo?: boolean }
 let waiting: Waiting[] = []
 // The tool calls whose permission check asked, newest last, so the prompt that follows is known by its call's id: the one of the same
 // loop, tool and input, else the newest of the same loop and tool
@@ -5871,24 +5979,64 @@ const askedFor = (agent: string | undefined, tool: string, input: unknown) => {
   if (one) asked = asked.filter(other => other !== one)
   return one?.id
 }
-// What the prompt asks, in its own few words: a command's description, the file, the site, the question
-const promptText = (tool: string, input: unknown) => {
+// What the prompt asks, in plain words and never a tool's own name: what is asked, exactly what (the command, the message, the page),
+// and what a yes and a no each do. A message names the work it goes to, by its card
+type Asks = Pick<Prompt, 'text' | 'kind' | 'detail' | 'yes' | 'no' | 'done'>
+const NO_SKIPS = 'No: it does not happen, and it stops to wait for what you say next.'
+const NO_TOLD = 'No: it does not happen, and the work is told you said no.'
+const promptOf = (tool: string, input: unknown, list: Todo[], isWork = false): Asks => {
   const given = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
   const field = (key: string) => (typeof given[key] === 'string' ? oneLine(given[key] as string) : '')
+  const whole = (key: string, max: number) => (typeof given[key] === 'string' ? cut((given[key] as string).trim(), max) : '')
   const file = (path: string) => path.split('/').filter(Boolean).pop() ?? ''
-  if (tool === 'Bash' || tool === 'PowerShell') return `Allow a command: ${cut(field('description') || field('command'), 90) || 'one with no words'}`
-  if (tool === 'Write') return `Allow writing ${file(field('file_path')) || 'a file'}`
-  if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit') return `Allow editing ${file(field('file_path') || field('notebook_path')) || 'a file'}`
-  if (tool === 'WebFetch') return `Allow opening ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'a web page'}`
-  if (tool === 'WebSearch') return `Allow a web search: ${cut(field('query'), 80)}`
+  const workNamed = (id: string) => {
+    if (!id) return 'another piece of work'
+    if (id === 'main' || id === 'parent') return 'its chat'
+    const card = list.find(one => one.id === id) ?? list.find(one => id.startsWith(one.id))
+    return card ? `the work “${titleOf(card)}”` : 'another piece of work'
+  }
+  const allow = (text: string, yes: string, detail = '', no = isWork ? NO_TOLD : NO_SKIPS): Asks => ({ text, kind: 'allow', ...(detail ? { detail } : {}), yes: `Yes: ${yes}`, no })
+  if (tool === 'Bash' || tool === 'PowerShell')
+    return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'one with no words'}`, 'the command runs on its Mac.', whole('command', 400))
+  if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'the file is saved, replacing any file of that name.', field('file_path'))
+  if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit')
+    return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'the change is made to the file.', field('file_path') || field('notebook_path'))
+  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'it reads the file; nothing is changed.', field('file_path'))
+  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'it searches; nothing is changed.', field('path'))
+  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'it reads the page; nothing is sent but the address.', field('url'))
+  if (tool === 'WebSearch') return allow(`Search the web for “${cut(field('query'), 80)}”`, 'it searches the web and reads the results.')
+  if (tool === 'SendMessage') {
+    const to = workNamed(field('to'))
+    return {
+      ...allow(
+        to === 'its chat' ? 'Pass a message back to its chat' : `Pass a message to ${to}`,
+        to === 'its chat' ? 'its chat gets the message.' : 'that work gets the message and acts on it.',
+        whole('message', 400) || field('summary'),
+        isWork ? 'No: it is not sent, and the work is told you said no.' : 'No: it is not sent, and it stops to wait for what you say next.',
+      ),
+      done: 'it was sent',
+    }
+  }
+  if (tool === 'Agent' || tool === 'Task')
+    return { ...allow(`Start a piece of work: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : 'No: it is not started, and the chat stops to wait for what you say next.'), done: 'it was started' }
+  if (tool === 'TaskStop')
+    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that work is stopped where it is.', '', isWork ? 'No: that work keeps running, and the work that asked is told you said no.' : 'No: that work keeps running, and the chat stops to wait for what you say next.'), done: 'it was stopped' }
+  if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`, 'it loads those instructions and follows them.')
   if (tool === 'AskUserQuestion') {
     const first = Array.isArray(given.questions) ? (given.questions[0] as { question?: unknown } | undefined)?.question : undefined
-    return typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 90)}` : 'Answer a question'
+    return {
+      text: typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 120)}` : 'Answer a question',
+      kind: 'question',
+      yes: 'Pick an answer: it goes back and the work carries on with it.',
+      no: 'Skip it: no answer goes back, and it waits for what you say next.',
+    }
   }
-  if (tool === 'ExitPlanMode') return 'Approve a plan'
+  if (tool === 'ExitPlanMode')
+    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: it starts doing what the plan says.', no: 'No: it keeps planning; say what to change.' }
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
-  if (mcp) return `Allow ${(mcp[2] ?? '').replace(/_/g, ' ')} (${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '')})`
-  return `Allow ${tool}`
+  const words = field('description') || field('text') || field('query') || field('title') || field('name') || field('url')
+  if (mcp) return allow(`Use “${(mcp[2] ?? '').replace(/_/g, ' ')}” from ${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '').replace(/[_-]/g, ' ')}`, 'it runs that action.', cut(words, 300))
+  return allow(words ? `Use a tool: ${cut(words, 90)}` : 'Use one of its tools', 'that tool runs.', '')
 }
 // The start of a command up to its first quote, `$` or line break, as a running shell shows it whatever the quoting
 const snippetOf = (tool: string, input: unknown) => {
@@ -5908,7 +6056,8 @@ const opened = async ($: EngineInterface, agent: string | undefined, tool: strin
   const id = askedFor(agent, tool, input) ?? `pr-${at}-${Math.random().toString(36).slice(2, 8)}`
   const list = await read($, todos)
   const card = agent !== undefined ? list.find(one => one.id === topOf(list, agent)) : undefined
-  const one: Waiting = { id, text: promptText(tool, input), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input) }
+  const strings = Object.fromEntries(Object.entries(input && typeof input === 'object' ? input : {}).filter(([, value]) => typeof value === 'string')) as Record<string, string>
+  const one: Waiting = { id, ...promptOf(tool, input, list, Boolean(agent)), ...(card ? { title: titleOf(card) } : {}), at, tool, agent: agent ?? '', snippet: snippetOf(tool, input), input: strings }
   waiting = [...waiting.filter(other => other.id !== id), one]
   redraw($)
   void shareMine($).catch(() => undefined)
@@ -5929,12 +6078,80 @@ const tellWaiting = async ($: EngineInterface) => {
   const chat = title.trim() || cwd.split('/').filter(Boolean).pop() || 'A chat'
   for (const one of due) await aloud($, 'prompt', `${one.title ?? chat} needs your OK`, one.text, `prompt-${one.id}`).catch(err => log($, `prompt not told: ${String(err)}`))
 }
-// The prompt of a call goes: by its id, else the oldest one of the same loop and tool whose id was not known
-const settle = ($: EngineInterface, id: string, agent?: string, tool?: string) => {
+// The prompt of a call goes: by its id, else the oldest one of the same loop and tool whose id was not known. With what came of it,
+// it stays, answered: allowed and running, then ended (allowed and run, refused, or ended before an answer) for PROMPT_SHOWN more.
+// Without (a settings hook answered it), it goes at once: nothing was put to the person
+type Outcome = 'running' | 'ran' | 'no' | 'stopped'
+let answeredPrompts: Waiting[] = []
+const PROMPT_SHOWN = 60_000
+// An allowed call whose end is never seen is taken as over this long after it was seen running, so nothing stays purple for good
+const RUNNING_LONGEST = 15 * 60_000
+const answeredShown = (at: number) => answeredPrompts.filter(one => (one.endedAt ? at - one.endedAt < PROMPT_SHOWN : at - one.at < RUNNING_LONGEST))
+const settle = ($: EngineInterface, id: string, agent?: string, tool?: string, outcome?: Outcome, args?: Record<string, unknown>) => {
+  const byTool = (one: Waiting) => one.id.startsWith('pr-') && one.tool === tool && one.agent === (agent ?? '')
+  // The same call as the prompt asked about: every word it asked with is the call's own
+  const isSameCall = (one: Waiting) => Boolean(args) && Object.keys(one.input ?? {}).length > 0 && Object.entries(one.input ?? {}).every(([key, value]) => args?.[key] === value)
+  // Its own id first, open or answered; only then the oldest open one of the same loop and tool whose id was not known. That one says
+  // what came of it only when the call asked with the very same words; else it may be another call's, and it goes with no word
   const exact = waiting.find(one => one.id === id)
-  const gone = exact ?? (tool ? waiting.find(one => one.id.startsWith('pr-') && one.tool === tool && one.agent === (agent ?? '')) : undefined)
-  if (!gone) return
-  waiting = waiting.filter(one => one !== gone)
+  const isOpen = (one: Waiting) => !one.endedAt || one.isPressedNo
+  let was = exact ? undefined : answeredPrompts.find(one => one.id === id && isOpen(one))
+  const sameOpen = exact || was || !tool ? undefined : waiting.find(one => byTool(one) && isSameCall(one))
+  // One answered on its card, whose id was not known, is the same call only when it asked with the very same words, and only when no
+  // open prompt did
+  if (!exact && !was && !sameOpen && tool) was = answeredPrompts.find(one => isOpen(one) && (one.isRunning || one.isPressedNo) && byTool(one) && isSameCall(one))
+  const guessed = exact || was || !tool ? undefined : (sameOpen ?? waiting.find(byTool))
+  const gone = exact ?? guessed
+  if (!gone && !was) return
+  if (gone) waiting = waiting.filter(one => one !== gone)
+  const before = exact ?? was ?? (guessed && isSameCall(guessed) ? guessed : undefined)
+  if (outcome && before) {
+    void $.clock.now().then(now => {
+      const isEnd = outcome !== 'running'
+      // A no pressed on the card stands unless the call went on: then Claude Code's own box had said yes first
+      if (before.isPressedNo && outcome !== 'running' && outcome !== 'ran') return
+      const wasAllowed = before.answered === 'yes'
+      const answered: Prompt['answered'] = outcome === 'no' ? 'no' : outcome === 'stopped' && !wasAllowed ? 'stopped' : 'yes'
+      const { isHeld: _held, isPressedNo: _pressed, ...base } = before
+      const after: Waiting = { ...base, ...(outcome === 'no' && pressedNo.has(before.id) ? { isPressedNo: true } : {}), answered, isRunning: !isEnd, ...(isEnd ? { endedAt: now } : { at: now }), ...(outcome === 'stopped' && wasAllowed ? { isCut: true } : {}) }
+      answeredPrompts = [...answeredShown(now).filter(one => one.id !== before.id), after].slice(-10)
+      redraw($)
+      void shareMine($).catch(() => undefined)
+      $.clock.after((isEnd ? PROMPT_SHOWN : RUNNING_LONGEST) + 100, () => (redraw($), void shareMine($).catch(() => undefined)))
+    })
+  }
+  redraw($)
+  void shareMine($).catch(() => undefined)
+}
+// What came of a call, as it ended: the person said no, it ended before it ran (interrupted, timed out, the turn or session ended), or
+// it ran. The engine says most endings in words, in the result or its text, often with isError
+const REFUSED_WORDS = /doesn't want to proceed|tool use was rejected|user (denied|rejected)|permission to use .{1,80} (has been|was) denied/i
+const NOT_RUN_WORDS = /\[(tool call (not|did not) complete|request interrupted)|interrupted by user|the (turn|session) (was )?ended|approval request expired/i
+const outcomeOf = (r: { deny?: unknown; result?: unknown; text?: unknown; isError?: unknown } | undefined): Outcome => {
+  if (!r) return 'stopped'
+  // Only a call that did not end well is read for words: a command that ran may print anything
+  if (!r.deny && !r.isError && typeof r.result !== 'string') return 'ran'
+  const words = [typeof r.deny === 'string' ? r.deny : '', typeof r.text === 'string' ? r.text : '', typeof r.result === 'string' ? r.result : JSON.stringify(r.result ?? '').slice(0, 2000)].join('\n')
+  if (REFUSED_WORDS.test(words)) return 'no'
+  if (NOT_RUN_WORDS.test(words)) return 'stopped'
+  if (r.deny) return 'no'
+  return r.isError ? 'stopped' : 'ran'
+}
+// The mod's own message, once on its way: a prompt it raised that no hook of the mod saw (one of its own tools, by a plugin's call
+// id) is over with it
+// The mod's own message to work: a prompt it raises is over once it is on its way
+const sendOwn = async ($: EngineInterface, message: { to: { agentId: string }; text: string }) => {
+  const since = await $.clock.now()
+  try {
+    return await $.session.send(message)
+  } finally {
+    ownSent($, since)
+  }
+}
+const ownSent = ($: EngineInterface, since: number) => {
+  const own = waiting.filter(one => one.id.startsWith('toolu_plugin_') && OWN_CALLS.includes(one.tool) && one.at >= since)
+  if (!own.length) return
+  waiting = waiting.filter(one => !own.includes(one))
   redraw($)
   void shareMine($).catch(() => undefined)
 }
@@ -5947,18 +6164,80 @@ const lookForStarted = async ($: EngineInterface) => {
   try {
     const lines = await running($)
     if (!lines) return
-    for (const one of sought) if (countOf(lines, one.snippet) > (one.seen ?? 0)) settle($, one.id)
+    for (const one of sought) if (countOf(lines, one.snippet) > (one.seen ?? 0)) settle($, one.id, undefined, undefined, 'running')
   } finally {
     isLooking = false
   }
 }
+
+// A press on a prompt's card, by the prompt's id, read by its hold between two looks; the prompts held now
+const promptSaid = new Map<string, 'yes' | 'no'>()
+const promptHeld = new Set<string>()
+const pressedNo = new Set<string>()
+// The longest a prompt waits for a press: past it the hook hands the prompt back to whatever else answers it
+const HOLD_LONGEST = 10 * 60_000
+const PRESSED_NO = 'The person said no to this on its card in the Claudopus panel. It did not run. Wait for what they say next.'
+const PRESSED_NO_WORK = 'The person said no to this on its card in the Claudopus panel. It did not run: do not try it another way; carry on without it.'
+const markHeld = ($: EngineInterface, id: string, isHeld: boolean) => {
+  waiting = waiting.map(one => (one.id !== id ? one : isHeld ? { ...one, isHeld: true } : (({ isHeld: _held, ...rest }) => rest)(one)))
+  redraw($)
+  void shareMine($).catch(() => undefined)
+}
+// Holds the prompt until a press on its card, its call ends (the box was answered), the engine gives up on the hook, or this copy of
+// the mod is replaced. As the admin gate does, the wait is a one-second sleep run by the engine, whose time the hook's own budget
+// does not count. Its buttons show only while it is held. Claude Code's box answers beside it, and that answer is seen only as the
+// call runs or ends; a press after it changes nothing, and the card then says what the call did
+const holdPrompt = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, id: string): Promise<'yes' | 'no' | undefined> => {
+  const since = await $.clock.now()
+  promptHeld.add(id)
+  markHeld($, id, true)
+  let said: 'yes' | 'no' | undefined
+  try {
+    for (;;) {
+      said = promptSaid.get(id)
+      if (said) break
+      if (!waiting.some(one => one.id === id) || next.signal?.aborted || (next.budget?.remainingMs ?? Infinity) < 1500 || (await isReplaced($))) break
+      if ((await $.clock.now()) - since > HOLD_LONGEST) break
+      await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
+    }
+  } finally {
+    promptHeld.delete(id)
+    promptSaid.delete(id)
+    if (waiting.some(one => one.id === id)) markHeld($, id, false)
+  }
+  return said
+}
+// A press on Yes or No, here or left by another chat: the prompt is answered at once and its card says so, as one answered in the box
+const answerPrompt = ($: EngineInterface, id: string, said: 'yes' | 'no') => {
+  presses += 1
+  if (!promptHeld.has(id) || promptSaid.has(id)) return false
+  const one = waiting.find(other => other.id === id)
+  if (!one) return false
+  promptSaid.set(id, said)
+  if (said === 'no') pressedNo.add(id)
+  settle($, id, one.agent || undefined, one.tool, said === 'yes' ? 'running' : 'no')
+  return true
+}
+
+// Work an allowed Agent call started: its prompt was answered, so it leaves the amber and its buttons go
+const agentStarted = ($: EngineInterface, toolUseId: string | undefined) => {
+  if (toolUseId && waiting.some(one => one.id === toolUseId)) settle($, toolUseId, undefined, undefined, 'running')
+}
+
+const OWN_CALLS = ['SendMessage', 'TaskStop']
+const isOwnCall = (next: { origin?: { plugin?: string } }) => next.origin?.plugin === 'claudopus'
 
 const promptHooks = (on: On) => {
 
   // A prompt the app is about to put to the person shows amber in every panel; the mod passes the request on untouched and never
   // answers it. A settings hook that answered it put nothing to the person
   on('tool.check', async ($, e, next) => {
+    // The mod's own calls carry out what the person already chose: their reply passed on to work, a Stop they pressed. The engine
+    // would put each to them again as "Allow SendMessage", a prompt that says nothing of what it is, and no hook of the mod sees that
+    // call end, so it never left the panel. Only these two tools, and only the mod's own calls of them, are allowed here
     const r = await next(e)
+    // Only an ask becomes an allow: a rule or hook of the person's that refuses it still does
+    if (r.decision === 'ask' && OWN_CALLS.includes(e.tool) && e.tool_use_id && isOwnCall(next as { origin?: { plugin?: string } })) return { ...r, decision: 'allow' }
     if (r.decision === 'ask' && e.tool_use_id && e.approver) {
       asked = [...asked.filter(one => one.id !== e.tool_use_id), { agent: e.agentId ?? '', tool: e.tool, input: inputKey(e.input), id: e.tool_use_id }].slice(-50)
     }
@@ -5967,8 +6246,18 @@ const promptHooks = (on: On) => {
   on('classic.PermissionRequest', async ($, e, next) => {
     const id = dir && !isEnded ? await opened($, e.agent_id, e.tool_name, e.tool_input).catch(err => (void log($, `prompt not shown: ${String(err)}`), '')) : ''
     const r = await next(e)
-    if (id && r?.decision) settle($, id)
-    return r
+    if (id && r?.decision) {
+      settle($, id)
+      return r
+    }
+    // A call to allow waits for a press on its card while the person can see one; a question or a plan is the person's own box's
+    const one = waiting.find(other => other.id === id)
+    if (!one || one.kind !== 'allow' || !(await $.session.surfaces().catch(() => [])).length) return r
+    const said = await holdPrompt($, next, id)
+    if (!said) return r
+    if (said === 'yes') return { ...r, decision: { behavior: 'allow' } }
+    // No from the chat's own thread stops its turn, as the box's No does; work is told, and carries on without it
+    return { ...r, decision: { behavior: 'deny', message: one.agent ? PRESSED_NO_WORK : PRESSED_NO, ...(one.agent ? {} : { interrupt: true }) } }
   })
   on('classic.Notification', async ($, e, next) => {
     if (e.notification_type === 'permission_prompt' && waiting.length) await tellWaiting($).catch(err => log($, `prompt not told: ${String(err)}`))
@@ -5978,7 +6267,7 @@ const promptHooks = (on: On) => {
   // running pill
   on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => {
     const id = e.props.tool_use_id
-    if (waiting.some(one => one.id === id)) void Promise.resolve().then(() => settle($, id))
+    if (waiting.some(one => one.id === id)) void Promise.resolve().then(() => settle($, id, undefined, undefined, 'running'))
     return next(e)
   })
 
@@ -6880,7 +7169,7 @@ const lookInOnHelpers = async ($: EngineInterface) => {
   for (const one of told) {
     // Work that ended its turn to wait for its helpers is woken by the line; work under way reads it at its next step
     const parent = list.find(todo => todo.id === one.to)
-    if (parent?.waitsSince) await $.session.send({ to: { agentId: one.to }, text: one.line }).catch(err => log($, `work ${one.to} not told of its helper: ${String(err)}`))
+    if (parent?.waitsSince) await sendOwn($, { to: { agentId: one.to }, text: one.line }).catch(err => log($, `work ${one.to} not told of its helper: ${String(err)}`))
     else await tell($, one.to, one.line)
   }
 }
@@ -7215,7 +7504,7 @@ const workHooks = (on: On) => {
       } finally {
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
-        settle($, e.tool_use_id, e.agentId, e.tool)
+        settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
         if (grants.length && !(e as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
       }
@@ -7350,7 +7639,7 @@ const workHooks = (on: On) => {
       // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
       // chat's own note that landed after the person's words once marked their words as not theirs
       const line = named(answered ? ANSWERED_IN_CHAT(answered, words, Boolean(answer && !settles(answer.ask, words, true))) : woke ? WOKE(woke) : from ? FROM(from, cut(oneLine(message), 80)) : STEER(words))
-      if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? $.session.send({ to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
+      if (!sent.deny) void tell($, steered, line).then(r => (!r || r.deny ? sendOwn($, { to: { agentId: steered }, text: line }).catch(err => log($, `work ${steered} not told: ${String(err)}`)) : undefined))
       return sent
     }
     // A report handed back is kept as the turn's answer only once the handback went through: refused, the work carries on
@@ -7456,6 +7745,7 @@ const workHooks = (on: On) => {
   })
 
   on('agent.spawn', async ($, e, next) => {
+    agentStarted($, e.tool_use_id)
     // An agent a workflow's script starts belongs to its run's blue card, not a card of its own
     if (e.workflow) {
       const r = await next(e)
@@ -7730,17 +8020,24 @@ const bandHooks = (on: On) => {
                 </Text>
               </Box>
             </Box>
-            {/* The chat's notice with what it is about went only to the chat that started the work */}
-            {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{cards.includes(first) ? '    What it is about is in the chat above and on its card' : '    What it is about is on its card'}</Text> : null}
-            {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
-            <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
-              {answers.map((choice, n) => (
-                <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
-              ))}
-              <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
-                {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to reply in words`}
-              </Text>
-            </Box>
+            {/* Acted on after the person's reply in words: that reply, and nothing to press */}
+            {isActingOnReply(first) ? (
+              <Text key="band-ask-replied" dimColor wrap="truncate-end">{`    ${sentLine(first, await $.clock.now()) || `✓ You replied “${cut(ask.replied?.text ?? '', 60)}”`}`}</Text>
+            ) : (
+              <Box flexDirection="column">
+                {/* The chat's notice with what it is about went only to the chat that started the work */}
+                {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{cards.includes(first) ? '    What it is about is in the chat above and on its card' : '    What it is about is on its card'}</Text> : null}
+                {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
+                <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
+                  {answers.map((choice, n) => (
+                    <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
+                  ))}
+                  <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
+                    {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to reply in words`}
+                  </Text>
+                </Box>
+              </Box>
+            )}
           </Box>
         )
       }
@@ -7847,9 +8144,14 @@ const panelHooks = (on: On) => {
     const own = all.filter(one => !one.parentId)
     // The work of the other chats, by chat; an ask answered here leaves its card at once
     const otherChats = await read($, others)
+    // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
+    for (const one of cardsOf(otherChats)) if (one.ask?.replied && actingOn.get(`${one.id}:${one.ask.at}`) === one.ask.replied.text) actingOn.delete(`${one.id}:${one.ask.at}`)
     const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
     const chat = await read($, me)
     const at = await $.clock.now()
+    // Prompts answered here and in other chats, for a minute after their call ended
+    const answeredOf = (list: Prompt[] | undefined) => (list ?? []).filter(p => !p.endedAt || at - p.endedAt < PROMPT_SHOWN)
+    const promptsAnswered = answeredShown(at)
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
     const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD))
@@ -7862,7 +8164,7 @@ const panelHooks = (on: On) => {
     // Work the app sent to an older model says which one it was kept off; work that answers from one all the same says so
     const offModel = (one: Todo) => (rightModel(one.model ?? '') ? 'not a model work should run on' : one.moved ? `kept off ${one.moved}` : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' ? 'Waits for your answer' : stood[one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waits for your answer' : stood[isActingOnReply(one) ? 'working' : one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -7991,6 +8293,14 @@ const panelHooks = (on: On) => {
       if (!ask) return null
       const answers = ask.choices?.length ? ask.choices : DEFAULT_ANSWERS
       const lost = sentLine(one, at)
+      // Answered in the person's own words and acted on: its question, with their reply under it, and nothing to press or type
+      if (isActingOnReply(one))
+        return (
+          <Box key={key} flexDirection="column" gap={1}>
+            <Text wrap="wrap" color={LIVE} bold>{withLinks(table.Link, isWhole ? ask.text : cut(ask.text, Math.round(room * 1.6)), `${key}-text`, ask.text)}</Text>
+            {lost ? <Text key={`${key}-sent`} dimColor wrap={isWhole ? 'wrap' : 'truncate-end'}>{lost}</Text> : null}
+          </Box>
+        )
       return (
         <Box key={key} flexDirection="column" gap={1}>
           {/* Whole in Details; on the small card cut at a word, with a mark, where the card has no room for it */}
@@ -8145,7 +8455,7 @@ const panelHooks = (on: On) => {
     // height, whatever it is; a terminal has no part thinner than a row, so there the edge is whole
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
-      if (needsPerson(one) || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : one.status === 'working' ? LIVE : DONE} />
+      if (needsPerson(one) || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : one.status === 'working' || isActingOnReply(one) ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
       return count > EDGE_PARTS ? (
         <Box key={`edge-${one.id}`} width={1} flexShrink={0} flexDirection="column">
@@ -8704,7 +9014,7 @@ const panelHooks = (on: On) => {
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>{needsPerson(one) ? 'Needs you now' : 'Acting on your reply; it still asks'}</Text>
+                <Text bold dimColor>{needsPerson(one) ? 'Needs you now' : 'Acting on your reply'}</Text>
                 {askBlock(one, `ask-big-${one.id}`, true)}
               </Box>
             </Box>
@@ -8723,22 +9033,70 @@ const panelHooks = (on: On) => {
       )
     }
 
-    // The app's own prompt open in a chat, amber at the top of that chat's cards: what it asks in its own few words, the work it came
-    // from, and where to answer it. A chat of the Claude app on this Mac opens at a press; the panel answers no prompt itself
+    // The app's own prompt open in a chat, amber at the top of that chat's cards, in plain words: which work asks, what it asks, exactly
+    // what (the command, the message), what a yes and a no each do, and Yes and No that answer it while its chat holds it. Not held
+    // (a question, a plan, a chat of an older version), it says where to answer it, and a chat of the Claude app on this Mac opens at a
+    // press. Another chat's Yes or No is left for that chat, and the card says what was pressed until that chat's file moves it on
+    const promptButtons = (p: Prompt, key: string, c?: Shared) => {
+      const pressed = c ? promptsPressed.get(`${c.host}:${c.chat}:${p.id}`) : undefined
+      if (pressed) return <Text key={`prompt-sent-${key}`} color={LIVE} bold wrap="wrap">{pressed === 'yes' ? 'You said yes · it goes to that chat' : 'You said no · it goes to that chat'}</Text>
+      const press = (said: 'yes' | 'no') => (c ? () => void answerPromptElsewhere($, c, p, said).catch(err => log($, `prompt answer not left: ${String(err)}`)) : () => void (answerPrompt($, p.id, said), redraw($)))
+      return (
+        <Box key={`prompt-buttons-${key}`} flexDirection="row" gap={1}>
+          <Button key={`prompt-yes-${key}-${presses}`} label="Yes" onPress={press('yes')} />
+          <Button key={`prompt-no-${key}-${presses}`} label="No" onPress={press('no')} />
+        </Box>
+      )
+    }
+    const isHeldHere = (p: Prompt, c?: Shared) => Boolean(p.isHeld && (c || promptHeld.has(p.id)))
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
       <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
         <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
         <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
           <Box flexDirection="column">
-            <Text bold wrap="truncate-end">{p.title || 'Needs your input'}</Text>
-            <Text dimColor wrap="truncate-end">{where}</Text>
+            <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+            <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
           </Box>
           <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
-          {c ? (
+          {p.detail ? (
+            <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
+              <Text mono wrap="wrap">{p.detail}</Text>
+            </Box>
+          ) : null}
+          {p.yes || p.no ? (
+            <Box flexDirection="column">
+              {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
+              {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
+            </Box>
+          ) : null}
+          {isHeldHere(p, c) ? promptButtons(p, key, c) : <Text dimColor wrap="wrap">{where}</Text>}
+          {c && pressOf(c) && !isHeldHere(p, c) ? (
             <Box flexDirection="row">
               <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
             </Box>
           ) : null}
+        </Box>
+      </Box>
+    )
+    // Where a prompt is answered: in this chat, the box Claude Code shows at its bottom
+    const answerHere = (p: Prompt) => (p.kind === 'question' ? 'Pick your answer in the box at the bottom of this chat.' : 'Answer Yes or No in the box at the bottom of this chat.')
+    // The same prompt once answered, for a minute after its call ends: what the person said and what is happening now, in the colour
+    // of what came of it (purple while it runs, grey once over)
+    const saidOf = (p: Prompt) => {
+      if (p.answered === 'stopped') return 'It ended before you answered · nothing happened'
+      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · no answer went back, and it waits for you' : p.kind === 'plan' ? 'You said no · it keeps planning' : p.title ? 'You said no · it did not happen, and the work was told' : 'You said no · it did not happen, and it waits for what you say next'
+      if (p.kind === 'question') return p.isRunning ? 'You answered · it is taking your answer' : 'You answered · it carries on with your answer'
+      if (p.kind === 'plan') return 'You approved the plan · it is carrying it out'
+      if (p.isCut) return 'You allowed it · it was stopped before it finished'
+      return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
+    }
+    const answeredCard = (p: Prompt, key: string, c?: Shared) => (
+      <Box key={`answered-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+        <Box width={1} flexShrink={0} backgroundColor={p.isRunning ? LIVE : FILL} />
+        <Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
+          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+          <Text wrap="wrap" color={p.isRunning ? LIVE : undefined} bold={p.isRunning}>{saidOf(p)}</Text>
+          <Text dimColor wrap="wrap">{p.text}</Text>
         </Box>
       </Box>
     )
@@ -8782,7 +9140,7 @@ const panelHooks = (on: On) => {
     // Each other chat's cards under its name: running, asking, or in the pause after ending. A chat with none of these and no prompt
     // is not listed at all, however many are open: the app's own list of chats has them
     const shownOf = (c: Shared) => elsewhere.filter(one => one.chat?.id === c.chat && one.chat.host === c.host && (one.status === 'working' || one.ask || lingers(one, at)))
-    const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length)
+    const listedChats = otherChats.filter(c => shownOf(c).length || c.prompts?.length || answeredOf(c.answeredPrompts).length)
     const finished = [...own.filter(one => one.status !== 'working' && !isLingering(one, at) && !one.ask), ...endedElsewhere].sort((a, b) => b.endedAt - a.endedAt)
     const finishedPart = (isOpen: boolean) =>
       finished.length || endedFlows.length ? (
@@ -8957,7 +9315,7 @@ const panelHooks = (on: On) => {
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     // A password or key box stays above it: the runner waits on it
-    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{screen}</Box>
+    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{doneNotesPart(ui, at)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
 
     return (
@@ -9006,6 +9364,7 @@ const panelHooks = (on: On) => {
         ) : null}
         {!alone ? boxesPart($, ui) : null}
         {!alone ? gatesPart($, ui) : null}
+        {!alone ? doneNotesPart(ui, at) : null}
         {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
@@ -9013,8 +9372,9 @@ const panelHooks = (on: On) => {
           : [
               // This chat's work first, named as this chat's once another chat's is shown; work that needs the person's hands comes first
               // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
-              ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-              ...waiting.map(p => promptCard(p, `this-${p.id}`, 'Answer it in this chat')),
+              ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
+              ...waiting.map(p => promptCard(p, `this-${p.id}`, answerHere(p))),
+              ...promptsAnswered.map(p => answeredCard(p, `this-${p.id}`)),
               ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, those that wait on the person first
               ...listedChats.flatMap(c => {
@@ -9022,8 +9382,9 @@ const panelHooks = (on: On) => {
                 // Open that chat whenever its link opens here: a chat of this Mac, or one of another Mac with Remote Control on
                 // In a chat another Mac's app runs here, that Mac opens it
                 const url = pressOf(c)
-                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', url ? c : undefined))
-                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...cards.map(one => small(one))]
+                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', c))
+                const answered = answeredOf(c.answeredPrompts).map(p => answeredCard(p, `${c.host}-${c.chat}-${p.id}`, c))
+                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...answered, ...cards.map(one => small(one))]
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}
