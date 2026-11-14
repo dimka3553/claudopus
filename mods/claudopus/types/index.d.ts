@@ -78,8 +78,9 @@ export type Todo = {
   // When its turn last ended with its answer, finished, while its own background work still held it; absent once it steps again.
   // Work stopped after that, by the chat, the panel or the engine, had finished: it ends done, not stopped
   answeredAt?: number
-  // The call it has been running longest, while one runs: what it is in a few words, and since when
-  running?: { what: string; at: number }
+  // The call it has been running longest, while one runs: what it is in a few words, since when, and for a command, the command
+  // in its own words
+  running?: { what: string; at: number; cmd?: string }
   // When something new last came back to it: a result holding a line it had not seen come back before
   newAt?: number
   // Set while nothing new has come back to it or any helper under it for a while: when something last did
@@ -87,8 +88,11 @@ export type Todo = {
   // Finished work that its own background work still holds: since when the mod has seen it so. Absent once nothing holds it
   leftSince?: number
   // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
-  // in its own words, and since when. Dropped as it ends or is stopped
-  bg?: { id: string; what: string; at: number; isWatch?: boolean }[]
+  // in its own words, and since when, with the command itself. Dropped as it ends or is stopped
+  bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string }[]
+  // What it started detached (with nohup or setsid, its output to a log): its own words for it, since when, the command, the log
+  // it writes and its process, while that runs. Kept past its end, as such a job outlives it
+  detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string }[]
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number

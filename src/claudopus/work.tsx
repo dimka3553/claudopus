@@ -35,7 +35,7 @@ const workHooks = (on: On) => {
     const run = async (call: typeof e) => {
       // What work runs, and what comes back of it, tells the stuck check whether it moves
       const isWatched = e.agentId !== undefined && Boolean(dir)
-      if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool).catch(err => log($, `call not followed: ${String(err)}`))
+      if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool, e as never).catch(err => log($, `call not followed: ${String(err)}`))
       if (isWatched) callStarted(e.tool_use_id, await $.clock.now())
       let r: Awaited<ReturnType<typeof raw>> | undefined
       try {
@@ -82,6 +82,7 @@ const workHooks = (on: On) => {
       // Ended work a message starts again is at work from now: its card leaves Finished while it acts on the message
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
+      if (dir && e.agentId !== undefined && !r.deny && !r.isError && !(call as { run_in_background?: unknown }).run_in_background) await keepDetached($, e.agentId, call as never, r.result).catch(err => log($, `detached work not followed: ${String(err)}`))
       return hideKept($, call, r)
     }
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes

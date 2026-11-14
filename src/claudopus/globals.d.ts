@@ -9,6 +9,7 @@ import * as M6 from '../../mods/claudopus/hooks/config'
 import * as M7 from '../../mods/claudopus/hooks/update'
 import * as M8 from '../../mods/claudopus/hooks/changelog'
 import * as M9 from '../../mods/claudopus/hooks/tabmoves'
+import * as M10 from '../../mods/claudopus/hooks/jobs'
 
 declare global {
   export import atom = M0.atom
@@ -181,5 +182,20 @@ declare global {
   export import TAB_BUDGET = M8.TAB_BUDGET
   export import Version = M8.Version
   export import tabMoveQueue = M9.tabMoveQueue
+  export import detachedOf = M10.detachedOf
+  export import DOWNLOAD_CMD = M10.DOWNLOAD_CMD
+  export import JOB_COLOR = M10.JOB_COLOR
+  export import JOB_GLYPH = M10.JOB_GLYPH
+  export import JOB_LOOK = M10.JOB_LOOK
+  export import JOB_NEWS = M10.JOB_NEWS
+  export import JOB_TAIL = M10.JOB_TAIL
+  export import JOB_WORD = M10.JOB_WORD
+  export import jobKindOf = M10.jobKindOf
+  export import latestOf = M10.latestOf
+  export import pidOf = M10.pidOf
+  export import portOf = M10.portOf
+  export import SERVER_CMD = M10.SERVER_CMD
+  export import Job = M10.Job
+  export import JobKind = M10.JobKind
   export import TabMove = M9.TabMove
 }

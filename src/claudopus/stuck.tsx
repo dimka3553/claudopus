@@ -12,7 +12,7 @@ const SEEN_KEPT = 5000
 const LINES_READ = 2000
 
 // The calls running now, by tool_use_id: whose, what, since when
-const inFlight = new Map<string, { agent: string; what: string; at: number }>()
+const inFlight = new Map<string, { agent: string; what: string; at: number; cmd?: string }>()
 const seenLines = new Map<string, Set<string>>()
 
 // What a running call is, in a few words, for its row
@@ -36,7 +36,7 @@ const resultLines = (result: unknown): string[] => {
 // The longest-running call of an agent, as its card keeps it
 const runningOf = (agent: string) => {
   const first = [...inFlight.values()].filter(one => one.agent === agent).sort((a, b) => a.at - b.at)[0]
-  return first ? { what: first.what, at: first.at } : undefined
+  return first ? { what: first.what, at: first.at, ...(first.cmd ? { cmd: first.cmd } : {}) } : undefined
 }
 // A card with its running call as it is now, worked out as it is changed, so calls that begin and end together leave it true;
 // the list itself when nothing changed
@@ -49,8 +49,10 @@ const withRunning = (list: Todo[], agent: string, newAt?: number) => {
 }
 
 // A call of a piece of work begins: its card keeps the one it has been running longest
-const callBegun = async ($: EngineInterface, id: string, agent: string, tool: string) => {
-  inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now() })
+const callBegun = async ($: EngineInterface, id: string, agent: string, tool: string, input?: { command?: unknown; description?: unknown }) => {
+  // A command keeps its own words for itself, or its first line, so its row can say which
+  const cmd = tool === 'Bash' ? oneLine(String(input?.description ?? '') || String(input?.command ?? '').split('\n')[0] || '').slice(0, 160) : ''
+  inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now(), ...(cmd ? { cmd } : {}) })
   await update($, todos, list => withRunning(list, agent))
 }
 
@@ -126,9 +128,10 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
   const id = call.tool === 'Bash' ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
   if (typeof id !== 'string' || !id || r.backgroundEndsWithFinalResponse) return
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
+  const cmd = oneLine(String(call.command ?? '')).slice(0, 400)
   const now = await $.clock.now()
   await update($, todos, list =>
-    list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(call.tool === 'Monitor' ? { isWatch: true } : {}) }].slice(-BG_KEPT) } : one)),
+    list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(cmd ? { cmd } : {}), ...(call.tool === 'Monitor' ? { isWatch: true } : {}) }].slice(-BG_KEPT) } : one)),
   )
 }
 // Background work that has ended or was stopped leaves every card that kept it
@@ -142,13 +145,15 @@ const dropBackground = async ($: EngineInterface, ids: string[]) =>
     })
   })
 
-// What work still at work says on its card while it waits for a command of its own: which, and how long it has run
-const waitLine = (one: Todo, at: number) => {
+// What work still at work says on its card while it waits for a command of its own: which, and how long it has run; only that it
+// waits when the command has its own row on the card's tree
+const waitLine = (one: Todo, at: number, isShort = false) => {
   const commands = (one.bg ?? []).filter(b => !b.isWatch)
   // The newest command it started, the one it is most likely on now
   const first = commands.at(-1)
   if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
   const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
+  if (isShort) return `Still at work: it waits for its background command${more} to finish`
   return `Still at work: it waits for its background command${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
 }
 

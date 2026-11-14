@@ -267,10 +267,11 @@ const panelHooks = (on: On) => {
                 <Text color={one.backAt ? undefined : NEEDS} dimColor={Boolean(one.backAt)} wrap="wrap">{cutLine(one)}</Text>
               </Box>
             ) : null}
-            {/* Still at work, waiting for a command of its own it started in the background: which, and how long it has run */}
+            {/* Still at work, waiting for a command of its own it started in the background: that it waits, the command itself
+                being a row on its tree */}
             {waitLine(one, at) ? (
               <Box key={`wait-${one.id}`} paddingLeft={lead}>
-                <Text dimColor wrap="wrap">{waitLine(one, at)}</Text>
+                <Text dimColor wrap="wrap">{waitLine(one, at, jobsOf(one, at).length > 0)}</Text>
               </Box>
             ) : null}
             {/* Its helpers running: how many, when they were last looked in on, and how many have gone quiet */}
@@ -378,21 +379,73 @@ const panelHooks = (on: On) => {
       const model = modelName(one.model ?? '')
       const width = perRow - 4 - t.depth * 2
       // A call it has run for minutes says so in place of the model and context, so a long step does not look like a hang
-      const busy = [runningLine(one, at), runningLine(one, at).replace(/^.* running · /, 'running · ')].find(text => text && width - text.length >= 12)
+      // (a command it waits on has its own row under it instead)
+      const busy = one.running?.cmd ? '' : [runningLine(one, at), runningLine(one, at).replace(/^.* running · /, 'running · ')].find(text => text && width - text.length >= 12)
       const side = busy ? busy : [[model, one.tokens ? thousands(one.tokens) : '', time], [model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
       return twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
     }
     // In a small card: the helpers at work now or just ended, and any that one of those runs under; the rest are one closing
     // row, laid out as the others, that says how many have ended and opens the card's Details, where every helper is listed
+    // A job on the tree: its line ends in a dot in the colour of its kind (green a server, blue a download, purple a script),
+    // with a ring while it runs; then what it is, the latest line it wrote, dim, and its percent and time last
+    const jobLines = (t: Twig, key: string, job: Job) =>
+      'Svg' in table && e.surface !== 'terminal' ? (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], true)} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+        </Box>
+      ) : (
+        <Box key={key} flexDirection="row" flexShrink={0}>
+          <Text dimColor>{twigText(t)}</Text>
+          <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
+        </Box>
+      )
+    const jobRow = (t: Twig, scope: string) => {
+      const job = t.job
+      if (!job) return null
+      const key = `${scope}-job-${job.id}`
+      const time = took(at - job.at)
+      const side = job.pct ? `${job.pct} · ${time}` : time
+      const width = perRow - 4 - t.depth * 2
+      const room = Math.max(12, width - side.length - 1)
+      const name = cut(jobHead(job), room)
+      const rest = room - name.length - 3
+      const detail = job.latest && rest >= 10 ? cut(job.latest, rest) : ''
+      return (
+        <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+          {jobLines(t, `twig-lines-${key}`, job)}
+          <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+            <Box flexShrink={0}>
+              <Text>{name}</Text>
+            </Box>
+            {detail ? (
+              <Box flexShrink={1} minWidth={0}>
+                <Text dimColor wrap="truncate-end">{` · ${detail}`}</Text>
+              </Box>
+            ) : null}
+          </Box>
+          <Box flexShrink={0}>
+            <Text color={job.pct ? JOB_COLOR.download : undefined} dimColor={!job.pct}>{side}</Text>
+          </Box>
+        </Box>
+      )
+    }
+    // Each branch with the jobs its helper has running first, under it, as the card's own come first under the card
+    const jobBranches = (card: Todo): Branch[] => jobsOf(card, at).map(job => ({ one: card, job, kids: [] }))
+    const withJobs = (branches: Branch[]): Branch[] => branches.map(b => (b.job ? b : { ...b, kids: [...jobBranches(b.one), ...withJobs(b.kids)] }))
+    const rowOf = (t: Twig) => (t.job ? jobRow(t, 'list') : twigRow(t, 'list'))
+    // In a small card: what it has running, then the helpers at work now or just ended, and any that one of those runs under; the
+    // rest are one closing row, laid out as the others, that says how many have ended and opens the card's Details, where every
+    // helper is listed. A helper that ended with a job still running stays for it
     const treeUnder = (one: Todo) => {
       const under = underOf(all, one.id)
-      if (!under.length) return []
-      const branches = branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at))
+      const own = jobBranches(one)
+      if (!under.length && !own.length) return []
+      const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid, at).length > 0))]
       const twigs = twigsOf(branches, true)
-      const rest = under.length - twigs.length
-      if (!rest) return twigsOf(branches).map(t => twigRow(t, 'list'))
+      const rest = under.length - twigs.filter(t => !t.job).length
+      if (!rest) return twigsOf(branches).map(rowOf)
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      return [...twigs.map(t => twigRow(t, 'list')), twigRowOf(closing, `rest-${one.id}`, `${rest} ${rest === 1 ? 'helper' : 'helpers'} ended`, true, '', () => openWork($, one.id))]
+      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, `${rest} ${rest === 1 ? 'helper' : 'helpers'} ended`, true, '', () => openWork($, one.id))]
     }
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----

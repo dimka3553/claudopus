@@ -16,6 +16,8 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isReloadDue, isU
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
+import { detachedOf, DOWNLOAD_CMD, JOB_COLOR, JOB_GLYPH, JOB_LOOK, JOB_NEWS, JOB_TAIL, JOB_WORD, jobKindOf, latestOf, pidOf, portOf, SERVER_CMD } from './jobs'
+import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
@@ -890,18 +892,19 @@ const kidsOf = (list: Todo[], id: string) => list.filter(one => one.parentId ===
 // Every helper under a piece of work, however deep
 const underOf = (list: Todo[], id: string, depth = 1): Todo[] => (depth > TREE_DEEP ? [] : kidsOf(list, id).flatMap(one => [one, ...underOf(list, one.id, depth + 1)]))
 const TREE_DEEP = 8
-type Branch = { one: Todo; kids: Branch[] }
+// A branch that is a job its helper (`one`) has running carries the job
+type Branch = { one: Todo; kids: Branch[]; job?: Job }
 // The helpers under a piece of work that `keep` picks, each with its own; one that is not picked stays while one under it is
 const branchesOf = (list: Todo[], id: string, keep: (one: Todo) => boolean, depth = 1): Branch[] =>
   depth > TREE_DEEP ? [] : kidsOf(list, id).map(one => ({ one, kids: branchesOf(list, one.id, keep, depth + 1) })).filter(b => keep(b.one) || b.kids.length > 0)
 // One row of the tree: how deep it is, which of the levels above it still have a row to come (their line runs on past it),
 // whether it is the last under its parent, and whether rows of its own follow
-type Twig = { one?: Todo; depth: number; rails: boolean[]; isLast: boolean; hasKids: boolean }
+type Twig = { one?: Todo; job?: Job; depth: number; rails: boolean[]; isLast: boolean; hasKids: boolean }
 // The rows in the order they are drawn; `isMore` says a closing row follows the top level's last
 const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[] = []): Twig[] =>
   branches.flatMap((b, i) => {
     const isLast = i === branches.length - 1 && !isMore
-    return [{ one: b.one, depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
+    return [{ one: b.one, ...(b.job ? { job: b.job } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
   })
 // The lines that join a row to the tree, as text. Each level is two letters wide; a row's own helpers hang from the second
 const twigText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`
@@ -1195,6 +1198,7 @@ const loadFinished = async ($: EngineInterface) => {
 
 const follow = async ($: EngineInterface) => {
   await sync($)
+  await lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
   await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
   await lookInDue($).catch(err => log($, `helpers not looked in on: ${String(err)}`))
   await writeRolls($).catch(err => log($, `helpers not written: ${String(err)}`))
@@ -6381,7 +6385,7 @@ const SEEN_KEPT = 5000
 const LINES_READ = 2000
 
 // The calls running now, by tool_use_id: whose, what, since when
-const inFlight = new Map<string, { agent: string; what: string; at: number }>()
+const inFlight = new Map<string, { agent: string; what: string; at: number; cmd?: string }>()
 const seenLines = new Map<string, Set<string>>()
 
 // What a running call is, in a few words, for its row
@@ -6405,7 +6409,7 @@ const resultLines = (result: unknown): string[] => {
 // The longest-running call of an agent, as its card keeps it
 const runningOf = (agent: string) => {
   const first = [...inFlight.values()].filter(one => one.agent === agent).sort((a, b) => a.at - b.at)[0]
-  return first ? { what: first.what, at: first.at } : undefined
+  return first ? { what: first.what, at: first.at, ...(first.cmd ? { cmd: first.cmd } : {}) } : undefined
 }
 // A card with its running call as it is now, worked out as it is changed, so calls that begin and end together leave it true;
 // the list itself when nothing changed
@@ -6418,8 +6422,10 @@ const withRunning = (list: Todo[], agent: string, newAt?: number) => {
 }
 
 // A call of a piece of work begins: its card keeps the one it has been running longest
-const callBegun = async ($: EngineInterface, id: string, agent: string, tool: string) => {
-  inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now() })
+const callBegun = async ($: EngineInterface, id: string, agent: string, tool: string, input?: { command?: unknown; description?: unknown }) => {
+  // A command keeps its own words for itself, or its first line, so its row can say which
+  const cmd = tool === 'Bash' ? oneLine(String(input?.description ?? '') || String(input?.command ?? '').split('\n')[0] || '').slice(0, 160) : ''
+  inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now(), ...(cmd ? { cmd } : {}) })
   await update($, todos, list => withRunning(list, agent))
 }
 
@@ -6495,9 +6501,10 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
   const id = call.tool === 'Bash' ? r.backgroundTaskId : call.tool === 'Monitor' ? r.taskId : undefined
   if (typeof id !== 'string' || !id || r.backgroundEndsWithFinalResponse) return
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
+  const cmd = oneLine(String(call.command ?? '')).slice(0, 400)
   const now = await $.clock.now()
   await update($, todos, list =>
-    list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(call.tool === 'Monitor' ? { isWatch: true } : {}) }].slice(-BG_KEPT) } : one)),
+    list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(cmd ? { cmd } : {}), ...(call.tool === 'Monitor' ? { isWatch: true } : {}) }].slice(-BG_KEPT) } : one)),
   )
 }
 // Background work that has ended or was stopped leaves every card that kept it
@@ -6511,18 +6518,141 @@ const dropBackground = async ($: EngineInterface, ids: string[]) =>
     })
   })
 
-// What work still at work says on its card while it waits for a command of its own: which, and how long it has run
-const waitLine = (one: Todo, at: number) => {
+// What work still at work says on its card while it waits for a command of its own: which, and how long it has run; only that it
+// waits when the command has its own row on the card's tree
+const waitLine = (one: Todo, at: number, isShort = false) => {
   const commands = (one.bg ?? []).filter(b => !b.isWatch)
   // The newest command it started, the one it is most likely on now
   const first = commands.at(-1)
   if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
   const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
+  if (isShort) return `Still at work: it waits for its background command${more} to finish`
   return `Still at work: it waits for its background command${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
 }
 
 // What finished work left running says on its card
 const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `It left something running in the background, ${took(at - one.leftSince)}` : '')
+
+// What each piece of work has running: the commands it sent to the background and a long one it waits on, each as a job on its
+// card's tree with what kind it is (a server, a download, a script), what it is in its own words, and the latest line it wrote
+
+// What kinds of job there are, how each is told and how its latest line is read are in hooks/jobs.ts
+
+// What each job wrote last, by its task id
+const jobLog = new Map<string, { latest: string; pct?: string; port?: string }>()
+// When each card was last told that one of its jobs wrote something new
+const jobNews = new Map<string, number>()
+let jobsLookedAt = 0
+// Where the engine writes this chat's background output, once found; and when it was last looked for in vain
+let tasksDir = ''
+let tasksMissedAt = 0
+
+// The jobs a card has running: what it sent to the background, and a command it has waited on a while
+const jobsOf = (one: Todo, at: number): Job[] => [
+  ...(one.bg ?? []).map(b => {
+    const cmd = b.cmd ?? b.what
+    const seen = jobLog.get(b.id)
+    const kind: JobKind = b.isWatch ? 'watch' : jobKindOf(cmd, b.what)
+    return { id: b.id, label: b.what || cmd, cmd, kind, at: b.at, ...(seen ?? {}), port: portOf(cmd) ?? seen?.port }
+  }),
+  ...(one.detached ?? []).map(d => {
+    const seen = jobLog.get(d.id)
+    return { id: d.id, label: d.what || d.cmd, cmd: d.cmd, kind: jobKindOf(d.cmd, d.what), at: d.at, ...(seen ?? {}), port: portOf(d.cmd) ?? seen?.port }
+  }),
+  ...(one.status === 'working' && one.running?.cmd && at - one.running.at >= RUNNING_SHOWN
+    ? [{ id: `call-${one.id}`, label: one.running.cmd, cmd: one.running.cmd, kind: jobKindOf(one.running.cmd, one.running.cmd), at: one.running.at }]
+    : []),
+]
+
+// A job's name on its row: what kind, a server's port, and its own words
+const jobHead = (job: Job) => {
+  const kind = job.kind === 'server' ? `Server${job.port ? ` :${job.port}` : ''}` : job.kind === 'download' ? 'Download' : job.kind === 'watch' ? 'Watch' : ''
+  return kind ? `${kind} · ${job.label}` : job.label
+}
+
+// Where this chat's background output is written: the engine's tasks folder under its own temporary folder, named by the chat
+const findTasks = async ($: EngineInterface) => {
+  const sid = await $.session.id().catch(() => '')
+  if (!sid) return ''
+  const r = await $.process
+    .run(['sh', '-c', 'for d in /private/tmp/claude-*/*/"$1"/tasks /tmp/claude-*/*/"$1"/tasks "${TMPDIR%/}"/claude-*/*/"$1"/tasks; do [ -d "$d" ] && { echo "$d"; exit 0; }; done; exit 1', 'sh', sid], { timeoutMs: 5000 })
+    .catch(() => undefined)
+  return r?.exitCode === 0 ? r.stdout.trim().split('\n')[0] ?? '' : ''
+}
+
+// A command the work started detached is kept by its card with the log it writes and its process; a leading `cd`, or else the
+// work's own folder, is where a log named without a folder is
+const keepDetached = async ($: EngineInterface, agent: string, call: { tool: string; command?: unknown; description?: unknown; tool_use_id?: unknown }, result: unknown) => {
+  if (call.tool !== 'Bash') return
+  const command = String(call.command ?? '')
+  const found = detachedOf(command)
+  if (!found) return
+  const base = found.cd ? (found.cd.startsWith('/') ? found.cd : `${await $.session.cwd()}/${found.cd}`) : await $.session.cwd()
+  const log = found.log.startsWith('/') ? found.log : found.log.startsWith('~/') ? found.log : `${base}/${found.log}`
+  const stdout = String((result as { stdout?: unknown } | undefined)?.stdout ?? '')
+  let pid = pidOf(stdout)
+  // No `echo $!`: the newest process running its command
+  if (!pid) {
+    const r = await $.process.run(['pgrep', '-n', '-f', found.core.slice(0, 200)], { timeoutMs: 5000 }).catch(() => undefined)
+    pid = r?.exitCode === 0 ? r.stdout.trim().split('\n')[0] : undefined
+  }
+  const what = oneLine(String(call.description ?? '') || found.core).slice(0, 160)
+  const now = await $.clock.now()
+  const id = `detached-${String(call.tool_use_id ?? now)}`
+  await update($, todos, list =>
+    list.map(one => (one.id === agent ? { ...one, detached: [...(one.detached ?? []), { id, what, at: now, cmd: oneLine(command).slice(0, 400), log, ...(pid ? { pid } : {}) }].slice(-BG_KEPT) } : one)),
+  )
+}
+
+// Looked at as the list is followed: the end of each background job's output, read in one go. A card whose job wrote something
+// new has news, so a long server or download that keeps writing does not read as stuck
+const lookJobs = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  if (now - jobsLookedAt < JOB_LOOK) return
+  jobsLookedAt = now
+  const list = await read($, todos)
+  const owned = [
+    ...list.flatMap(one => (one.bg ?? []).filter(b => !b.isWatch).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
+    ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid }))),
+  ]
+  for (const id of jobLog.keys()) if (!owned.some(o => o.id === id)) jobLog.delete(id)
+  if (!owned.length) return
+  if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
+    tasksDir = await findTasks($)
+    if (!tasksDir) tasksMissedAt = now
+  }
+  const files = owned.map(o => o.file || (tasksDir ? `${tasksDir}/${o.id}.output` : '')).filter(Boolean)
+  const pids = owned.flatMap(o => (o.pid ? [o.pid] : []))
+  // One go: the end of each output, then which of the detached processes still run
+  const script = `for f; do printf '\\n@@JOB@@ %s\\n' "$f"; case $f in "~/"*) f="$HOME/\${f#\\~/}";; esac; tail -c ${JOB_TAIL} "$f" 2>/dev/null; done; printf '\\n@@ALIVE@@'; for p in ${pids.map(p => p.replace(/\D/g, '')).join(' ')}; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; printf '\\n'`
+  const r = await $.process.run(['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
+  if (!r) return
+  const [body = '', aliveText = ''] = r.stdout.split('\n@@ALIVE@@')
+  const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
+  // A detached job whose process ended leaves its card
+  const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
+  if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
+    await update($, todos, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined } : one)))
+    $.ui.invalidate('ui.render')
+  }
+  const parts = body.split(/\n@@JOB@@ ([^\n]*)\n/)
+  let isChanged = false
+  const moved = new Set<string>()
+  for (let n = 1; n + 1 < parts.length; n += 2) {
+    const file = parts[n] ?? ''
+    const id = owned.find(o => o.file === file)?.id ?? file.split('/').at(-1)?.replace(/\.output$/, '') ?? ''
+    const seen = latestOf(parts[n + 1] ?? '')
+    const was = jobLog.get(id)
+    if (!seen.latest || (was?.latest === seen.latest && was?.pct === seen.pct)) continue
+    jobLog.set(id, seen)
+    isChanged = true
+    const owner = owned.find(o => o.id === id)?.owner
+    if (owner && was && now - (jobNews.get(owner) ?? 0) >= JOB_NEWS) moved.add(owner)
+  }
+  for (const owner of moved) jobNews.set(owner, now)
+  if (moved.size) await update($, todos, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
+  if (isChanged) $.ui.invalidate('ui.render')
+}
 
 // Steps that could have gone out together: after each step of work, a line in its next request when the step shows a pattern that
 // costs time (a helper started alone, a run of single lookups, long runs of one kind one after another, a step of only to-dos, a
@@ -6991,7 +7121,7 @@ const workHooks = (on: On) => {
     const run = async (call: typeof e) => {
       // What work runs, and what comes back of it, tells the stuck check whether it moves
       const isWatched = e.agentId !== undefined && Boolean(dir)
-      if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool).catch(err => log($, `call not followed: ${String(err)}`))
+      if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool, e as never).catch(err => log($, `call not followed: ${String(err)}`))
       if (isWatched) callStarted(e.tool_use_id, await $.clock.now())
       let r: Awaited<ReturnType<typeof raw>> | undefined
       try {
@@ -7038,6 +7168,7 @@ const workHooks = (on: On) => {
       // Ended work a message starts again is at work from now: its card leaves Finished while it acts on the message
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
+      if (dir && e.agentId !== undefined && !r.deny && !r.isError && !(call as { run_in_background?: unknown }).run_in_background) await keepDetached($, e.agentId, call as never, r.result).catch(err => log($, `detached work not followed: ${String(err)}`))
       return hideKept($, call, r)
     }
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
@@ -7831,10 +7962,11 @@ const panelHooks = (on: On) => {
                 <Text color={one.backAt ? undefined : NEEDS} dimColor={Boolean(one.backAt)} wrap="wrap">{cutLine(one)}</Text>
               </Box>
             ) : null}
-            {/* Still at work, waiting for a command of its own it started in the background: which, and how long it has run */}
+            {/* Still at work, waiting for a command of its own it started in the background: that it waits, the command itself
+                being a row on its tree */}
             {waitLine(one, at) ? (
               <Box key={`wait-${one.id}`} paddingLeft={lead}>
-                <Text dimColor wrap="wrap">{waitLine(one, at)}</Text>
+                <Text dimColor wrap="wrap">{waitLine(one, at, jobsOf(one, at).length > 0)}</Text>
               </Box>
             ) : null}
             {/* Its helpers running: how many, when they were last looked in on, and how many have gone quiet */}
@@ -7942,21 +8074,73 @@ const panelHooks = (on: On) => {
       const model = modelName(one.model ?? '')
       const width = perRow - 4 - t.depth * 2
       // A call it has run for minutes says so in place of the model and context, so a long step does not look like a hang
-      const busy = [runningLine(one, at), runningLine(one, at).replace(/^.* running · /, 'running · ')].find(text => text && width - text.length >= 12)
+      // (a command it waits on has its own row under it instead)
+      const busy = one.running?.cmd ? '' : [runningLine(one, at), runningLine(one, at).replace(/^.* running · /, 'running · ')].find(text => text && width - text.length >= 12)
       const side = busy ? busy : [[model, one.tokens ? thousands(one.tokens) : '', time], [model, time], [time]].map(parts => parts.filter(Boolean).join(' · ')).find(text => width - text.length >= 12) ?? time
       return twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
     }
     // In a small card: the helpers at work now or just ended, and any that one of those runs under; the rest are one closing
     // row, laid out as the others, that says how many have ended and opens the card's Details, where every helper is listed
+    // A job on the tree: its line ends in a dot in the colour of its kind (green a server, blue a download, purple a script),
+    // with a ring while it runs; then what it is, the latest line it wrote, dim, and its percent and time last
+    const jobLines = (t: Twig, key: string, job: Job) =>
+      'Svg' in table && e.surface !== 'terminal' ? (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], true)} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+        </Box>
+      ) : (
+        <Box key={key} flexDirection="row" flexShrink={0}>
+          <Text dimColor>{twigText(t)}</Text>
+          <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
+        </Box>
+      )
+    const jobRow = (t: Twig, scope: string) => {
+      const job = t.job
+      if (!job) return null
+      const key = `${scope}-job-${job.id}`
+      const time = took(at - job.at)
+      const side = job.pct ? `${job.pct} · ${time}` : time
+      const width = perRow - 4 - t.depth * 2
+      const room = Math.max(12, width - side.length - 1)
+      const name = cut(jobHead(job), room)
+      const rest = room - name.length - 3
+      const detail = job.latest && rest >= 10 ? cut(job.latest, rest) : ''
+      return (
+        <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+          {jobLines(t, `twig-lines-${key}`, job)}
+          <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+            <Box flexShrink={0}>
+              <Text>{name}</Text>
+            </Box>
+            {detail ? (
+              <Box flexShrink={1} minWidth={0}>
+                <Text dimColor wrap="truncate-end">{` · ${detail}`}</Text>
+              </Box>
+            ) : null}
+          </Box>
+          <Box flexShrink={0}>
+            <Text color={job.pct ? JOB_COLOR.download : undefined} dimColor={!job.pct}>{side}</Text>
+          </Box>
+        </Box>
+      )
+    }
+    // Each branch with the jobs its helper has running first, under it, as the card's own come first under the card
+    const jobBranches = (card: Todo): Branch[] => jobsOf(card, at).map(job => ({ one: card, job, kids: [] }))
+    const withJobs = (branches: Branch[]): Branch[] => branches.map(b => (b.job ? b : { ...b, kids: [...jobBranches(b.one), ...withJobs(b.kids)] }))
+    const rowOf = (t: Twig) => (t.job ? jobRow(t, 'list') : twigRow(t, 'list'))
+    // In a small card: what it has running, then the helpers at work now or just ended, and any that one of those runs under; the
+    // rest are one closing row, laid out as the others, that says how many have ended and opens the card's Details, where every
+    // helper is listed. A helper that ended with a job still running stays for it
     const treeUnder = (one: Todo) => {
       const under = underOf(all, one.id)
-      if (!under.length) return []
-      const branches = branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at))
+      const own = jobBranches(one)
+      if (!under.length && !own.length) return []
+      const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid, at).length > 0))]
       const twigs = twigsOf(branches, true)
-      const rest = under.length - twigs.length
-      if (!rest) return twigsOf(branches).map(t => twigRow(t, 'list'))
+      const rest = under.length - twigs.filter(t => !t.job).length
+      if (!rest) return twigsOf(branches).map(rowOf)
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      return [...twigs.map(t => twigRow(t, 'list')), twigRowOf(closing, `rest-${one.id}`, `${rest} ${rest === 1 ? 'helper' : 'helpers'} ended`, true, '', () => openWork($, one.id))]
+      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, `${rest} ${rest === 1 ? 'helper' : 'helpers'} ended`, true, '', () => openWork($, one.id))]
     }
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----
