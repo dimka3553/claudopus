@@ -96,6 +96,8 @@ const chatHooks = (on: On) => {
     const title = await appTitle($)
     // The first load of a session sends the role text; a reload keeps what stands
     await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id ? m.needsContext : true }))
+    // What was at work when this chat's process last ended is read before this load writes its own: work no longer at work was cut off
+    await noteCut($, id).catch(err => log($, `cut-off work not looked for: ${String(err)}`))
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
     await readOthers($).catch(() => undefined)
@@ -258,6 +260,8 @@ const chatHooks = (on: On) => {
     await unshare($, true).catch(() => undefined)
     if (macs.length) everyLoad($, FETCH_EVERY, () => fetchMacs($).catch(err => log($, `other Macs not fetched: ${String(err)}`)))
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
+    // A chat the app runs from another Mac has a keeper on this one, which goes on with its work should the app end its process
+    if (isRunFromAfar) await startKeeper($, id).catch(err => log($, `keeper not started: ${String(err)}`))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
@@ -351,6 +355,8 @@ const chatHooks = (on: On) => {
     if (!dir) return done
     // A piece of work ended its turn: it has ended and leaves the panel, since the chat passes its answer on.
     // One that only waits for its helpers goes on working
+    // A turn the lapsed sign-in of the app ended hands the chat to this Mac's keeper
+    await lapsedSignIn($, e).catch(err => log($, `lapsed sign-in not handed over: ${String(err)}`))
     if (e.agentId !== undefined) {
       const id = e.agentId
       const now = await $.clock.now()
