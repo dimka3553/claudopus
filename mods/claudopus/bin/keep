@@ -28,9 +28,9 @@ now() { date +%s; }
 
 # The newest keeper of a chat is the one that acts: a load after this one starts its own. A reload of the mod in the same process
 # leaves the keeper that watches it
-read -r was wasfor < "$dir/$sid.keeper" 2>/dev/null
-if [ "${wasfor:-}" = "$pid" ] && [ "${was:-}" != "$$" ] && kill -0 "${was:-0}" 2>/dev/null; then exit 0; fi
-me="$$ $pid"
+read -r was wasfor wasown < "$dir/$sid.keeper" 2>/dev/null
+if [ "${wasfor:-}" = "$pid" ] && [ "${wasown:-}" = "$own" ] && [ "${was:-}" != "$$" ] && kill -0 "${was:-0}" 2>/dev/null; then exit 0; fi
+me="$$ $pid $own"
 printf '%s\n' "$me" > "$dir/$sid.keeper"
 mine() { [ "$(cat "$dir/$sid.keeper" 2>/dev/null)" = "$me" ]; }
 
@@ -46,9 +46,11 @@ plugins=$(printf '%s\n' "$args" | tr ' ' '\n' | awk 'f { print; f = 0; next } $0
 log "watching process $pid in $cwd (model ${model:-default}, effort ${effort:-default}, mode ${mode:-default})"
 
 # The mod asks for the process to be ended when the sign-in the app lent it has lapsed: the chat then goes on here at once
+# A hand-over asked of another process, left behind, is no ask of this one
+[ "$(cat "$dir/$sid.handover" 2>/dev/null)" = "$pid" ] || rm -f "$dir/$sid.handover"
 handed=0
 while kill -0 "$pid" 2>/dev/null; do
-  if [ -e "$dir/$sid.handover" ] && mine; then
+  if [ "$(cat "$dir/$sid.handover" 2>/dev/null)" = "$pid" ] && mine; then
     rm -f "$dir/$sid.handover"; handed=1
     log "the sign-in the app lent the chat lapsed: process $pid ended so the chat goes on here"
     kill -TERM "$pid" 2>/dev/null
@@ -99,9 +101,10 @@ log "the chat goes on here as background session $copy, $((moved - gone))s after
 # While the copy runs: the app starting the chat again (its process, under the app's helper here) has it stopped at once, so the
 # app finds the chat free, and its cut-off work is started again there; finished work at rest a while stops it too, and so does
 # a chat that has done nothing for a long while. Claude Code keeps the conversation: the app's next start goes on from it
-# How the copy stands in Claude Code's list: working (it or its work is), another state, or gone
-standing() { "$claude" agents --json 2>/dev/null | COPY=$copy /usr/bin/perl -MJSON::PP -0777 -ne 'my $l = eval { decode_json($_) } || []; for my $a (@$l) { if (ref $a eq "HASH" && ($a->{id} // "") eq $ENV{COPY}) { print $a->{state} // "listed"; exit } } print "gone"' 2>/dev/null || echo gone; }
-rest=0 idle=0 last=$SECONDS
+# How the copy stands in Claude Code's list: working (it or its work is), another state, gone, or unknown when the list could
+# not be read
+standing() { "$claude" agents --json 2>/dev/null | COPY=$copy /usr/bin/perl -MJSON::PP -0777 -ne 'my $l = eval { decode_json($_) }; if (ref $l ne "ARRAY") { print "unknown"; exit } for my $a (@$l) { if (ref $a eq "HASH" && ($a->{id} // "") eq $ENV{COPY}) { print $a->{state} // "listed"; exit } } print "gone"' 2>/dev/null || echo unknown; }
+rest=0 idle=0 gone_looks=0 last=$SECONDS
 while :; do
   sleep 0.3
   if pgrep -f -- "/ccd-cli/.* --resume=$sid" >/dev/null 2>&1; then
@@ -113,12 +116,18 @@ while :; do
   [ $((SECONDS - last)) -ge 10 ] || continue
   last=$SECONDS
   state=$(standing)
-  if [ "$state" = gone ]; then log "background session $copy is gone"; exit 0; fi
+  [ "$state" = unknown ] && continue
+  if [ "$state" = gone ]; then gone_looks=$((gone_looks + 1)); else gone_looks=0; fi
+  if [ "$gone_looks" -ge 3 ]; then log "background session $copy is gone"; exit 0; fi
+  [ "$state" = gone ] && continue
   if [ "$state" = working ]; then idle=0; else idle=$((idle + 10)); fi
   if [ "$(field count "$dir/$sid.json")" = 0 ]; then rest=$((rest + 10)); else rest=0; fi
   if [ "$idle" -ge "$IDLE" ]; then
     "$claude" stop "$copy" >/dev/null 2>&1
-    log "background session $copy was not working for ${IDLE}s: stopped"
+    left=$(field count "$dir/$sid.json")
+    # Work still counted at work is a cut of its own: the next start of the chat, in the app, starts it again
+    case "$left" in '' | *[!0-9]* | 0) ;; *) printf '{"cutAt":%s,"movedAt":%s,"copy":"%s","count":%s,"backAt":%s}\n' "$((gone * 1000))" "$((moved * 1000))" "$copy" "$left" "$(($(now) * 1000))" > "$dir/$sid.state" ;; esac
+    log "background session $copy was not working for ${IDLE}s: stopped${left:+ with $left piece(s) of work still counted, for the next start in the app to take up}"
     exit 0
   fi
   if [ "$rest" -ge "$REST" ]; then

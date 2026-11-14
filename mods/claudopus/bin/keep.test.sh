@@ -91,8 +91,15 @@ s=00000000-0000-0000-0000-000000000007
 rm -f "$tmp/started" "$tmp/stopped"
 export CLAUDOPUS_KEEP_GRACE=30
 p=$(run $s 1); sleep 1.5
-touch "$mem/keep/$s.handover"
+printf '%s' "$p" > "$mem/keep/$s.handover"
 within "[ -e '$tmp/started' ]" 8 && ! kill -0 "$p" 2>/dev/null && grep -q 'sign-in the app lent the chat lapsed' "$mem/keep/$s.log" && ok "a lapsed sign-in ends the process and the chat goes on here without the minute's wait" || no "a lapsed sign-in ends the process and the chat goes on here without the minute's wait"
+end
+
+# 8. A hand-over left behind for another process ends no healthy one
+s=00000000-0000-0000-0000-000000000008
+printf '12345' > "$mem/keep/$s.handover"
+p=$(run $s 1); sleep 3
+kill -0 "$p" 2>/dev/null && [ ! -e "$mem/keep/$s.handover" ] && ok "a hand-over left for another process is dropped and ends nothing" || no "a hand-over left for another process is dropped and ends nothing"
 end
 
 [ "$fails" -eq 0 ] && echo "keep.test.sh: all passed" || { echo "keep.test.sh: $fails failed"; exit 1; }

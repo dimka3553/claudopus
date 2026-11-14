@@ -41,16 +41,23 @@ const startKeeper = async ($: EngineInterface, id: string) => {
 // With the app away its sign-in lapses, and the chat's process, still running, can no longer reach Claude: a turn ends with the
 // API saying so. The keeper is asked to end the process then, which hands the chat to this Mac's own sign-in at once (bin/keep
 // ends it on <chat>.handover); the work that failed so is counted as at work, to be started again there
-const SIGNIN_LAPSED = /oauth token has expired|oauth token revoked|authentication_error|invalid authentication credentials|api error: 401/i
+// Only the API's own words for a lapsed sign-in, and only twice within a few minutes: one helper's refusal is no lapse
+const SIGNIN_LAPSED = /API Error: 401\b[\s\S]{0,400}(authentication_error|OAuth token has expired|OAuth token revoked|invalid authentication credentials)/i
+const LAPSED_AGAIN = 10 * 60_000
 const lapsed = new Set<string>()
+let lapsedAt: number[] = []
 const lapsedSignIn = async ($: EngineInterface, e: { agentId?: string; reason: string; answer: string }) => {
   if (!isRunFromAfar || e.reason !== 'error' || !SIGNIN_LAPSED.test(e.answer) || (await isKeptCopy($))) return false
   const { id } = await read($, me)
   if (!id || !dir) return false
+  const now = await $.clock.now()
   if (e.agentId) lapsed.add(e.agentId)
+  lapsedAt = [...lapsedAt.filter(at => now - at < LAPSED_AGAIN), now]
+  if (lapsedAt.length < 2) return void log($, `a turn ended with a lapsed sign-in${e.agentId ? ` (work ${e.agentId})` : ''}; handed over if another does`)
   keepSign = ''
   await saveKeep($)
-  await $.fs.write(keepFile(id, 'handover'), String(await $.clock.now()))
+  // The keeper acts only on an ask naming the process it watches
+  await $.fs.write(keepFile(id, 'handover'), enginePid)
   await log($, `the sign-in the app lent this chat lapsed${e.agentId ? ` (work ${e.agentId})` : ''}: the keeper is asked to hand the chat to this Mac`)
   return true
 }

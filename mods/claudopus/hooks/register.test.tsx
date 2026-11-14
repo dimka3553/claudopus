@@ -6160,7 +6160,11 @@ test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper
   // Another error is not a lapsed sign-in
   await $.turn.complete({ answer: 'API Error: 529 overloaded', durationMs: 1, isAborted: false, turnId: 't0', reason: 'error', agentId: 'a1' } as never)
   expect(files.has(`${KEEP_AT}.handover`)).toBe(false)
-  await $.turn.complete({ answer: 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}', durationMs: 1, isAborted: false, turnId: 't1', reason: 'error', agentId: 'a1' } as never)
+  const lapse = (turnId: string) => $.turn.complete({ answer: 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}', durationMs: 1, isAborted: false, turnId, reason: 'error', agentId: 'a1' } as never)
+  // Once is no lapse; twice within minutes is
+  await lapse('t1')
+  expect(files.has(`${KEEP_AT}.handover`)).toBe(false)
+  await lapse('t2')
   expect(files.has(`${KEEP_AT}.handover`)).toBe(true)
   expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ ids: ['a1'] })
 })
