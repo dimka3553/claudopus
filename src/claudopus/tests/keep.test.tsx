@@ -105,3 +105,16 @@ test('the notice names each piece by its own title', SLOW, async ($, on) => {
   const said = logged.find(line => line.includes('was cut off at')) ?? ''
   expect(said).toMatch(/^"Solve the cameras" was cut off at \d\d:\d\d and has been going again since \d\d:\d\d\. "Train the splats" cut off at \d\d:\d\d could not be started again\.$/)
 })
+
+test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper, its work counted as at work', SLOW, async ($, on) => {
+  const { files } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'train the splats', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Train the splats', prompt: 'train' } as never)
+  // Another error is not a lapsed sign-in
+  await $.turn.complete({ answer: 'API Error: 529 overloaded', durationMs: 1, isAborted: false, turnId: 't0', reason: 'error', agentId: 'a1' } as never)
+  expect(files.has(`${KEEP_AT}.handover`)).toBe(false)
+  await $.turn.complete({ answer: 'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired."}}', durationMs: 1, isAborted: false, turnId: 't1', reason: 'error', agentId: 'a1' } as never)
+  expect(files.has(`${KEEP_AT}.handover`)).toBe(true)
+  expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ ids: ['a1'] })
+})

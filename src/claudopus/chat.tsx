@@ -355,6 +355,8 @@ const chatHooks = (on: On) => {
     if (!dir) return done
     // A piece of work ended its turn: it has ended and leaves the panel, since the chat passes its answer on.
     // One that only waits for its helpers goes on working
+    // A turn the lapsed sign-in of the app ended hands the chat to this Mac's keeper
+    await lapsedSignIn($, e).catch(err => log($, `lapsed sign-in not handed over: ${String(err)}`))
     if (e.agentId !== undefined) {
       const id = e.agentId
       const now = await $.clock.now()

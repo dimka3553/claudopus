@@ -14,7 +14,7 @@ const pidOfEngine = async ($: EngineInterface) => ((await $.process.run(['/bin/s
 const saveKeep = async ($: EngineInterface) => {
   const { id, title } = await read($, me)
   if (!id || !dir) return
-  const ids = (await read($, todos)).filter(one => !one.parentId && !one.chat && one.status === 'working').map(one => one.id)
+  const ids = (await read($, todos)).filter(one => !one.parentId && !one.chat && (one.status === 'working' || lapsed.has(one.id))).map(one => one.id)
   const sign = `${ids.join(',')}|${title}`
   if (sign === keepSign) return
   keepSign = sign
@@ -36,6 +36,23 @@ const startKeeper = async ($: EngineInterface, id: string) => {
   const own = $.plugin.root.includes('/.claude/plugins/cache/') ? '' : $.plugin.root
   const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/keep`, id, cwd, dir, own]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   await log($, r.exitCode === 0 ? `keeper started for ${id}` : `keeper not started: ${r.stderr.slice(0, 200)}`)
+}
+
+// With the app away its sign-in lapses, and the chat's process, still running, can no longer reach Claude: a turn ends with the
+// API saying so. The keeper is asked to end the process then, which hands the chat to this Mac's own sign-in at once (bin/keep
+// ends it on <chat>.handover); the work that failed so is counted as at work, to be started again there
+const SIGNIN_LAPSED = /oauth token has expired|oauth token revoked|authentication_error|invalid authentication credentials|api error: 401/i
+const lapsed = new Set<string>()
+const lapsedSignIn = async ($: EngineInterface, e: { agentId?: string; reason: string; answer: string }) => {
+  if (!isRunFromAfar || e.reason !== 'error' || !SIGNIN_LAPSED.test(e.answer) || (await isKeptCopy($))) return false
+  const { id } = await read($, me)
+  if (!id || !dir) return false
+  if (e.agentId) lapsed.add(e.agentId)
+  keepSign = ''
+  await saveKeep($)
+  await $.fs.write(keepFile(id, 'handover'), String(await $.clock.now()))
+  await log($, `the sign-in the app lent this chat lapsed${e.agentId ? ` (work ${e.agentId})` : ''}: the keeper is asked to hand the chat to this Mac`)
+  return true
 }
 
 // ---- Work cut off: marked, started again, said ----

@@ -45,7 +45,16 @@ plugins=$(printf '%s\n' "$args" | tr ' ' '\n' | awk 'f { print; f = 0; next } $0
 [ -n "$own" ] && plugins=$(printf '%s\n%s\n' "$plugins" "$own" | awk 'NF && !seen[$0]++')
 log "watching process $pid in $cwd (model ${model:-default}, effort ${effort:-default}, mode ${mode:-default})"
 
-while kill -0 "$pid" 2>/dev/null; do sleep "$STEP"; done
+# The mod asks for the process to be ended when the sign-in the app lent it has lapsed: the chat then goes on here at once
+handed=0
+while kill -0 "$pid" 2>/dev/null; do
+  if [ -e "$dir/$sid.handover" ] && mine; then
+    rm -f "$dir/$sid.handover"; handed=1
+    log "the sign-in the app lent the chat lapsed: process $pid ended so the chat goes on here"
+    kill -TERM "$pid" 2>/dev/null
+  fi
+  sleep "$STEP"
+done
 gone=$(now)
 mine || exit 0
 count=$(field count "$dir/$sid.json")
@@ -58,6 +67,7 @@ printf '{"cutAt":%s,"count":%s}\n' "$((gone * 1000))" "$count" > "$dir/$sid.stat
 # Another process of the same chat: the app started it again itself, or someone resumed it
 again() { pgrep -f -- "--resume[= ]$sid" >/dev/null 2>&1; }
 waited=0
+[ "$handed" = 1 ] && waited=$GRACE
 while [ "$waited" -lt "$GRACE" ]; do
   if again; then log "the chat was started again by the app within ${waited}s: not kept"; exit 0; fi
   mine || exit 0

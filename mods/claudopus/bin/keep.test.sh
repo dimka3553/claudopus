@@ -86,4 +86,13 @@ bash "$keep" "$p" "$s" "$tmp/work" "$mem" & second=$!
 sleep 1; kill -0 $second 2>/dev/null && no "a second keeper for the same process leaves" || ok "a second keeper for the same process leaves"
 end
 
+# 7. The mod asks for a hand-over (the app's sign-in lapsed): the process is ended and the chat goes on here at once
+s=00000000-0000-0000-0000-000000000007
+rm -f "$tmp/started" "$tmp/stopped"
+export CLAUDOPUS_KEEP_GRACE=30
+p=$(run $s 1); sleep 1.5
+touch "$mem/keep/$s.handover"
+within "[ -e '$tmp/started' ]" 8 && ! kill -0 "$p" 2>/dev/null && grep -q 'sign-in the app lent the chat lapsed' "$mem/keep/$s.log" && ok "a lapsed sign-in ends the process and the chat goes on here without the minute's wait" || no "a lapsed sign-in ends the process and the chat goes on here without the minute's wait"
+end
+
 [ "$fails" -eq 0 ] && echo "keep.test.sh: all passed" || { echo "keep.test.sh: $fails failed"; exit 1; }
