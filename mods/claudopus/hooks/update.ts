@@ -249,27 +249,39 @@ export const checkSaid = (look: Look, loaded: string, isTypedOnly = false, isFol
 }
 // ---- A copy run from a folder of its code: the folder is brought up to date with git ----
 
-// A folder of the code is a git checkout; bringing it up to date fetches its branch's upstream and moves the branch forward to it,
-// only when that is a plain fast-forward. git itself refuses, before it changes anything, when an uncommitted change or an untracked
-// file there would be overwritten, so work in the folder is never lost; a branch with commits of its own is left alone
-export type Pulled = { kind: 'pulled' | 'same' } | { kind: 'refused'; why: string }
+// A folder of the code is a git checkout; bringing it up to date fetches main from online and moves main forward to it, only as a
+// plain fast-forward. Only Claudopus's own main checkout is touched: not another repo that holds the folder, not a worktree (where
+// work is under way) and not a branch other than main, which releases never reach. git itself refuses, before it changes anything,
+// when an uncommitted change or an untracked file there would be overwritten, so work in the folder is never lost; a main with commits
+// of its own is left alone. `isClean` says whether the folder had no uncommitted changes, so nothing uncommitted is copied on
+export type Pulled = { kind: 'pulled' | 'same'; isClean: boolean } | { kind: 'refused'; why: string }
 export const pullFolder = async (io: Pick<LookIo, 'run'>, folder: string): Promise<Pulled> => {
   const git = (args: string[], timeoutMs = 20_000) =>
-    io.run(['env', 'GIT_TERMINAL_PROMPT=0', 'GIT_ASKPASS=true', 'git', '-C', folder, ...args], timeoutMs).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+    io
+      .run(['env', 'GIT_TERMINAL_PROMPT=0', 'GIT_ASKPASS=true', 'GIT_SSH_COMMAND=ssh -o BatchMode=yes', 'git', '-C', folder, ...args], timeoutMs)
+      .catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
   const last = (out: { stdout: string; stderr: string }) => `${out.stderr || out.stdout}`.trim().split('\n').at(-1)?.trim().replace(/^(fatal|error): /, '').slice(0, 140) ?? ''
   if ((await git(['rev-parse', '--show-toplevel'])).exitCode !== 0) return { kind: 'refused', why: 'its folder is not a git checkout' }
+  if ((await git(['ls-files', '--error-unmatch', ':/mods/claudopus/.claude-plugin/plugin.json'])).exitCode !== 0)
+    return { kind: 'refused', why: "its folder is in a git checkout that isn't Claudopus's" }
+  const [gitDir = '', commonDir = ''] = (await git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'])).stdout.trim().split('\n')
+  if (gitDir.trim() !== commonDir.trim()) return { kind: 'refused', why: 'its folder is a git worktree, not the main checkout' }
   const branch = (await git(['symbolic-ref', '-q', '--short', 'HEAD'])).stdout.trim()
   if (!branch) return { kind: 'refused', why: 'its folder is on no branch' }
   const upstream = (await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim()
-  if (!upstream) return { kind: 'refused', why: `its folder's branch ${branch} follows no branch online` }
+  if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream)) return { kind: 'refused', why: `its folder is on ${upstream ? `${branch}, following ${upstream}` : branch}, and releases come out on main` }
   const fetched = await git(['fetch', '--quiet'], 120_000)
   if (fetched.exitCode !== 0) return { kind: 'refused', why: `its folder could not fetch ${upstream} (${last(fetched)})` }
   const [head, theirs] = [(await git(['rev-parse', 'HEAD'])).stdout.trim(), (await git(['rev-parse', '@{u}'])).stdout.trim()]
-  if (head && head === theirs) return { kind: 'same' }
-  if ((await git(['merge-base', '--is-ancestor', 'HEAD', '@{u}'])).exitCode !== 0)
-    return { kind: 'refused', why: `its folder's branch ${branch} has commits of its own that ${upstream} does not have` }
-  const merged = await git(['merge', '--ff-only', '--quiet', '@{u}'], 60_000)
-  if (merged.exitCode === 0) return { kind: 'pulled' }
+  if (!head || !theirs) return { kind: 'refused', why: `git did not say where ${upstream} is` }
+  const isClean = async () => {
+    const status = await git(['status', '--porcelain', '--untracked-files=no'])
+    return status.exitCode === 0 && !status.stdout.trim()
+  }
+  if (head === theirs) return { kind: 'same', isClean: await isClean() }
+  if ((await git(['merge-base', '--is-ancestor', 'HEAD', '@{u}'])).exitCode !== 0) return { kind: 'refused', why: `its folder's main has commits of its own that ${upstream} does not have` }
+  const merged = await git(['merge', '--ff-only', '--quiet', '@{u}'], 120_000)
+  if (merged.exitCode === 0) return { kind: 'pulled', isClean: await isClean() }
   const said = `${merged.stderr}\n${merged.stdout}`
   if (/would be overwritten/.test(said)) return { kind: 'refused', why: "changes in its folder that aren't committed touch files the update changes" }
   return { kind: 'refused', why: `git would not update its folder (${last(merged)})` }
@@ -281,7 +293,7 @@ export const folderMarketplace = (known: string, root: string): string | undefin
   try {
     const trim = (path = '') => path.replace(/\/+$/, '')
     const entries = Object.entries(JSON.parse(known) ?? {}) as [string, { source?: { source?: string; path?: string } }][]
-    const found = entries.find(([name, one]) => /^[\w.-]+$/.test(name) && one?.source?.source === 'directory' && one.source.path && (trim(root) === trim(one.source.path) || trim(root).startsWith(`${trim(one.source.path)}/`)))
+    const found = entries.find(([name, one]) => /^[\w.-]+$/.test(name) && one?.source?.source === 'directory' && one.source.path && (trim(root) === trim(one.source.path) || trim(root) === `${trim(one.source.path)}/mods/claudopus`))
     return found?.[0]
   } catch {
     return undefined
@@ -329,7 +341,8 @@ export const folderLook = async (io: LookIo, at: { root: string; plugins: string
       }
     })()
     const scope = scopes.includes('user') ? 'user' : scopes.find((one): one is string => typeof one === 'string' && /^(user|project|local)$/.test(one))
-    if (marketplace && plugin && scope)
+    // Only a folder with nothing uncommitted: the record is copied from the folder as it is on disk
+    if (marketplace && plugin && scope && pulled.isClean)
       for (const step of updateSteps(at.engine, { marketplace, plugin }, scope)) {
         const out = await io.run(step, 180_000).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
         if (out.exitCode === 0) continue
@@ -338,7 +351,7 @@ export const folderLook = async (io: LookIo, at: { root: string; plugins: string
       }
   }
   await io.write(stampPath, JSON.stringify({ at: now, version: to, result: pulled.kind === 'pulled' ? 'updated' : 'latest' }))
-  if (to && isNewer(current, to)) return { kind: 'failed', version: current, why: `its folder's branch online still has v${to}`, next: 'Check again in a few minutes.' }
+  if (to && isNewer(current, to)) return { kind: 'failed', version: current, why: `its folder's main online still has v${to}`, next: 'Check again in a few minutes.' }
   return { kind: pulled.kind === 'pulled' ? 'updated' : 'latest', version: to || current }
 }
 

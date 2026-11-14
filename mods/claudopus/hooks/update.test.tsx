@@ -275,7 +275,7 @@ test('a copy run from a folder of its code brings that folder up to date by a fa
   const { io, at, files, ran } = folder('0.2.76', '0.2.88', '0.2.88')
   const look = await folderLook(io, at)
   expect(look).toEqual({ kind: 'updated', version: '0.2.88' })
-  expect(gitRan(ran)).toEqual(['rev-parse', 'symbolic-ref', 'rev-parse', 'fetch', 'rev-parse', 'rev-parse', 'merge-base', 'merge'])
+  expect(gitRan(ran)).toEqual(['rev-parse', 'ls-files', 'rev-parse', 'symbolic-ref', 'rev-parse', 'fetch', 'rev-parse', 'rev-parse', 'merge-base', 'merge', 'status'])
   expect(ran.find(argv => argv.includes('merge'))?.slice(-3)).toEqual(['--ff-only', '--quiet', '@{u}'])
   // Never asks for a password at the terminal
   expect(ran.filter(argv => argv[0] === 'env').every(argv => argv.includes('GIT_TERMINAL_PROMPT=0'))).toBe(true)
@@ -300,8 +300,19 @@ test('a folder is never changed when git would overwrite work there, or its bran
   expect(checkSaid(refused, '0.2.76', false, true)).toEqual({ text: "Couldn't update to v0.2.88: changes in its folder that aren't committed touch files the update changes. Nothing in it was changed.", isError: true })
   expect(dirty.ran.filter(argv => argv[0] === 'claude')).toEqual([])
   const ahead = folder('0.2.76', '0.2.88', '0.2.88', { 'merge-base': { exitCode: 1 } })
-  expect(checkSaid(await folderLook(ahead.io, ahead.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder's branch main has commits of its own that origin/main does not have. Nothing in it was changed.")
+  expect(checkSaid(await folderLook(ahead.io, ahead.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder's main has commits of its own that origin/main does not have. Nothing in it was changed.")
   expect(gitRan(ahead.ran)).not.toContain('merge')
+  const branch = folder('0.2.76', '0.2.88', '0.2.88', { 'symbolic-ref': { stdout: 'card-alignment\n' } })
+  expect(checkSaid(await folderLook(branch.io, branch.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder is on card-alignment, following origin/main, and releases come out on main. Nothing in it was changed.")
+  const worktree = folder('0.2.76', '0.2.88', '0.2.88', { 'rev-parse --git-common-dir': { stdout: '/code/claudopus/.git/worktrees/x\n/code/claudopus/.git\n' } })
+  expect(checkSaid(await folderLook(worktree.io, worktree.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder is a git worktree, not the main checkout. Nothing in it was changed.")
+  const other = folder('0.2.76', '0.2.88', '0.2.88', { 'ls-files': { exitCode: 1 } })
+  expect(checkSaid(await folderLook(other.io, other.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder is in a git checkout that isn't Claudopus's. Nothing in it was changed.")
+  expect(gitRan([...branch.ran, ...worktree.ran, ...other.ran])).not.toContain('fetch')
+  // Pulled with uncommitted changes elsewhere in the folder: they stay, and Claude Code's record is not copied from it
+  const edited = folder('0.2.76', '0.2.88', '0.2.88', { status: { stdout: ' M src/a.tsx\n' } })
+  expect((await folderLook(edited.io, edited.at)).kind).toBe('updated')
+  expect(edited.ran.filter(argv => argv[0] === 'claude')).toEqual([])
   const loose = folder('0.2.76', '0.2.88', '0.2.88', { 'symbolic-ref': { exitCode: 1, stdout: '' } })
   expect(checkSaid(await folderLook(loose.io, loose.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder is on no branch. Nothing in it was changed.")
   const offline = folder('0.2.76', '0.2.88', '0.2.88', { fetch: { exitCode: 128, stderr: 'fatal: unable to access github.com' } })
@@ -313,21 +324,23 @@ test('a folder is never changed when git would overwrite work there, or its bran
 
 test('a folder whose branch online is still behind the page says so, not newest', async () => {
   const { io, at } = folder('0.2.76', '0.2.88', '0.2.87')
-  expect(checkSaid(await folderLook(io, at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder's branch online still has v0.2.87. Check again in a few minutes.")
+  expect(checkSaid(await folderLook(io, at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder's main online still has v0.2.87. Check again in a few minutes.")
 })
 
 test('the directory marketplace a folder belongs to is found by its path', async () => {
   const known = JSON.stringify({ other: { source: { source: 'github', repo: 'a/b' } }, claudopus: { source: { source: 'directory', path: '/code/claudopus/' } } })
   expect(folderMarketplace(known, '/code/claudopus/mods/claudopus')).toBe('claudopus')
   expect(folderMarketplace(known, '/code/claudopus-x/mods/claudopus')).toBeUndefined()
+  // A worktree Claude Code keeps inside the folder is not the marketplace
+  expect(folderMarketplace(known, '/code/claudopus/.claude/worktrees/x/mods/claudopus')).toBeUndefined()
   expect(folderMarketplace('not json', '/code')).toBeUndefined()
 })
 
 test('an installed copy whose marketplace is a folder of the code brings that folder up to date before refreshing', async () => {
   const { io, at, files, ran } = mac('0.2.64', '0.2.71', { update: '✔ claudopus is already at the latest version (0.2.64).' })
   files.set('/p/known_marketplaces.json', JSON.stringify({ m: { source: { source: 'directory', path: '/code/claudopus' } } }))
-  const look = await lookOnce({ ...io, run: async (argv, t) => (argv[0] === 'env' ? (argv.includes('merge-base') ? { exitCode: 1, stdout: '', stderr: '' } : { exitCode: 0, stdout: argv.includes('symbolic-ref') ? 'main' : argv.includes('--symbolic-full-name') ? 'origin/main' : argv.at(-1) === 'HEAD' ? 'aaa' : 'bbb', stderr: '' }) : io.run(argv, t)) }, at)
-  expect(checkSaid(look, '0.2.64').text).toBe("Couldn't download v0.2.71: where Claude Code installs it from still has v0.2.64: its folder's branch main has commits of its own that origin/main does not have. Nothing in it was changed.")
+  const look = await lookOnce({ ...io, run: async (argv, t) => (argv[0] === 'env' ? (argv.includes('merge-base') ? { exitCode: 1, stdout: '', stderr: '' } : { exitCode: 0, stdout: argv.includes('symbolic-ref') ? 'main' : argv.includes('--symbolic-full-name') ? 'origin/main' : argv.includes('--git-dir') ? '/code/.git\n/code/.git' : argv.at(-1) === 'HEAD' ? 'aaa' : 'bbb', stderr: '' }) : io.run(argv, t)) }, at)
+  expect(checkSaid(look, '0.2.64').text).toBe("Couldn't download v0.2.71: where Claude Code installs it from still has v0.2.64: its folder's main has commits of its own that origin/main does not have. Nothing in it was changed.")
   expect(ran).toEqual(updateSteps('claude', at.from, 'user'))
 })
 

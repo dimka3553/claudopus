@@ -307,12 +307,12 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           {toggle(
             'updates',
             'Automatic updates',
-            'Every few hours Claudopus installs its newest release, and chats you start after that use it. Off, it stays on the version you have until you update it yourself.',
+            'Every hour Claudopus gets its newest release, and chats switch to it once they are idle. Off, it stays on the version you have until you update it yourself.',
           )}
           {item(
             'config-check',
             shown.version ? `This chat runs v${shown.version}` : 'Check for updates',
-            'Looks for a newer release now and downloads it, also with automatic updates off.',
+            'Looks for a newer release now and gets it, also with automatic updates off.',
             shown.check.isChecking ? (
               <Text key="config-check-checking" dimColor>Checking…</Text>
             ) : (

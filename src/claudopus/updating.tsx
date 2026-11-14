@@ -45,9 +45,11 @@ const lookIo = ($: EngineInterface): LookIo => ({
   log: text => log($, text),
 })
 // One look: an installed copy runs Claude Code's own update steps, a copy run from a folder of its code brings that folder up to date
+// A folder's looks keep their own stamp, so they never stand in for an installed copy's hourly look on the same Mac
+const stampFor = (from: ReturnType<typeof installedFrom>) => `${dir}/${from ? 'update' : 'update-folder'}.json`
 const lookAt = async ($: EngineInterface, from: ReturnType<typeof installedFrom>) => {
   const engine = (await $.env.get('CLAUDE_CODE_EXECPATH')) || 'claude'
-  const stampPath = `${dir}/update.json`
+  const stampPath = stampFor(from)
   if (!from) return folderLook(lookIo($), { root: $.plugin.root, plugins: dir.replace(/\/claudopus$/, '/plugins'), engine, stampPath })
   return lookOnce(lookIo($), { from, root: $.plugin.root, cwd, engine, stampPath })
 }
@@ -60,7 +62,7 @@ const selfUpdate = async ($: EngineInterface) => {
   if (isUpdating || !dir) return
   // Automatic updates turned off in Config leave the installed version alone
   if ((await readConfig($, dir)).updates === false) return
-  const stampPath = `${dir}/update.json`
+  const stampPath = stampFor(from)
   if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now())) return
   isUpdating = true
   try {
@@ -110,7 +112,10 @@ const installedNow = async ($: EngineInterface) => (await installedCopy($))?.ver
 const installedCopy = async ($: EngineInterface) => {
   const from = installedFrom($.plugin.root)
   if (!from) {
+    // Only a main checkout (its .git a folder, not a worktree's file) follows its folder: a worktree's version rises as work merges
+    // main or a release numbers it, mid-build, and a chat loaded from it is reloaded by hand
     const root = $.plugin.root.replace(/\/+$/, '')
+    if (!(await readOr($, `${root}/../../.git/HEAD`)).trim()) return undefined
     const version = versionOnPage(await readOr($, `${root}/.claude-plugin/plugin.json`))
     return version ? { version, installPath: root } : undefined
   }

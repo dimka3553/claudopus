@@ -153,7 +153,7 @@ test('Check for updates in Config shows it is checking, then what it found; a se
   await until(async () => answer)
   release()
   expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it, or it switches by itself in a moment.' }))).toBeDefined()
-  expect(gitRan.at(-1)).toBe('merge --ff-only --quiet @{u}')
+  expect(gitRan).toContain('merge --ff-only --quiet @{u}')
   files.delete('git:online')
   // No answer that reads as a version: said as a failure, in the error colour
   page = 'oops'
