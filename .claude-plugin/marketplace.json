@@ -1,6 +1,6 @@
 {
   "name": "claudopus",
-  "description": "Claudopus: Claude Code, with eight arms. One chat runs many jobs at once, with a panel beside it showing each one. macOS only",
+  "description": "Claudopus: Claude Code, with eight arms. One chat runs many jobs at once, with a panel beside it showing each one. macOS and Linux",
   "owner": { "name": "dimka3553" },
   "plugins": [{ "name": "claudopus", "source": "./mods/claudopus" }]
 }

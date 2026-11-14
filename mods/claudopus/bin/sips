@@ -1,0 +1,62 @@
+#!/bin/bash
+# On Linux, the few calls of macOS's sips that the mod makes for the small copies of pictures, answered with ImageMagick:
+#   sips -g pixelWidth -g pixelHeight [-g hasAlpha] FILE
+#   sips -Z SIZE -s format jpeg -s formatOptions QUALITY IN --out OUT
+#   sips --resampleWidth WIDTH -s format png IN --out OUT
+#   sips --padToHeightWidth HEIGHT WIDTH FILE
+#   sips -c ROWS COLUMNS --cropOffset Y X -s format FORMAT [-s formatOptions QUALITY] IN --out OUT
+# Without ImageMagick (magick, or convert and identify) it ends 127 and makes nothing: the panel then draws pictures as rows
+# without their small copies. `sudo apt install imagemagick` (or the system's own) brings them.
+set -u
+if command -v magick >/dev/null 2>&1; then convert=(magick) identify=(magick identify)
+elif command -v convert >/dev/null 2>&1 && command -v identify >/dev/null 2>&1; then convert=(convert) identify=(identify)
+else echo "sips: ImageMagick is not installed, so no small copy of a picture is made" >&2; exit 127; fi
+
+gets=() size='' width='' pad=() crop=() offset=() format='' quality='' out='' files=()
+while [ $# -gt 0 ]; do
+  case $1 in
+    -g) gets+=("$2"); shift 2 ;;
+    -Z) size=$2; shift 2 ;;
+    --resampleWidth) width=$2; shift 2 ;;
+    --padToHeightWidth) pad=("$2" "$3"); shift 3 ;;
+    -c) crop=("$2" "$3"); shift 3 ;;
+    --cropOffset) offset=("$2" "$3"); shift 3 ;;
+    -s) case $2 in format) format=$3 ;; formatOptions) quality=$3 ;; esac; shift 3 ;;
+    --out) out=$2; shift 2 ;;
+    *) files+=("$1"); shift ;;
+  esac
+done
+[ "${#files[@]}" = 1 ] || { echo "sips: one picture is needed" >&2; exit 2; }
+in=${files[0]}
+[ -f "$in" ] || { echo "sips: $in is not there" >&2; exit 1; }
+
+if [ "${#gets[@]}" -gt 0 ]; then
+  said=$("${identify[@]}" -format '%w %h %A\n' "$in[0]" 2>/dev/null | head -1) || exit 1
+  read -r w h alpha <<<"$said"
+  [ -n "${w:-}" ] || exit 1
+  printf '%s\n' "$in"
+  for one in "${gets[@]}"; do
+    case $one in
+      pixelWidth) printf '  pixelWidth: %s\n' "$w" ;;
+      pixelHeight) printf '  pixelHeight: %s\n' "$h" ;;
+      # ImageMagick says Blend, True or On for a picture with see-through parts, Undefined or False for one without
+      hasAlpha) case $alpha in [Bb]lend | [Tt]rue | [Oo]n | [Aa]ctivate) printf '  hasAlpha: yes\n' ;; *) printf '  hasAlpha: no\n' ;; esac ;;
+    esac
+  done
+  exit 0
+fi
+
+# In place, as sips does, when no --out is given
+target=${out:-$in}
+ops=()
+[ -n "$size" ] && ops+=(-resize "${size}x${size}>")
+[ -n "$width" ] && ops+=(-resize "${width}x")
+[ "${#pad[@]}" = 2 ] && ops+=(-background none -gravity center -extent "${pad[1]}x${pad[0]}" +gravity)
+[ "${#crop[@]}" = 2 ] && ops+=(-crop "${crop[1]}x${crop[0]}+${offset[1]:-0}+${offset[0]:-0}" +repage)
+prefix=''
+case $format in
+  jpeg | jpg) prefix='jpeg:'; ops+=(-background white -flatten); [ -n "$quality" ] && ops+=(-quality "$quality") ;;
+  png) prefix='png:' ;;
+esac
+tmp="$target.sips-$$"
+"${convert[@]}" "$in[0]" -auto-orient "${ops[@]}" "$prefix$tmp" 2>/dev/null && mv -f "$tmp" "$target" || { rm -f "$tmp"; exit 1; }

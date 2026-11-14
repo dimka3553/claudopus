@@ -48,7 +48,7 @@ const welcomeCard = ($: EngineInterface, ui: Ui) => (
     <ui.Text wrap="wrap">Each message you send in a chat goes to background work, and its card shows here while it runs.</ui.Text>
     <ui.Text wrap="wrap">Closed this panel? Type /claudopus to bring it back.</ui.Text>
     <ui.Text bold wrap="wrap">Bring in your old chats</ui.Text>
-    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on this Mac into its memory, so it knows what you were working on. It runs as background work and takes a few minutes.</ui.Text>
+    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on {thisMac()} into its memory, so it knows what you were working on. It runs as background work and takes a few minutes.</ui.Text>
     <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
       <ui.Button key={`welcome-index-${presses}`} label="Index my old chats" onPress={() => void indexOldChats($).catch(err => log($, `old chats not indexed: ${String(err)}`))} />
       <ui.Button key={`welcome-later-${presses}`} label="Not now" plain dimColor onPress={() => void closeWelcome($).catch(err => log($, `welcome not put away: ${String(err)}`))} />

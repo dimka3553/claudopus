@@ -50,10 +50,23 @@ No work runs on an older model or on Haiku (unless you name Haiku in `models`). 
 
 - Claude Code 2.1.287 or newer in the terminal, or the desktop app 2.1.286 or newer. The panel draws in VS Code from 2.1.299.
 - Does not work on Windows under WSL (plugins do not load there) or where your organization's admins block mods. In `claude -p` print mode and cloud sessions there is no panel.
-- macOS only (12 or newer): the password and key boxes, the keychain, thumbnails and notifications use `osascript`, `security`, `sips`, `open` and two small apps of the mod's, `notifier/Claudopus.app` and `notifier/ClaudopusAsks.app`, which are copied to `~/Library/Application Support/Claudopus` on its first notification. If you turn Claudopus Asks off in System Settings, Notifications, what needs you comes as Claudopus, purple, with the mod's own chime instead of the notification's sound; if you turn Claudopus off, macOS's plain notification is used instead, which cannot show the icon or open the chat.
+- On a Mac (12 or newer): the password and key boxes, the keychain, thumbnails and notifications use `osascript`, `security`, `sips`, `open` and two small apps of the mod's, `notifier/Claudopus.app` and `notifier/ClaudopusAsks.app`, which are copied to `~/Library/Application Support/Claudopus` on its first notification. If you turn Claudopus Asks off in System Settings, Notifications, what needs you comes as Claudopus, purple, with the mod's own chime instead of the notification's sound; if you turn Claudopus off, macOS's plain notification is used instead, which cannot show the icon or open the chat.
 - Stats reads Claude's records with `jq`, which macOS 15 and later include.
 - The two notification apps come built, so you need no Xcode; how to rebuild them and compare with what is committed is in [What Claudopus does on your Mac](privacy.md#files-that-will-be-held-for-a-reviewer-and-why-they-stay).
-- Seen working in the macOS desktop app. The terminal and VS Code have not been tried yet.
+- Seen working in the macOS desktop app and in a terminal on Linux (Ubuntu 24.04). VS Code has not been tried yet.
+
+## On Linux
+
+Claude Code runs on Linux in a terminal (there is no Claude desktop app for Linux), and Claudopus installs there with the same lines as on a Mac. The panel, background work, results, memory, updates, admin commands and keys all work; where a Mac has something of its own, Linux does this instead:
+
+- **Passwords and keys.** Linux has no keychain a terminal program can use without a desktop signed in, so `bin/keyring` keeps each one in a file of its own under `~/.local/share/claudopus/keyring` (or `$XDG_DATA_HOME/claudopus/keyring`), the folders readable only by you (700) and the files too (600). As on a Mac, any program running as you can read them; work is refused commands that name `bin/keyring` or that folder, and reading, searching or writing a file in it or searching a folder of yours it is in, which stops slips and common tricks and is no wall. On both systems that also refuses a command that only names the word, such as `pip install keyring`: run it yourself. The runners need perl with its JSON::PP and Digest::SHA, which Ubuntu, Debian and Fedora include with `perl`.
+- **"Let macOS ask, keep nothing"** is a Mac's own box, so on Linux it is not there: set to it, an admin command does not run and says to keep the password instead. Admin commands use `sudo` as on a Mac.
+- **A password or key with no panel open** (a `claude -p` run): a Mac asks in a box on its screen; Linux has none, so the runner says to open the panel with `/claudopus` and run it again.
+- **Notifications** use the desktop's own (`notify-send`) when Claude Code runs in a desktop session. In a terminal with no desktop, as over SSH, there is no pop-up: the panel, its sound and the terminal's own notice are what you get.
+- **Opening things.** Memory opens as a tab of the panel, as in any terminal. A picture or a settings file opens with `xdg-open` on a desktop; with none, a picture's row says where it is, or sends it to your device as it does over SSH from a Mac. A card's Open in Terminal button is not there: copy the command instead.
+- **Small copies of pictures** are made with ImageMagick (`sudo apt install imagemagick`, or your system's own) by `bin/sips`, which answers the calls the mod makes of macOS's `sips`. Without it, pictures are listed without their small copies.
+- **Your other Macs** (`macs`) and the keeper of a chat the app runs over SSH work the same; this machine is named by `hostname`.
+- **Not on Linux:** the two notification apps (`notifier/`), which are Mac apps, and what reads the desktop app's own folders and logs, which Linux does not have; nothing is shown for them.
 
 ## Settings
 

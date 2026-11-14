@@ -3,7 +3,6 @@
 # start of the chat again. Nothing real is started or stopped; everything is under a folder of its own.
 #   bash mods/claudopus/bin/keep.test.sh
 set -u
-[ "$(uname)" = Darwin ] || { echo "keep.test.sh: skipped, bin/keep reads its files with macOS's plutil"; exit 0; }
 here=$(cd "$(dirname "$0")" && pwd)
 keep=$here/keep
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/claudopus-keep-test.XXXXXX") || exit 1

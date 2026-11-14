@@ -41,7 +41,7 @@ test('a step is told when it started a helper alone, held only to-dos, or made a
   expect(await toldOf(batch($, undefined as never, [{ tool: 'Agent' }]))).toBe('')
 })
 
-test('three single lookups in a row are told to go together or to a helper; two long runs of one kind in a row, to run side by side', async ($, on) => {
+test('three single lookups in a row are told to go together or to a helper; two long runs of one kind in a row, to run side by side', SLOW, async ($, on) => {
   const { clock, held } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })

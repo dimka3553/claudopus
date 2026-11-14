@@ -1,5 +1,7 @@
 # What Claudopus does on your Mac
 
+On Linux it does the same, except as [On Linux](guide.md#on-linux) says: keys and passwords are files only you can read under `~/.local/share/claudopus/keyring`, and it runs `uname`, `hostname`, `xdg-open`, `notify-send` and ImageMagick where a Mac runs its own tools.
+
 Where its data lives, what it sends, and every hook, tool and program it runs, for you and for the plugin directory's reviewers. The short version is under [Privacy](../README.md#privacy) in the README.
 
 ## In short

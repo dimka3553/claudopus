@@ -175,7 +175,7 @@ const makeThumbs = async ($: EngineInterface, r: Report) => {
     if (await $.fs.exists(to)) continue
     await $.process.run(['mkdir', '-p', `${reportPath(r)}/thumbs`])
     for (const size of THUMB_SIZES) {
-      await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '55', `${reportPath(r)}/${file}`, '--out', to])
+      await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '55', `${reportPath(r)}/${file}`, '--out', to])
       if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= THUMB_BYTES) break
     }
   }
@@ -187,7 +187,7 @@ const thumbOf = async ($: EngineInterface, path: string) => {
   let one: { source: string; width: number; height: number } | null = null
   try {
     const read = (await $.fs.read(path, { as: 'bytes' })) as { base64: string }
-    const sized = (await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path])).stdout
+    const sized = (await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', path])).stdout
     const width = Number(/pixelWidth:\s*(\d+)/.exec(sized)?.[1] ?? 0)
     const height = Number(/pixelHeight:\s*(\d+)/.exec(sized)?.[1] ?? 0)
     if (width && height && read.base64.length < 50_000) {

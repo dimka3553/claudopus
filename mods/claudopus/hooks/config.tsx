@@ -107,7 +107,7 @@ export type ConfigShown = {
   texts: { text: Text; isOwn: boolean; isStale: boolean; path: string; body: string }[]; config: Config; failed: string
   // Admin commands: what is in force, a "work" or "never" in config.json that no press here sealed, the commands always allowed
   // (and how many in the file carry no seal of this Mac's), and whether this chat is reached from another device
-  gate: { mode: AdminMode; unsealed: string; password: 'keep' | 'macos'; allowed: { host: string; command: string }[]; unsealedAllowed: number; isAfar: boolean }
+  gate: { mode: AdminMode; unsealed: string; password: 'keep' | 'macos'; allowed: { host: string; command: string }[]; unsealedAllowed: number; isAfar: boolean; isLinux?: boolean }
 }
 export type ConfigActs = {
   edit: (text: Text, body: string) => void
@@ -255,12 +255,14 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           {item(
             'config-admin-password',
             'Admin password',
-            `Kept in this Mac's keychain, a password can be read by any process running as you, so asking first is a check, not a wall. Let macOS ask keeps no password: macOS asks for it on this Mac's screen each time, on this Mac only.${shown.gate.isAfar && shown.gate.password === 'macos' ? ' This chat is reached from another device, where that box cannot be seen: admin commands are refused here.' : shown.gate.isAfar ? ' In a chat reached from another device that box cannot be seen, so admin commands are then refused there.' : ''}`,
+            shown.gate.isLinux
+              ? `Linux has no keychain for it: the password is kept in a file only you can read on this machine, which any process running as you can read too, so asking first is a check, not a wall. Let macOS ask works only on a Mac: set to it, admin commands here are refused.`
+              : `Kept in this Mac's keychain, a password can be read by any process running as you, so asking first is a check, not a wall. Let macOS ask keeps no password: macOS asks for it on this Mac's screen each time, on this Mac only.${shown.gate.isAfar && shown.gate.password === 'macos' ? ' This chat is reached from another device, where that box cannot be seen: admin commands are refused here.' : shown.gate.isAfar ? ' In a chat reached from another device that box cannot be seen, so admin commands are then refused there.' : ''}`,
             null,
             shown.gate.password !== 'keep',
             () => acts.gatePassword('keep'),
             <Box key="config-admin-password-choice" flexDirection="row" flexShrink={0}>
-              <Select key="config-admin-password-pick" options={ADMIN_PASSWORDS.map(one => ({ value: one.value, label: one.label }))} value={shown.gate.password} onSelect={value => acts.gatePassword(value === 'macos' ? 'macos' : 'keep')} />
+              <Select key="config-admin-password-pick" options={ADMIN_PASSWORDS.map(one => ({ value: one.value, label: shown.gate.isLinux && one.value === 'keep' ? 'Keep it in a file only you can read' : one.label }))} value={shown.gate.password} onSelect={value => acts.gatePassword(value === 'macos' ? 'macos' : 'keep')} />
             </Box>,
           )}
           {item(

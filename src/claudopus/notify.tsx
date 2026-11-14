@@ -134,13 +134,18 @@ const alertPerson = async ($: EngineInterface, what: string, title: string, text
   if (amber && (amber.exitCode === 0 || amber.exitCode === 5)) {
     void log($, `${what}: ${title} — app said ${sent.reason}; ${amber.exitCode === 0 ? 'notified through Claudopus Asks' : 'macOS asked to allow Claudopus Asks'}`)
     // Shown now with its sound; one waiting on macOS's question goes without it, so the mod's chime is heard instead
-    return amber.exitCode === 0 && asks?.chime === true
+    return amber.exitCode === 0 && asks?.chime === true && !isLinux
   }
   // Claudopus Asks turned off in System Settings, or it failed: the purple Claudopus, without the sound
   const own = await run([])
   const tried = amber ? `Claudopus Asks said ${amber.exitCode}; ` : ''
   if (own.exitCode === 0 || own.exitCode === 5) {
     void log($, `${what}: ${title} — app said ${sent.reason}; ${tried}${own.exitCode === 0 ? 'notified through Claudopus' : 'macOS asked to allow Claudopus'}`)
+    return false
+  }
+  // Linux: bin/notify was the desktop's own notification, and with no desktop there is none; the panel and the terminal show it
+  if (isLinux) {
+    void log($, `${what}: ${title} — app said ${sent.reason}; ${tried}${own.exitCode === 3 ? 'no desktop notification on this machine' : `notify-send said ${own.exitCode}`}`)
     return false
   }
   // Claudopus notifications turned off in System Settings, or it failed: macOS's plain notification. Elsewhere osascript is

@@ -51,10 +51,8 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
 
 async function openedInEditor($: EngineInterface, path: string) {
   // The text editor the Mac opens .md files in; elsewhere the desktop's own opener
-  const mac = await $.process.run(['open', '-t', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  if (mac.exitCode === 0) return ''
-  const other = await $.process.run(['xdg-open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  return other.exitCode === 0 ? '' : mac.stderr || other.stderr || 'no editor opened'
+  const r = await openOn($, path, true)
+  return r.exitCode === 0 ? '' : r.stderr || 'no editor opened'
 }
 // Edit: the person's own copy, made from the shipped text the first time, opened in their editor
 async function editText($: EngineInterface, root: string, memory: string, path: string) {
@@ -132,7 +130,7 @@ const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
   config: await readConfig($, dir),
   gate: await (async () => {
     const [gate, kept] = [await gateOf($), await validAllowed($)]
-    return { mode: gate.mode, unsealed: gate.unsealed, password: gate.password, allowed: kept.valid.map(({ host, command }) => ({ host, command })), unsealedAllowed: kept.unsealed, isAfar: isRunFromAfar }
+    return { mode: gate.mode, unsealed: gate.unsealed, password: gate.password, allowed: kept.valid.map(({ host, command }) => ({ host, command })), unsealedAllowed: kept.unsealed, isAfar: isRunFromAfar, isLinux }
   })(),
   // A config.json that does not read is said at once: until it is fixed every setting is as shipped
   failed:

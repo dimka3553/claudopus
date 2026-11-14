@@ -325,6 +325,34 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
   </ui.Box>
 )
 
+// ---- Which system this chat runs on ----
+// Linux, as uname says once at the chat's start (chat.tsx), else a Mac: what only a Mac has (its keychain, Finder and Preview,
+// Terminal, sips, its own notifications) takes Linux's own way there, or says plainly that it is not there. `hasDesktop` is a
+// Linux desktop session the person sees (DISPLAY or WAYLAND_DISPLAY): without one, as in a terminal over SSH, nothing opens a window
+let isLinux = false
+let hasDesktop = true
+// Where bin/keyring keeps its files on Linux, as it finds it: $XDG_DATA_HOME, when it is a full path, else ~/.local/share
+let keyringRoot = ''
+const knowSystem = async ($: EngineInterface) => {
+  const r = await $.process.run(['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined)
+  isLinux = r?.exitCode === 0 && r.stdout.trim() === 'Linux'
+  hasDesktop = !isLinux || Boolean((await $.env.get('DISPLAY')) || (await $.env.get('WAYLAND_DISPLAY')))
+  const data = (await $.env.get('XDG_DATA_HOME')) ?? ''
+  keyringRoot = `${data.startsWith('/') ? data : `${(await $.env.get('HOME')) ?? ''}/.local/share`}/claudopus/keyring`
+}
+// How this computer is named in what the person reads
+const thisMac = () => (isLinux ? 'this machine' : 'this Mac')
+const keptWhere = () => (isLinux ? 'a file on this machine that only you can read' : "this Mac's keychain")
+// A file, folder or link opened as the person's own system opens it: `open` on a Mac, xdg-open on a Linux desktop. Linux without
+// a desktop has nothing to open it on, and says so as a failed run does
+const openOn = async ($: EngineInterface, target: string, isText = false) => {
+  if (!isLinux) return $.process.run(isText ? ['open', '-t', target] : ['open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  if (!hasDesktop) return { exitCode: 1, stderr: 'no desktop on this machine to open it on' }
+  return $.process.run(['xdg-open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+}
+// macOS's sips on a Mac; on Linux bin/sips, which answers the same calls with ImageMagick and fails, drawing no small copy, without it
+const sips = ($: EngineInterface) => (isLinux ? `${$.plugin.root}/bin/sips` : 'sips')
+
 // What chats and work are told: the brief rule, refusals, the work's panel rule, steers and reminders
 
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
@@ -335,9 +363,9 @@ const REFUSED =
   'This chat\'s own thread only reads (Read, Grep, Glob); it changes no file and runs no command. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
 const NO_COPY = () =>
   `Work is never started as a copy of this chat. Start a fresh agent instead: subagent_type "general-purpose", the model named (${modelsShort(models)}), and a brief as the prompt.`
-// A command that would print a password or key the keychain keeps. Work uses a kept key only through `bin/secret`, which reads it itself
+// A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
 // or that would point the runner at another store or another box
-const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b/
+const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
 const NO_READ = 'A kept key or password is never read or printed. Use it as an environment variable through the secret runner the work rules name; it hides the value from what the command prints.'
 // A push or merge to main or master by hand: git's own push naming main or master, a push that skips the repo's hooks, the release
 // runner's own pass given by hand, or a pull request merged on GitHub. The command is read as the shell splits it, so words inside
@@ -624,10 +652,8 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
 
 async function openedInEditor($: EngineInterface, path: string) {
   // The text editor the Mac opens .md files in; elsewhere the desktop's own opener
-  const mac = await $.process.run(['open', '-t', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  if (mac.exitCode === 0) return ''
-  const other = await $.process.run(['xdg-open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  return other.exitCode === 0 ? '' : mac.stderr || other.stderr || 'no editor opened'
+  const r = await openOn($, path, true)
+  return r.exitCode === 0 ? '' : r.stderr || 'no editor opened'
 }
 // Edit: the person's own copy, made from the shipped text the first time, opened in their editor
 async function editText($: EngineInterface, root: string, memory: string, path: string) {
@@ -705,7 +731,7 @@ const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
   config: await readConfig($, dir),
   gate: await (async () => {
     const [gate, kept] = [await gateOf($), await validAllowed($)]
-    return { mode: gate.mode, unsealed: gate.unsealed, password: gate.password, allowed: kept.valid.map(({ host, command }) => ({ host, command })), unsealedAllowed: kept.unsealed, isAfar: isRunFromAfar }
+    return { mode: gate.mode, unsealed: gate.unsealed, password: gate.password, allowed: kept.valid.map(({ host, command }) => ({ host, command })), unsealedAllowed: kept.unsealed, isAfar: isRunFromAfar, isLinux }
   })(),
   // A config.json that does not read is said at once: until it is fixed every setting is as shipped
   failed:
@@ -1755,7 +1781,7 @@ const makeThumbs = async ($: EngineInterface, r: Report) => {
     if (await $.fs.exists(to)) continue
     await $.process.run(['mkdir', '-p', `${reportPath(r)}/thumbs`])
     for (const size of THUMB_SIZES) {
-      await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '55', `${reportPath(r)}/${file}`, '--out', to])
+      await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '55', `${reportPath(r)}/${file}`, '--out', to])
       if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= THUMB_BYTES) break
     }
   }
@@ -1767,7 +1793,7 @@ const thumbOf = async ($: EngineInterface, path: string) => {
   let one: { source: string; width: number; height: number } | null = null
   try {
     const read = (await $.fs.read(path, { as: 'bytes' })) as { base64: string }
-    const sized = (await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path])).stdout
+    const sized = (await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', path])).stdout
     const width = Number(/pixelWidth:\s*(\d+)/.exec(sized)?.[1] ?? 0)
     const height = Number(/pixelHeight:\s*(\d+)/.exec(sized)?.[1] ?? 0)
     if (width && height && read.base64.length < 50_000) {
@@ -1867,7 +1893,7 @@ const welcomeCard = ($: EngineInterface, ui: Ui) => (
     <ui.Text wrap="wrap">Each message you send in a chat goes to background work, and its card shows here while it runs.</ui.Text>
     <ui.Text wrap="wrap">Closed this panel? Type /claudopus to bring it back.</ui.Text>
     <ui.Text bold wrap="wrap">Bring in your old chats</ui.Text>
-    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on this Mac into its memory, so it knows what you were working on. It runs as background work and takes a few minutes.</ui.Text>
+    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on {thisMac()} into its memory, so it knows what you were working on. It runs as background work and takes a few minutes.</ui.Text>
     <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
       <ui.Button key={`welcome-index-${presses}`} label="Index my old chats" onPress={() => void indexOldChats($).catch(err => log($, `old chats not indexed: ${String(err)}`))} />
       <ui.Button key={`welcome-later-${presses}`} label="Not now" plain dimColor onPress={() => void closeWelcome($).catch(err => log($, `welcome not put away: ${String(err)}`))} />
@@ -2436,8 +2462,8 @@ const openMemory = ($: EngineInterface, path: string) => {
 // Memory: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on
 // A terminal, or a chat run over ssh, has no Finder the person can see: there the folder opens as a tab of the panel, each file a link
 const showMemory = async ($: EngineInterface, surface: RenderSurface) => {
-  if (isRunFromAfar || surface === 'terminal') return openMemory($, dir)
-  const opened = await $.process.run(['open', dir]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  if (isRunFromAfar || surface === 'terminal' || !hasDesktop) return openMemory($, dir)
+  const opened = await openOn($, dir)
   if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stderr}`)
 }
 const memoryButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
@@ -2597,7 +2623,7 @@ async function loadStats($: EngineInterface, scope: Scope, home: string, memory:
     const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat()
     held.set(scope, { runs, at: now })
   } catch (err) {
-    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? 'Stats reads Claude’s records with jq, and jq was not found on this Mac.' : `The records could not be read: ${String(err)}` })
+    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Stats reads Claude’s records with jq, and jq was not found on ${thisMac()}.` : `The records could not be read: ${String(err)}` })
   } finally {
     reading.delete(scope)
     $.ui.invalidate('ui.render')
@@ -3062,9 +3088,9 @@ type Pic = { name: string; path: string; thumb: Thumb; isGone?: boolean }
 // own, which from a Details tab closed the tab pressed in and opened it again so it let go of the keyboard: that tab came back drawn
 // afresh, its chat at its end and slow to scroll, and the picture's tab stayed behind it (seen on 0.2.49 in a helper's Details)
 const showPicture = async ($: EngineInterface, path: string, pane: string, row: string, surface?: RenderSurface) => {
-  if (surface === 'terminal' && (termFrom || isRunFromAfar)) return sendPicture($, path)
+  if (surface === 'terminal' && (termFrom || isRunFromAfar || !hasDesktop)) return sendPicture($, path)
   if (isRunFromAfar) return showPictureIn($, path, pane, row)
-  const opened = await $.process.run(['open', path]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  const opened = await openOn($, path)
   if (opened.exitCode !== 0) await log($, `picture ${path} not opened: ${opened.stderr}`)
 }
 // A terminal draws no picture worth looking at (a few blurred pixels a cell), so there a picture is a row that is pressed: on the
@@ -3082,7 +3108,7 @@ const shQuoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`
 const sendPicture = async ($: EngineInterface, path: string) => {
   const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), $.ui.invalidate('ui.render'))
   // A terminal with no word of where it is watched from: where the picture is, and no more
-  if (!termFrom) return say(`It is at ${path} on this Mac`)
+  if (!termFrom) return say(`It is at ${path} on ${thisMac()}`)
   say('Sending it to your device…')
   for (const bin of TAILSCALES) {
     const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined)
@@ -3168,7 +3194,7 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
     return from >= 0 && text.length - from <= LARGE_CHARS ? { bands: [text.slice(from)], width: 0, height: 0 } : null
   }
   if (!RASTER.test(path)) return null
-  const got = await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'hasAlpha', path]).catch(() => ({ exitCode: 1, stdout: '' }))
+  const got = await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', '-g', 'hasAlpha', path]).catch(() => ({ exitCode: 1, stdout: '' }))
   const width = Number(/pixelWidth:\s*(\d+)/.exec(got.stdout)?.[1] ?? 0)
   const height = Number(/pixelHeight:\s*(\d+)/.exec(got.stdout)?.[1] ?? 0)
   if (!width || !height) return null
@@ -3185,13 +3211,13 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
     for (const [most, quality] of format === 'png' ? [...new Map(sizes.map(([w]) => [w, [w, 0] as const])).values()] : sizes) {
       // The picture at this width, then cut into bands down it, each as tall as fits
       const wide = `${base}-${most}.png`
-      const sized = await $.process.run(['sips', '--resampleWidth', String(most), '-s', 'format', 'png', path, '--out', wide]).catch(() => ({ exitCode: 1 }))
+      const sized = await $.process.run([sips($), '--resampleWidth', String(most), '-s', 'format', 'png', path, '--out', wide]).catch(() => ({ exitCode: 1 }))
       if (sized.exitCode !== 0) continue
-      const tall = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run(['sips', '-g', 'pixelHeight', wide]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
+      const tall = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run([sips($), '-g', 'pixelHeight', wide]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
       if (!tall) continue
       // sips crops only a band that neither starts at the top nor reaches the bottom (one that does comes out centred, or whole),
       // so the picture is given a row above and below first, and each band is cut one row down
-      const padded = await $.process.run(['sips', '--padToHeightWidth', String(tall + 2), String(most), wide]).catch(() => ({ exitCode: 1 }))
+      const padded = await $.process.run([sips($), '--padToHeightWidth', String(tall + 2), String(most), wide]).catch(() => ({ exitCode: 1 }))
       if (padded.exitCode !== 0) continue
       const bands: string[] = []
       let band = Math.min(tall, 400)
@@ -3200,8 +3226,8 @@ const makeLarge = async ($: EngineInterface, path: string, size: number): Promis
       for (let y = 0; y < tall; ) {
         const rows = Math.min(band, tall - y)
         const out = `${base}-band.${format === 'png' ? 'png' : 'jpg'}`
-        await $.process.run(['sips', '-c', String(rows), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', String(quality)] : []), wide, '--out', out])
-        const cutTo = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run(['sips', '-g', 'pixelHeight', out]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
+        await $.process.run([sips($), '-c', String(rows), String(most), '--cropOffset', String(y + 1), '0', '-s', 'format', format, ...(format === 'jpeg' ? ['-s', 'formatOptions', String(quality)] : []), wide, '--out', out])
+        const cutTo = Number(/pixelHeight:\s*(\d+)/.exec((await $.process.run([sips($), '-g', 'pixelHeight', out]).catch(() => ({ stdout: '' }))).stdout)?.[1] ?? 0)
         const read = cutTo === rows ? ((await $.fs.read(out, { as: 'bytes' }).catch(() => undefined)) as { base64: string } | undefined) : undefined
         const source = read ? `<svg xmlns="http://www.w3.org/2000/svg" width="${most}" height="${rows}" viewBox="0 0 ${most} ${rows}"><image href="data:image/${format};base64,${read.base64}" width="${most}" height="${rows}"/></svg>` : ''
         if (!source) break
@@ -3311,7 +3337,7 @@ const picOf = async ($: EngineInterface, given: string, one: Todo, isSeen: boole
     if (!(await $.fs.exists(to))) {
       await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
       for (const size of CHAT_THUMB_SIZES) {
-        await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', asked, '--out', to])
+        await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '60', asked, '--out', to])
         if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= THUMB_BYTES) break
       }
     }
@@ -3446,7 +3472,7 @@ const askPicOf = async ($: EngineInterface, path: string): Promise<Pic | null> =
     if (!(await $.fs.exists(to))) {
       await $.process.run(['mkdir', '-p', `${dir}/thumbs`])
       for (const [size, quality] of ASK_THUMB_SIZES) {
-        await $.process.run(['sips', '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to])
+        await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', quality, path, '--out', to])
         if (((await $.fs.stat(to).catch(() => undefined))?.size ?? Infinity) <= ASK_THUMB_BYTES) break
       }
     }
@@ -3849,13 +3875,18 @@ const alertPerson = async ($: EngineInterface, what: string, title: string, text
   if (amber && (amber.exitCode === 0 || amber.exitCode === 5)) {
     void log($, `${what}: ${title} — app said ${sent.reason}; ${amber.exitCode === 0 ? 'notified through Claudopus Asks' : 'macOS asked to allow Claudopus Asks'}`)
     // Shown now with its sound; one waiting on macOS's question goes without it, so the mod's chime is heard instead
-    return amber.exitCode === 0 && asks?.chime === true
+    return amber.exitCode === 0 && asks?.chime === true && !isLinux
   }
   // Claudopus Asks turned off in System Settings, or it failed: the purple Claudopus, without the sound
   const own = await run([])
   const tried = amber ? `Claudopus Asks said ${amber.exitCode}; ` : ''
   if (own.exitCode === 0 || own.exitCode === 5) {
     void log($, `${what}: ${title} — app said ${sent.reason}; ${tried}${own.exitCode === 0 ? 'notified through Claudopus' : 'macOS asked to allow Claudopus'}`)
+    return false
+  }
+  // Linux: bin/notify was the desktop's own notification, and with no desktop there is none; the panel and the terminal show it
+  if (isLinux) {
+    void log($, `${what}: ${title} — app said ${sent.reason}; ${tried}${own.exitCode === 3 ? 'no desktop notification on this machine' : `notify-send said ${own.exitCode}`}`)
     return false
   }
   // Claudopus notifications turned off in System Settings, or it failed: macOS's plain notification. Elsewhere osascript is
@@ -4335,7 +4366,8 @@ const copyAsk = ($: EngineInterface, id: string, text: string, surface: RenderSu
 let openedKey = ''
 let opens = 0
 const zshQuoted = (text: string) => `'${text.replaceAll("'", `'\\''`)}'`
-const canOpenTerminal = (one: Todo) => Boolean(one.ask?.isCommand && one.ask.copy) && !one.chat?.host && !isRunFromAfar
+// Linux has no Terminal app to type it into, so there the card gives the command to copy only
+const canOpenTerminal = (one: Todo) => Boolean(one.ask?.isCommand && one.ask.copy) && !one.chat?.host && !isRunFromAfar && !isLinux
 const terminalFiles = (folder: string, home: string) => ({
   // Their own .zshenv runs first; one that moves ZDOTDIR to their own folder is followed there afterwards, not before ours runs
   '.zshenv': [
@@ -4964,7 +4996,7 @@ const openChat = async ($: EngineInterface, c: Shared) => {
   if (url) await openHere($, c, url)
 }
 const openHere = async ($: EngineInterface, c: { chat: string; host: string }, url: string) => {
-  const r = await $.process.run(['open', url]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  const r = await openOn($, url)
   await log($, `chat ${c.chat}${c.host ? ` on ${c.host}` : ''} ${r.exitCode === 0 ? `opened: ${url}` : `not opened: ${r.stderr.trim().slice(0, 160)}`}`)
 }
 // Whether this chat runs here for another Mac's Claude app, over SSH: the app's own runner says so, once, at the start
@@ -5140,7 +5172,7 @@ const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o
 let localName = ''
 const knowLocalName = async ($: EngineInterface) => {
   if (localName) return localName
-  const r = await $.process.run(['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
+  const r = await $.process.run(isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
   localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac'
   return localName
 }
@@ -5451,15 +5483,15 @@ const boxWording = (one: Record<string, unknown>): string | undefined => {
   const again = typeof one.again === 'string' && Object.hasOwn(BOX_AGAIN, one.again) ? BOX_AGAIN[one.again]! : ''
   if (one.kind === 'admin') {
     if (typeof one.host !== 'string' || !BOX_HOST.test(one.host) || one.name !== undefined) return undefined
-    const mac = one.host === 'here' ? 'this Mac' : one.host
-    return `${again}Claudopus needs the admin password of ${mac} to run an admin command. It is kept only in this Mac's keychain, and later admin commands on ${mac} run without asking again until it is forgotten.`
+    const mac = one.host === 'here' ? thisMac() : one.host
+    return `${again}Claudopus needs the admin password of ${mac} to run an admin command. It is kept only in ${keptWhere()}, and later admin commands on ${mac} run without asking again until it is forgotten.`
   }
   if (one.kind === 'secret') {
     if (one.host !== undefined) return undefined
     // No name: the first box of a key saved by hand asks its name
     if (one.name === undefined) return 'Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.'
     if (typeof one.name !== 'string' || !BOX_NAME.test(one.name)) return undefined
-    return `${again}Claudopus needs ${one.name}. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print.`
+    return `${again}Claudopus needs ${one.name}. It is kept only in ${keptWhere()}, and work uses it by name, hidden in what its commands print.`
   }
   return undefined
 }
@@ -5513,7 +5545,7 @@ const boxesDir = () => `${dir}/boxes`
 // Another chat's request is left to it this long, so its own chat tells it, when that chat is open
 const BOX_GRACE = 5000
 // In the chat only the name of what is asked, once per box, in the chat that asked or else whichever chat sees it first
-const BOX_TOLD = (text: string) => `${text} Click in the box at the top of the Claudopus panel and type it there, never in this chat's prompt (/claudopus opens the panel). What is typed in the box goes only into this Mac's keychain.`
+const BOX_TOLD = (text: string) => `${text} Click in the box at the top of the Claudopus panel and type it there, never in this chat's prompt (/claudopus opens the panel). What is typed in the box goes only into ${keptWhere()}.`
 // This chat's own id, as the runner reads it from CLAUDE_CODE_SESSION_ID, read at each look (a /clear can change it)
 let boxChat = ''
 // Requests this chat has told or seen told
@@ -5541,7 +5573,7 @@ const lookBoxes = async ($: EngineInterface) => {
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && now - one.at >= BOX_OLD) {
         await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`]).catch(() => undefined)
-        await $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => undefined)
+        await boxKeyring($, 'delete', id)
       }
     } catch {
       // A request being written is read at the next look
@@ -5572,6 +5604,14 @@ const lookBoxes = async ($: EngineInterface) => {
   $.ui.invalidate('ui.render')
 }
 
+// A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
+// which sendBox calls as before for set and has, so only delete goes through here
+const boxKeyring = ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
+  isLinux
+    ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+    : what === 'delete'
+      ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
+      : Promise.resolve({ exitCode: -1 })
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
   boxDrafts.delete(id)
@@ -5586,23 +5626,25 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
   if (!(await $.fs.exists(request).catch(() => false))) return void (await cancelBox($, id, 'It was no longer waiting · nothing was saved'))
   const escaped = value.replace(/[\\"]/g, '\\$&')
-  const r = await $.process
-    .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
-    .catch(() => ({ exitCode: -1 }))
+  const r = isLinux
+    ? await boxKeyring($, 'set', id, `${value}\n`)
+    : await $.process
+        .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
+        .catch(() => ({ exitCode: -1 }))
   // security -i can end well when the add failed: the entry is looked for by its attributes, never its value
-  const isKept = r.exitCode === 0 && (await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
+  const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0
   // and one whose runner stopped meanwhile is taken out again
-  if (isKept && !(await $.fs.exists(request).catch(() => false))) await $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => undefined)
+  if (isKept && !(await $.fs.exists(request).catch(() => false))) await boxKeyring($, 'delete', id)
   boxPresses += 1
   if (!isKept) {
-    boxSaid.set(id, 'It could not be put in this Mac\'s keychain. Try again.')
+    boxSaid.set(id, `It could not be put in ${keptWhere()}. Try again.`)
     await log($, `box ${id} not kept: security ended ${r.exitCode}`)
   } else {
     boxSent.add(id)
     boxSaid.delete(id)
     const one = boxes.find(other => other.id === id)
     boxes = boxes.filter(other => other.id !== id)
-    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: "You gave it · it is in this Mac's keychain, and what asked for it goes on now", what: '', isOn: true })
+    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   $.ui.invalidate('ui.render')
@@ -5625,7 +5667,7 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
   return shown.map((one, n) => (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
-      <ui.Text dimColor wrap="wrap">What you type here shows as you type it. It goes only into this Mac's keychain, never into a chat.</ui.Text>
+      <ui.Text dimColor wrap="wrap">What you type here shows as you type it. It goes only into {keptWhere()}, never into a chat.</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
           key={`box-${one.id}-field-${boxPresses}`}
@@ -5673,7 +5715,7 @@ const GATE_DENIED = () =>
 const GATE_GONE = () => named('This admin command did not run: the wait for {name} to allow it was cut short. Run it again if it is still needed.')
 const GATE_LATE = () => named('This admin command did not run: {name} did not answer in the time a call can be held. Run it again when it is needed, and {name} is asked again.')
 const GATE_BLIND = () => named('This admin command did not run: {name} is asked before every admin command, on a card in the Claudopus panel, and no panel is drawn for this chat.')
-const GATE_UNSEALED = "This admin command did not run: what was allowed could not be sealed in this Mac's keychain. Run it again."
+const GATE_UNSEALED = () => `This admin command did not run: what was allowed could not be sealed in ${keptWhere()}. Run it again.`
 const NO_GATE_TOUCH = () =>
   named('The list of admin commands {name} always allows, what {name} allowed and the key that seals them are never read or written by work: only {name} adds to them, with a press on a card or in Config.')
 const MACOS_ONLY_HERE = () =>
@@ -5727,12 +5769,22 @@ const SEAL = `set -u
 PATH=/usr/bin:/bin
 mode=$1
 shift
-key() { /usr/bin/security find-generic-password -s ${GATE_SERVICE} -a seal -w 2>/dev/null; }
+if [ -x /usr/bin/security ]; then
+  key() { /usr/bin/security find-generic-password -s ${GATE_SERVICE} -a seal -w 2>/dev/null; }
+  keep() { printf 'add-generic-password -U -s "${GATE_SERVICE}" -a "seal" -l "Claudopus admin gate" -w "%s"\\n' "$1" | /usr/bin/security -i >/dev/null 2>&1; }
+else
+  # Linux: where bin/keyring keeps it, a file only this user reads
+  d=\${XDG_DATA_HOME:-$HOME/.local/share}
+  case $d in /*) ;; *) d=$HOME/.local/share ;; esac
+  f=$d/claudopus/keyring/${GATE_SERVICE}
+  key() { [ -f "$f/seal" ] && cat "$f/seal" 2>/dev/null; }
+  keep() { (umask 077; mkdir -p "$f" && chmod 700 "$d/claudopus" "$d/claudopus/keyring" "$f" && printf '%s' "$1" >"$f/.seal.new" && mv -f "$f/.seal.new" "$f/seal"); }
+fi
 k=$(key)
 if [ "$mode" = new ] || { [ -z "$k" ] && [ "$mode" = make ]; }; then
-  k=$(/usr/bin/openssl rand -hex 32) || exit 1
+  k=$(/usr/bin/openssl rand -hex 32 2>/dev/null || od -An -tx1 -N32 /dev/urandom | tr -d ' \\n') || exit 1
   [ \${#k} = 64 ] || exit 1
-  printf 'add-generic-password -U -s "${GATE_SERVICE}" -a "seal" -l "Claudopus admin gate" -w "%s"\\n' "$k" | /usr/bin/security -i >/dev/null 2>&1
+  keep "$k"
   [ "$(key)" = "$k" ] || exit 1
 fi
 [ -n "$k" ] || exit 3
@@ -5797,7 +5849,7 @@ const isAllowed = async ($: EngineInterface, call: AdminCall) => {
 }
 const allowAlways = async ($: EngineInterface, call: AdminCall) => {
   const seal = (await sealed($, 'make', [allowMessage(call)]))?.[0]
-  if (!seal) throw new Error("the seal could not be made in this Mac's keychain")
+  if (!seal) throw new Error(`the seal could not be made in ${keptWhere()}`)
   const at = await $.clock.now()
   allowedRead = { key: '', valid: [], unsealed: 0 }
   await writeAllowed($, [...(await readAllowed($)).filter(one => one.host !== call.host || one.command !== call.command), { ...call, seal, at }])
@@ -5809,7 +5861,7 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
   const kept = change.remove ? valid.filter(one => one.host !== change.remove?.host || one.command !== change.remove.command) : valid
   const mode = change.mode ?? (await gateOf($)).mode
   const seals = await sealed($, 'new', [...kept.map(allowMessage), ...(mode === 'each' ? [] : [`mode\n${mode}`])])
-  if (!seals) throw new Error("the seal could not be made in this Mac's keychain")
+  if (!seals) throw new Error(`the seal could not be made in ${keptWhere()}`)
   allowedRead = { key: '', valid: [], unsealed: 0 }
   await writeAllowed($, kept.map((one, n) => ({ ...one, seal: seals[n] ?? '' })))
   await setConfig($, dir, 'admin', mode === 'each' ? undefined : mode)
@@ -5817,7 +5869,7 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
   if (change.mode) workAllowed.clear()
 }
 // "Let macOS ask, keep nothing": every password kept for an admin command leaves the keychain
-const FORGET_KEPT = 'n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done'
+const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; else d=${XDG_DATA_HOME:-$HOME/.local/share}; case $d in /*) ;; *) d=$HOME/.local/share ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; fi'
 const setAdminPassword = async ($: EngineInterface, value: 'keep' | 'macos') => {
   await setConfig($, dir, 'adminPassword', value === 'macos' ? 'macos' : undefined)
   if (value === 'macos') await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
@@ -5868,7 +5920,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
   await openList($).catch(() => undefined)
   const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
-  const where = gate.host === 'here' ? 'this Mac' : gate.host
+  const where = gate.host === 'here' ? thisMac() : gate.host
   const text = `Wants to run an admin command on ${where}: ${cut(oneLine(gate.command), 200)}`
   await (card ? askAloud($, card, text) : aloud($, 'ask', 'An admin command needs you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
   $.ui.log(
@@ -5899,7 +5951,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
     gateSaid.set(id, said)
     void noteDone($, {
       id: `gate-${id}`,
-      head: `An admin command on ${gate.host === 'here' ? 'this Mac' : gate.host}`,
+      head: `An admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
       said:
         said === 'deny'
           ? 'You denied it · it did not run, and the work was told'
@@ -5944,7 +5996,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
     const grant = await issueGrant($, `${e.tool_use_id}-${n}`, call)
     if (!grant) {
       await dropGrants($, grants)
-      return { deny: GATE_UNSEALED, grants: [] }
+      return { deny: GATE_UNSEALED(), grants: [] }
     }
     grants.push(grant)
   }
@@ -5955,7 +6007,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
 // that holds the call allows it
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
   <ui.Box key={key} flexDirection="column" gap={1}>
-    <ui.Text wrap="wrap" color={NEEDS} bold>{`Wants to run an admin command on ${gate.host === 'here' ? 'this Mac' : gate.host}`}</ui.Text>
+    <ui.Text wrap="wrap" color={NEEDS} bold>{`Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`}</ui.Text>
     <ui.Box backgroundColor={FILL} paddingLeft={2}>
       <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
     </ui.Box>
@@ -6364,6 +6416,7 @@ const heldLook = async ($: EngineInterface, id: string) => {
 }
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
+    await knowSystem($).catch(() => undefined)
     // A load, first or a reload, starts looking afresh: nothing that ended before it is announced
     lastSeen = undefined
     // and reads its own copy's version again
@@ -7592,6 +7645,34 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   return false
 }
 
+// bin/keyring and its store, the runners' alone: on a Mac a way into the keychain, on Linux files that hold every kept password and
+// key, the boxes' answers and the admin gate's key. A command that names the keyring runner or the store's folder (bin/keyring,
+// keyring/…, "keyring"), and any tool that reads, searches or writes a path in that folder, or searches a folder of yours it is in,
+// is refused. Commands that only name the word, such as `pip install keyring`, are refused with it. This stops slips and common
+// tricks, as the boxes' guard does; it is no wall
+const KEYRING_WORD = /(?:^|[\s'"=/;&|(`$])keyring(?:$|[\s'"/;&|)`])/i
+const KEYRING_PATH = /claudopus\/keyring(?:\/|\b)|\.local\/share\/claudopus\b/i
+const touchesKeyring = (e: { tool: string }) => {
+  const input = e as { command?: unknown; file_path?: unknown; notebook_path?: unknown; path?: unknown; pattern?: unknown; glob?: unknown }
+  if (e.tool === 'Bash') {
+    const command = String(input.command ?? '')
+    // git and gh alone may name the word, so a commit message or a pull request can; never the store's folder
+    return KEYRING_PATH.test(command) || (KEYRING_WORD.test(command) && !/^\s*(?:git|gh)\s[^;&|`$<>]*$/.test(command))
+  }
+  if (!['Read', 'Grep', 'Glob', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return false
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const roots = [keyringRoot, `${home}/.local/share/claudopus/keyring`].filter(Boolean).map(one => one.toLowerCase())
+  const isSearch = e.tool === 'Grep' || e.tool === 'Glob'
+  if (isSearch && [input.pattern, input.glob].some(one => typeof one === 'string' && KEYRING_WORD.test(` ${one} `))) return true
+  return [input.file_path, input.notebook_path, input.path, input.pattern, input.glob].some(one => {
+    if (typeof one !== 'string' || !one) return false
+    if (KEYRING_PATH.test(one)) return true
+    const path = pathOf(one, home, cwd || home).toLowerCase().replace(/\/+$/, '')
+    // A search from a folder of yours above the store reaches into it (ripgrep passes over hidden folders only from above your home)
+    return roots.some(root => path === root || path.startsWith(`${root}/`) || (isSearch && path.length > home.length && root.startsWith(`${path}/`)))
+  })
+}
+
 const workHooks = (on: On) => {
 
   // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
@@ -7619,7 +7700,7 @@ const workHooks = (on: On) => {
       await log($, `refused ${e.tool} touching the password and key boxes`)
       return { deny: NO_BOXES }
     }
-    if (e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) {
+    if ((e.tool === 'Bash' && KEYCHAIN_READ.test(String((e as { command?: unknown }).command ?? ''))) || touchesKeyring(e)) {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
     }
@@ -8038,7 +8119,7 @@ const toolHooks = (on: On) => {
     if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
     if (card) await askInChat($, card)
     // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
-    const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
+    const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.` : isLinux ? ` Do not open a terminal for it: on Linux the card gives it with a Copy button, and ${who()} runs it in a terminal of their own.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : ''
     const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ')
     const lost = givenPics.length - pictures.length
     // An ask that points at an explanation it does not carry: the person sees the ask before the work's report, so it is said back

@@ -12,7 +12,7 @@ const ssh = (mac: string, command: string) => ['ssh', '-o', 'BatchMode=yes', '-o
 let localName = ''
 const knowLocalName = async ($: EngineInterface) => {
   if (localName) return localName
-  const r = await $.process.run(['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
+  const r = await $.process.run(isLinux ? ['hostname', '-s'] : ['scutil', '--get', 'LocalHostName'], { timeoutMs: 5_000 }).catch(() => ({ exitCode: -1, stdout: '' }))
   localName = keyOf(r.exitCode === 0 ? r.stdout.trim() : '') || 'mac'
   return localName
 }

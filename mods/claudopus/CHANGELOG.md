@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.101 · 15 November 2026
+- Claudopus works on Linux, in Claude Code in a terminal, installed with the same lines as on a Mac. Passwords and keys are kept there in files only you can read, as Linux has no keychain to use; notifications use the desktop's own where there is one; small copies of pictures are made with ImageMagick; what only a Mac can do (Let macOS ask, Open in Terminal, the notification apps) is not offered there and says so. The guide's On Linux says what differs.
+- The tests run on Linux and on a Mac on every push.
+
 ## 0.2.100 · 14 November 2026
 - The Claudopus page on GitHub names the newest version as its latest release again, with what changed in it; it had stopped at 0.2.51. Every release now posts itself there, and a release that cannot do so says it failed.
 
