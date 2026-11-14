@@ -1,11 +1,11 @@
-// Above the prompt: the small octopus while work runs
+// Above the prompt: the small octopus while work runs, and how Claude uses this computer
 
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
 let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
 const bandHooks = (on: On) => {
 
-  // Above the prompt, while work runs: a small mark that it does, and nothing of what it is doing
+  // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const cards = await read($, todos)
@@ -74,25 +74,18 @@ const bandHooks = (on: On) => {
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
-    // What the work that last said something is doing, in a few whole words: the to-do it is on (a to-do is written in a few
-    // words), else its title. Never cut with an ellipsis: the band is one line
-    const latest = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')
-    const [lead] = [...working].sort((a, b) => (latest(b)?.at ?? b.startedAt) - (latest(a)?.at ?? a.startedAt))
-    const doing = lead ? lead.items.find(item => item.state === 'doing')?.text || lead.title || 'Working' : '✓ Finished'
-    const more = working.length - 1
+    // How Claude uses this computer: memory in use and Claude's part, how busy the processor is and Claude's part, the disk's and the
+    // network's speed, looked at every few seconds while work runs. The second's tick redraws it as the figures move
+    await read($, tick)
+    const figures = usageNow(await $.clock.now())
+    if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
         {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
-        <Box flexShrink={1} minWidth={0}>
-          <Text dimColor wrap="truncate-end">{oneLine(doing)}</Text>
-        </Box>
-        {more > 0 ? (
-          <Box flexShrink={0}>
-            <Text dimColor>{`· +${more} more`}</Text>
-          </Box>
-        ) : null}
-        {isPanelAway ? (
+        {figures ? (e.surface === 'terminal' ? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box> : usageDrawn(ui, figures) ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box>) : null}
+        {/* The figures fill a phone's terminal: the hint shows until they come */}
+        {isPanelAway && !figures ? (
           <Box flexShrink={0}>
             <Text dimColor>· /claudopus shows the panel</Text>
           </Box>

@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.106 · 15 November 2026
+- The line above the prompt shows how Claude uses the computer while work runs, in place of one piece of work's step: memory in use, how busy the processor is, and the disk's and the network's speed. In the two small meters Claude's part (the app, its chats and everything they started) is purple and the rest grey; memory turns amber past 90%. The terminal shows the same line in words. It is looked at every 5 seconds, once for all open chats.
+
 ## 0.2.105 · 15 November 2026
 - A card now names the step its work is on, as "Step 13 of 16", under its line of facts; with no step in hand it names the next one, dim
 - Past 14 steps, a card's coloured edge still shows the step being done in its lighter shade, between what is done and what is left

@@ -15,9 +15,8 @@ test('what I ask for becomes a box in the panel, the panel opens once, and the c
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const band = await $.ui.mount({ ...BAND, surface } as never)
-    // One short line: what the work that last moved is doing, and how many others run
-    expect((await band.find({ type: 'Text', text: /more$/ }))?.text).toBe('· +1 more')
-    expect((await band.find({ type: 'Text', text: /Check the ears|Fix the nose/ }))?.props.wrap).toBe('truncate-end')
+    // One short line, and never what a piece of work is doing: that is on its card
+    expect(await band.find({ type: 'Text', text: /more$|Check the ears|Fix the nose/ })).toBeUndefined()
     expect(await band.findAll({ type: 'Button' })).toHaveLength(0)
     await band.unmount()
   }
