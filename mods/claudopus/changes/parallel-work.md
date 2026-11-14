@@ -1,0 +1,5 @@
+- A piece of work's helpers now run in the background, as the chat's own work does: the work carries on with its own steps while they run, and their results come to it as they end. Before, the work was frozen until each helper ended.
+- Work waits for its helpers only when it has nothing else to do, with a command that comes back as soon as one ends, or every three minutes with how each is doing. It is not let finish while one still runs, so no helper's result goes to the chat instead.
+- While a piece of work has helpers running, its card says how many and when they were last looked in on, and turns amber when one has shown nothing new for five minutes; the work is told, to check it, nudge it or replace it.
+- After each step, work is told when it could have sent its calls together: a helper started alone, three single lookups in a row, two long runs of one kind one after the other, a step of only to-dos, or a commit with no second look started yet.
+- The to-do reminder now asks for the to-do and note calls to go with the next work call, never in a step of their own.
