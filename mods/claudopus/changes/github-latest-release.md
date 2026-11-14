@@ -1,0 +1,1 @@
+- The Claudopus page on GitHub names the newest version as its latest release again, with what changed in it; it had stopped at 0.2.51. Every release now posts itself there, and a release that cannot do so says it failed.

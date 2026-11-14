@@ -6,18 +6,21 @@
 # left that the repo does not track, runs the repo's checks on the result, pushes main and the version's tag.
 #   release --status   says who is releasing in this repo now, and since when
 # Exit: 0 released; 2 main and the branch changed the same lines (merge main into the branch, resolve, commit, run again);
-#       3 the build or the checks failed (fix on the branch, run again); 1 anything else. Nothing is pushed unless it exits 0.
+#       3 the build or the checks failed (fix on the branch, run again); 4 main was pushed but its tag or its GitHub release was
+#       not (it says the one command that finishes it); 1 anything else. Nothing is pushed unless it exits 0 or 4.
 # Settings, all optional, in the repo's committed `.release` (bash): MAIN (main), REMOTE (origin), NAME (put before the version
 # in the title), VERSION_FILE (a JSON file with "version": "x.y.z", or a file holding only x.y.z), DERIVED (files the build
 # makes, never merged), BUILD, CHECK (commands run in the release's own checkout), AFTER (run in the work's worktree once
-# pushed). `release.local` in the repo's git folder, never committed, can set the same for this Mac only, such as AFTER.
+# pushed), GITHUB_RELEASE (a command, run in the release's checkout with the version in RELEASE_VERSION, that prints the
+# notes of the version's GitHub release: with it every release with a version is made a GitHub release marked latest, and gh
+# must be signed in, which is checked before anything is pushed). `release.local` in the repo's git folder, never committed, can set the same for this Mac only, such as AFTER.
 set -uo pipefail
 say() { echo "release: $*" >&2; }
 die() { say "$1"; exit "${2:-1}"; }
 
 top=$(git rev-parse --show-toplevel 2>/dev/null) || die "not in a git repo"
 common=$(cd "$top" && cd "$(git rev-parse --git-common-dir)" && pwd)
-MAIN= REMOTE=origin NAME= VERSION_FILE= DERIVED= BUILD= CHECK= AFTER=
+MAIN= REMOTE=origin NAME= VERSION_FILE= DERIVED= BUILD= CHECK= AFTER= GITHUB_RELEASE=
 [ -f "$top/.release" ] && . "$top/.release"
 [ -f "$common/release.local" ] && . "$common/release.local"
 url=$(git -C "$top" remote get-url "$REMOTE" 2>/dev/null) || die "no remote $REMOTE"
@@ -94,7 +97,7 @@ git -C "$top" worktree list --porcelain | sed -n 's#^worktree \(.*/claudopus-rel
 done
 git -C "$top" worktree prune
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/claudopus-release.XXXXXX")/release"
-cleanup() { git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
+cleanup() { git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 
@@ -120,7 +123,7 @@ for try in 1 2 3 4 5; do
   cd "$tmp" || die "no checkout"
   # The checks and build are main's own when main has its settings, so a branch cannot drop them; this Mac's own still apply
   if git cat-file -e "$base:.release" 2>/dev/null; then
-    keep=$MAIN; BUILD= CHECK= DERIVED= VERSION_FILE= NAME=; . ./.release; MAIN=$keep
+    keep=$MAIN; BUILD= CHECK= DERIVED= VERSION_FILE= NAME= GITHUB_RELEASE=; . ./.release; MAIN=$keep
     [ -f "$common/release.local" ] && . "$common/release.local"
   fi
   if ! out=$(git merge -q --no-ff --no-commit "$branch" 2>&1); then
@@ -161,16 +164,43 @@ for try in 1 2 3 4 5; do
   git add -u
   if [ -n "$CHECK" ]; then out=$(bash -c "$CHECK" 2>&1) || { echo "$out" | tail -25 >&2; die "the checks failed on $MAIN with $branch; nothing pushed" 3; }; fi
   [ -n "$(git ls-files --others --exclude-standard)" ] && die "the checks left files the repo does not track; nothing pushed" 3
+  # The GitHub release's notes and gh's sign-in are made sure of before the push, so a release that cannot make its GitHub
+  # release pushes nothing
+  notes="$tmp.notes"
+  if [ -n "$GITHUB_RELEASE" ] && [ -n "$ver" ]; then
+    RELEASE_VERSION=$ver bash -c "$GITHUB_RELEASE" >"$notes" 2>"$notes.err" && [ -s "$notes" ] || { tail -5 "$notes.err" >&2; die "the GitHub release notes for $ver could not be made; nothing pushed" 3; }
+    command -v gh >/dev/null || die "GITHUB_RELEASE is set but gh is not installed; nothing pushed" 3
+    gh auth status >/dev/null 2>&1 || die "gh is not signed in to GitHub (gh auth login), so the GitHub release could not be made; nothing pushed" 3
+  fi
   what=${title:-$(git log --no-merges -1 --format=%s "$base..$branch")}
   label=${NAME:+$NAME }${ver:+$ver: }
   git commit -q -m "${label}${what}" -m "Released from $branch by release, on $(git rev-parse --short "$base")." || die "nothing to commit"
   if pushed=$(RELEASE_PUSH=1 git push -q "$REMOTE" "HEAD:refs/heads/$MAIN" 2>&1); then
     sha=$(git rev-parse --short HEAD)
-    if [ -n "$ver" ]; then git tag -f "v$ver" >/dev/null && RELEASE_PUSH=1 git push -q "$REMOTE" "v$ver" 2>/dev/null || say "pushed, but tag v$ver was not"; fi
+    failed=""
+    if [ -n "$ver" ]; then
+      if ! { git tag -f "v$ver" >/dev/null && RELEASE_PUSH=1 git push -q "$REMOTE" "v$ver" 2>/dev/null; }; then
+        failed="RELEASE FAILED: $MAIN was pushed as $sha, but its tag v$ver was not. Finish it with: git push $REMOTE v$ver"
+      elif [ -n "$GITHUB_RELEASE" ]; then
+        repo=$(printf %s "$url" | sed -E 's#^.*github\.com[:/]##; s#\.git$##')
+        kept="$common/release-notes-v$ver.md"
+        retry="gh release create v$ver --repo $repo --title '${NAME:+$NAME }$ver' --notes-file '$kept' --latest --verify-tag"
+        if ! out=$(gh release create "v$ver" --repo "$repo" --title "${NAME:+$NAME }$ver" --notes-file "$notes" --latest --verify-tag 2>&1); then
+          cp "$notes" "$kept"; echo "$out" | tail -5 >&2
+          failed="RELEASE FAILED: $MAIN and tag v$ver were pushed, but GitHub's release for v$ver was not made. Finish it with: $retry"
+        elif [ "$(gh release view --repo "$repo" --json tagName --jq .tagName 2>/dev/null)" != "v$ver" ]; then
+          failed="RELEASE FAILED: GitHub's release for v$ver was made, but GitHub does not show it as the latest. Mark it with: gh release edit v$ver --repo $repo --latest"
+        else
+          say "GitHub's latest release is now v$ver"
+        fi
+      fi
+    fi
+    rm -f "$notes" "$notes.err"
     git -C "$top" fetch -q "$REMOTE" "$MAIN"
     echo "released ${label}${what} as $sha"
     cd "$top" || exit 0
     if [ -n "$AFTER" ]; then bash -c "$AFTER" || say "released, but the after-step failed"; fi
+    [ -n "$failed" ] && die "$failed" 4
     exit 0
   fi
   cd "$top" || exit 1

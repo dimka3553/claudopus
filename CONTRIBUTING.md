@@ -25,5 +25,5 @@ The GitHub check (`.github/workflows/check.yml`) runs the build check, the notif
 
 - `README.md` and `mods/claudopus/README.md` are the same text, so change them together.
 - A change under `mods/claudopus/notifier/` is rebuilt with `sh mods/claudopus/notifier/build.sh`, which rewrites `checksums.txt`; commit both.
-- A release raises `version` in `mods/claudopus/.claude-plugin/plugin.json` and then builds. Installs update when that version changes.
+- A release raises `version` in `mods/claudopus/.claude-plugin/plugin.json` and then builds. Installs update when that version changes. Once pushed, it makes that version a GitHub release marked latest, with its changelog entry (`build.mjs --notes`), so the repo page and the README's release badge always name it.
 - Everything here is public: no keys, private paths or personal notes.
