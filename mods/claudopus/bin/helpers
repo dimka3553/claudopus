@@ -1,7 +1,8 @@
 #!/bin/sh
 # Waits for a piece of work's helpers, run by the work itself with Bash: back once the helpers it has running change (one ended,
-# or one started), which the mod writes within about 20 seconds, or after 110 seconds, inside Bash's own two-minute limit; then
-# prints how each is doing. The file's first line names the helpers running ("running: <ids>"), the rest says how each is doing.
+# one started or one went quiet), which the mod writes within about 20 seconds, or after 110 seconds, inside Bash's own two-minute limit; then
+# prints how each is doing. The file's first line names the helpers running and those gone quiet ("running: <ids> quiet: <ids>"),
+# the rest says how each is doing.
 f="$1"
 [ -f "$f" ] || { echo "No helper of yours is running."; exit 0; }
 first=$(head -n 1 "$f")
@@ -17,5 +18,5 @@ while [ "$i" -lt 55 ]; do
   sleep 2
   i=$((i + 1))
 done
-if [ -n "$changed" ]; then echo "Your helpers changed: one ended (its result comes to you as a message) or one started."; else echo "No helper ended in the last two minutes."; fi
+if [ -n "$changed" ]; then echo "Your helpers changed: one ended (its result comes to you as a message), one started, or one went quiet."; else echo "No helper ended in the last two minutes."; fi
 tail -n +2 "$f"

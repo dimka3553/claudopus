@@ -6725,7 +6725,8 @@ const HELD_AT_END = (n: number, command: string) =>
   `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Do not finish yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Carry on with what needs nothing from ${n === 1 ? 'it' : 'them'}, or wait with this Bash command (timeout 600000): ${command} ; stop one you no longer need with TaskStop.`
 const HELPERS_STARTED = (command: string) => `Your helpers run in the background: each call came back at once and each result comes to you as a message when it ends. Carry on now with your own part. ${WAIT_HOW(command)}`
 
-// The file each piece of work with helpers waits on: its first line the helpers it has running, then how each is doing
+// The file each piece of work with helpers waits on: its first line the helpers it has running and those of them gone quiet, then
+// how each is doing
 const rollPath = (agent: string) => `${dir}/helpers/${agent}.txt`
 const rollsWritten = new Map<string, { head: string; at: number }>()
 const writeRolls = async ($: EngineInterface, isNow = false) => {
@@ -6735,7 +6736,10 @@ const writeRolls = async ($: EngineInterface, isNow = false) => {
   for (const id of parents) {
     const parent = list.find(one => one.id === id)
     if (!parent || parent.status !== 'working') continue
-    const head = `running: ${runningHelpers(list, id).map(one => one.id).join(',')}`
+    // A helper that goes quiet changes the line too, so a work waiting on its helpers hears of it at once, not after its wait
+    const running = runningHelpers(list, id)
+    const quiet = running.filter(one => now - Math.max(one.startedAt, one.newAt ?? 0) >= HELPER_QUIET)
+    const head = `running: ${running.map(one => one.id).join(',')}${quiet.length ? ` quiet: ${quiet.map(one => one.id).join(',')}` : ''}`
     const last = rollsWritten.get(id)
     if (!isNow && last && last.head === head && now - last.at < 60_000) continue
     rollsWritten.set(id, { head, at: now })

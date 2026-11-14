@@ -6136,10 +6136,13 @@ test('the work waits for its helpers with a command of its own: a file it waits 
   expect(told).toContain('Your helpers run in the background')
   expect(told).toMatch(/bin\/helpers' '\/home\/sam\/\.claude\/claudopus\/helpers\/a1\.txt'/)
   expect(await toldOf(batch($, 'a1', [{ tool: 'Agent', input: { description: 'A third' } }, { tool: 'Read' }]))).toBe('')
+  // Five minutes with nothing new from either: the line names them as quiet, so a wait on it comes back
+  await clock.advance(5 * 60_000)
+  expect(roll().split('\n')[0]).toBe('running: a2,a3 quiet: a2,a3')
   agents.a2 = 'completed'
   await $.turn.complete({ answer: 'nose.ts', durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' } as never)
   await clock.advance(21_000)
-  expect(roll().split('\n')[0]).toBe('running: a3')
+  expect(roll().split('\n')[0]).toBe('running: a3 quiet: a3')
   expect(roll()).toContain('"Read the nose code" (a2): ended')
 })
 
