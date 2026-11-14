@@ -1,0 +1,3 @@
+- A download or long run on a card now shows how much is done of how much (such as 460 MB of 1 GB, or 3 of 6 steps), its percent and its speed, read by itself from the progress curl, wget, rsync, az and azcopy, aws, pip, git, tqdm and the like print, beside when it last wrote or how long it has been quiet.
+- Work is told to make its long scripts print a `progress:` line the card reads, and to run tools with their progress shown even when their output goes to a file.
+- A run whose output cannot be found says "output not found" instead of showing only its time; a detached run is no longer followed by a wrong process or a log named by a shell variable, which had kept a long-ended download on its card for hours with nothing to show.

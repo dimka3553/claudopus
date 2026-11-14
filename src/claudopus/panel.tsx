@@ -473,8 +473,11 @@ const panelHooks = (on: On) => {
         : job.kind === 'wait' ? (job.target ? [job.target, true] : ['waiting', false])
         : job.wroteAt && quiet >= JOB_QUIET ? [`no new output for ${shortAgo(quiet)}`, true]
         : job.wroteAt ? [`updated ${shortAgo(quiet)} ago`, false]
+        // A job whose output cannot be found says so, so a blank row is never taken for one that moves (a command held open has no
+        // output to read until it ends)
+        : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', true]
         : ['', false]
-      const short = state.replace(/^no new output for /, 'quiet ').replace(/^updated (.*) ago$/, '$1 ago').replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still ')
+      const short = state.replace(/^no new output for /, 'quiet ').replace(/^output not found$/, 'no output').replace(/^updated (.*) ago$/, '$1 ago').replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still ')
       const text = firstFit([[...pct, state, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
       return { text, isWarn: Boolean(isWarn) && Boolean(state) }
     }
@@ -487,9 +490,11 @@ const panelHooks = (on: On) => {
       const { text: side, isWarn } = isMore ? { text: took(at - job.at), isWarn: false } : jobSide(job, width)
       const room = Math.max(12, width - side.length - 1)
       // The latest line, unless it is only a progress bar its percent already says, in the room the name leaves; a wait says what
-      // it waits for
-      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
-      const name = cut(jobHead(job), room)
+      // it waits for. How much is done of how much, and how fast, stands in for the line it came from
+      const amount = job.done ? `${job.done}${job.total ? ` of ${job.total}` : ''}${job.rate ? ` · ${job.rate}` : ''}` : ''
+      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : amount || (job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : '')
+      // and an amount keeps its room before the name does
+      const name = cut(jobHead(job), amount && job.kind !== 'wait' ? Math.max(12, room - amount.length - 3) : room)
       const rest = room - name.length - 3
       const detail = latest && rest >= 10 ? cut(latest, rest) : ''
       return (

@@ -197,6 +197,7 @@ declare global {
   export import JOB_NEWS = M10.JOB_NEWS
   export import JOB_QUIET = M10.JOB_QUIET
   export import JOB_TAIL = M10.JOB_TAIL
+  export import JOB_UNREAD = M10.JOB_UNREAD
   export import JOB_WORD = M10.JOB_WORD
   export import jobKindOf = M10.jobKindOf
   export import JOBS_SHOWN = M10.JOBS_SHOWN

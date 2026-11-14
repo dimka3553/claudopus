@@ -39,7 +39,7 @@ const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my pri
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean } } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: () => string; wroteAt: () => number } } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -204,6 +204,15 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       files.set(rest[3], `${files.get(rest[3]) ?? ''}${rest[4] ?? ''}`)
       return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
+    // says, last written when it says, and every detached process it names still runs
+    if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {
+      const n = Number(rest[3] ?? 0)
+      const asked = rest.slice(4, 4 + n).map(String)
+      const pids = [...String(rest[1]).matchAll(/for p in ([\d ]*); do kill/g)].flatMap(m => (m[1] ?? '').trim().split(/\s+/).filter(Boolean))
+      const at = Math.floor(options.jobs.wroteAt() / 1000)
+      return ok(`${asked.map(file => `\n@@JOB@@ ${at} ${file}\n${options.jobs?.output() ?? ''}`).join('')}\n@@ALIVE@@${pids.map(p => ` ${p}`).join('')}\n`)
+    }
     // What sips says of a picture, where the test gives it
     const sipsSaid = tool === 'sips' ? options.sips?.([...e.argv]) : undefined
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -348,6 +357,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // as the engine says it: an error result in words, the same for an approval cut short
     if (files.get('refuse') === e.tool) return { result: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", isError: true } as never
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
+    // A command started detached prints its process, as `echo $!` does
+    if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
@@ -1841,6 +1852,58 @@ test('long work keeps only its newest ended helpers, and none of work that was f
   expect(names.includes('Measure 5')).toBe(false)
   expect(names.includes('Measure 6')).toBe(true)
   await tab.unmount()
+})
+
+test('a long run shows how far it is from what it prints: how much of how much, its percent and speed, and whether output still comes', SLOW, async ($, on) => {
+  let output = '  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n\r  5 1024M    5 51.2M    0     0  10.2M      0  0:01:40  0:00:05  0:01:35 10.5M\r 45 1024M   45  460M    0     0  10.2M      0  0:01:40  0:00:45  0:00:55 10.5M'
+  let wroteAt = 0
+  const { clock } = world(on, { jobs: { output: () => output, wroteAt: () => wroteAt } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  // The mocked clock starts where the world sets it
+  let now = 1_700_000_000_000
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fetch the scans', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fetch the scans', prompt: 'fetch the scans' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'a1', command: 'cd /w && nohup curl -L -o scans.zip https://example.com/scans.zip > fetch.log 2>&1 & echo $!', description: 'Fetch the CT scans' } as never)
+  wroteAt = now
+  await advance(20_000)
+  wroteAt = now - 3_000
+  await advance(20_000)
+  const texts = async () => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
+    const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
+    await list.unmount()
+    return all
+  }
+  expect(await until(async () => ((await texts()).includes(' · 460 MB of 1 GB · 10.5 MB/s') || undefined))).toBe(true)
+  const shown = await texts()
+  expect(shown).toContain('45%')
+  expect(shown.some(text => /^ · updated \d+s ago · /.test(text))).toBe(true)
+  // The work's own line, as its scripts are told to print it
+  output = 'loading\nprogress: 3/6 steps fitting\nframe 12 done\n'
+  wroteAt = now
+  await advance(20_000)
+  expect(await until(async () => ((await texts()).includes(' · 3 of 6 steps') || undefined))).toBe(true)
+  // Quiet for long, in words
+  wroteAt = now - 15 * 60_000
+  await advance(20_000)
+  expect(await until(async () => ((await texts()).some(text => /no new output for 1[5-9]m|quiet 1[5-9]m/.test(text)) || undefined))).toBe(true)
+})
+
+test('a run whose output cannot be found says so after a minute, so a blank row is never taken for one that moves', async ($, on) => {
+  const { clock } = world(on)
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fetch the scans', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fetch the scans', prompt: 'fetch the scans' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'a1', command: 'cd /w && nohup curl -L -o scans.zip https://example.com/scans.zip > fetch.log 2>&1 & echo $!', description: 'Fetch the CT scans' } as never)
+  await clock.advance(70_000)
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
+  const shown = (await list.findAll({ type: 'Text' })).map(one => one.text)
+  expect(shown.some(text => /^Download · Fetch the CT scans/.test(text))).toBe(true)
+  expect(shown.some(text => /^output not found · 1m 1\ds$/.test(text))).toBe(true)
+  await list.unmount()
 })
 
 // Finished work: the happy green octopus and its pause

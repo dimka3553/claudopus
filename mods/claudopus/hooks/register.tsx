@@ -16,7 +16,7 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isReloadDue, isU
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { detachedOf, DOWNLOAD_CMD, foldJobs, isOutputEnded, isPausedProc, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
+import { detachedOf, DOWNLOAD_CMD, foldJobs, isOutputEnded, isPausedProc, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
@@ -6989,7 +6989,7 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; pct?: string; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -7053,15 +7053,16 @@ const keepDetached = async ($: EngineInterface, agent: string, call: { tool: str
   // not known); the process is the one `echo $!` printed. Without both it is not followed, so nothing stays on a card for ever
   const here = await $.session.cwd()
   const base = found.cd ? (found.cd.startsWith('/') ? found.cd : `${here}/${found.cd}`) : here
-  const log = found.log.startsWith('/') || found.log.startsWith('~/') ? found.log : `${base}/${found.log}`
-  if (!found.cd && !found.log.startsWith('/') && !found.log.startsWith('~/') && !(await $.fs.exists(log).catch(() => false))) return
-  const pid = pidOf(String((result as { stdout?: unknown } | undefined)?.stdout ?? ''))
+  const logFile = found.log.startsWith('/') || found.log.startsWith('~/') ? found.log : `${base}/${found.log}`
+  if (!found.cd && !found.log.startsWith('/') && !found.log.startsWith('~/') && !(await $.fs.exists(logFile).catch(() => false))) return
+  // Only a command that printed its process with `echo $!` is followed by it: any other number it printed is no process
+  const pid = /\$!/.test(command) ? pidOf(String((result as { stdout?: unknown } | undefined)?.stdout ?? '')) : undefined
   if (!pid) return
   const what = oneLine(String(call.description ?? '') || found.core).slice(0, 160)
   const now = await $.clock.now()
   const id = `detached-${String(call.tool_use_id ?? now)}`
   await update($, todos, list =>
-    list.map(one => (one.id === agent ? { ...one, detached: [...(one.detached ?? []), { id, what, at: now, cmd: oneLine(command).slice(0, 400), log, pid }].slice(-BG_KEPT) } : one)),
+    list.map(one => (one.id === agent ? { ...one, detached: [...(one.detached ?? []), { id, what, at: now, cmd: oneLine(command).slice(0, 400), log: logFile, pid }].slice(-BG_KEPT) } : one)),
   )
 }
 
@@ -7154,7 +7155,7 @@ const lookJobs = async ($: EngineInterface) => {
     const was = jobLog.get(id)
     const wait = waits.find(w => w.id === id)
     const next: Seen = { ...seen, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true
@@ -8736,8 +8737,11 @@ const panelHooks = (on: On) => {
         : job.kind === 'wait' ? (job.target ? [job.target, true] : ['waiting', false])
         : job.wroteAt && quiet >= JOB_QUIET ? [`no new output for ${shortAgo(quiet)}`, true]
         : job.wroteAt ? [`updated ${shortAgo(quiet)} ago`, false]
+        // A job whose output cannot be found says so, so a blank row is never taken for one that moves (a command held open has no
+        // output to read until it ends)
+        : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', true]
         : ['', false]
-      const short = state.replace(/^no new output for /, 'quiet ').replace(/^updated (.*) ago$/, '$1 ago').replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still ')
+      const short = state.replace(/^no new output for /, 'quiet ').replace(/^output not found$/, 'no output').replace(/^updated (.*) ago$/, '$1 ago').replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still ')
       const text = firstFit([[...pct, state, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
       return { text, isWarn: Boolean(isWarn) && Boolean(state) }
     }
@@ -8750,9 +8754,11 @@ const panelHooks = (on: On) => {
       const { text: side, isWarn } = isMore ? { text: took(at - job.at), isWarn: false } : jobSide(job, width)
       const room = Math.max(12, width - side.length - 1)
       // The latest line, unless it is only a progress bar its percent already says, in the room the name leaves; a wait says what
-      // it waits for
-      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
-      const name = cut(jobHead(job), room)
+      // it waits for. How much is done of how much, and how fast, stands in for the line it came from
+      const amount = job.done ? `${job.done}${job.total ? ` of ${job.total}` : ''}${job.rate ? ` · ${job.rate}` : ''}` : ''
+      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : amount || (job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : '')
+      // and an amount keeps its room before the name does
+      const name = cut(jobHead(job), amount && job.kind !== 'wait' ? Math.max(12, room - amount.length - 3) : room)
       const rest = room - name.length - 3
       const detail = latest && rest >= 10 ? cut(latest, rest) : ''
       return (
