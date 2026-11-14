@@ -3,38 +3,48 @@
 
 // What kinds of job there are, how each is told and how its latest line is read are in hooks/jobs.ts
 
-// What each job wrote last, by its task id
-const jobLog = new Map<string, { latest: string; pct?: string; port?: string }>()
+// What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
+// and for a wait, how what it waits for stands
+type Seen = { latest: string; pct?: string; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
 let jobsLookedAt = 0
+// The processes on this Mac, looked at less often than the outputs; and how many looks in a row found no shell for a command
+let jobProcs: Proc[] = []
+let jobProcsAt = 0
+const JOB_PS = 15_000
+const shellMissed = new Map<string, number>()
 // Where the engine writes this chat's background output, once found; and when it was last looked for in vain
 let tasksDir = ''
 let tasksOf = ''
 let tasksMissedAt = 0
 
-// The jobs a card has running: what it sent to the background, and a command it has waited on a while
-const jobsOf = (one: Todo, at: number): Job[] => [
-  ...(one.bg ?? []).map(b => {
-    const cmd = b.cmd ?? b.what
-    const seen = jobLog.get(b.id)
-    const kind: JobKind = b.isWatch ? 'watch' : jobKindOf(cmd, b.what)
-    return { id: b.id, label: labelOf(b.what || cmd, cmd), cmd, kind, at: b.at, ...(seen ?? {}), port: portOf(cmd) ?? seen?.port }
-  }),
-  ...(one.detached ?? []).map(d => {
-    const seen = jobLog.get(d.id)
-    return { id: d.id, label: labelOf(d.what || d.cmd, d.cmd), cmd: d.cmd, kind: jobKindOf(d.cmd, d.what), at: d.at, ...(seen ?? {}), port: portOf(d.cmd) ?? seen?.port }
-  }),
-  ...(one.status === 'working' && one.running?.cmd && !isWaitOnly(one.running.cmd) && at - one.running.at >= RUNNING_SHOWN
-    ? [{ id: `call-${one.id}`, label: labelOf(one.running.label || one.running.cmd, one.running.cmd), cmd: one.running.cmd, kind: jobKindOf(one.running.cmd, one.running.label ?? ''), at: one.running.at }]
-    : []),
-]
+// A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
+const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false): Job => {
+  const seen = jobLog.get(id)
+  const wait = isWatch ? undefined : waitOf(cmd)
+  const kind: JobKind = isWatch ? 'watch' : wait ? 'wait' : jobKindOf(cmd, what)
+  return { id, label: labelOf(what || cmd, cmd), cmd, kind, at, ...(seen ?? {}), ...(wait ? { waitsFor: wait.what } : {}), port: portOf(cmd) ?? seen?.port }
+}
+// The jobs a card has running: what it sent to the background, and a command it has waited on a while; jobs alike are one
+const jobsOf = (one: Todo, at: number): Job[] =>
+  foldJobs([
+    ...(one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch)),
+    ...(one.detached ?? []).map(d => jobOf(d.id, d.what, d.cmd, d.at)),
+    ...(one.status === 'working' && one.running?.cmd && !isWaitOnly(one.running.cmd) && at - one.running.at >= RUNNING_SHOWN
+      ? [jobOf(`call-${one.id}`, one.running.label ?? '', one.running.cmd, one.running.at)]
+      : []),
+  ])
 
 // A job's name on its row: what kind, a server's port, and its own words
+// Its kind leads in words, so it is never taken for a helper, then how many alike it stands for; a wait's own "Wait" is not said
+// twice
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
-  const kind = job.kind === 'server' ? `Server${job.port ? ` :${job.port}` : ''}` : job.kind === 'download' ? 'Download' : job.kind === 'watch' ? 'Watch' : ''
-  return kind ? `${kind} · ${job.label}` : job.label
+  const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
+  const label = job.kind === 'wait' ? job.label.replace(/^wait(s|ing)?\s+/i, '') : job.label
+  return `${kind} · ${label}`
 }
 
 // Where this chat's background output is written: the engine's tasks folder under its own temporary folder, named by the chat
@@ -92,35 +102,91 @@ const lookJobs = async ($: EngineInterface) => {
   }
   const asked = owned.filter(o => o.file || tasksDir)
   const files = asked.map(o => o.file || `${tasksDir}/${o.id}.output`)
+  // The files the waits poll, to tell whether what they wait for still moves
+  const waits = list.flatMap(one => [...(one.bg ?? []).filter(b => !b.isWatch), ...(one.detached ?? [])].flatMap(j => {
+    const wait = waitOf(j.cmd ?? '')
+    return wait ? [{ id: j.id, wait }] : []
+  }))
+  const targets = waits.flatMap(w => (w.wait.file ? [w.wait.file] : []))
+  const isPs = now - jobProcsAt >= JOB_PS
   const pids = owned.flatMap(o => (o.pid ? [o.pid] : []))
-  // One go: the end of each output, then which of the detached processes still run
-  const script = `for f; do printf '\\n@@JOB@@ %s\\n' "$f"; case $f in "~/"*) f="$HOME/\${f#\\~/}";; esac; tail -c ${JOB_TAIL} "$f" 2>/dev/null; done; printf '\\n@@ALIVE@@'; for p in ${pids.map(p => p.replace(/\D/g, '')).join(' ')}; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; printf '\\n'`
-  const r = await $.process.run(['sh', '-c', script, 'sh', ...files], { timeoutMs: 5000 }).catch(() => undefined)
+  // One go: the end of each output with when it last changed, when each polled file last changed, which detached processes still
+  // run, and now and then every process with its state
+  const mtime = 'm=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || echo 0)'
+  const home = 'case $f in "~/"*) f="$HOME/${f#\\~/}";; esac'
+  const script = `n=$1; shift; i=0; for f; do i=$((i+1)); ${home}; ${mtime}; if [ $i -le $n ]; then printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; else printf '\\n@@AT@@ %s %s' "$m" "$f"; fi; done; printf '\\n@@ALIVE@@'; for p in ${pids.map(p => p.replace(/\D/g, '')).join(' ')}; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; printf '\\n'${isPs ? "; printf '@@PS@@\\n'; ps -axww -o pid=,ppid=,stat=,command=" : ''}`
+  const r = await $.process.run(['sh', '-c', script, 'sh', String(files.length), ...files, ...targets], { timeoutMs: 5000 }).catch(() => undefined)
   if (!r) return
-  const [body = '', aliveText = ''] = r.stdout.split('\n@@ALIVE@@')
+  const [body = '', tail = ''] = r.stdout.split('\n@@ALIVE@@')
+  const [aliveText = '', psText] = tail.split('@@PS@@\n')
+  if (psText !== undefined) ((jobProcs = procsOf(psText)), (jobProcsAt = now))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
+  const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
   // A detached job whose process ended leaves its card
   const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
   if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
     await update($, todos, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined } : one)))
     $.ui.invalidate('ui.render')
   }
+  // Each background command's shell, found by its words among the engine's shells: paused when any of its processes is, and gone
+  // when no shell has been found for it twice in a row while others were (so a way of running the engine has not changed), as one the engine never said ended (only once a minute has passed)
+  const bgs = list.flatMap(one => (one.bg ?? []).filter(b => !b.isWatch).map(b => ({ id: b.id, cmd: b.cmd ?? '', at: b.at })))
+  const shells = jobProcs.length ? shellsOf(jobProcs, bgs) : new Map<string, string | null>()
+  const states = new Map<string, boolean>()
+  for (const [id, pid] of shells) {
+    if (pid) ((states.set(id, treeOf(jobProcs, pid).some(isPausedProc))), shellMissed.delete(id))
+    else if (psText !== undefined && [...shells.values()].some(Boolean)) shellMissed.set(id, (shellMissed.get(id) ?? 0) + 1)
+  }
+  for (const o of owned) if (o.pid) states.set(o.id, treeOf(jobProcs, o.pid).some(isPausedProc))
+  const ended = bgs.filter(b => (shellMissed.get(b.id) ?? 0) >= 2 && now - b.at >= 60_000).map(b => b.id)
+  // How what each wait waits for stands: a run it waits on paused or gone, a file it polls still for long
+  const targetOf = (wait: NonNullable<ReturnType<typeof waitOf>>) => {
+    const runs = wait.pattern
+      ? jobProcs.filter(p => p.command.includes(wait.pattern ?? '') && !/\b(pgrep|eval)\b/.test(p.command))
+      : wait.pid
+        ? jobProcs.filter(p => p.pid === wait.pid)
+        : undefined
+    if (runs && jobProcs.length) {
+      if (!runs.length) return wait.isStart ? '' : 'what it waits for has ended'
+      if (runs.some(p => treeOf(jobProcs, p.pid).some(isPausedProc))) return 'what it waits for is paused'
+    }
+    const at = wait.file ? [...changed].find(([f]) => f === wait.file || f.endsWith(`/${wait.file}`))?.[1] : undefined
+    return at && now - at >= JOB_QUIET ? `${wait.file?.split('/').at(-1)} unchanged ${shortAgo(now - at)}` : ''
+  }
   const parts = body.split(/\n@@JOB@@ ([^\n]*)\n/)
   let isChanged = false
   const moved = new Set<string>()
   for (let n = 1; n + 1 < parts.length; n += 2) {
-    // The outputs come back in the order they were asked for
+    // The outputs come back in the order they were asked for, each after when it last changed
     const job = asked[(n - 1) / 2]
     const id = job?.id ?? ''
-    const seen = latestOf(parts[n + 1] ?? '')
+    const text = (parts[n + 1] ?? '').split('\n@@AT@@ ')[0] ?? ''
+    if (!job?.pid && isOutputEnded(text)) ended.push(id)
+    const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
+    const seen = latestOf(text)
     const was = jobLog.get(id)
-    if (!seen.latest || (was?.latest === seen.latest && was?.pct === seen.pct)) continue
-    jobLog.set(id, seen)
+    const wait = waits.find(w => w.id === id)
+    const next: Seen = { ...seen, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
+    if (isSame) continue
+    jobLog.set(id, next)
     isChanged = true
     const owner = job?.owner
-    if (owner && was && now - (jobNews.get(owner) ?? 0) >= JOB_NEWS) moved.add(owner)
+    if (seen.latest && owner && was && was.latest !== seen.latest && now - (jobNews.get(owner) ?? 0) >= JOB_NEWS) moved.add(owner)
+  }
+  // A background command that has ended, by the engine's last line on its output or as no shell runs it, leaves its card
+  if (ended.length) {
+    await dropBackground($, ended)
+    for (const id of ended) (jobLog.delete(id), shellMissed.delete(id))
+    isChanged = true
   }
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await update($, todos, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
   if (isChanged) $.ui.invalidate('ui.render')
+}
+
+// A short time since, for a row's side: seconds, minutes, or hours and minutes
+const shortAgo = (ms: number) => {
+  const all = Math.max(0, Math.floor(ms / 1000))
+  return all < 60 ? `${all}s` : all < 3600 ? `${Math.floor(all / 60)}m` : `${Math.floor(all / 3600)}h ${String(Math.floor(all / 60) % 60).padStart(2, '0')}m`
 }

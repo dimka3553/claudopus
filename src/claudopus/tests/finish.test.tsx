@@ -312,7 +312,7 @@ test('work that answers a question while a copy of its own still runs, with that
   const wait = () => pane.find({ type: 'Text', text: /^Still at work: it waits for its background command to finish/ })
   expect((await wait())?.text).toBe('Still at work: it waits for its background command to finish')
   // The copy itself is a row on its tree: what it is in its own words, and how long it has run
-  const job = () => pane.find({ type: 'Text', text: /^Send the four big pieces/ })
+  const job = () => pane.find({ type: 'Text', text: /^Command · Send the four/ })
   expect(await job()).toBeDefined()
   // Forty minutes with nothing new is a long copy, not stuck work
   await clock.advance(40 * 60_000)

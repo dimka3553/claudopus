@@ -1,0 +1,5 @@
+- A job on a card's tree is never taken for a helper: its row starts with what it is (Command, Server, Download, Wait, Watch), and its mark is its own shape and colour; purple round dots are helpers only.
+- Each job row says whether it moves: when its output last changed, "no new output for …" in amber when it has written nothing for ten minutes, and "paused" when its processes are stopped.
+- A percent on a job row is its progress only: a score or coverage figure a command prints is no longer read as one.
+- Alike jobs are one row with a count, such as "Wait ×6"; a command that only waits says what it waits for, and in amber when that has ended, is paused or has not changed for long.
+- A background command that has ended leaves the card, whether the engine said so in its output or no process runs it any more.

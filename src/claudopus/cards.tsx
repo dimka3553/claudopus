@@ -106,7 +106,7 @@ const TWIG_STEP = 18
 const TWIG_ENDED = '#4EBA65'
 const TWIG_FAILED = '#E5484D'
 const twigWidth = (t: Twig) => t.rails.length * TWIG_STEP + 36
-const twigSvg = (t: Twig, line: number, dot: string, isMoving = false) => {
+const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'circle' | 'square' | 'diamond' | 'down' | 'open' = 'circle') => {
   const mid = line / 2
   const x = (level: number) => level * TWIG_STEP + 9
   const own = x(t.rails.length)
@@ -117,8 +117,16 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false) => {
     ...(t.hasKids ? [`M${at} ${mid + 5}V${line}`] : []),
   ]
   const ring = `<circle cx="${at}" cy="${mid}" r="3.5" fill="${dot}" opacity="0"><animate attributeName="r" values="3.5;8" dur="2.4s" repeatCount="indefinite"/><animate attributeName="opacity" values="0.7;0" dur="2.4s" repeatCount="indefinite"/></circle>`
+  // A job's mark is its own shape, so only a helper has a round dot
+  const shaped = {
+    circle: `<circle cx="${at}" cy="${mid}" r="3.5" fill="${dot}"/>`,
+    square: `<rect x="${at - 3.5}" y="${mid - 3.5}" width="7" height="7" rx="1" fill="${dot}"/>`,
+    diamond: `<path d="M${at} ${mid - 4.5}L${at + 4.5} ${mid}L${at} ${mid + 4.5}L${at - 4.5} ${mid}Z" fill="${dot}"/>`,
+    down: `<path d="M${at - 4.5} ${mid - 3.5}H${at + 4.5}L${at} ${mid + 4}Z" fill="${dot}"/>`,
+    open: `<path d="M${at} ${mid - 4}L${at + 4} ${mid}L${at} ${mid + 4}L${at - 4} ${mid}Z" fill="none" stroke="${dot}" stroke-width="1.5"/>`,
+  }[shape]
   const mark = dot
-    ? `${isMoving ? ring : ''}<circle cx="${at}" cy="${mid}" r="3.5" fill="${dot}"/>`
+    ? `${isMoving ? ring : ''}${shaped}`
     : `<circle cx="${at}" cy="${mid}" r="3" fill="none" stroke="#808080" stroke-width="1.5"/>`
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`
 }

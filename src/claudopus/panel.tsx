@@ -454,7 +454,7 @@ const panelHooks = (on: On) => {
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], true)} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait', JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
         </Box>
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
@@ -462,16 +462,33 @@ const panelHooks = (on: On) => {
           <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>
       )
+    // Beside it, how it stands, so a glance tells whether it moves: paused, what a wait waits for gone or still, output that has
+    // not changed for long (in amber), or when it last changed; its percent when it shows progress, and its time last
+    const jobSide = (job: Job, width: number) => {
+      const time = took(at - job.at)
+      const pct = job.pct ? [job.pct] : []
+      const quiet = job.wroteAt ? at - job.wroteAt : 0
+      const [state, isWarn] =
+        job.isPaused ? ['paused', true]
+        : job.kind === 'wait' ? (job.target ? [job.target, true] : ['waiting', false])
+        : job.wroteAt && quiet >= JOB_QUIET ? [`no new output for ${shortAgo(quiet)}`, true]
+        : job.wroteAt ? [`updated ${shortAgo(quiet)} ago`, false]
+        : ['', false]
+      const short = state.replace(/^no new output for /, 'quiet ').replace(/^updated (.*) ago$/, '$1 ago').replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still ')
+      const text = firstFit([[...pct, state, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
+      return { text, isWarn: Boolean(isWarn) && Boolean(state) }
+    }
     const jobRow = (t: Twig, scope: string) => {
       const job = t.job
       if (!job) return null
       const key = `${scope}-job-${job.id}`
-      const time = took(at - job.at)
-      const side = job.pct ? `${job.pct} · ${time}` : time
       const width = perRow - 4 - t.depth * 2
+      const isMore = job.id.startsWith('more-')
+      const { text: side, isWarn } = isMore ? { text: took(at - job.at), isWarn: false } : jobSide(job, width)
       const room = Math.max(12, width - side.length - 1)
-      // The latest line, unless it is only a progress bar its percent already says, in the room the name leaves
-      const latest = job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
+      // The latest line, unless it is only a progress bar its percent already says, in the room the name leaves; a wait says what
+      // it waits for
+      const latest = job.kind === 'wait' ? (job.waitsFor ?? '') : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
       const name = cut(jobHead(job), room)
       const rest = room - name.length - 3
       const detail = latest && rest >= 10 ? cut(latest, rest) : ''
@@ -489,7 +506,7 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
           <Box flexShrink={0}>
-            <Text color={job.pct ? JOB_COLOR.download : undefined} dimColor={!job.pct}>{side}</Text>
+            <Text color={isWarn ? NEEDS : job.pct ? JOB_COLOR.download : undefined} dimColor={!isWarn && !job.pct}>{side}</Text>
           </Box>
         </Box>
       )
@@ -501,7 +518,7 @@ const panelHooks = (on: On) => {
       if (jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
       const more = jobs.length - JOBS_SHOWN + 1
       const shown = jobs.slice(-(JOBS_SHOWN - 1))
-      const rest: Job = { id: `more-${card.id}`, label: `${more} more running`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
+      const rest: Job = { id: `more-${card.id}`, label: `${more} more jobs`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
       return [...shown, rest].map(job => ({ one: card, job, kids: [] }))
     }
     const withJobs = (branches: Branch[]): Branch[] => branches.map(b => (b.job ? b : { ...b, kids: [...jobBranches(b.one), ...withJobs(b.kids)] }))

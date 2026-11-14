@@ -2109,7 +2109,7 @@ test('work that answers a question while a copy of its own still runs, with that
   const wait = () => pane.find({ type: 'Text', text: /^Still at work: it waits for its background command to finish/ })
   expect((await wait())?.text).toBe('Still at work: it waits for its background command to finish')
   // The copy itself is a row on its tree: what it is in its own words, and how long it has run
-  const job = () => pane.find({ type: 'Text', text: /^Send the four big pieces/ })
+  const job = () => pane.find({ type: 'Text', text: /^Command · Send the four/ })
   expect(await job()).toBeDefined()
   // Forty minutes with nothing new is a long copy, not stuck work
   await clock.advance(40 * 60_000)
@@ -5709,15 +5709,15 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
   void $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'h1', command: 'hold search' } as never)
   const rows = async () => {
     const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-    // The command a helper waits on is a row under it, in its own words
-    const r = (await pane.findAll({ type: 'Text', text: /^(hold search|.* running · .*)$/ })).map(one => one.text)
+    // The command a helper waits on is a row under it, in its own words, after the word that says it is a command
+    const r = (await pane.findAll({ type: 'Text', text: /^(Command · hold search|.* running · .*)$/ })).map(one => one.text)
     await pane.unmount()
     return r
   }
   await clock.advance(90_000)
   expect(await rows()).toEqual([])
   await clock.advance(70_000)
-  expect(await rows()).toEqual(['hold search'])
+  expect(await rows()).toEqual(['Command · hold search'])
   const letSearch = await until(async () => held.get('search'))
   letSearch?.('found it')
   await clock.advance(1_000)
