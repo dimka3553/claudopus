@@ -72,7 +72,7 @@ const panelHooks = (on: On) => {
     const at = await $.clock.now()
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
-    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince)
+    const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD))
     // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of the chat always does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
@@ -259,6 +259,12 @@ const panelHooks = (on: On) => {
             {one.stuckAt && one.status === 'working' && !one.chat ? (
               <Box key={`stuck-${one.id}`} paddingLeft={lead}>
                 <Text color={NEEDS} bold wrap="wrap">{stuckLine(all, one, at)}</Text>
+              </Box>
+            ) : null}
+            {/* Cut off as the chat's process ended: when, and since when it goes on again; amber when it could not be started again */}
+            {cutLine(one) && !one.chat ? (
+              <Box key={`cut-${one.id}`} paddingLeft={lead}>
+                <Text color={one.backAt ? undefined : NEEDS} dimColor={Boolean(one.backAt)} wrap="wrap">{cutLine(one)}</Text>
               </Box>
             ) : null}
             {/* Still at work, waiting for a command of its own it started in the background: which, and how long it has run */}

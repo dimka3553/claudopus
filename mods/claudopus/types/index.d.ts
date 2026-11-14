@@ -92,6 +92,10 @@ export type Todo = {
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number
+  // Work cut off as the chat's process ended, not stopped by anyone: when, and when it went on again; `backAt` is absent while it
+  // could not be started again
+  cutAt?: number
+  backAt?: number
   // Only work that is working has a card; one that has ended is kept, so a message to it brings its card back as it was
   status: 'working' | 'done' | 'stopped' | 'failed'
   // Set on a card another chat shares: that chat, the Mac it runs on when another (empty for this one), and the card's own id there.

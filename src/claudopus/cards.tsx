@@ -175,6 +175,7 @@ const sync = async ($: EngineInterface) => {
   })
   await keepStoppedReports($, now)
   await lookEnds($)
+  await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
 }
 
 // Changes the to-do a piece of work belongs to; work the mod never saw start is looked up first, and a helper of unknown work changes nothing
