@@ -19,15 +19,15 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   for (const text of await scriptsRun($, command)) if (touchesBoxes(text)) return true
   return false
 }
-// The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners, bin/admin and bin/secret,
-// are let through unread
+// The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
+// bin/release, bin/keyring) are let through unread
 const scriptsRun = async ($: EngineInterface, command: string) => {
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const root = $.plugin.root
   const texts: string[] = []
   for (const path of filesRun(command, home, cwd || home)) {
-    const runner = /\/bin\/(admin|secret)$/.exec(path)?.[1]
-    if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret)$`).test(path))) continue
+    const runner = /\/bin\/(admin|secret|release|keyring)$/.exec(path)?.[1]
+    if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret|release|keyring)$`).test(path))) continue
     const text = (await readOr($, path)).slice(0, 1_000_000)
     if (runner && text && text === (await readOr($, `${root}/bin/${runner}`))) continue
     if (text) texts.push(text)
@@ -123,7 +123,7 @@ const workHooks = (on: On) => {
       return { deny: ownFiles }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
-    if (e.tool === 'Bash' && (pushesMain(String((e as { command?: unknown }).command ?? '')) || (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(pushesMain))) {
+    if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }

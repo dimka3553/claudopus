@@ -6691,7 +6691,7 @@ test('F-008 · "Let macOS ask" chosen before it was kept beside the gate\'s key 
 })
 
 test('F-007 F-017 · a runner run with another home or data folder, or with Claude Code\'s mark taken away, is refused, typed or in a script', async ($, on) => {
-  const { bash, files, grants } = await gated($, on)
+  const { bash, files, grants, list } = await gated($, on)
   files.set('/repo/rel.sh', 'unset CLAUDECODE\n/plug/claudopus/bin/release\n')
   for (const command of [
     'HOME=/tmp/h /plug/claudopus/bin/release',
@@ -6704,18 +6704,29 @@ test('F-007 F-017 · a runner run with another home or data folder, or with Clau
   ])
     expect(((await bash(`h${command.length}`, command)) as { deny?: string }).deny).toContain("Claudopus's runners")
   expect(grants()).toEqual([])
+  // The mod's own release runner (here a copy of it), which pushes main itself and names the grants folder, is not read as a script of
+  // work's: it is held
+  const runner = 'unset X\nRELEASE_PUSH=1 git push -q "$REMOTE" "HEAD:refs/heads/$MAIN"\nls "$HOME/.claude/claudopus/admin-grants"\n'
+  files.set(`${new URL('..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')}/bin/release`, runner)
+  files.set('/plug/claudopus/bin/release', runner)
+  files.set('git:top', '/repo/wt')
+  files.set('git:branch', 'fix-it')
+  const held = bash('h-rel', 'cd /repo/wt && /plug/claudopus/bin/release').catch(() => undefined)
+  expect(await until(async () => keyed(list, 'gate-h-rel-r0-deny'))).toBeDefined()
+  void held
   // A command that only reads the home folder's name runs as before
   expect(((await bash('h-ok', 'echo $HOME && /plug/claudopus/bin/release --status')) as { result?: unknown }).result).toBe('ran')
 })
 
-test('F-007 F-012 F-017 F-021 · a script a command runs is held to the same guards: it never writes settings, what chats answer through, or pushes main', async ($, on) => {
+test('F-007 F-012 F-021 · a script a command runs is held to the same guards: it never writes settings, what chats answer through, or the gate\'s grants', async ($, on) => {
   const { bash, files } = await gated($, on)
   files.set('/repo/settings.sh', `echo '{"admin":"never"}' > ~/.claude/claudopus/config.json\n`)
   expect(((await bash('s1', 'bash /repo/settings.sh')) as { deny?: string }).deny).toContain('only with the Edit or Write tool')
   files.set('/repo/answer.sh', `echo '{"card":"a1","choice":"yes"}' > ~/.claude/claudopus/live/answers/engine-id/1-a.json\n`)
   expect(((await bash('s2', 'sh /repo/answer.sh')) as { deny?: string }).deny).toContain("are the mod's alone")
-  files.set('/repo/push.sh', 'git checkout main\ngit push origin main\n')
-  expect(((await bash('s3', 'bash /repo/push.sh')) as { deny?: string }).deny).toContain('never pushes or merges to main')
+  // A test script that makes a home and a repo of its own for its runs, naming a runner elsewhere, runs
+  files.set('/repo/own.test.sh', '#!/bin/bash\n# Tests the gate in bin/admin, and bin/release on a repo of its own\nexport HOME=$tmp/home\nunset CLAUDECODE\n(cd "$r/work" && git push -q origin main)\n"$here/release"\n')
+  expect(((await bash('s3', 'bash /repo/own.test.sh')) as { result?: unknown }).result).toBe('ran')
   files.set('/repo/grant.sh', 'cp g.json ~/.claude/claudopus/admin-grants/\n')
   expect(((await bash('s4', 'bash /repo/grant.sh')) as { deny?: string }).deny).toContain('never read or written by work')
   files.set('/repo/fine.sh', 'echo hello\n')

@@ -200,7 +200,29 @@ for mark in read after bash; do
   [ ! -e "$r/$mark" ] && echo "ok $n - the branch's .release did not run its $mark" || { echo "NOT OK $n - the branch's .release ran its $mark"; failed=1; }
 done
 (cd "$r/work" && echo three >file && git commit -q -am three)
-expect "a person's own release, outside Claude Code: released with no press" 0 'released' -- env -u CLAUDECODE bash -c 'cd "$1" && "$2"' sh "$r/work" "$here/release"
+# Outside Claude Code with no terminal, as a run detached or over ssh: still refused
+expect 'outside Claude Code with no terminal and no grant: refused' 6 "$RELEASE_REFUSED" -- env -u CLAUDECODE bash -c 'cd "$1" && "$2" </dev/null' sh "$r/work" "$here/release"
+# A person at their own terminal outside Claude Code: asked there, and a no releases nothing, a yes releases
+at_terminal() {
+  env -u CLAUDECODE python3 -c '
+import os, pty, select, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.chdir(sys.argv[1]); os.execv(sys.argv[2], [sys.argv[2]])
+out, sent = b"", False
+while True:
+    if not select.select([fd], [], [], 60)[0]: break
+    try: d = os.read(fd, 4096)
+    except OSError: break
+    if not d: break
+    out += d
+    if not sent and b"[y/N]" in out: os.write(fd, sys.argv[3].encode() + b"\n"); sent = True
+_, st = os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors="replace")); sys.exit(os.WEXITSTATUS(st) if os.WIFEXITED(st) else 1)
+' "$r/work" "$here/release" "$1"
+}
+expect "a person's own release at a terminal, answered no: refused" 6 "$RELEASE_REFUSED" -- at_terminal n
+expect "a person's own release at a terminal, answered yes: released" 0 'released' -- at_terminal y
 n=$((n + 1))
 [ "$(git -C "$r/origin.git" show main:file)" = three ] && echo "ok $n - main has the person's release" || { echo "NOT OK $n - main does not have the person's release"; failed=1; }
 unset CLAUDECODE

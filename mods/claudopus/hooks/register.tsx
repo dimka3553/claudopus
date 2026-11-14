@@ -6060,9 +6060,11 @@ const dropGrants = async ($: EngineInterface, names: string[]) => {
 const unquoted = (command: string) => command.replace(/["'\\]/g, '')
 // The runners find their key, grants and settings under the home folder, and release asks for a press only inside Claude Code: a
 // command that names one and sets another home or data folder, or takes Claude Code's mark away, would have it read the caller's own
-const RUNNER_NAMED = /\bbin\/(?:admin|secret|release|keyring)\b/
-const RUNNER_MOVED = /(?:^|[\s;&|(`'"])(?:HOME|XDG_DATA_HOME|CLAUDECODE)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:HOME|XDG_DATA_HOME|CLAUDECODE)\b|\benv\b[^;&|\n]*\s(?:-u\s*|--unset[= ])CLAUDECODE\b|\benv\s+(?:-\w+\s+)*-i\b|\benv\b[^;&|\n]*\s-i\b/
-const movesRunner = (command: string) => [command, unquoted(command)].some(one => RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one))
+// (its comment lines left out, so a test script that makes a home of its own and only names a runner in a comment is not refused)
+const RUNNER_NAMED = /\bbin\/(?:admin|secret|release|keyring)(?![\w.-])/
+const RUNNER_MOVED = /(?:^|[\s;&|(`'"])(?:HOME|XDG_DATA_HOME|CLAUDECODE)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:HOME|XDG_DATA_HOME|CLAUDECODE)\b|\benv\b[^;&|\n]*\s(?:-u\s*|--unset[= ])CLAUDECODE\b|\benv\b[^;&|\n]*\s-i\b|\benv(?:\s+-\w+)*\s+-(?=\s|$)|\bexec\s+-\w*c/
+const movesRunner = (command: string) =>
+  [command, unquoted(command)].map(one => one.replace(/^\s*#.*$/gm, '')).some(one => RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one))
 const NO_RUNNER_MOVED =
   "This command did not run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the marks Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or takes CLAUDECODE away, is refused. Run the runner as it is."
 const touchesGate = (e: ToolCallInput) => {
@@ -7916,15 +7918,15 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   for (const text of await scriptsRun($, command)) if (touchesBoxes(text)) return true
   return false
 }
-// The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners, bin/admin and bin/secret,
-// are let through unread
+// The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
+// bin/release, bin/keyring) are let through unread
 const scriptsRun = async ($: EngineInterface, command: string) => {
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const root = $.plugin.root
   const texts: string[] = []
   for (const path of filesRun(command, home, cwd || home)) {
-    const runner = /\/bin\/(admin|secret)$/.exec(path)?.[1]
-    if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret)$`).test(path))) continue
+    const runner = /\/bin\/(admin|secret|release|keyring)$/.exec(path)?.[1]
+    if (runner && (path === `${root}/bin/${runner}` || new RegExp(`^${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.claude/plugins/cache/claudopus/claudopus/[^/]+/bin/(?:admin|secret|release|keyring)$`).test(path))) continue
     const text = (await readOr($, path)).slice(0, 1_000_000)
     if (runner && text && text === (await readOr($, `${root}/bin/${runner}`))) continue
     if (text) texts.push(text)
@@ -8020,7 +8022,7 @@ const workHooks = (on: On) => {
       return { deny: ownFiles }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
-    if (e.tool === 'Bash' && (pushesMain(String((e as { command?: unknown }).command ?? '')) || (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(pushesMain))) {
+    if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }

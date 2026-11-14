@@ -236,9 +236,11 @@ const dropGrants = async ($: EngineInterface, names: string[]) => {
 const unquoted = (command: string) => command.replace(/["'\\]/g, '')
 // The runners find their key, grants and settings under the home folder, and release asks for a press only inside Claude Code: a
 // command that names one and sets another home or data folder, or takes Claude Code's mark away, would have it read the caller's own
-const RUNNER_NAMED = /\bbin\/(?:admin|secret|release|keyring)\b/
-const RUNNER_MOVED = /(?:^|[\s;&|(`'"])(?:HOME|XDG_DATA_HOME|CLAUDECODE)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:HOME|XDG_DATA_HOME|CLAUDECODE)\b|\benv\b[^;&|\n]*\s(?:-u\s*|--unset[= ])CLAUDECODE\b|\benv\s+(?:-\w+\s+)*-i\b|\benv\b[^;&|\n]*\s-i\b/
-const movesRunner = (command: string) => [command, unquoted(command)].some(one => RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one))
+// (its comment lines left out, so a test script that makes a home of its own and only names a runner in a comment is not refused)
+const RUNNER_NAMED = /\bbin\/(?:admin|secret|release|keyring)(?![\w.-])/
+const RUNNER_MOVED = /(?:^|[\s;&|(`'"])(?:HOME|XDG_DATA_HOME|CLAUDECODE)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:HOME|XDG_DATA_HOME|CLAUDECODE)\b|\benv\b[^;&|\n]*\s(?:-u\s*|--unset[= ])CLAUDECODE\b|\benv\b[^;&|\n]*\s-i\b|\benv(?:\s+-\w+)*\s+-(?=\s|$)|\bexec\s+-\w*c/
+const movesRunner = (command: string) =>
+  [command, unquoted(command)].map(one => one.replace(/^\s*#.*$/gm, '')).some(one => RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one))
 const NO_RUNNER_MOVED =
   "This command did not run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the marks Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or takes CLAUDECODE away, is refused. Run the runner as it is."
 const touchesGate = (e: ToolCallInput) => {

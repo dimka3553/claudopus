@@ -1,5 +1,5 @@
 - Automatic updates are now off as shipped: turn them on in Config to have Claudopus update itself and reload open chats. Until then, update with `/plugin` and type `/reload-plugins`, as the panel's header says.
-- A release now waits for your press of Release on its work's card, and nothing is released without it; a branch's own `.release` no longer runs anything.
+- A release now waits for your press of Release on its work's card, and nothing is released without it (a release you run yourself in a terminal asks you there); a branch's own `.release` no longer runs anything.
 - Work that writes your settings, the principles, the chat's rules or the work rules now waits for your Allow on its card; a shell command that writes them is refused.
 - A prompt from the app is answered only in its own chat: other chats' panels and other Macs show it without Yes and No.
 - An answer left in a file counts only for the very ask it was made for, and only once.
