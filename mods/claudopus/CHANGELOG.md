@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.96 · 14 November 2026
+- The panel header's buttons keep a gap between rows when a narrow panel wraps them onto two lines.
+
 ## 0.2.95 · 14 November 2026
 - What work has running (a server, a download, a long script) shows as a row on its card's tree, under whichever helper started it: what it is, a server's port, the latest line it wrote, a download's percent and how long it has run, read live from its output.
 - A command started detached with nohup stays on its card until its process ends, even after the work finishes.
