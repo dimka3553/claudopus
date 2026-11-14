@@ -54,14 +54,15 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
   void $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'h1', command: 'hold search' } as never)
   const rows = async () => {
     const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-    const r = (await pane.findAll({ type: 'Text', text: / running · / })).map(one => one.text)
+    // The command a helper waits on is a row under it, in its own words
+    const r = (await pane.findAll({ type: 'Text', text: /^(hold search|.* running · .*)$/ })).map(one => one.text)
     await pane.unmount()
     return r
   }
   await clock.advance(90_000)
   expect(await rows()).toEqual([])
   await clock.advance(70_000)
-  expect(await rows()).toEqual(['one command running · 2m 40s'])
+  expect(await rows()).toEqual(['hold search'])
   const letSearch = await until(async () => held.get('search'))
   letSearch?.('found it')
   await clock.advance(1_000)

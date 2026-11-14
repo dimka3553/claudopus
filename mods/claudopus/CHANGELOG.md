@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.95 · 14 November 2026
+- What work has running (a server, a download, a long script) shows as a row on its card's tree, under whichever helper started it: what it is, a server's port, the latest line it wrote, a download's percent and how long it has run, read live from its output.
+- A command started detached with nohup stays on its card until its process ends, even after the work finishes.
+- A job that keeps writing counts as news, so a long server or download no longer makes its card say nothing new has come back.
+- Work is told to make its long scripts print a line at each step, so its card shows how far they are.
+
 ## 0.2.94 · 14 November 2026
 - Once you have answered an ask, by a button or in your own words, its card keeps no buttons, reply box or send: a reply in words turns it purple with the question and your reply under it while the work acts on it, in the panel, in other chats' panels, in Details and in the terminal's band
 - When the work asks again, or ends with the ask still open, the ask comes back with its answers and an empty box, and the chat is shown it afresh
