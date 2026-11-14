@@ -1089,6 +1089,9 @@ test('past the parts the edge has, it is one bar in three shades, and the step b
   const after = (await pane.findAll({ type: 'Box' })).filter(b => String(b.props.backgroundColor).startsWith('#8A63F0'))
   expect(after.map(b => [b.props.backgroundColor, b.props.flexGrow])).toEqual([['#8A63F0', 13], ['#8A63F05C', 3]])
   expect((await pane.find({ type: 'Text', text: /^Next, step / }))?.text).toBe('Next, step 14 of 16 ·')
+  // Every step ticked while it still runs: the row stays and says so
+  for (let n = 14; n <= 16; n += 1) await call('todo', { item: `Round step ${n}`, state: 'done' })
+  expect((await pane.find({ type: 'Text', text: /^All \d+ steps done$/ }))?.text).toBe('All 16 steps done')
 })
 
 test("a pressed card shows the work's own chat: what it was told, what it wrote, and each tool step in order", async ($, on) => {
