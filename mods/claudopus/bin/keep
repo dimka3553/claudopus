@@ -23,7 +23,9 @@ REST=${CLAUDOPUS_KEEP_REST:-120}
 # A copy Claude Code has not listed as working this long is stopped, whatever the mod says is at work (a copy without the mod)
 IDLE=${CLAUDOPUS_KEEP_IDLE:-600}
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$dir/$sid.log"; }
-field() { /usr/bin/plutil -extract "$1" raw -o - "$2" 2>/dev/null; }
+# One field of a JSON file: macOS's plutil, or on Linux perl's own JSON reader
+if [ -x /usr/bin/plutil ]; then field() { /usr/bin/plutil -extract "$1" raw -o - "$2" 2>/dev/null; }
+else field() { /usr/bin/perl -MJSON::PP -0777 -ne 'my $j = eval { decode_json($_) }; exit 1 unless ref $j eq "HASH" && defined $j->{$ARGV[0]}; my $v = $j->{$ARGV[0]}; $v = $v ? "true" : "false" if JSON::PP::is_bool($v); print "$v\n"' "$2" "$1" 2>/dev/null; }; fi
 now() { date +%s; }
 
 # The newest keeper of a chat is the one that acts: a load after this one starts its own. A reload of the mod in the same process

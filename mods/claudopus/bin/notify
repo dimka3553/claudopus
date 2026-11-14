@@ -7,6 +7,26 @@
 # Exit codes: 0 shown, 5 macOS is asking the person to allow Claudopus (this one is shown once they do), 2 Claudopus
 # notifications are turned off, anything else failed.
 set -eu
+# Linux: the desktop's own notification, by notify-send, where a desktop session is seen; 3 where there is none (as in a terminal
+# over SSH, where the terminal's own notification and the panel are what the person sees), so the mod says so in its log
+if [ "$(uname -s)" != Darwin ]; then
+  title='' text='' icon=dialog-information urgency=normal
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --asks) icon=dialog-warning urgency=critical; shift ;;
+      --title) title=$2; shift 2 ;;
+      --text) text=$2; shift 2 ;;
+      --open | --activate | --key | --sound) shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  if [ -z "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || ! command -v notify-send >/dev/null 2>&1; then
+    [ "$title" = '' ] && [ "$text" = '' ] && { echo unavailable; exit 0; }
+    exit 3
+  fi
+  [ "$title" = '' ] && [ "$text" = '' ] && { echo on; exit 0; }
+  exec notify-send -a Claudopus -i "$icon" -u "$urgency" -- "$title" "$text"
+fi
 name=Claudopus
 chime=
 if [ "${1:-}" = --asks ]; then

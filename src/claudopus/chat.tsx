@@ -61,6 +61,7 @@ const heldLook = async ($: EngineInterface, id: string) => {
 }
 const chatHooks = (on: On) => {
   on('session.start', async ($, e, next) => {
+    await knowSystem($).catch(() => undefined)
     // A load, first or a reload, starts looking afresh: nothing that ended before it is announced
     lastSeen = undefined
     // and reads its own copy's version again

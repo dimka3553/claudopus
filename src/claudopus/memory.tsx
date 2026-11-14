@@ -83,8 +83,8 @@ const openMemory = ($: EngineInterface, path: string) => {
 // Memory: the folder the mod keeps everything in (index, briefs, words, results), opened in Finder on the Mac the chat runs on
 // A terminal, or a chat run over ssh, has no Finder the person can see: there the folder opens as a tab of the panel, each file a link
 const showMemory = async ($: EngineInterface, surface: RenderSurface) => {
-  if (isRunFromAfar || surface === 'terminal') return openMemory($, dir)
-  const opened = await $.process.run(['open', dir]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  if (isRunFromAfar || surface === 'terminal' || !hasDesktop) return openMemory($, dir)
+  const opened = await openOn($, dir)
   if (opened.exitCode !== 0) await log($, `memory folder not opened: ${opened.stderr}`)
 }
 const memoryButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (

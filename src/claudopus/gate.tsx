@@ -80,12 +80,22 @@ const SEAL = `set -u
 PATH=/usr/bin:/bin
 mode=$1
 shift
-key() { /usr/bin/security find-generic-password -s ${GATE_SERVICE} -a seal -w 2>/dev/null; }
+if [ -x /usr/bin/security ]; then
+  key() { /usr/bin/security find-generic-password -s ${GATE_SERVICE} -a seal -w 2>/dev/null; }
+  keep() { printf 'add-generic-password -U -s "${GATE_SERVICE}" -a "seal" -l "Claudopus admin gate" -w "%s"\\n' "$1" | /usr/bin/security -i >/dev/null 2>&1; }
+else
+  # Linux: where bin/keyring keeps it, a file only this user reads
+  d=\${XDG_DATA_HOME:-$HOME/.local/share}
+  case $d in /*) ;; *) d=$HOME/.local/share ;; esac
+  f=$d/claudopus/keyring/${GATE_SERVICE}
+  key() { [ -f "$f/seal" ] && cat "$f/seal" 2>/dev/null; }
+  keep() { (umask 077; mkdir -p "$f" && chmod 700 "$d/claudopus" "$d/claudopus/keyring" "$f" && printf '%s' "$1" >"$f/.seal.new" && mv -f "$f/.seal.new" "$f/seal"); }
+fi
 k=$(key)
 if [ "$mode" = new ] || { [ -z "$k" ] && [ "$mode" = make ]; }; then
   k=$(/usr/bin/openssl rand -hex 32) || exit 1
   [ \${#k} = 64 ] || exit 1
-  printf 'add-generic-password -U -s "${GATE_SERVICE}" -a "seal" -l "Claudopus admin gate" -w "%s"\\n' "$k" | /usr/bin/security -i >/dev/null 2>&1
+  keep "$k"
   [ "$(key)" = "$k" ] || exit 1
 fi
 [ -n "$k" ] || exit 3
@@ -170,7 +180,7 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
   if (change.mode) workAllowed.clear()
 }
 // "Let macOS ask, keep nothing": every password kept for an admin command leaves the keychain
-const FORGET_KEPT = 'n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done'
+const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; else d=${XDG_DATA_HOME:-$HOME/.local/share}; case $d in /*) ;; *) d=$HOME/.local/share ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; fi'
 const setAdminPassword = async ($: EngineInterface, value: 'keep' | 'macos') => {
   await setConfig($, dir, 'adminPassword', value === 'macos' ? 'macos' : undefined)
   if (value === 'macos') await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))

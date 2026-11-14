@@ -301,3 +301,27 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
     {body}
   </ui.Box>
 )
+
+// ---- Which system this chat runs on ----
+// Linux, as uname says once at the chat's start (chat.tsx), else a Mac: what only a Mac has (its keychain, Finder and Preview,
+// Terminal, sips, its own notifications) takes Linux's own way there, or says plainly that it is not there. `hasDesktop` is a
+// Linux desktop session the person sees (DISPLAY or WAYLAND_DISPLAY): without one, as in a terminal over SSH, nothing opens a window
+let isLinux = false
+let hasDesktop = true
+const knowSystem = async ($: EngineInterface) => {
+  const r = await $.process.run(['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined)
+  isLinux = r?.exitCode === 0 && r.stdout.trim() === 'Linux'
+  hasDesktop = !isLinux || Boolean((await $.env.get('DISPLAY')) || (await $.env.get('WAYLAND_DISPLAY')))
+}
+// How this computer is named in what the person reads
+const thisMac = () => (isLinux ? 'this machine' : 'this Mac')
+const keptWhere = () => (isLinux ? 'a file only you can read on this machine' : "this Mac's keychain")
+// A file, folder or link opened as the person's own system opens it: `open` on a Mac, xdg-open on a Linux desktop. Linux without
+// a desktop has nothing to open it on, and says so as a failed run does
+const openOn = async ($: EngineInterface, target: string, isText = false) => {
+  if (!isLinux) return $.process.run(isText ? ['open', '-t', target] : ['open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  if (!hasDesktop) return { exitCode: 1, stderr: 'no desktop on this machine to open it on' }
+  return $.process.run(['xdg-open', target]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+}
+// macOS's sips on a Mac; on Linux bin/sips, which answers the same calls with ImageMagick and fails, drawing no small copy, without it
+const sips = ($: EngineInterface) => (isLinux ? `${$.plugin.root}/bin/sips` : 'sips')
