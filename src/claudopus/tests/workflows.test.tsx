@@ -49,43 +49,36 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   // One card for the run, none for its agents
   expect(await until(async () => pane.find({ type: 'Text', text: /^Roman numerals$/ }))).toBeDefined()
   expect(await keyed(pane, 'open-a1')).toBeUndefined()
-  // Where it stands in as many words as fit its row: the models give way to the agents' count on a card this narrow
-  expect(await pane.find({ type: 'Text', text: /^Workflow · 3 agents · \d+s$/ })).toBeDefined()
-  // The run as squares, one per step, grouped by round: round 1's make done and its check failed, round 2's make running and its
-  // check not started. No moving dots
-  const squares = (await pane.findAll({ type: 'Svg' })).find(one => /^round 1/.test(String(one.props.alt)))
-  expect(squares?.props.alt).toBe('round 1: done, failed; round 2: running, waiting')
-  expect(String(squares?.props.source)).toContain('#E5534B')
-  expect(String(squares?.props.source)).toContain('#4E93EF')
-  expect(String(squares?.props.source).match(/<rect/g)).toHaveLength(4)
-  // What is happening now in one plain line, and each checked round in a few words: no "under way", nothing cut
-  expect((await pane.find({ type: 'Text', text: /^Making$/ }))?.props.color).toBe('#4E93EF')
-  expect(await pane.find({ type: 'Text', text: /^to_roman\(True\) is not refused$/ })).toBeDefined()
-  // Who is in it is said once, in Details: the card names no role or model
-  expect((await pane.findAll({ type: 'Text' })).filter(one => /maker|checker|Opus|Sonnet/.test(String(one.text)) && !/This chat/.test(String(one.text)))).toEqual([])
-  const said = (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
-  expect(said.filter(one => one.includes('…') || one.includes('under way'))).toEqual([])
-  expect((await pane.findAll({ type: 'Text' })).filter(one => one.props.wrap === 'truncate-end' && /Workflow|Roman/.test(String(one.text)))).toEqual([])
-  expect((await pane.find({ type: 'Text', text: /^round 2 of 3$/ }))?.props.color).toBe('#4E93EF')
-  // On a narrow panel every line still fits whole, shortened and never cut
+  // Built as every card is: the title opens Details and Stop sits at its right end; where it stands, as a card's facts line says it
+  expect(await keyed(pane, 'flow-open-wf_1')).toBeDefined()
+  expect((await pane.find({ type: 'Button', key: 'flow-stop-wf_1' }))?.props.plain).toBe(true)
+  expect(await pane.find({ type: 'Text', text: /^Opus 5\.5 · (3 agents · )?round 2 of 3 · \d+s$/ })).toBeDefined()
+  // The bar it is held to, under it
+  expect(await pane.find({ type: 'Text', text: /^Every case holds\.$/ })).toBeDefined()
+  // A row per round up to the cap, each led by its own squares: round 1's make done and its check failed, round 2's make running
+  // and its check not started, round 3 not run
+  const alts = (await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).filter(alt => /^round \d/.test(alt))
+  expect(alts).toEqual(['round 1: done, failed', 'round 2: running, waiting', 'round 3: waiting, waiting'])
+  const first = (await pane.findAll({ type: 'Svg' })).find(one => one.props.alt === 'round 1: done, failed')
+  expect(String(first?.props.source)).toContain('#E5534B')
+  // What round 1's check found, with how many; who is at work in round 2, in blue beside the moving dots; round 3 runs if needed
+  expect(await pane.find({ type: 'Text', text: /^1 found · to_roman\(True\) is not refused$/ })).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: /^Maker fixing what the check found$/ }))?.props.color).toBe('#4E93EF')
+  expect((await pane.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Being done now' && String(one.props.source).includes('#4E93EF'))).toBe(true)
+  expect(await pane.find({ type: 'Text', text: /^if needed$/ })).toBeDefined()
+  // No boxed Details button and no round count at the bottom: the card's own parts say it
+  expect((await pane.findAll({ type: 'Button' })).filter(one => one.props.label === 'Details')).toEqual([])
+  // On a narrow panel the rounds keep their rows
   await pane.unmount()
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 16 }, surface: 'desktop' } as never)
   await until(async () => narrow.find({ type: 'Text', text: /^Roman numerals$/ }))
-  expect(await narrow.find({ type: 'Text', text: /^Workflow · 3 agents · \d+s$/ })).toBeDefined()
-  expect(await narrow.find({ type: 'Text', text: /^Making$/ })).toBeDefined()
-  expect(await narrow.find({ type: 'Text', text: /^to_roman\(True\)$/ })).toBeDefined()
+  expect(await narrow.find({ type: 'Text', text: /^Maker fixing what the check found$/ })).toBeDefined()
   await narrow.unmount()
-  // On a wide panel the checker's words are whole
-  const wide = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  await until(async () => wide.find({ type: 'Text', text: /^Roman numerals$/ }))
-  expect(await wide.find({ type: 'Text', text: /^Round 1: to_roman\(True\) is not refused$/ })).toBeDefined()
-  expect(await wide.find({ type: 'Text', text: /^Workflow · 3 agents · \d+k tokens · \d+s$/ })).toBeDefined()
-  await wide.unmount()
   pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  // A surface that draws no pictures has the squares as letters
+  // A surface that draws no pictures has the squares as letters, a round's pair on its row
   const words = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   await until(async () => words.find({ type: 'Text', text: /^Roman numerals$/ }))
-  expect((await words.findAll({ type: 'Text', text: /^[■□]$/ })).map(one => one.text).join('')).toBe('■■■□')
+  expect((await words.findAll({ type: 'Text', text: /^[■□]$/ })).map(one => one.text).join('')).toBe('■■■□□□')
   await words.unmount()
   expect(await pane.find({ type: 'Text', text: /^Working on 1 thing$/ })).toBeDefined()
   // Kept in a file of its own, for the chat that started this session
@@ -123,7 +116,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeUndefined()
   expect(await octopus()).toBe('Claudopus')
   await pressed(pane, 'finished-fold')
-  expect(await until(async () => pane.find({ type: 'Text', text: /^Finished · Workflow/ }))).toBeDefined()
+  expect(await until(async () => pane.find({ type: 'Text', text: /^Finished · (Opus 5\.5 · )?(\d agents · )?round 2 of 3/ }))).toBeDefined()
   expect(JSON.parse(files.get(`${MEMORY}/flows/wf_1.json`) ?? '{}').result).toBe('passed in 2 rounds')
   // Its end was heard and told, as a piece of work's is
   expect(played).toEqual(['sounds/ready.wav'])

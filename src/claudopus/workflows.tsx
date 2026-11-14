@@ -71,6 +71,7 @@ const flowStarted = async ($: EngineInterface, input: { script?: unknown; script
   const now = await $.clock.now()
   const args = input.args
   const task = args && typeof args === 'object' && typeof (args as { task?: unknown }).task === 'string' ? String((args as { task: string }).task) : typeof args === 'string' ? args : ''
+  const bar = args && typeof args === 'object' && typeof (args as { bar?: unknown }).bar === 'string' ? String((args as { bar: string }).bar).replace(/\s+/g, ' ').trim() : ''
   const f: Flow = {
     id: answer.runId,
     taskId: answer.taskId,
@@ -81,6 +82,7 @@ const flowStarted = async ($: EngineInterface, input: { script?: unknown; script
     // The rounds script's own cap: 3 when none is given, at most 5
     ...((capOf(args) ?? (meta.name === 'rounds' ? 3 : undefined)) ? { cap: meta.name === 'rounds' ? Math.min(capOf(args) ?? 3, 5) : capOf(args) } : {}),
     task: task.trim().slice(0, 4000),
+    ...(bar ? { bar: bar.slice(0, 1000) } : {}),
     words: said.trim().slice(0, 4000),
     session: await sessionName($),
     parent: ccd.parent,

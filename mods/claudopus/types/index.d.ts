@@ -237,6 +237,8 @@ export type Flow = {
   cap?: number
   // The task the args gave, and the person's message that started it
   task: string
+  // The bar the args gave, which says when it passes; absent when they gave none
+  bar?: string
   words: string
   // The app's id of the session that runs it, and of the session that started that one
   session: string
