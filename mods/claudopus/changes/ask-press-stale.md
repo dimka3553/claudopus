@@ -1,0 +1,2 @@
+- An answer pressed on a card's ask now always counts: pressing an answer on one card no longer renames every other card's buttons, so a press from a panel that redraws late, as on a phone over the remote connection, no longer goes nowhere and leaves that card amber.
+- A finished work's card no longer keeps a run counting for ever when the command it started printed a number that is no process, such as a web address's "000".

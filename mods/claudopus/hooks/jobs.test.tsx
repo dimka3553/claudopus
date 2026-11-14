@@ -29,6 +29,9 @@ test('a command started detached is known by its log and folder; one that is not
   expect(detachedOf('python train.py > train.log')).toBeUndefined()
   expect(pidOf('48213\n')).toBe('48213')
   expect(pidOf('started\n')).toBeUndefined()
+  // curl's http code when nothing answered is no process: kill -0 0 always succeeds
+  expect(pidOf('000\n')).toBeUndefined()
+  expect(pidOf('0123\n')).toBeUndefined()
 })
 
 test('a detached start is one sent off with & by nohup or setsid on this Mac; a wait is no job; a description drops the command it repeats', async () => {
