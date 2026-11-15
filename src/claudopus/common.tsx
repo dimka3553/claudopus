@@ -30,12 +30,17 @@ const PASTE_CHARS = 12_000
 const KEPT = 40
 const ENTRIES_KEPT = 200
 // How many of the to-dos not yet started an open card lists before "more"
-const NEXT_SHOWN = 3
 // What else a Details tab can unfold, kept beside its chat's numbers, far from them: the person's words whole, every to-do
 // not yet started, and those done or dropped
 const OPEN_ASK = -1_000_001
-const OPEN_NEXT = -1_000_002
 const OPEN_DONE = -1_000_003
+const OPEN_RESULT = -1_000_004
+// Under a command's row in Details, its last lines sit on a darker ground, as a terminal's
+const OUTPUT_FILL = '#0000003D'
+// How much of what work reported at its end its Details shows before Show all
+const RESULT_SHOWN = 600
+// Past this many done to-dos, Details folds them into one row
+const DONE_FOLDED = 8
 // How much of a piece of work's chat the panel draws, the newest: this many lines, and this many characters, which one drawing has room for
 const TALK_KEPT = 300
 const TALK_CHARS = 40_000

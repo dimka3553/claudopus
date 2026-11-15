@@ -294,6 +294,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     }
     // A shell run here: bringing results from another Mac lays there what the test laid as remote:<folder>/<file>, and a folder moved
     // into place goes only where none has its name
+    // Another chat's transcript, read for its work's Details: the file under the projects folder named by its folder, if kept
+    if (tool === 'sh' && String(rest[1]).startsWith('for f in "$1/$2/$3"')) {
+      const path = `${rest[3]}/${rest[4]}/${rest[5]}`
+      return files.has(path) ? ok(files.get(path)) : ok('', 1)
+    }
     if (tool === 'sh' || tool === 'bash') {
       sshed.push([String(rest[1]), String(rest.slice(3).join(' '))])
       // A stream cut short lays half of what it carried and fails
@@ -1060,17 +1065,9 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await tab.find({ type: 'Text', text: /^Check the left ear/ }))?.props.dimColor).toBe(true)
   expect((await tab.find({ type: 'Text', text: /^The nostril is closed/ }))?.props.dimColor).toBe(true)
   expect(await tab.find({ type: 'Text', text: /^Now:$/ })).toBeUndefined()
-  // The next three are listed, the rest behind "more"
-  expect(await tab.find({ type: 'Text', text: /^Later step 2$/ })).toBeDefined()
-  expect(await tab.find({ type: 'Text', text: /^Later step 3$/ })).toBeUndefined()
-  await pressed(tab, 'fold--1000002')
+  // Every to-do is listed in the order the work listed them: done ticked, dropped struck through, the rest dim
   expect(await tab.find({ type: 'Text', text: /^Later step 4$/ })).toBeDefined()
-  expect(await tab.find({ type: 'Text', text: /^Fit the/ })).toBeUndefined()
-  expect((await keyed(tab, 'fold--1000003'))?.props.label).toBe('▸ 1 done · 1 dropped')
-  // A pressed button comes back under a new key: the app keeps the button that holds the focus in view, and pulled the view back to it
-  const before = (await keyed(tab, 'fold--1000003'))?.key
-  await pressed(tab, 'fold--1000003')
-  expect((await keyed(tab, 'fold--1000003'))?.key).not.toBe(before)
+  expect(await keyed(tab, 'fold--1000003')).toBeUndefined()
   expect((await tab.find({ type: 'Text', text: /^Fit the/ }))?.props.dimColor).toBe(true)
   expect((await tab.find({ type: 'Text', text: /^Try the/ }))?.props.strikethrough).toBe(true)
   // The list behind it is as it was
@@ -1668,7 +1665,6 @@ test("Details opens as a tab of its own, named after the work, in front; pressed
   // The pressed button comes back under a new key, so the list is not held where it was
   expect(await pane.find({ type: 'Button', key: 'open-a1-0' })).toBeUndefined()
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
-  await pressed(tab, 'fold--1000002')
   expect(await tab.find({ type: 'Text', text: /^Step 5$/ })).toBeDefined()
   // Pressed again with its tab open: the same tab comes forward, nothing is closed, and it stays unfolded
   await pressed(pane, 'open-a1')
@@ -5302,6 +5298,66 @@ test("a chat of this Mac with work opens by the app's own id when it has no Remo
   await list.unmount()
 })
 
+test("Details of another chat's work on this Mac is as deep as this chat's own: every to-do, its helpers with the step each is on, its commands' last lines, and its chat read from that chat's own file", async ($, on) => {
+  const { files, clock, opened } = world(on)
+  await $.session.start(start)
+  const at = NOW
+  const card = { id: 'b1', parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: 'Fix the M4 install path', words: 'fix the install path', items: [{ text: 'Find where it installs', state: 'done' }, { text: 'Fix the path', state: 'doing' }, { text: 'Run it again', state: 'open' }, { text: 'Check the app', state: 'open' }], entries: [{ at, kind: 'note', text: 'HOME is empty over ssh.' }], answer: '', startedAt: at - 60_000, endedAt: 0, status: 'working', bg: [{ id: 'bx1', what: 'Update the plugin', at: at - 20_000, cmd: 'claude plugin update claudopus' }], seenJobs: { bx1: { latest: 'Fetching the mod', tail: ['Updating marketplace claudopus', 'Fetching the mod'] } } }
+  const helper = { id: 'h1', parentId: 'b1', isFork: false, tokens: 0, title: "Check the M4's plugin folder", words: '', items: [{ text: 'List the caches', state: 'doing' }, { text: 'Report back', state: 'open' }], entries: [{ at, kind: 'note', text: 'Listing the caches.' }], answer: '', startedAt: at - 30_000, endedAt: 0, status: 'working' }
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ chat: 'chat-b', title: 'M4 setup', folder: '/repo/claudopus', host: '', at, cards: [card], helpers: [helper] }))
+  const line = (one: object) => JSON.stringify(one)
+  files.set(
+    `${HOME}/.claude/projects/-repo-claudopus/chat-b/subagents/agent-b1.jsonl`,
+    [
+      line({ type: 'user', message: { role: 'user', content: 'fix the install path' } }),
+      line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The install puts the mod under the wrong folder.' }, { type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'ls', description: 'List the plugins' } }] } }),
+      line({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'cache' }] } }),
+    ].join('\n'),
+  )
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Fix the M4 install path' }))).toBeDefined()
+  // Its helper is no card of its own in the list
+  expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === "Check the M4's plugin folder" && !(b.key ?? '').includes('details'))).toBe(false)
+  const id = (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('open-r-'))?.key?.replace(/^open-/, '').replace(/-\d+$/, '') ?? ''
+  const tab = await $.ui.mount({ ...LIST, requestId: `work-${id}`, surface: 'desktop' } as never)
+  // Its chat is read from that chat's file, as its own chat's Details reads it
+  const said = async () => (await tab.findAll({ type: 'Markdown' })).find(m => String(m.props.text).startsWith('The install puts'))
+  expect(await until(said)).toBeDefined()
+  const texts = (await tab.findAll({ type: 'Text' })).map(t => t.text)
+  // Every to-do, in its order
+  for (const item of ['Find where it installs', 'Fix the path', 'Run it again', 'Check the app']) expect(texts).toContain(item)
+  expect(texts).toContain('HOME is empty over ssh.')
+  // Its helper on its tree, with the step it is on and where it is under it
+  expect((await tab.findAll({ type: 'Button' })).some(b => String(b.props.label).startsWith("Check the M4's plugin"))).toBe(true)
+  expect(texts).toContain('Step 1 of 2 · List the caches')
+  expect(texts).toContain('Listing the caches.')
+  // Its command's last lines, as that chat read them
+  expect(texts).toContain('Updating marketplace claudopus')
+  expect(texts).toContain('Fetching the mod')
+  // The chat's name, and no line in place of its chat
+  expect(texts.some(t => t?.startsWith('From the chat "M4 setup"'))).toBe(true)
+  expect(texts.some(t => t?.startsWith('Its chat is kept by'))).toBe(false)
+  // The helper opens its own Details, of that chat too
+  const helperKey = (await tab.findAll({ type: 'Button' })).find(b => String(b.props.label).startsWith("Check the M4's plugin"))?.key ?? ''
+  await pressed(tab, helperKey.replace(/-\d+$/, ''))
+  expect(await until(async () => opened.find(one => one.startsWith('work-r-') && one.endsWith('-h1')))).toBeDefined()
+  await tab.unmount()
+  await list.unmount()
+})
+
+test("this chat's file carries the helpers of the work it shares, apart from its cards, and how each command stands", async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await $.agent.spawn({ ...spawn, agentId: 'a2', description: 'Read the scan', prompt: 'read', parentAgentId: 'a1' } as never)
+  await clock.advance(25_000)
+  const mine = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}') as { cards?: { id: string }[]; helpers?: { id: string; parentId: string; title: string; words: string }[] }
+  expect(mine.cards?.map(one => one.id)).toEqual(['a1'])
+  expect(mine.helpers?.map(one => [one.id, one.parentId, one.title, one.words])).toEqual([['a2', 'a1', 'Read the scan', '']])
+})
+
 // The app's own prompts shown amber in every panel
 
 // A prompt's Yes or No, by the start of its key: the prompt's id and the count of presses follow
@@ -5814,7 +5870,7 @@ test("Details of work in a chat the app runs on another Mac shows what that chat
   expect(texts).toContain('“Can you improve the video?”')
   expect(texts).toContain('Have it checked')
   expect(texts).toContain('Rendering again for a second look.')
-  expect(texts).toContain('Its chat is shown in the panel of the chat "Video" on m4, which runs it. Stop it or move it to another model there.')
+  expect(texts).toContain('Its chat is kept by the chat "Video" on m4, which runs it. Stop it or move it to another model there.')
   await pressed(tab, `their-chat-${id}`)
   expect(await until(async () => shown.find(argv => argv[1]?.startsWith('claude://')))).toEqual(['open', 'claude://code/session_01Video'])
   await tab.unmount()

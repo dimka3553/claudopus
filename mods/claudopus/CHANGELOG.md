@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.112 · 15 November 2026
+- Details lists every to-do in its order, done ones ticked, in place of the next three and a count.
+- In Details, each helper at work shows the step it is on and where it says it is, and each running command shows the last lines of its output, under its row.
+- Finished work's Details shows what it reported at its end near the top, as its Result.
+- Work of another chat opens its Details with the same depth as this chat's own: its helpers, its commands and their last lines, and its chat, read from that chat on this Mac. A press beside the chat's name opens that chat.
+
 ## 0.2.111 · 15 November 2026
 - Every run on a card is two lines: what it is and its time, then how it stands. A command held open shows its progress too, a watch its last event, and one that has printed nothing says "nothing printed in 9m" instead of "updated 9m ago".
 - A run's second line shows how much of how much (in GB, or a count of what it counts), its percent, its speed and the time left when the run says them, never worked out by Claudopus. A run quiet for three minutes says "quiet for 4m" in amber.

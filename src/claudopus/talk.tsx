@@ -168,7 +168,8 @@ const titleOf = (one: Todo) => one.title || quoted(one.words, 60) || 'Background
 const openWork = ($: EngineInterface, id: string) => {
   presses += 1
   void comingTab((async () => {
-    const one = [...(await read($, todos)), ...cardsOf(await read($, others))].find(card => card.id === id)
+    const there = await read($, others)
+    const one = [...(await read($, todos)), ...cardsOf(there), ...helpersOf(there)].find(card => card.id === id)
     if (!one) return
     // A tab opened afresh starts folded; one already open keeps what was unfolded in it
     if (!(await $.ui.panes()).some(pane => pane.id === workPaneOf(id))) (folds.delete(id), pictureIn.delete(workPaneOf(id)))
