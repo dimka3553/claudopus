@@ -431,42 +431,10 @@ const openOn = async ($: EngineInterface, target: string, isText = false) => {
 // macOS's sips on a Mac; on Linux bin/sips, which answers the same calls with ImageMagick and fails, drawing no small copy, without it
 const sips = ($: EngineInterface) => (isLinux ? `${$.plugin.root}/bin/sips` : 'sips')
 
-// A hook's work, as its hook returns it: what it comes to, or, once the hook's signal aborts, `gone` at once. Claude Code has gone on
-// without the hook by then and gives it five seconds more: a hook of the mod still running past that twice in a row is taken for a
-// runaway, and Claude Code ends the hooks worker, so every call the mod held dies with it (exit 137) and the mod is unloaded, tools,
-// rules and holds, until /reload-plugins. What the hook was doing finishes on its own, unwaited
-const untilSignal = <T,>($: EngineInterface, signal: AbortSignal | undefined, running: Promise<T>, gone: T): Promise<T> => {
-  if (!signal) return running
-  return new Promise<T>((resolve, reject) => {
-    const go = () => {
-      // Its own end is no one's now: a fault in it is only logged
-      running.catch(err => log($, `a hook let go at its signal failed later: ${String(err)}`).catch(() => undefined))
-      resolve(gone)
-    }
-    if (signal.aborted) return go()
-    signal.addEventListener('abort', go, { once: true })
-    running.then(
-      value => (signal.removeEventListener('abort', go), resolve(value)),
-      err => (signal.removeEventListener('abort', go), reject(err)),
-    )
-  })
-}
-// A hold's wait between two looks at what was pressed: a one-second sleep the engine runs, whose time the hook's budget does not
-// count, cut short when the hook's signal aborts, so a hold let go ends at once, never a slow sleep later on a busy Mac
-const aSecond = async ($: EngineInterface, signal: AbortSignal | undefined) => {
-  if (signal?.aborted) return
-  let unhook = () => {}
-  const aborted = new Promise<void>(done => {
-    unhook = () => (signal?.removeEventListener('abort', done), done())
-    signal?.addEventListener('abort', () => done(), { once: true })
-  })
-  await Promise.race([$.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined), aborted])
-  unhook()
-}
 // Waiting on another call's work (a look over the person's files, a write in its turn) counts against a hook's own ten seconds, as
-// only the engine's own calls do not. On a busy Mac with many pieces of work, a call that waited its turn that long had its hook
-// skipped (the call ran without the mod's checks) and was then taken as running past its signal. So the wait is made beside a
-// sleep the engine runs, which stops that count, half a second at a time
+// only the engine's own calls do not. On a busy Mac with many pieces of work, a hook that waited its turn that long ran out of time,
+// and one still waiting past its signal twice in a row had Claude Code end the mod as a runaway, killing every call it held. So
+// the wait is made beside a sleep the engine runs, which stops that count, half a second at a time
 const waitOn = async ($: EngineInterface, other: Promise<unknown>) => {
   let isDone = false
   const done = other.then(

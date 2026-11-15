@@ -277,7 +277,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
       if (next.signal?.aborted || (await isReplaced($))) said = 'gone'
       else if ((next.budget?.remainingMs ?? Infinity) < 1500) said = 'late'
       if (said) break
-      await aSecond($, next.signal)
+      await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
     }
   } finally {
     gateHeld.delete(gate.id)

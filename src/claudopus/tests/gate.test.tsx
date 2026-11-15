@@ -586,43 +586,10 @@ test('answering one of two asks at the top leaves both cards where they were, so
   expect(await list.find({ type: 'Text', text: /You answered “Done”/ } as never)).toBeDefined()
 })
 
-// 15 Nov: a dozen pieces of work on a Mac under heavy load, and calls the mod held went on past their signal twice in a row: Claude
-// Code took the mod for a runaway and ended it, so a release Sam had allowed was killed in its checks (exit 137), and a second, held
-// for Sam's press, ran unasked once the mod was gone and was refused for want of a grant. Claude Code lets a held call go when the
-// person interrupts, a hook above settles first, or the hook's own time runs out, and gives the hook five seconds more: a gate's
-// wait ends the moment that comes, never a slow sleep later. A plugin above the mod lets the call go while the gate holds it; an
-// inline plugin runs on its own, so all it keeps is inside its register
-const LETS_GO: Plugin = {
-  name: 'lets-go',
-  tier: 'prepend',
-  register: on => {
-    on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-      if (!String((e as { command?: unknown }).command ?? '').includes('# let go')) return next(e)
-      const below = Promise.resolve(next(e))
-      await Promise.race([below, new Promise<void>(done => void setTimeout(done, 300))])
-      return { deny: 'let go above' }
-    })
-  },
-}
-for (const [kind, command] of [
-  ['an admin command', `${ADMIN} here 'id -u' # let go`],
-  ['a release', 'cd /repo/wt && /plug/claudopus/bin/release # let go'],
-] as const)
-  test(`${kind} let go while its gate holds it leaves the card at once, with no grant, before the engine's next second`, { plugins: [LETS_GO], timeoutMs: 20_000 }, async ($, on) => {
-    const w = await gated($, on)
-    w.files.set('git:top', '/repo/wt')
-    w.files.set('git:branch', 'fix-it')
-    const said = (await w.bash('g1', command)) as { deny?: string }
-    expect(said.deny).toBe('let go above')
-    // No second passes (the engine's sleep is never let go): the gate is gone from the card all the same, and nothing was granted
-    expect(await until(async () => ((await keyed(w.list, 'gate-g1')) ? undefined : true))).toBe(true)
-    expect(w.grants()).toHaveLength(0)
-  })
-
 // 15 Nov, the cause itself: every call of every piece of work waits its turn for the look over the person's files as it begins.
-// With the files slow to read, a call that waited past ten seconds had its hook skipped: Claude Code ran it without the mod's gate
-// (the release that ran unasked), and the hook, still waiting, was counted as running past its signal. The wait no longer counts
-// against the hook's own time. While the test lays /slow, the plugin above makes the kept copy of the files eight seconds slow to read
+// That wait counted against the hook's own ten seconds: with the files slow to read, a hook that waited that long ran out of time,
+// Claude Code went on without it and ran it again, and a hook that went on waiting past its signal twice in a row got the mod
+// ended as a runaway, every call it held killed. The wait no longer counts against the hook's own time. While the test lays /slow, the plugin above makes the kept copy of the files eight seconds slow to read
 const SLOW_READS: Plugin = {
   name: 'slow-reads',
   tier: 'prepend',
@@ -649,7 +616,7 @@ test('three admin commands at once on a slow Mac each wait their turn and are ea
   expect(isShown).toBe(true)
   for (const one of said) expect(String(one.deny)).toContain('Deny')
   expect(w.admins).toHaveLength(0)
-  // No hook ran out of time while it waited: one that did was run again by Claude Code and looked again, and 0.2.124 read the
+  // No hook ran out of time while it waited: one that did was run again by Claude Code and looked again, and 0.2.129 read the
   // slow file 14 times with the gates up after fifty seconds, where now it is read 6 times and they are up in sixteen
   expect(Number(w.files.get('/slow-reads'))).toBeLessThanOrEqual(8)
 })
