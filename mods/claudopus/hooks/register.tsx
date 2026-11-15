@@ -11,7 +11,7 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
-import type { LookIo, Notice, Published, Source, Steps } from './update'
+import type { Fail, LookIo, Notice, Published, Source, Steps } from './update'
 import { copyOf, download, FAILS, folderMarketplace, folderReady, install, installedFrom, isNewer, isUpdateDue, isVersion, lookEveryOf, LOOK_EVERY_HOURS, missedOn, noticeOf, publishedOf, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, sizeText, stampOf, stepsOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
@@ -4277,8 +4277,9 @@ const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask'
 // Updates as the person asks for them. A look only reads the version page on claudopus.ai, on its own as often as Config says or
 // only at Config's Check now, and the panel's header then says a newer version is out, quietly, in one small box. Each step is a
 // press: Download fetches the release and checks it is what the release published, Install puts it in place (Claude Code's own
-// steps for an installed copy, a fast-forward for a folder of the code), Reload switches this chat. Not now and Skip this version
-// keep it quiet. The pure parts are in hooks/update.ts
+// steps for an installed copy), Reload switches this chat. A chat run from a folder of the code has one press, Update, for both:
+// the fetch, its check, then a fast-forward only once the check holds; then Reload. Not now and Skip this version keep it quiet.
+// The pure parts are in hooks/update.ts
 
 // ---- One at a time, under a lock the other chats see ----
 
@@ -4517,6 +4518,9 @@ const atStep = async ($: EngineInterface, act: () => Promise<void>) => {
     redraw($)
   }
 }
+// A chat run from Claudopus's own checkout: Download and Install are one press, Update (the fetch, its check against the release,
+// then the fast-forward, under the one lock); an installed copy keeps them as two
+const isOnePress = (src: Source) => src.kind === 'folder' && src.runs === 'folder'
 // The page read again at each press: a step is checked only against what claudopus.ai says now, never against a kept file
 const freshPage = async ($: EngineInterface, version: string, step: 'download' | 'install', now: number) => {
   const { page } = await readPage($)
@@ -4527,8 +4531,15 @@ const freshPage = async ($: EngineInterface, version: string, step: 'download' |
 let downloadProgress: { version: string; pct: number; got: number; phase: string } | undefined
 // What the download's last drawing showed, and when
 const progressDrawn = { shown: '', phase: '', at: 0 }
+// Update's press, from its fetch to the end of its move: the panel says Updating throughout, and offers no press in between
+let isUpdatePress = false
 const downloadPress = ($: EngineInterface, version: string) => {
   presses += 1
+  // A press while a step runs does nothing, as atStep would, and leaves the flag to the press that set it
+  if (isStepping || isUpdating) return
+  // Update's move, once its fetch was checked: each half takes the lock on its own, as two presses did, so neither holds it longer
+  let next: { version: string; commit: string } | undefined
+  isUpdatePress = true
   void atStep($, async () => {
     const now = await $.clock.now()
     const { src } = await knowSource($, true)
@@ -4558,37 +4569,44 @@ const downloadPress = ($: EngineInterface, version: string) => {
     downloadProgress = undefined
     const at = await $.clock.now()
     heldChecked.clear()
-    if (got.ok) await writeSteps($, { version: page.version, stage: 'downloaded', step: 'download', commit: got.commit, tree: page.tree, at, from: loaded })
-    else {
+    if (got.ok) {
+      await writeSteps($, { version: page.version, stage: 'downloaded', step: 'download', commit: got.commit, tree: page.tree, at, from: loaded })
+      // Update's second half: the fetch was checked against the release, and the move reads the page and checks it again
+      if (isOnePress(src)) next = { version: page.version, commit: got.commit }
+    } else {
       // What git or GitHub said is kept in the log only: the panel shows what failed in its own words
       if (got.detail) await log($, `Claudopus ${page.version} download failed (${got.fail}): ${got.detail}`)
       await writeSteps($, { version: page.version, stage: 'failed', step: 'download', fail: got.fail, at, from: loaded })
     }
   })
+    .then(() => (next ? atStep($, () => installStep($, next!.version, next!.commit)) : undefined))
+    .finally(() => ((isUpdatePress = false), redraw($)))
 }
 // Install, pressed for the download the notice showed: checked against the page read now, then put in place
 const installPress = ($: EngineInterface, version: string, commit: string) => {
   presses += 1
-  void atStep($, async () => {
-    const now = await $.clock.now()
-    const { src } = await knowSource($, true)
-    if (src.kind === 'none') return
-    const page = await freshPage($, version, 'install', now)
-    if (!page) return
-    const loaded = (await versionsOf($)).version
-    if (page.version !== version) return void (await writeSteps($, { version, stage: 'failed', step: 'install', fail: 'newer-out', at: now, from: loaded }))
-    await writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at: now, from: loaded })
-    // A long install keeps its step alive for the other chats
-    let isOn = true
-    const beat = (): unknown =>
-      $.clock.after(20_000, () => void (isOn && $.clock.now().then(at => writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at, from: loaded })).then(() => isOn && beat())))
-    beat()
-    const got = await install(lookIo($), src, page, commit, await engineOf($)).finally(() => (isOn = false))
-    const at = await $.clock.now()
-    Object.assign(stepSaid, { version, detail: '', dirty: got.ok && got.dirty })
-    if (!got.ok && got.detail) await log($, `Claudopus ${version} install failed (${got.fail}): ${got.detail}`)
-    await writeSteps($, got.ok ? { version, stage: 'installed', step: 'install', commit, tree: page.tree, at, from: loaded } : { version, stage: 'failed', step: 'install', fail: got.fail, commit, at, from: loaded })
-  })
+  void atStep($, () => installStep($, version, commit))
+}
+// Install itself, run under the lock: at Install's press, or as Update's second half
+const installStep = async ($: EngineInterface, version: string, commit: string) => {
+  const now = await $.clock.now()
+  const { src } = await knowSource($, true)
+  if (src.kind === 'none') return
+  const page = await freshPage($, version, 'install', now)
+  if (!page) return
+  const loaded = (await versionsOf($)).version
+  if (page.version !== version) return void (await writeSteps($, { version, stage: 'failed', step: 'install', fail: 'newer-out', at: now, from: loaded }))
+  await writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at: now, from: loaded })
+  // A long install keeps its step alive for the other chats
+  let isOn = true
+  const beat = (): unknown =>
+    $.clock.after(20_000, () => void (isOn && $.clock.now().then(at => writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at, from: loaded })).then(() => isOn && beat())))
+  beat()
+  const got = await install(lookIo($), src, page, commit, await engineOf($)).finally(() => (isOn = false))
+  const at = await $.clock.now()
+  Object.assign(stepSaid, { version, detail: '', dirty: got.ok && got.dirty })
+  if (!got.ok && got.detail) await log($, `Claudopus ${version} install failed (${got.fail}): ${got.detail}`)
+  await writeSteps($, got.ok ? { version, stage: 'installed', step: 'install', commit, tree: page.tree, at, from: loaded } : { version, stage: 'failed', step: 'install', fail: got.fail, commit, at, from: loaded })
 }
 // Reload: this chat switches with Claude Code's own /reload-plugins. A chat run from another Mac is never sent one (the engine
 // refuses it there), nor one whose reload the engine refused: it says to type it
@@ -4693,9 +4711,20 @@ const updateShape = async ($: EngineInterface) =>
     : ''
 
 // The notice: a small grey outlined box in the header, under the version this chat runs, never a demand as the amber boxes are.
-// What is out and, in a line, what is new; the three steps and where they stand; the one press that comes next, Not now and Skip
+// What is out and, in a line, what is new; the steps and where they stand; the one press that comes next, Not now and Skip. A chat
+// run from Claudopus's own checkout has two steps, Update and Reload, and is told nothing of where it loads from (Config says)
 const NOTICE_EDGE = '#80808070'
 const STEPS = ['Download', 'Install', 'Reload'] as const
+const ONE_PRESS_STEPS = ['Update', 'Reload'] as const
+// Why Update could not move this chat's checkout forward, in Update's own words; the rest are FAILS'
+const ONE_PRESS_FAILS: Partial<Record<Fail, string>> = {
+  'own-commits': "main has commits of its own that this version doesn't have, so it can't move forward",
+  overwrite: 'your uncommitted changes touch files this version changes: commit them or set them aside, then try again',
+  moved: "it couldn't be moved forward",
+  'newer-out': 'a newer version came out while it was updating',
+  gone: 'what was fetched is no longer there',
+  unchecked: 'the version page has no fingerprint to check it against',
+}
 const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loaded: string) => {
   const now = await $.clock.now()
   const busy = now - busyAt < 10_000 ? <ui.Text key="update-busy" dimColor wrap="wrap">Another chat is updating Claudopus. Try again in a moment.</ui.Text> : null
@@ -4703,10 +4732,13 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   const known = await knowSource($)
   const { src } = known
   const isFolder = src.kind === 'folder'
+  const isOne = isOnePress(src)
+  // A copy Claude Code installs from a folder of the code: its Install moves that folder's main, and its card says so
+  const isCopy = isFolder && !isOne
   const folder = isFolder ? homeShort(src.repo) : ''
   const track = (at: number) => (
     <ui.Text key="update-track" dimColor wrap="truncate-end">
-      {STEPS.map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${i === 0 && isFolder ? 'Fetch' : i === 1 && isFolder ? 'Move forward' : one}`).join('   ')}
+      {(isOne ? ONE_PRESS_STEPS : STEPS).map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${isCopy && i === 0 ? 'Fetch' : isCopy && i === 1 ? 'Move forward' : one}`).join('   ')}
     </ui.Text>
   )
   const quiet = (key: string, version: string, withSkip = true) => [
@@ -4738,7 +4770,11 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     </ui.Text>
   )
   const v = n.version
-  if (n.kind === 'available' || n.kind === 'cannot') {
+  // Update's press between its fetch and its move: still updating
+  if (isOne && (n.kind === 'installing' || (n.kind === 'downloaded' && (isStepping || isUpdatePress)))) return box('installing', [title(`Updating Claudopus ${v}…`), track(0)], [])
+  // A fetch checked earlier, left by a copy before Update was one press, is offered as any version out: its Update moves it forward,
+  // after checking it once more
+  if (n.kind === 'available' || n.kind === 'cannot' || (isOne && n.kind === 'downloaded')) {
     const page = await pageFor($, v)
     const missed = page && page.version === v ? missedOn(page, loaded) : []
     const newest = missed[0]
@@ -4751,8 +4787,12 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
       'available',
       [head, what ? line('what', what) : null],
       [
-        <ui.Button key={`update-download-${presses}`} label={isFolder ? 'Fetch into the folder' : page?.size ? `Download · ${sizeText(page.size)}` : 'Download'} onPress={() => downloadPress($, v)} />,
-        ...quiet('available', v),
+        n.kind === 'downloaded' ? (
+          <ui.Button key={`update-install-${presses}`} label="Update" onPress={() => installPress($, v, n.commit)} />
+        ) : (
+          <ui.Button key={`update-download-${presses}`} label={isOne ? 'Update' : isCopy ? 'Fetch into the folder' : page?.size ? `Download · ${sizeText(page.size)}` : 'Download'} onPress={() => downloadPress($, v)} />
+        ),
+        ...quiet(n.kind, v),
       ],
     )
   }
@@ -4761,48 +4801,46 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const pct = live?.pct ?? n.pct
     const got = live?.got ?? n.got
     const said = live?.phase === 'checking' ? 'checking it against what the release published' : [pct !== undefined ? `${Math.round(pct)}%` : '', got ? sizeText(got) : '', live?.phase === 'resolving' ? 'unpacking' : ''].filter(Boolean).join(' · ')
-    return box('downloading', [title(`${isFolder ? 'Fetching' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
+    return box('downloading', [title(`${isOne ? 'Updating' : isCopy ? 'Fetching' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
   }
   if (n.kind === 'downloaded') {
-    const replaces = isFolder
+    const replaces = isCopy
       ? `Checked against the release. Move forward takes ${folder} from v${loaded} to v${v}, fast-forward only.`
       : `Checked against the release. Install replaces v${loaded}; new chats start on v${v}.`
     return box(
       'downloaded',
-      [title(`Claudopus ${v} ${isFolder ? 'fetched' : 'downloaded'}`), line('replaces', replaces), track(1)],
-      [<ui.Button key={`update-install-${presses}`} label={isFolder ? 'Move forward' : 'Install'} onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
+      [title(`Claudopus ${v} ${isCopy ? 'fetched' : 'downloaded'}`), line('replaces', replaces), track(1)],
+      [<ui.Button key={`update-install-${presses}`} label={isCopy ? 'Move forward' : 'Install'} onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
     )
   }
-  if (n.kind === 'installing') return box('installing', [title(`${isFolder ? 'Moving the folder to' : 'Installing'} Claudopus ${v}…`), track(1)], [])
+  if (n.kind === 'installing') return box('installing', [title(`${isCopy ? 'Moving the folder to' : 'Installing'} Claudopus ${v}…`), track(1)], [])
   if (n.kind === 'reload') {
-    const who =
-      isFolder && src.runs === 'folder'
-        ? `This chat still runs v${loaded}. Every chat run from ${folder} switches only at its own reload, which its panel offers.`
-        : `This chat still runs v${loaded}. Reload switches this chat only; new chats start on v${v}.`
+    const who = isOne ? `This chat still runs v${loaded}. Each open chat switches at its own Reload.` : `This chat still runs v${loaded}. Reload switches this chat only; new chats start on v${v}.`
     const typed = isRunFromAfar || isReloadRefused
     return box(
       'reload',
       [
-        title(`Claudopus ${v} is ${isFolder && src.runs === 'folder' ? 'in the folder' : 'installed'}`),
+        title(`Claudopus ${v} is ${isOne ? 'ready' : 'installed'}`),
         line('who', typed ? `This chat still runs v${loaded}. Type /reload-plugins in this chat to switch it.` : who),
-        stepSaid.version === v && stepSaid.dirty ? line('dirty', 'The uncommitted changes in the folder stay, and a reload loads them on top.') : null,
-        track(2),
+        stepSaid.version === v && stepSaid.dirty ? line('dirty', 'Your uncommitted changes stay, and Reload loads them on top.') : null,
+        track(isOne ? 1 : 2),
       ],
       [typed ? null : <ui.Button key={`update-reload-${presses}`} label="Reload this chat" onPress={() => void reloadPress($, v).catch(err => log($, `chat not reloaded: ${String(err)}`))} />, ...quiet('reload', v, false)],
     )
   }
   // A step that failed: what failed, and that what this chat runs is as it was
   const detail = ''
-  const which = n.step === 'download' ? (isFolder ? 'fetch' : 'download') : isFolder ? 'move the folder to' : 'install'
+  const which = isOne ? 'update' : n.step === 'download' ? (isCopy ? 'fetch' : 'download') : isCopy ? 'move the folder to' : 'install'
+  const why = (isOne ? ONE_PRESS_FAILS[n.fail] : undefined) ?? FAILS[n.fail]
   const kept =
     n.fail === 'installed-mismatch'
-      ? `${isFolder ? `The folder moved to v${v}, but ` : ''}Claude Code's record was put back, so new chats keep v${loaded}.`
+      ? `${isOne ? `Claudopus moved to v${v}, but ` : isCopy ? `The folder moved to v${v}, but ` : ''}Claude Code's record was put back, so new chats keep v${loaded}.`
       : n.fail === 'kept-copy'
         ? `This chat still runs v${loaded}.`
         : `Nothing was changed: this chat still runs v${loaded}.`
   return box(
     'failed',
-    [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${FAILS[n.fail].replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
+    [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${why.replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
     [<ui.Button key={`update-again-${presses}`} label="Try again" onPress={() => downloadPress($, v)} />, ...quiet('failed', v)],
   )
 }
@@ -10385,8 +10423,7 @@ const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
 // More of each figure, for a pointer resting on it: a heading with the figure in full, then rows of a name and its value (Claude's
 // part, the parts of a speed, who uses the most), and for the battery its state in words. Only what the looks gave: a part that is
 // not known is left out
-// foot: what the figures above it cover, under them
-type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][]; foot?: string }
+type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][] }
 const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
   const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? top.map(([name, n]): [string, string] => [name, text(n)]) : undefined)
   const b = f.battery
@@ -10399,11 +10436,11 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
       most: most(f.cpuTop, n => `${pctText(n)}%`),
     },
     // Busy is time at work at any speed, so a busy graphics processor can draw little; drawing the screen is macOS's own
-    // (WindowServer), for every app's window, Claude's too, so it is no one's part
+    // (WindowServer), for every app's window, Claude's too, so it is no one's part. The card is its rows alone, with no words under
+    // them on what they cover
     gpu: f.gpu === undefined ? undefined : {
       title: 'Graphics processor',
       value: `${pctText(f.gpu)}% busy`,
-      note: 'Time at work, at any speed',
       rows: [
         ...(f.gpuClaude !== undefined ? [['Claude and what it started', `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
         ...(f.wattsGpu !== undefined ? [['Drawing', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
@@ -10425,14 +10462,10 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
         ...(f.wattsGpu !== undefined ? [['Graphics, every program', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
         ...(f.wattsGpuClaude !== undefined ? [['Claude of that, estimated', `${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
       ],
-      ...(f.wattsClaude !== undefined || f.wattsGpuClaude !== undefined
-        ? { foot: `Claude: the app, its chats and all their work.${f.wattsGpuClaude === undefined ? ' Graphics is not in its watts.' : ''} Part of what the processors draw is no program's, and work that ends within seconds is missed. The screen, memory and storage count only in the whole, which the Mac updates about once a minute.` }
-        : {}),
     },
     disk: f.disk === undefined ? undefined : {
-      title: 'Disk',
+      title: 'Disk, read and write',
       value: rateText(f.disk).join(' '),
-      note: 'Reading and writing together',
       rows: f.diskClaude !== undefined ? [['Claude and what it runs', rateFine(Math.min(f.diskClaude, f.disk))]] : [],
     },
     net: f.net === undefined ? undefined : {
@@ -10451,9 +10484,12 @@ const rateFine = (perSecond: number) => (perSecond < 1024 * 1024 ? `${Math.round
 const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 // Watts, whole from ten up, a tenth below
 const wattText = (w: number) => (w >= 10 ? `${Math.round(w)}` : `${Math.round(w * 10) / 10}`)
-// The card, in the bar's own column above the figures: drawn hidden, and shown while the pointer rests on its figure through the
-// figure's hover group. The app's lifted hover cards (an absolute Box under a keyed one) were tried and left cards open after the
-// pointer had gone on to the next figure; a group is lit and put out by the pointer itself, so one card shows at a time
+// A figure's card: one Box placed absolutely and drawn hidden inside the figure's keyed Box, which the desktop app lifts over the
+// chat as its own floating card above the figure, kept in the window and shifted sideways at its edges, so showing it moves nothing
+// in the chat or the bar (in the bar's column it took room: the chat was pushed up and sprang back, and a tall card hid the figures).
+// What it says is shown by the figure's hover group, which the pointer lights and puts out at once, so as the pointer goes on to
+// the next figure this card's words are gone before the next card shows, though the app keeps the lifted card itself a moment for
+// a pointer on its way into it
 const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
   const { Box, Text } = ui
   const row = (name: string, value: string, n: number, kind: string) => (
@@ -10463,22 +10499,45 @@ const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
     </Box>
   )
   return (
-    <Box key={`${key}-card`} display="none" hover={{ scope: key, display: 'flex' }} flexDirection="column" gap={1} alignSelf="flex-start" borderStyle="round" borderDimColor paddingX={1} marginBottom={1}>
-      <Box key={`${key}-card-head`} flexDirection="row" justifyContent="space-between" gap={3}>
-        <Text bold>{card.title}</Text>
-        <Text bold>{card.value}</Text>
-      </Box>
-      {card.note ? <Text key={`${key}-card-note`} dimColor>{card.note}</Text> : null}
-      {card.rows.length ? <Box key={`${key}-card-rows`} flexDirection="column">{card.rows.map(([name, value], n) => row(name, value, n, 'row'))}</Box> : null}
-      {card.most?.length ? (
-        <Box key={`${key}-card-most`} flexDirection="column">
-          <Text dimColor>Using the most</Text>
-          {card.most.map(([name, value], n) => row(name, value, n, 'most'))}
+    // No key and no hover group of its own: the app lifts only a hidden absolute Box shown by the hover of its keyed Box
+    <Box position="absolute" top={-1} left={0} display="none" hover={{ display: 'flex' }} flexDirection="column">
+      <Box key={`${key}-card`} display="none" hover={{ scope: key, display: 'flex' }} flexDirection="column" gap={1}>
+        <Box key={`${key}-card-head`} flexDirection="row" justifyContent="space-between" gap={3}>
+          <Text bold>{card.title}</Text>
+          <Text bold>{card.value}</Text>
         </Box>
-      ) : null}
-      {card.foot ? <Text key={`${key}-card-foot`} dimColor>{card.foot}</Text> : null}
+        {card.note ? <Text key={`${key}-card-note`} dimColor>{card.note}</Text> : null}
+        {card.rows.length ? <Box key={`${key}-card-rows`} flexDirection="column">{card.rows.map(([name, value], n) => row(name, value, n, 'row'))}</Box> : null}
+        {card.most?.length ? (
+          <Box key={`${key}-card-most`} flexDirection="column">
+            <Text dimColor>Using the most</Text>
+            {card.most.map(([name, value], n) => row(name, value, n, 'most'))}
+          </Box>
+        ) : null}
+      </Box>
     </Box>
   )
+}
+
+// The desktop app draws the bar anew whenever anything in it changes (new figures, the work under it, the octopus), and shows again
+// each lifted card whose figure's place (its count among the keyed Boxes drawn) held a card that was up as the old drawing went: so
+// a card the pointer had just left stayed up with nothing under the pointer to put it away, and one shown again before its words
+// were lit was placed too low, over the figures. A run of hidden keyed Boxes before the figures, there in every other drawing, moves every figure past the places the last drawing had, more than all the keyed Boxes of the figures and
+// their cards, so no card is shown again but the one under the pointer, which the app measures whole
+const USAGE_SPACERS = 120
+let usageSpaced = false
+const usageSpacersDrawn = (ui: Ui) => {
+  const { Box, Text } = ui
+  usageSpaced = !usageSpaced
+  return usageSpaced ? (
+    <Box display="none">
+      {Array.from({ length: USAGE_SPACERS }, (_, n) => (
+        <Box key={`usage-spacer-${n}`}>
+          <Text> </Text>
+        </Box>
+      ))}
+    </Box>
+  ) : null
 }
 
 // The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
@@ -10499,6 +10558,7 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
         {value}
         <Text dimColor={!color} color={color}>{unit}</Text>
       </Text>
+      {card ? usageCardDrawn(ui, `usage-${key}`, card) : null}
     </Box>
   )
   return [
@@ -10510,9 +10570,6 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
     f.net === undefined ? null : one('net', cards.net, usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
   ]
 }
-// The cards above the figures, one for each figure drawn, all hidden until the pointer rests on their figure
-const usageCardsDrawn = (ui: Ui, f: UsageFigures) =>
-  (Object.entries(usageCards(f)) as [string, UsageCard | undefined][]).map(([key, card]) => (card ? usageCardDrawn(ui, `usage-${key}`, card) : null))
 // The line as text, for the terminal, in a phone's 50 columns with the octopus: a word for each, units cut to G and M/s, and three-cell meters with Claude's cells purple
 const USAGE_CELLS = 3
 // Given the room, a figure that does not fit is left out whole, never cut in the middle: the network first, then the disk, then the
@@ -11020,28 +11077,32 @@ const bandHooks = (on: On) => {
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
     const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
-    const row = (
-      <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-        {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
-        {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
-        {/* The figures fill a phone's terminal: the hint shows until they come */}
-        {isPanelAway && !figures ? (
-          <Box flexShrink={0}>
-            <Text dimColor>· /claudopus shows the panel</Text>
-          </Box>
-        ) : null}
-      </Box>
-    )
-    // Where the figures are drawn, a pointer resting on one shows its card above them; the bar grows upward, so the figures stay put
-    return (drawn && figures) || waits ? (
-      <Box flexDirection="column">
-        {waits}
-        {drawn && figures ? usageCardsDrawn(ui, figures) : null}
-        {row}
-      </Box>
-    ) : (
-      row
-    )
+    const drawing = (spacers: JSX.Element | null) => {
+      const row = (
+        <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
+          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
+          {spacers}
+          {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
+          {/* The figures fill a phone's terminal: the hint shows until they come */}
+          {isPanelAway && !figures ? (
+            <Box flexShrink={0}>
+              <Text dimColor>· /claudopus shows the panel</Text>
+            </Box>
+          ) : null}
+        </Box>
+      )
+      // Where the figures are drawn, a pointer resting on one shows its card floating over the chat above them, taking no room
+      return waits ? (
+        <Box flexDirection="column">
+          {waits}
+          {row}
+        </Box>
+      ) : (
+        row
+      )
+    }
+    // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
+    return drawing(drawn ? usageSpacersDrawn(ui) : null)
   })
 
 }

@@ -54,28 +54,32 @@ const bandHooks = (on: On) => {
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
     const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
-    const row = (
-      <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-        {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
-        {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
-        {/* The figures fill a phone's terminal: the hint shows until they come */}
-        {isPanelAway && !figures ? (
-          <Box flexShrink={0}>
-            <Text dimColor>· /claudopus shows the panel</Text>
-          </Box>
-        ) : null}
-      </Box>
-    )
-    // Where the figures are drawn, a pointer resting on one shows its card above them; the bar grows upward, so the figures stay put
-    return (drawn && figures) || waits ? (
-      <Box flexDirection="column">
-        {waits}
-        {drawn && figures ? usageCardsDrawn(ui, figures) : null}
-        {row}
-      </Box>
-    ) : (
-      row
-    )
+    const drawing = (spacers: JSX.Element | null) => {
+      const row = (
+        <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
+          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
+          {spacers}
+          {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
+          {/* The figures fill a phone's terminal: the hint shows until they come */}
+          {isPanelAway && !figures ? (
+            <Box flexShrink={0}>
+              <Text dimColor>· /claudopus shows the panel</Text>
+            </Box>
+          ) : null}
+        </Box>
+      )
+      // Where the figures are drawn, a pointer resting on one shows its card floating over the chat above them, taking no room
+      return waits ? (
+        <Box flexDirection="column">
+          {waits}
+          {row}
+        </Box>
+      ) : (
+        row
+      )
+    }
+    // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
+    return drawing(drawn ? usageSpacersDrawn(ui) : null)
   })
 
 }
