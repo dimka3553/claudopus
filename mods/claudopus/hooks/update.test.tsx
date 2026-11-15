@@ -200,10 +200,11 @@ test("git's progress is read as a download comes", async () => {
 })
 
 // A repo for the steps: the release's tag fetched gives `commit`, whose mod folder is `got` (the release's tree unless said)
-const repo = (o: { got?: string; manifest?: string; fetch?: number; online?: string; installed?: string; worktree?: boolean; overwrite?: boolean; ahead?: boolean; dirty?: boolean } = {}) => {
-  const files = new Map<string, string>([['/p/installed_plugins.json', JSON.stringify({ plugins: { 'claudopus@m': [{ scope: 'user', version: '0.2.118', installPath: '/p/cache/m/claudopus/0.2.118' }] } })]])
+const repo = (o: { got?: string; manifest?: string; fetch?: number; online?: string; tag?: string; installed?: string; worktree?: boolean; overwrite?: boolean; ahead?: boolean; dirty?: boolean; held?: string; scope?: string } = {}) => {
+  const scope = o.scope ?? 'user'
+  const files = new Map<string, string>([['/p/installed_plugins.json', JSON.stringify({ plugins: { 'claudopus@m': [{ scope, version: '0.2.118', installPath: '/p/cache/m/claudopus/0.2.118' }] } })]])
   const ran: string[] = []
-  let ref = ''
+  let ref = o.held ?? ''
   const io: LookIo = {
     read: async path => files.get(path) ?? '',
     write: async (path, text) => void files.set(path, text),
@@ -219,7 +220,7 @@ const repo = (o: { got?: string; manifest?: string; fetch?: number; online?: str
       if (argv[0] === 'sh') return ok(`${o.installed ?? T}\n`)
       if (argv[0] === 'claude') {
         ran.push(argv.slice(1, 3).join(' '))
-        if (argv[2] === 'update') files.set('/p/installed_plugins.json', JSON.stringify({ plugins: { 'claudopus@m': [{ scope: 'user', version: '0.2.121', installPath: '/p/cache/m/claudopus/0.2.121' }] } }))
+        if (argv[2] === 'update') files.set('/p/installed_plugins.json', JSON.stringify({ plugins: { 'claudopus@m': [{ scope, version: '0.2.121', installPath: '/p/cache/m/claudopus/0.2.121' }] } }))
         return ok()
       }
       const args = argv.slice(argv.indexOf('-C') + 2)
@@ -237,7 +238,8 @@ const repo = (o: { got?: string; manifest?: string; fetch?: number; online?: str
       if (args[0] === 'merge-base') return ok('', o.ahead ? 1 : 0)
       if (args[0] === 'merge') return o.overwrite ? { exitCode: 1, stdout: '', stderr: 'error: would be overwritten by merge' } : ok()
       if (args[0] === 'status') return ok(o.dirty ? ' M mods/claudopus/README.md\n' : '')
-      if (args[0] === 'ls-remote') return ok(`${o.online ?? C}\tHEAD\n`)
+      if (args[0] === 'ls-remote' && args[2] === 'HEAD') return ok(`${o.online ?? C}\tHEAD\n`)
+      if (args[0] === 'ls-remote') return ok(`${o.tag ?? C}\trefs/tags/v0.2.121^{}\n`)
       return ok()
     },
     page: async () => ({ ok: true, status: 200, text: JSON.stringify(PAGE) }),
@@ -273,32 +275,32 @@ test('a download that is not what the release published is thrown away: another 
 
 test('Install checks the download again, runs Claude Code\'s steps only while online is still that release, and puts the record back when the copy installed is not it', async () => {
   // The release as published: both steps, the installed copy checked
-  const good = repo()
+  const good = repo({ held: C })
   expect(await install(good.io, CLONE, PAGE, C, 'claude')).toEqual({ ok: true, version: '0.2.121', dirty: false })
   expect(good.ran).toContain('plugin marketplace')
   expect(good.ran).toContain('plugin update')
   // The download no longer the release's tree: nothing runs
-  const changed = repo({ got: 'b'.repeat(40) })
+  const changed = repo({ got: 'b'.repeat(40), held: C })
   expect(await install(changed.io, CLONE, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'mismatch', detail: '' })
   expect(moves(changed.ran)).toEqual([])
   // A newer commit online: Claude Code's refresh would take it, so nothing runs
-  const newer = repo({ online: 'd'.repeat(40) })
+  const newer = repo({ online: 'd'.repeat(40), held: C })
   expect(await install(newer.io, CLONE, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'newer-out', detail: '' })
   expect(moves(newer.ran)).toEqual([])
   // What Claude Code installed is not the release: its record is put back as it was
-  const bad = repo({ installed: 'e'.repeat(40) })
+  const bad = repo({ installed: 'e'.repeat(40), held: C })
   const before = bad.files.get('/p/installed_plugins.json')
   expect(await install(bad.io, CLONE, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'installed-mismatch', detail: '' })
   expect(bad.files.get('/p/installed_plugins.json')).toBe(before)
 })
 
 test('Install in a folder of the code is a fast-forward to the download only, refused where it would lose work, and says what it kept', async () => {
-  const good = repo({ dirty: true })
+  const good = repo({ dirty: true, held: C })
   expect(await install(good.io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: true, version: '0.2.121', dirty: true })
   expect(good.ran).toContain(`merge --ff-only --quiet ${C}`)
-  expect(await install(repo({ overwrite: true }).io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'overwrite', detail: '' })
-  expect(await install(repo({ ahead: true }).io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'own-commits', detail: '' })
-  const worktree = repo({ worktree: true })
+  expect(await install(repo({ overwrite: true, held: C }).io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'overwrite', detail: '' })
+  expect(await install(repo({ ahead: true, held: C }).io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'own-commits', detail: '' })
+  const worktree = repo({ worktree: true, held: C })
   expect((await install(worktree.io, FOLDER, PAGE, C, 'claude')).ok).toBe(false)
   expect(moves(worktree.ran)).toEqual([])
   expect((await folderReady(worktree.io, '/code')).ok).toBe(false)
@@ -329,4 +331,22 @@ test('the notice says where updating stands for this chat: out, each step, a rel
   expect(noticeOf({ ...at, later: { version: '0.2.121', until: 999_999 } })?.kind).toBe('available')
   expect(lookEveryOf(6)).toBe(6 * 3_600_000)
   expect(lookEveryOf(0.001)).toBe(3_600_000)
+})
+
+test('Install takes only the commit the download ref holds and the release\'s tag names, checks the copy at the scope it updated, and a copy made from a folder with uncommitted changes is said as kept', async () => {
+  // A commit named by a file, not the one downloaded: nothing moves
+  const planted = repo({ held: 'f'.repeat(40) })
+  expect(await install(planted.io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'gone', detail: '' })
+  expect(moves(planted.ran)).toEqual([])
+  // The release's tag online is another commit: nothing moves
+  const retagged = repo({ held: C, tag: 'd'.repeat(40) })
+  expect(await install(retagged.io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'mismatch', detail: '' })
+  expect(moves(retagged.ran)).toEqual([])
+  // A copy installed at project scope is the one checked
+  const project = repo({ held: C, scope: 'project' })
+  expect(await install(project.io, { ...CLONE, scope: 'project' }, PAGE, C, 'claude')).toEqual({ ok: true, version: '0.2.121', dirty: false })
+  // An installed copy made from a folder with uncommitted changes: the folder moved, Claude Code's copy did not, and that is said
+  const kept = repo({ held: C, dirty: true })
+  expect(await install(kept.io, { ...FOLDER, runs: 'copy', record: { plugins: '/p', marketplace: 'm', plugin: 'claudopus', scope: 'user' } }, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'kept-copy', detail: '' })
+  expect(kept.ran.filter(one => one.startsWith('plugin '))).toEqual([])
 })

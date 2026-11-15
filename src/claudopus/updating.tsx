@@ -24,8 +24,11 @@ const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): P
     const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
     // A lock dated ahead of this Mac's clock, past what two chats' clocks can differ by, was never taken by a chat here: it is stale
     if (now - at < UPDATE_LOOK && at - now <= LOCK_SKEW) return UPDATE_BUSY
+    const seen = await readOr($, lock)
     const aside = `${lock}.${token.split(' ')[1]}`
     if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
+    // Another chat took the stale lock over in between: what was moved is its fresh lock, put back where it was
+    if ((await readOr($, aside)) !== seen) return ((await $.process.run(['mv', '-n', aside, lock]).catch(() => undefined)), UPDATE_BUSY)
     await $.process.run(['rm', '-f', aside]).catch(() => undefined)
     if (!(await take())) return UPDATE_BUSY
   }
@@ -171,7 +174,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       return done({
         src: { kind: 'folder', repo, sub: 'mods/claudopus', runs: 'copy', record },
         cannot: ready.ok ? undefined : { what: `Claude Code installs it from ${ready.what}`, why: ready.why },
-        where: `Claude Code's installed copy, made from the folder ${homeShort(repo)}`,
+        where: ready.ok ? `Claude Code's installed copy, made from the folder ${homeShort(repo)}` : "Claude Code's installed copy, made from a folder of the code",
       })
     }
     const location = typeof entry?.installLocation === 'string' ? entry.installLocation.replace(/\/+$/, '') : ''
@@ -255,6 +258,9 @@ const downloadPress = ($: EngineInterface, version: string) => {
     const page = await freshPage($, version, 'download', now)
     if (!page) return
     const loaded = (await versionsOf($)).version
+    // The page names no newer version than this chat runs (the notice came from a look that is out of date, or a planted file): the
+    // look's record is set right, and nothing is fetched
+    if (!loaded || !isNewer(page.version, loaded)) return void (await $.fs.write(lookedPath(), JSON.stringify({ at: now, version: page.version, result: 'seen' })))
     Object.assign(stepSaid, { version: page.version, detail: '', dirty: false })
     await writeSteps($, { version: page.version, stage: 'downloading', step: 'download', at: now, from: loaded })
     let wrote = 0
@@ -266,8 +272,13 @@ const downloadPress = ($: EngineInterface, version: string) => {
     })
     downloadProgress = undefined
     const at = await $.clock.now()
+    heldChecked.clear()
     if (got.ok) await writeSteps($, { version: page.version, stage: 'downloaded', step: 'download', commit: got.commit, tree: page.tree, at, from: loaded })
-    else ((stepSaid.detail = got.detail), await writeSteps($, { version: page.version, stage: 'failed', step: 'download', fail: got.fail, at, from: loaded }))
+    else {
+      // What git or GitHub said is kept in the log only: the panel shows what failed in its own words
+      if (got.detail) await log($, `Claudopus ${page.version} download failed (${got.fail}): ${got.detail}`)
+      await writeSteps($, { version: page.version, stage: 'failed', step: 'download', fail: got.fail, at, from: loaded })
+    }
   })
 }
 // Install, pressed for the download the notice showed: checked against the page read now, then put in place
@@ -289,7 +300,8 @@ const installPress = ($: EngineInterface, version: string, commit: string) => {
     beat()
     const got = await install(lookIo($), src, page, commit, await engineOf($)).finally(() => (isOn = false))
     const at = await $.clock.now()
-    Object.assign(stepSaid, { version, detail: got.ok ? '' : got.detail, dirty: got.ok && got.dirty })
+    Object.assign(stepSaid, { version, detail: '', dirty: got.ok && got.dirty })
+    if (!got.ok && got.detail) await log($, `Claudopus ${version} install failed (${got.fail}): ${got.detail}`)
     await writeSteps($, got.ok ? { version, stage: 'installed', step: 'install', commit, tree: page.tree, at, from: loaded } : { version, stage: 'failed', step: 'install', fail: got.fail, commit, at, from: loaded })
   })
 }
@@ -327,6 +339,22 @@ const skipPress = async ($: EngineInterface, version: string) => {
 
 // ---- The notice ----
 
+// What this chat found of each download it was told of, by commit and tree, so the check runs once
+const heldChecked = new Map<string, boolean>()
+const isDownloadHeld = async ($: EngineInterface, src: Source, steps: Steps) => {
+  if (src.kind === 'none' || !steps.commit || !steps.tree) return false
+  if (pageRead && (pageRead.page.version !== steps.version || pageRead.page.tree !== steps.tree)) return false
+  const key = `${src.repo}|${steps.commit}|${steps.tree}`
+  const known = heldChecked.get(key)
+  if (known !== undefined) return known
+  const git = (args: string[]) => $.process.run(['env', 'GIT_TERMINAL_PROMPT=0', 'git', '-C', src.repo, ...args], { timeoutMs: 20_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+  const held = (await git(['rev-parse', '--verify', '-q', 'refs/claudopus/update^{commit}'])).stdout.trim()
+  const tree = held === steps.commit ? (await git(['rev-parse', '--verify', '-q', `${steps.commit}:${src.sub}`])).stdout.trim() : ''
+  const isHeld = tree === steps.tree
+  heldChecked.set(key, isHeld)
+  return isHeld
+}
+
 // Where updating stands for this chat, from what is true now
 const noticeNow = async ($: EngineInterface, loaded: string, installed: string): Promise<Notice | undefined> => {
   if (!dir || !loaded) return undefined
@@ -342,11 +370,14 @@ const noticeNow = async ($: EngineInterface, loaded: string, installed: string):
     }
   }
   const known = await knowSource($)
+  const steps = stepsOf(await readOr($, stepsPath()))
   return noticeOf({
     loaded,
     installed,
     seen: isVersion(seen) ? seen : '',
-    steps: stepsOf(await readOr($, stepsPath())),
+    // A download is said to be checked only once this chat has seen it so: its repo's download ref holds that commit, whose mod folder
+    // is the tree the steps name, and the page this chat read names it too
+    steps: steps?.stage === 'downloaded' && !(await isDownloadHeld($, known.src, steps)) ? undefined : steps,
     page: pageRead?.page,
     skipped: isVersion(config.skipVersion) ? config.skipVersion : undefined,
     later: later(),
@@ -386,9 +417,9 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   const { src } = known
   const isFolder = src.kind === 'folder'
   const folder = isFolder ? homeShort(src.repo) : ''
-  const track = (at: number, isFailed = false) => (
+  const track = (at: number) => (
     <ui.Text key="update-track" dimColor wrap="truncate-end">
-      {STEPS.map((one, i) => `${i < at ? '✓' : i === at ? (isFailed ? '✗' : '●') : '○'} ${i === 0 && isFolder ? 'Fetch' : i === 1 && isFolder ? 'Move forward' : one}`).join('   ')}
+      {STEPS.map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${i === 0 && isFolder ? 'Fetch' : i === 1 && isFolder ? 'Move forward' : one}`).join('   ')}
     </ui.Text>
   )
   const quiet = (key: string, version: string, withSkip = true) => [
@@ -427,7 +458,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const more = missed.reduce((sum, one) => sum + 1 + one.more, 0) - 1
     const count = n.kind === 'available' ? n.count : missed.length || 1
     const what = newest?.line ? `${newest.line}${more > 0 ? ` · and ${more} more ${more === 1 ? 'change' : 'changes'}` : ''}` : ''
-    const head = title(`Claudopus ${v} is out`, count > 1 ? `· ${count} versions since yours` : '')
+    const head = title(`Claudopus ${v} is out`, count > 1 ? `· ${count} versions since v${loaded}` : '')
     if (n.kind === 'cannot') return box('cannot', [head, line('why', `${n.what}: ${n.why}.`)], quiet('cannot', v))
     return box(
       'available',
@@ -460,7 +491,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const who =
       isFolder && src.runs === 'folder'
         ? `This chat still runs v${loaded}. Every chat run from ${folder} switches only at its own reload, which its panel offers.`
-        : `This chat still runs v${loaded}. Reload switches this chat only; new chats start on v${v}, and each open chat on an older version offers its own.`
+        : `This chat still runs v${loaded}. Reload switches this chat only; new chats start on v${v}.`
     const typed = isRunFromAfar || isReloadRefused
     return box(
       'reload',
@@ -474,12 +505,17 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     )
   }
   // A step that failed: what failed, and that what this chat runs is as it was
-  const detail = stepSaid.version === v && stepSaid.detail ? ` (${stepSaid.detail})` : ''
+  const detail = ''
   const which = n.step === 'download' ? (isFolder ? 'fetch' : 'download') : isFolder ? 'move the folder to' : 'install'
-  const kept = n.fail === 'installed-mismatch' ? `Claude Code's record was put back, so new chats keep v${loaded}.` : `Nothing was changed: this chat still runs v${loaded}.`
+  const kept =
+    n.fail === 'installed-mismatch'
+      ? `${isFolder ? `The folder moved to v${v}, but ` : ''}Claude Code's record was put back, so new chats keep v${loaded}.`
+      : n.fail === 'kept-copy'
+        ? `This chat still runs v${loaded}.`
+        : `Nothing was changed: this chat still runs v${loaded}.`
   return box(
     'failed',
-    [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${FAILS[n.fail].replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`), track(n.step === 'download' ? 0 : 1, true)],
+    [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${FAILS[n.fail].replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
     [<ui.Button key={`update-again-${presses}`} label="Try again" onPress={() => downloadPress($, v)} />, ...quiet('failed', v)],
   )
 }

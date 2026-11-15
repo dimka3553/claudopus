@@ -21,7 +21,7 @@ export type UpdateStamp = { at: number; version: string; result: string }
 // is left alone: nothing was installed there to update
 export const installedFrom = (root: string): { plugins: string; marketplace: string; plugin: string } | undefined => {
   const [, plugins = '', marketplace = '', plugin = ''] = /^(.*\/plugins)\/cache\/([^/]+)\/([^/]+)\/[^/]+\/?$/.exec(root) ?? []
-  return plugins && /^[\w.-]+$/.test(marketplace) && /^[\w.-]+$/.test(plugin) ? { plugins, marketplace, plugin } : undefined
+  return plugins && /^\w[\w.-]*$/.test(marketplace) && /^\w[\w.-]*$/.test(plugin) ? { plugins, marketplace, plugin } : undefined
 }
 
 // The scope this copy was installed at, read from installed_plugins.json by its folder; absent, `plugin update` takes the user's
@@ -229,11 +229,13 @@ export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Prom
   if ((await git(['ls-files', '--error-unmatch', ':/mods/claudopus/.claude-plugin/plugin.json'])).exitCode !== 0)
     return { ok: false, what: 'a folder', why: "it is in a git checkout that isn't Claudopus's" }
   const [gitDir = '', commonDir = ''] = (await git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'])).stdout.trim().split('\n')
-  const branch = (await git(['symbolic-ref', '-q', '--short', 'HEAD'])).stdout.trim()
+  // Names as plain words of a bounded length: they are shown in the panel
+  const named = (text: string) => text.replace(/[^\w./-]/g, '').slice(0, 40)
+  const branch = named((await git(['symbolic-ref', '-q', '--short', 'HEAD'])).stdout.trim())
   if (gitDir.trim() !== commonDir.trim())
     return { ok: false, what: `a worktree of the code${branch ? `, on branch ${branch}` : ''}`, why: 'releases come out on main and never reach a worktree: merge main there, then reload' }
   if (!branch) return { ok: false, what: 'a checkout of the code on no branch', why: 'releases come out on main: switch it to main, then check again' }
-  const upstream = (await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim()
+  const upstream = named((await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim())
   if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream))
     return { ok: false, what: `a checkout of the code on ${branch}${upstream ? `, following ${upstream}` : ''}`, why: 'releases come out on main: switch it to main, then check again' }
   return { ok: true, branch, upstream }
@@ -260,6 +262,7 @@ export const FAILS = {
   stopped: 'it stopped before it finished, when its chat closed or reloaded',
   busy: 'another chat is updating Claudopus right now',
   gone: 'the download is no longer there',
+  'kept-copy': "the folder moved forward, but its uncommitted changes kept Claude Code's copy as it was: commit them or set them aside, then try again",
 } as const
 export type Fail = keyof typeof FAILS
 export type Steps = { version: string; stage: Stage; at: number; commit?: string; tree?: string; fail?: Fail; step?: 'download' | 'install'; pct?: number; got?: number; from?: string }
@@ -306,11 +309,12 @@ export const fetchProgress = (said: string): { pct: number; got: number; phase: 
   return undefined
 }
 
-// git's fingerprint of a folder as it is on disk, every file counted (none left out by an ignore list), so it is compared with the
-// release's `tree` file for file: a copy Claude Code installed is checked this way
+// git's fingerprint of a folder as it is on disk, counted as the release counts it: every file but those the folder's own ignore
+// files leave out (the engine's `.claude-plugin/types`, which a copy from a folder of the code carries) and the engine's `.in_use`
+// and `.orphaned_at` marks, never the person's global ignore list; so a copy Claude Code installed is compared with the release's `tree` file for file
 export const TREE_OF_FOLDER =
   'd=$(mktemp -d) || exit 1; trap \'rm -rf "$d"\' EXIT; git init -q --bare "$d/g" || exit 1; ' +
-  'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" -c core.excludesFile=/dev/null add -A -f . >/dev/null 2>&1 || exit 1; ' +
+  'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" -c core.excludesFile=/dev/null add -A -- . ":(exclude).in_use" ":(exclude).orphaned_at" >/dev/null 2>&1 || exit 1; ' +
   'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" write-tree'
 export const treeOfFolder = async (io: Pick<LookIo, 'run'>, folder: string) => {
   const out = await io.run(['sh', '-c', TREE_OF_FOLDER, 'sh', folder], 60_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))
@@ -364,9 +368,17 @@ export const download = async (io: LookIo, src: Exclude<Source, { kind: 'none' }
 export type Installed = { ok: true; version: string; dirty: boolean } | { ok: false; fail: Fail; detail: string }
 export const install = async (io: LookIo, src: Exclude<Source, { kind: 'none' }>, page: Published, commit: string, engine: string): Promise<Installed> => {
   const git = gitIn(io, src.repo)
+  // The commit is the one this repo's download ref holds, and the release's own tag online, whatever a file said: its whole tree is
+  // what a folder moves to, not only the mod's part of it
+  const held = (await git(['rev-parse', '--verify', '-q', `${DOWNLOAD_REF}^{commit}`])).stdout.trim()
+  if (!held || held !== commit) return { ok: false, fail: 'gone', detail: '' }
   const tree = (await git(['rev-parse', '--verify', '-q', `${commit}:${src.sub}`])).stdout.trim()
   if (!tree) return { ok: false, fail: 'gone', detail: '' }
   if (tree !== page.tree) return { ok: false, fail: 'mismatch', detail: '' }
+  const tagged = (await git(['ls-remote', 'origin', `refs/tags/v${page.version}^{}`, `refs/tags/v${page.version}`], 60_000)).stdout
+  const tagCommit = (tagged.split('\n').find(one => one.endsWith('^{}')) ?? tagged.split('\n')[0] ?? '').split(/\s/)[0] ?? ''
+  if (!tagCommit) return { ok: false, fail: 'fetch', detail: 'GitHub did not answer' }
+  if (tagCommit !== commit) return { ok: false, fail: 'mismatch', detail: '' }
   const record = src.kind === 'clone' ? src : src.record
   // Claude Code's steps, then what they installed checked; a copy that isn't the release has its record put back
   const viaClaudeCode = async (rec: NonNullable<typeof record>): Promise<Installed | undefined> => {
@@ -377,11 +389,21 @@ export const install = async (io: LookIo, src: Exclude<Source, { kind: 'none' }>
       const out = await io.run(step, 300_000).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
       if (out.exitCode !== 0) return { ok: false, fail: 'install', detail: lastLine(out) }
     }
-    const copy = copyOf(await io.read(path).catch(() => ''), id, '')
-    const got = copy?.installPath ? await treeOfFolder(io, copy.installPath) : ''
+    // The entry at the scope the update ran at, which must now name this version
+    const text = await io.read(path).catch(() => '')
+    const copy = (() => {
+      try {
+        const entries = (JSON.parse(text)?.plugins?.[id] ?? []) as { scope?: unknown; version?: unknown; installPath?: unknown }[]
+        return entries.find(one => (one?.scope ?? 'user') === (rec.scope ?? 'user'))
+      } catch {
+        return undefined
+      }
+    })()
+    const installPath = typeof copy?.installPath === 'string' && copy.version === page.version ? copy.installPath : ''
+    const got = installPath ? await treeOfFolder(io, installPath) : ''
     if (got === page.tree) return undefined
     if (before) await io.write(path, before)
-    await io.log(`Claudopus ${page.version}: the copy Claude Code installed (${copy?.installPath ?? 'none'}) is ${got || 'unreadable'}, not the release's ${page.tree}; its record was put back`)
+    await io.log(`Claudopus ${page.version}: the copy Claude Code installed (${installPath || 'none'}) is ${got || 'unreadable'}, not the release's ${page.tree}; its record was put back`)
     return { ok: false, fail: 'installed-mismatch', detail: '' }
   }
   if (src.kind === 'clone') {
@@ -402,6 +424,11 @@ export const install = async (io: LookIo, src: Exclude<Source, { kind: 'none' }>
   }
   const status = await git(['status', '--porcelain', '--untracked-files=no', '--', src.sub])
   const dirty = status.exitCode !== 0 || Boolean(status.stdout.trim())
+  // An installed copy made from the folder is copied from it as it is on disk: with uncommitted changes there it is left as it was
+  if (src.runs === 'copy' && dirty) {
+    await io.log(`Claudopus folder ${src.repo} moved forward to ${page.version}, but its uncommitted changes kept Claude Code's copy as it was`)
+    return { ok: false, fail: 'kept-copy', detail: '' }
+  }
   await io.log(`Claudopus folder ${src.repo} moved forward to ${page.version} (${commit})${dirty ? ', with uncommitted changes in it kept' : ''}`)
   // Claude Code's record of the folder follows it, only from a folder with nothing uncommitted, as it copies the folder as it is
   if (src.record && !dirty) {

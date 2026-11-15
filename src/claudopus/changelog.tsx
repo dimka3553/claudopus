@@ -97,7 +97,10 @@ const closeScreen = async ($: EngineInterface, version: string) => {
 const firstClause = (text: string) => {
   const plain = text.replace(/`/g, '').replace(/\s+/g, ' ').trim()
   const first = /^(.{20,}?[.;:])(\s|$)/.exec(plain)?.[1] ?? plain
-  return first.length <= 110 ? first.replace(/[.;:]$/, '') : `${first.slice(0, 107).replace(/\s+\S*$/, '')}…`
+  if (first.length <= 110) return first.replace(/[.;:]$/, '')
+  // Too long: up to its last comma that fits, else the words that fit
+  const comma = first.slice(0, 110).lastIndexOf(',')
+  return comma > 40 ? first.slice(0, comma) : `${first.slice(0, 107).replace(/\s+\S*$/, '')}…`
 }
 // The note a chat shows once it moved to a newer version whose changes the person has not seen on this Mac: one quiet box in the
 // header, where the update's steps were, saying what it moved from and how many versions that covers, with What's new (the
