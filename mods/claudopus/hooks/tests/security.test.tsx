@@ -832,7 +832,8 @@ test('F-021 · a kept copy written, taken away or broken by work never decides w
   files.set(rules, 'PLANTED-LOAD')
   // Looked at again a moment later, as another chat may be writing it just then
   const loading = $.session.start(start)
-  await until(async () => undefined)
+  // (a real half second, as the load's first look runs: the length the wait for nothing took before it went by the clock)
+  await new Promise<void>(resolve => setTimeout(() => resolve(), 500))
   await clock.advance(1_000)
   await loading
   expect(files.has(rules)).toBe(false)
