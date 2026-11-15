@@ -1,0 +1,1 @@
+- The panel's recorder also notes which button each press reached and where the focus went, for finding why a press can jump the panel

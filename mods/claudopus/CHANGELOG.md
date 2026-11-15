@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.135 · 15 November 2026
+- Typing in a reply box no longer pulls the panel back down: while the box had the focus, every scroll up was undone by the app moving the panel back to the box, and the mod now refuses that move, so the panel stays where you scrolled it.
+- The panel can be recorded for a few minutes to find faults only the real app shows (off unless asked for; it keeps no letter typed, and nothing typed into a key box).
+
 ## 0.2.134 · 15 November 2026
 - A press on Allow once, Always allow, Deny or an ask's buttons shows its answer at once: the amber box and its buttons go in the same moment, where before they stayed up to a second until the waiting command noticed the press.
 - If what you allowed then does not come about (its command had stopped waiting, or could not be sealed), the box says so in grey instead of staying green; an answer to an ask that could not be written says "Not sent" and brings its buttons back, in the place its card had.
