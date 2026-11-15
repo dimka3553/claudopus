@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.136 · 15 November 2026
+- The Keys button beside Memory is gone. Claudopus still keeps the list of keys you have given, by name and where each is kept, in keys.md in the memory folder; work still reads it before asking, and an ask for a key you already gave is still refused with where it is.
+
 ## 0.2.135 · 15 November 2026
 - Typing in a reply box no longer pulls the panel back down: while the box had the focus, every scroll up was undone by the app moving the panel back to the box, and the mod now refuses that move, so the panel stays where you scrolled it.
 - The panel can be recorded for a few minutes to find faults only the real app shows (off unless asked for; it keeps no letter typed, and nothing typed into a key box).
