@@ -2,6 +2,7 @@
 // each named for its job; build.mjs joins them into mods/claudopus/hooks/register.tsx, the one file the mod loads
 
 export const register: Register = on => {
+  recorderHooks(on)
   chatHooks(on)
   promptHooks(on)
   workHooks(on)
