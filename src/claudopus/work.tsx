@@ -122,6 +122,8 @@ const workHooks = (on: On) => {
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
         if (grants.length && !(e as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
         runnerEnded(e.tool_use_id, Boolean((e as { run_in_background?: unknown }).run_in_background), await $.clock.now())
+        // A note of what the person allowed for this call goes as it ends
+        await noteCallEnded($, e.tool_use_id).catch(() => undefined)
       }
     }
     let grants: string[] = []
@@ -158,11 +160,13 @@ const workHooks = (on: On) => {
     const isRefusedHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
-      if (gated.deny) return { deny: gated.deny }
+      // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
+      if (gated.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: gated.deny })
       grants = gated.grants
       const released = await gateRelease($, e, raw as never)
       if (released.deny) {
         await dropGrants($, grants)
+        await noteCallEnded($, e.tool_use_id).catch(() => undefined)
         return { deny: released.deny }
       }
       grants = [...grants, ...released.grants]
@@ -171,7 +175,7 @@ const workHooks = (on: On) => {
     }
     if (!isRefusedHere) {
       const fileSaid = await gateOwnFile($, e, raw as never)
-      if (fileSaid) return { deny: fileSaid }
+      if (fileSaid) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: fileSaid })
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''

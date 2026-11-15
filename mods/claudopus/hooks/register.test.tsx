@@ -334,6 +334,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
+    // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
+    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir')) return ok(files.has('git:common') ? `${files.get('git:common')}\n` : '', files.has('git:common') ? 0 : 128)
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
@@ -6724,7 +6726,7 @@ test('Deny refuses the call with a line that says the person refused it, and not
   expect(grants()).toEqual([])
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on m4' })).toBeUndefined()
   expect(await until(async () => list.find({ type: 'Text', text: 'You denied it · it did not run, and the work was told' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'An admin command on m4' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Admin command on m4' })).toBeDefined()
 })
 
 test('no way to the runner gets past the press: another spelling, a shell, a helper, and two commands in one call each wait', async ($, on) => {
@@ -6956,6 +6958,44 @@ test("another chat's panel shows an admin command that waits, with no button: on
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Allow or deny it on its card in its own chat.' })).toBeDefined()
   expect((await list.findAll({ type: 'Button' })).some(one => ['Allow once', 'Always allow this command', 'Deny'].includes(String(one.props.label)))).toBe(false)
+})
+
+test('a release whose output goes to a log asks once, for its own branch: the 15 Nov run-progress-rows release asked twice, first for a branch called ">"', async ($, on) => {
+  const { list, press, files, grants, holding } = await gated($, on)
+  files.set('git:top', '/repo/wt')
+  files.set('git:branch', 'fix-it')
+  for (const [id, tail] of [['rl1', ' > /tmp/release.log 2>&1'], ['rl2', ' 2>/tmp/release.log'], ['rl3', '>/tmp/release.log']] as const) {
+    const call = $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command: `hold x${id}; /plug/claudopus/bin/release${tail}` } as never) as Promise<{ deny?: string; result?: unknown }>
+    expect(await until(async () => keyed(list, `gate-${id}-r0-once`))).toBeDefined()
+    // Said in plain words: what is released, its branch, and where from in one line
+    expect(await list.find({ type: 'Text', text: 'Branch fix-it' })).toBeDefined()
+    expect((await list.findAll({ type: 'Text' })).some(one => /^>|> from/.test(String(one.text ?? '')))).toBe(false)
+    await press(`gate-${id}-r0-once`)
+    const granted = await until(async () => (grants().length ? grants() : undefined))
+    expect(granted?.map(path => (({ host, command }) => [host, command])(JSON.parse(files.get(path) ?? '{}')))).toEqual([['release', '/repo/wt\nfix-it']])
+    holding.get(`x${id}; /plug/claudopus/bin/release${tail}`)?.('released')
+    expect((await call).deny).toBeUndefined()
+  }
+})
+
+test('a press is answered by a line, not a card: an ask is an outlined box, what was done a line with no fill or edge that goes once its call ends', async ($, on) => {
+  const { press, bash, held, list, clock } = await gated($, on)
+  const call = bash('b1', `${ADMIN} here 'chmod 644 /etc/hosts'`)
+  expect(await held('b1')).toBeDefined()
+  const boxes = async () => (await list.findAll({ type: 'Box' })) as { props: Record<string, unknown> }[]
+  // The ask: an outlined box in the colour of what needs the person, the kind of ask at its top
+  expect((await boxes()).some(one => one.props.borderStyle === 'round' && one.props.borderColor === '#E5A50A')).toBe(true)
+  expect(await list.find({ type: 'Text', text: 'Admin command · waits for your press' })).toBeDefined()
+  await press('gate-b1-0-once')
+  await call
+  expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it once · it runs now' }))).toBeDefined()
+  const edges = async () => (await boxes()).filter(one => one.props.backgroundColor === '#8A63F0' || one.props.backgroundColor === '#80808024').length
+  const withNote = await edges()
+  // Its call has ended: once it could be read, it goes, well before a minute
+  await clock.advance(16_000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'You allowed it once · it runs now' })) ? undefined : true))).toBe(true)
+  // It had no fill or purple edge of its own, as a piece of work has
+  expect(await edges()).toBe(withNote)
 })
 
 // Each finding of the security review of 0.2.100 (F-001 to F-022), held by a test that fails on the code before its fix. The findings

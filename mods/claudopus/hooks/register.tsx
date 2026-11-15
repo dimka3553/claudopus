@@ -5670,7 +5670,7 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
 // word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
 // any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
 // it is no wall against code set on getting round it
-type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string }
+type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string; call?: string }
 // The Bash calls of this chat that run bin/admin or bin/secret, by call id, with their command: a box is drawn only for a request of
 // this chat's own while one of them runs (one sent to the background for BOX_OLD after it began), and says which command asked. A
 // request no runner of this chat could have made, however it is worded, is drawn nowhere
@@ -5684,7 +5684,7 @@ const runnerEnded = (id: string, isBackground: boolean, at: number) => {
   for (const [key, other] of [...runnerCalls]) if (other.until < at) runnerCalls.delete(key)
 }
 // The command that asked: the one of this chat's running runners begun last before the request
-const runnerOf = (at: number, now: number) => [...runnerCalls.values()].filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0]
+const runnerOf = (at: number, now: number) => [...runnerCalls].map(([call, one]) => ({ ...one, call })).filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0]
 const BOX_SKEW = 60_000
 // What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
 const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
@@ -5729,29 +5729,49 @@ const boxWording = (one: Record<string, unknown>): string | undefined => {
 let boxes: Asked[] = []
 // What the person just did with a box or an admin command, shown a minute at the top of the panel where it was: what they did and
 // what happens now, so nothing that needed them just vanishes
-type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean }
+// A note tied to the call the press let go (`call`) goes once that call ends, never before DONE_LEAST so it can be read, and at
+// most DONE_LONGEST while it runs; one with no call is shown DONE_SHOWN
+type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number }
 let doneNotes: DoneNote[] = []
 const DONE_SHOWN = 60_000
+const DONE_LEAST = 15_000
+const DONE_LONGEST = 30 * 60_000
+const isNoteShown = (one: DoneNote, at: number) =>
+  !one.call ? at - one.at < DONE_SHOWN : one.endedAt === undefined ? at - one.at < DONE_LONGEST : at < Math.max(one.endedAt, one.at + DONE_LEAST)
+// The calls that have ended, so a note made after its call ended (a runner sent to the background) is over from the start
+const callsEnded = new Set<string>()
 const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
   const at = await $.clock.now()
-  doneNotes = [...doneNotes.filter(one => one.id !== note.id && at - one.at < DONE_SHOWN), { ...note, at }].slice(-6)
+  const made = { ...note, at, ...(note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}) }
+  doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), made].slice(-6)
   $.ui.invalidate('ui.render')
-  // Drawn again as its minute ends, so it goes with nothing else to redraw the panel
-  $.clock.after(DONE_SHOWN + 100, () => $.ui.invalidate('ui.render'))
+  // Drawn again as its time ends, so it goes with nothing else to redraw the panel
+  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => $.ui.invalidate('ui.render'))
 }
+// The call a note tells of has ended: what it said is over, so the note goes (after DONE_LEAST from its press)
+const noteCallEnded = async ($: EngineInterface, call: string) => {
+  callsEnded.add(call)
+  if (callsEnded.size > 200) callsEnded.delete(callsEnded.values().next().value ?? '')
+  if (!doneNotes.some(one => one.call === call && one.endedAt === undefined)) return
+  const at = await $.clock.now()
+  doneNotes = doneNotes.map(one => (one.call === call && one.endedAt === undefined ? { ...one, endedAt: at } : one))
+  $.ui.invalidate('ui.render')
+  const last = Math.max(...doneNotes.filter(one => one.call === call).map(one => one.at + DONE_LEAST))
+  $.clock.after(Math.max(0, last - at) + 100, () => $.ui.invalidate('ui.render'))
+}
+// What was done is a line, as Claude Code reports a call's result under it: a mark and the words, with no box, fill or edge, so it is
+// never taken for a card of work. Green once allowed or given, grey once refused or cancelled
+const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, lines: string[]) => (
+  <ui.Box key={key} flexDirection="row" gap={1} paddingX={2} flexShrink={0}>
+    <ui.Text color={isOn ? DONE : undefined} dimColor={!isOn}>{isOn ? '✓' : '✕'}</ui.Text>
+    <ui.Box flexDirection="column" minWidth={0} flexGrow={1} flexShrink={1}>
+      <ui.Text wrap="wrap">{said}</ui.Text>
+      {lines.filter(Boolean).map((line, n) => <ui.Text key={`${key}-${n}`} dimColor wrap="truncate-end">{line}</ui.Text>)}
+    </ui.Box>
+  </ui.Box>
+)
 const doneNotesPart = (ui: Ui, at: number) =>
-  doneNotes
-    .filter(one => at - one.at < DONE_SHOWN)
-    .map(one => (
-      <ui.Box key={`done-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <ui.Box width={1} flexShrink={0} backgroundColor={one.isOn ? LIVE : FILL} />
-        <ui.Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <ui.Text bold wrap="truncate-end">{one.head}</ui.Text>
-          <ui.Text wrap="wrap" color={one.isOn ? LIVE : undefined} bold={one.isOn}>{one.said}</ui.Text>
-          {one.what ? <ui.Text dimColor wrap="wrap">{one.what}</ui.Text> : null}
-        </ui.Box>
-      </ui.Box>
-    ))
+  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
 // What a box asks for, in a few words, for its note once answered
 const boxHead = (text: string) => {
   const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
@@ -5804,7 +5824,7 @@ const lookBoxes = async ($: EngineInterface) => {
       const key = typeof one.key === 'string' ? one.key : undefined
       if (key && !boxKeys.has(id)) boxKeys.set(id, key)
       const isKeySame = !key || boxKeys.get(id) === key
-      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, ...(one.kind === 'admin' && key ? { key } : {}) })
+      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, call: runner.call, ...(one.kind === 'admin' && key ? { key } : {}) })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
@@ -5889,7 +5909,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     boxSaid.delete(id)
     const one = boxes.find(other => other.id === id)
     boxes = boxes.filter(other => other.id !== id)
-    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
+    if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   $.ui.invalidate('ui.render')
@@ -5901,7 +5921,8 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled �
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
-  if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said, what: '' })
+  // Cancelled, nothing more comes of it: it is over at once
+  if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call, endedAt: 0 } : {}), head: boxHead(one.text), said, what: '' })
   $.ui.invalidate('ui.render')
 }
 
@@ -5910,7 +5931,8 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
   // This chat's own requests first, the first of them with the keys, so a value typed for the notice it told goes to its own box
   const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
   return shown.map((one, n) => (
-    <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+    <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+      <ui.Text dimColor wrap="truncate-end">{`${one.key ? 'Admin password' : 'Key'} · waits for you to type it`}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
       {one.command ? <ui.Text dimColor wrap="wrap">{`Asked by this chat's command: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
       <ui.Text dimColor wrap="wrap">{one.key ? 'What you type here shows as you type it. It goes only to the command that asked, sealed for it, never into a chat, and is not kept.' : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>
@@ -6224,7 +6246,10 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
     gateSaid.set(id, said)
     void noteDone($, {
       id: `gate-${id}`,
-      head: gate.kind === 'release' ? `A release of ${gate.host}` : gate.kind === 'file' ? `A change to ${gate.host}` : `An admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
+      ...(gate.call ? { call: gate.call } : {}),
+      // Refused, nothing runs: what it says is over at once
+      ...(said === 'deny' ? { endedAt: 0 } : {}),
+      head: gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host} into ${gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
       said:
         said === 'deny'
           ? `You denied it · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}, and the work was told`
@@ -6235,7 +6260,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
             : gate.isWork
               ? "You allowed this work's admin commands · it runs now"
               : 'You allowed it once · it runs now',
-      what: cut(oneLine(gate.command), 200),
+      what: gate.kind === 'release' && gate.folder ? `from ${shortPath(gate.folder)}` : gate.kind === 'file' ? '' : cut(oneLine(gate.command), 200),
       isOn: said !== 'deny',
     }).catch(() => undefined)
   }
@@ -6258,7 +6283,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
     const isWork = gate.mode === 'work' && Boolean(card)
     const isCovered = (isWork && workAllowed.has(top)) || (await isAllowed($, call))
     if (!isCovered) {
-      const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(isWork ? { isWork: true } : {}) }, card ? top : '')
+      const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(isWork ? { isWork: true } : {}) }, card ? top : '')
       if (said !== 'once' && said !== 'always') {
         await dropGrants($, grants)
         return { deny: said === 'deny' ? GATE_DENIED() : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
@@ -6280,11 +6305,39 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
 // release runner named by any spelling of its path, from the folder the command runs it in (a cd before it moves that). Allowed, it gets
 // a grant naming that worktree and its branch, which bin/release takes once; its --status asks nothing
 type ReleaseCall = { folder: string; branch: string }
+// The runner's own arguments, as the shell hands them: a redirection (`> log`, `2>log`, `>>log`, `<in`) and what it names are the
+// shell's, never a branch. Read otherwise, `release > log` asked to release a branch called ">", whose grant the runner (on its
+// own branch) refused, so the work ran it again and the person was asked twice
+const releaseArgs = (words: string[]) => {
+  const args: string[] = []
+  for (let n = 0; n < words.length; n++) {
+    const word = words[n]!
+    if (/^\d*(?:>>?|<<?|>\||<>)$/.test(word)) {
+      n++
+      continue
+    }
+    if (/^\d*[<>]/.test(word)) continue
+    const cut = word.search(/[<>]/)
+    if (cut >= 0) {
+      if (cut > 0) args.push(word.slice(0, cut))
+      // `branch>log` hands the branch and sends what it prints to log; `branch> log` names the log in the next word
+      if (/[<>]$/.test(word)) n++
+      continue
+    }
+    args.push(word)
+  }
+  return args
+}
 const releaseCalls = (command: string, root: string, from: string): ReleaseCall[] => {
   let folder = from
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const found: ReleaseCall[] = []
-  for (const words of shellWords(command)) {
+  for (const said of shellWords(command)) {
+    // `release>log` is the runner and a redirection, as the shell reads it: the runner's own word alone is split
+    const words = said.flatMap(word => {
+      const cut = word.search(/[<>]/)
+      return cut > 0 && isAdminPath(word.slice(0, cut), root, 'release') ? [word.slice(0, cut), word.slice(cut)] : [word]
+    })
     const i = commandAt(words)
     const name = (words[i] ?? '').split('/').pop() ?? ''
     if ((name === 'cd' || name === 'pushd') && words[i + 1]) {
@@ -6294,7 +6347,7 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
     // Run by a shell handed it as a script, or by itself
     const at = ['bash', 'sh', 'zsh'].includes(name) ? i + 1 + words.slice(i + 1).findIndex(one => !one.startsWith('-')) : i
     if (at < i || !isAdminPath(words[at] ?? '', root, 'release')) continue
-    const args = words.slice(at + 1)
+    const args = releaseArgs(words.slice(at + 1))
     if (args[0] === '--status') continue
     const rest = args[0] === '-m' ? args.slice(2) : args
     found.push({ folder, branch: rest[0] ?? '' })
@@ -6315,7 +6368,10 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     // Not a repo, or no branch: the runner itself says what is wrong, and it releases nothing without a grant
     if (!repo || !branch || branch === 'HEAD') continue
     const id = `${e.tool_use_id}-r${n}`
-    const said = await holdGate($, next, { id, kind: 'release', host: repo.split('/').pop() ?? repo, command: `${branch} from ${repo}`, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
+    // Named by the repo itself, not the worktree's folder: a worktree's git folder is inside the repo's own
+    const common = await git(['rev-parse', '--path-format=absolute', '--git-common-dir'])
+    const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo
+    const said = await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
     if (said !== 'once') {
       await dropGrants($, grants)
       const gate = { kind: 'release' as const }
@@ -6363,7 +6419,7 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
   const list = await read($, todos)
   const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
   const card = list.find(one => one.id === top)
-  const said = await holdGate($, next, { id: `${e.tool_use_id}-f`, kind: 'file', host: file, command: cut(change, 2000), at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
+  const said = await holdGate($, next, { id: `${e.tool_use_id}-f`, call: e.tool_use_id, kind: 'file', host: file, command: cut(change, 2000), at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
   const gate = { kind: 'file' as const }
   return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
 }
@@ -6647,10 +6703,19 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
 
 // On the card: what it wants to run, whole, and the three presses. Another chat's panel shows it with no buttons: only the chat
 // that holds the call allows it
+// Drawn as Claude Code draws its own permission asks: an outlined box with the kind of ask at its top, never a filled card with an
+// edge as work's cards are, so an ask is not taken for one more piece of work
+const gateKind = (gate: Gate) => (gate.isUndone ? 'Put back' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
-  <ui.Box key={key} flexDirection="column" gap={1}>
+  <ui.Box key={key} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+    <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? (gate.isUndone ? 'yours to decide' : 'waits for your press') : isElsewhere ? 'asked in another chat' : 'no longer waits'}`}</ui.Text>
     <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
-    {gate.command ? (
+    {gate.kind === 'release' && gate.folder ? (
+      <ui.Box flexDirection="column">
+        <ui.Text wrap="truncate-end">{`Branch ${gate.branch ?? ''}`}</ui.Text>
+        <ui.Text dimColor wrap="truncate-start">{`from ${shortPath(gate.folder)}`}</ui.Text>
+      </ui.Box>
+    ) : gate.command ? (
       <ui.Box backgroundColor={FILL} paddingLeft={2}>
         <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
       </ui.Box>
@@ -6686,12 +6751,19 @@ const adminBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string) =>
     </ui.Box>
   ) : null
 // A gate with no card, at the top of the panel
-const gatesPart = ($: EngineInterface, ui: Ui) =>
-  looseGates.map(gate => (
-    <ui.Box key={`gate-top-${gate.id}`} flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-      {gateRow($, ui, gate, `gate-${gate.id}`, false)}
-    </ui.Box>
-  ))
+const gatesPart = ($: EngineInterface, ui: Ui) => looseGates.map(gate => gateRow($, ui, gate, `gate-${gate.id}`, false))
+// A path in one line: the home folder as ~, and the middle left out past `room` characters, keeping its last folders
+const shortPath = (path: string, room = 44) => {
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const p = home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path
+  if (p.length <= room) return p
+  const parts = p.split('/')
+  for (let keep = parts.length - 2; keep >= 1; keep--) {
+    const short = `${parts[0]}/…/${parts.slice(-keep).join('/')}`
+    if (short.length <= room) return short
+  }
+  return `…/${parts.at(-1) ?? ''}`
+}
 
 // The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel
 
@@ -6819,7 +6891,7 @@ const tellWaiting = async ($: EngineInterface) => {
 // Without (a settings hook answered it), it goes at once: nothing was put to the person
 type Outcome = 'running' | 'ran' | 'no' | 'stopped'
 let answeredPrompts: Waiting[] = []
-const PROMPT_SHOWN = 60_000
+const PROMPT_SHOWN = 15_000
 // An allowed call whose end is never seen is taken as over this long after it was seen running, so nothing stays purple for good
 const RUNNING_LONGEST = 15 * 60_000
 const answeredShown = (at: number) => answeredPrompts.filter(one => (one.endedAt ? at - one.endedAt < PROMPT_SHOWN : at - one.at < RUNNING_LONGEST))
@@ -8469,6 +8541,8 @@ const workHooks = (on: On) => {
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
         if (grants.length && !(e as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
         runnerEnded(e.tool_use_id, Boolean((e as { run_in_background?: unknown }).run_in_background), await $.clock.now())
+        // A note of what the person allowed for this call goes as it ends
+        await noteCallEnded($, e.tool_use_id).catch(() => undefined)
       }
     }
     let grants: string[] = []
@@ -8505,11 +8579,13 @@ const workHooks = (on: On) => {
     const isRefusedHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
-      if (gated.deny) return { deny: gated.deny }
+      // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
+      if (gated.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: gated.deny })
       grants = gated.grants
       const released = await gateRelease($, e, raw as never)
       if (released.deny) {
         await dropGrants($, grants)
+        await noteCallEnded($, e.tool_use_id).catch(() => undefined)
         return { deny: released.deny }
       }
       grants = [...grants, ...released.grants]
@@ -8518,7 +8594,7 @@ const workHooks = (on: On) => {
     }
     if (!isRefusedHere) {
       const fileSaid = await gateOwnFile($, e, raw as never)
-      if (fileSaid) return { deny: fileSaid }
+      if (fileSaid) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: fileSaid })
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
@@ -10399,33 +10475,33 @@ const panelHooks = (on: On) => {
     }
     // Only this chat's own prompt, while this chat holds it: another chat's is answered in that chat, as no file may answer one
     const isHeldHere = (p: Prompt, c?: Shared) => Boolean(!c && p.isHeld && promptHeld.has(p.id))
+    // Drawn as Claude Code draws its permission asks, as the admin gate's are: an outlined box with the kind of ask at its top, never
+    // a filled card with an edge as work's cards are
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
-      <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
-        <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <Box flexDirection="column">
-            <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
-            <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
-          </Box>
-          <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
-          {p.detail ? (
-            <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
-              <Text mono wrap="wrap">{p.detail}</Text>
-            </Box>
-          ) : null}
-          {p.yes || p.no ? (
-            <Box flexDirection="column">
-              {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
-              {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
-            </Box>
-          ) : null}
-          {isHeldHere(p, c) ? promptButtons(p, key) : <Text dimColor wrap="wrap">{where}</Text>}
-          {c && pressOf(c) && !isHeldHere(p, c) ? (
-            <Box flexDirection="row">
-              <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
-            </Box>
-          ) : null}
+      <Box key={`prompt-${key}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+        <Box flexDirection="column">
+          <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waits for your answer' : 'asked in another chat'}`}</Text>
+          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+          <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
         </Box>
+        <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
+        {p.detail ? (
+          <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
+            <Text mono wrap="wrap">{p.detail}</Text>
+          </Box>
+        ) : null}
+        {p.yes || p.no ? (
+          <Box flexDirection="column">
+            {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
+            {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
+          </Box>
+        ) : null}
+        {isHeldHere(p, c) ? promptButtons(p, key) : <Text dimColor wrap="wrap">{where}</Text>}
+        {c && pressOf(c) && !isHeldHere(p, c) ? (
+          <Box flexDirection="row">
+            <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
+          </Box>
+        ) : null}
       </Box>
     )
     // Where a prompt is answered: in this chat, the box Claude Code shows at its bottom
@@ -10440,16 +10516,9 @@ const panelHooks = (on: On) => {
       if (p.isCut) return 'You allowed it · it was stopped before it finished'
       return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
     }
-    const answeredCard = (p: Prompt, key: string, c?: Shared) => (
-      <Box key={`answered-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <Box width={1} flexShrink={0} backgroundColor={p.isRunning ? LIVE : FILL} />
-        <Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
-          <Text wrap="wrap" color={p.isRunning ? LIVE : undefined} bold={p.isRunning}>{saidOf(p)}</Text>
-          <Text dimColor wrap="wrap">{p.text}</Text>
-        </Box>
-      </Box>
-    )
+    // Once answered it is a line of what was done, as the gate's notes are: no box, fill or edge
+    const answeredCard = (p: Prompt, key: string, c?: Shared) =>
+      reportLine(table, `answered-${key}`, p.answered !== 'no' && p.answered !== 'stopped' && !p.isCut, saidOf(p), [p.title || (c ? 'That chat itself' : 'This chat itself'), p.text])
 
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
     // the Claude app when pressed, where its link opens here
