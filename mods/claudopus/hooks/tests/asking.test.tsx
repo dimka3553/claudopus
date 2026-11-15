@@ -821,13 +821,14 @@ test('work that needs the person\'s hands asks: its card stands out first with t
 })
 
 test('a button answers only when deliberately pressed: never over a reply typed in its box, never as the panel moves under the pointer, and an approving one can be taken back before it goes: the 15 Nov "Release it" recorded while the person typed not to release', async ($, on) => {
-  const { clock, appended } = world(on)
+  const { clock, appended, files } = world(on)
   // The app moves the focus where it is asked to, the person's or the mod's own
   const focused: string[] = []
   on('ui.focus', { plugin: '*' } as never, ((_: unknown, e: { key?: string; element?: string; origin?: { kind: string } }) => (focused.push(String(e.key ?? e.element)), e.origin?.kind === 'person' ? {} : { value: {} })) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'show the asks in the bar', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Asks with their buttons in the bar', prompt: 'bar' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'ears' } as never)
   const question = 'Release the asks-in-the-bar change as the next Claudopus version?'
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: question, choices: ['Release it', 'Not now'] } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -866,7 +867,7 @@ test('a button answers only when deliberately pressed: never over a reply typed 
   await focus(box2)
   await clock.advance(1000)
   await list.press({ key: await release() })
-  expect(await shows('Not answered: “Release it” was pressed by a key, not clicked.')).toBeDefined()
+  expect(await shows('Not answered: no click reached “Release it”')).toBeDefined()
   // and the keys go back to the reply box, so the rest of what is typed lands there
   expect(await until(async () => (focused.at(-1) === box2 ? true : undefined))).toBe(true)
   // Clicked on a still panel: said back, and nothing goes yet; taken back, nothing goes at all and the buttons are back
@@ -880,13 +881,29 @@ test('a button answers only when deliberately pressed: never over a reply typed 
   await clock.advance(6000)
   expect(sent().length).toBe(before)
   expect(await until(async () => ((await release()) ? true : undefined))).toBe(true)
-  // Clicked once more and left: it reaches the work once, after the moment to take it back
+  // Other work writing a line just before the click moves nothing under the pointer: the click counts
   await clock.advance(1000)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a2', text: 'Measuring the left ear.' } as never)
+  expect(await shows('Measuring the left ear.')).toBeDefined()
   await focus(await release())
   const second = list.press({ key: await release() })
   expect(await shows('You answered: “Release it”.')).toBeDefined()
-  await clock.advance(5000)
+  // Their words passed on by the chat meanwhile win over the press: it is taken back, and the words go
+  await $.prompt.submit({ text: 'Wait, do not release it yet', wait: false, origin: composer })
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 't1', to: 'a1', message: 'Their reply: “Wait, do not release it yet”' } as never)
+  expect(await until(async () => (files.get(`${MEMORY}/log.md`)?.includes("taken back: the person's words came first") ? true : undefined))).toBe(true)
   await second
+  await clock.advance(5000)
+  expect(sent().some(line => line.includes('pressed "Release it"'))).toBe(false)
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('Wait, do not release it yet')))).toBeDefined()
+  // Asked again, clicked and left: it reaches the work once, after the moment to take it back
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2b', agentId: 'a1', text: question, choices: ['Release it', 'Not now'] } as never)
+  await clock.advance(2000)
+  await focus(await release())
+  const third = list.press({ key: await release() })
+  expect(await shows('You answered: “Release it”.')).toBeDefined()
+  await clock.advance(5000)
+  await third
   expect(await until(async () => sent().find(line => line.includes('pressed "Release it"')))).toBeDefined()
   expect(sent().filter(line => line.includes('pressed "Release it"'))).toHaveLength(1)
   // An answer that approves nothing goes at once

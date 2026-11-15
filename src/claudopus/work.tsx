@@ -240,6 +240,9 @@ const workHooks = (on: On) => {
       // own work, or the helper that asked. Marked at once, so a press on the card at the same moment counts once; undone if refused
       const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => one.ask?.from === target.id)) : undefined
       const asked = asking?.ask ? `${asking.id}:${asking.ask.at}:${asking.ask.text}` : ''
+      // Their words passed on while a press of theirs waits to be taken back win over it: the press is taken back, the words answer
+      const heldPress = asking?.ask ? answerHeld.get(asking.id) : undefined
+      if (asking?.ask && heldPress?.askAt === asking.ask.at) (heldPress.settle(false, true), answeredAsks.delete(asked), void log($, `a held press for ${asking.id} taken back: the person's words came first`))
       if (asking?.ask && !answeredAsks.has(asked)) {
         answeredAsks.add(asked)
         answered = asking.ask.text

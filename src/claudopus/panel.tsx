@@ -59,8 +59,12 @@ const panelHooks = (on: On) => {
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
-    // Drawn afresh, a pane is new under the pointer: a press on an ask's answer counts only once it has held still (STEADY)
-    paneMoved(paneId, heldAt)
+    // Drawn afresh with a new layout (cards come, go or reorder, an ask or what is said under its buttons changes), what is under the
+    // pointer moved: a press on an ask's answer counts only once it has held still (STEADY), from when the drawing is given back. One
+    // drawn afresh for a running time or a step of other work moves nothing
+    const askSign = askLayout()
+    const isMoved = !held || held.shape !== shape || held.askSign !== askSign
+    if (isMoved) paneMoved(paneId, heldAt)
     if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
@@ -1712,7 +1716,8 @@ const panelHooks = (on: On) => {
       </Box>
     )
     })()
-    heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing, askSign })
+    if (isMoved) paneMoved(paneId, await $.clock.now())
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     return drawing
     } finally {

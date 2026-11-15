@@ -95,7 +95,9 @@ let isTyping = false
 const CALM = 10_000
 // The last drawing of each pane on each surface and size: what it showed in shape (paneShape) and in full (paneContent), when, and
 // which call for a drawing of the mod's own it answered (freshness)
-const heldDrawings = new Map<string, { shape: string; content: string; at: number; fresh: number; drawing: unknown }>()
+const heldDrawings = new Map<string, { shape: string; content: string; at: number; fresh: number; drawing: unknown; askSign?: string }>()
+// What of an ask's card changes its layout beyond the pane's shape: what is said under its buttons, an answer held, an answer said back
+const askLayout = () => JSON.stringify([[...pressRefused].map(([id, r]) => [id, r.at]), [...answerHeld].map(([id, h]) => [id, h.askAt]), [...sentReplies].map(([id, r]) => [id, r.at, r.to])])
 // Counts the mod's own calls for a drawing: a press, a reply, a picture made, a box that came. Each one is drawn at once
 let freshness = 0
 const drawAgain = ($: EngineInterface) => {
@@ -242,9 +244,9 @@ const answersOnWay = new Set<Promise<unknown>>()
 // box and not sent wins over every button of its ask. An answer that releases, allows or approves is said back and reaches the work
 // only HOLD after the press, with a press to take it back meanwhile
 const STEADY = 700
-const HOLD = 5000
+const HOLD = 4000
 const REFUSED_SHOWN = 15_000
-const APPROVING = /\b(?:releas\w*|allow\w*|approv\w*|deploy\w*|merg\w*|push\w*|publish\w*|ship\w*|go ahead|delet\w*|remov\w*|yes|send\w*|run it|accept\w*|pay|buy)\b/i
+const APPROVING = /\b(?:releas\w*|allow\w*|approv\w*|deploy\w*|merg\w*|push\w*|publish\w*|ship\w*|go ahead|delet\w*|remov\w*|yes|ok|okay|send\w*|run\w*|accept\w*|pay|buy|proceed\w*|do it|continu\w*|confirm\w*|install\w*|commit\w*|overwrit\w*|restart\w*|updat\w*|upgrad\w*|start\w*|reset\w*|forc\w*|kill\w*|stop\w*|tag\w*|renam\w*|apply\w*|enabl\w*|disabl\w*|grant\w*|sign\w*|submit\w*|launch\w*|wip\w*|drop\w*|revert\w*|rollback|roll back|go live)\b/i
 // When each pane of the mod's last moved under the pointer: drawn afresh, or scrolled by anyone
 const paneMovedAt = new Map<string, number>()
 const paneMoved = (paneId: string, at: number) => paneMovedAt.set(paneId, Math.max(at, paneMovedAt.get(paneId) ?? 0))
@@ -253,19 +255,25 @@ const paneMoved = (paneId: string, at: number) => paneMovedAt.set(paneId, Math.m
 // by its place after each drawing, so a button that came where another was holds it, and the person typing a sentence presses it with
 // the first space. So on the desktop a press counts only within FOCUS_WINDOW of the person's focus moving onto that very button. A
 // copy of the app that never says a button took the focus (no such move seen since the mod loaded) is not held to it
-const FOCUS_WINDOW = 3000
-let focusSeen: { element: string; requestId: string; at: number } | undefined
+const FOCUS_WINDOW = 1500
+// Marked before the hook awaits anything, so a press hook running beside it finds it; its time is filled in once read (until then
+// it counts as now)
+let focusSeen: { element: string; requestId: string; at?: number } | undefined
 let isButtonFocusSaid = false
-const focusMoved = (element: string | undefined, requestId: string, at: number) => {
-  focusSeen = element ? { element, requestId, at } : undefined
+const focusMoved = (element: string | undefined, requestId: string) => {
+  const seen: typeof focusSeen = element ? { element, requestId } : undefined
+  focusSeen = seen
   if (element && !isTypedBox(element)) isButtonFocusSaid = true
+  return (at: number) => void (seen && (seen.at = at))
 }
 // Each press, by its element, as the press hook found it before anything it does draws the pane again: whether its pane held still,
 // and on the desktop whether the person's focus came onto it just before
 let pressSteady = new Map<string, 'steady' | 'moved' | 'unfocused'>()
+// Off only in the terminal, whose buttons are pressed by keys alone. A focus move counts for one press only
 const pressSeen = (element: string, requestId: string, surface: string, at: number) => {
   if (pressSteady.size > 50) pressSteady = new Map()
-  const isFocused = surface !== 'desktop' || !isButtonFocusSaid || (focusSeen?.element === element && focusSeen.requestId === requestId && at - focusSeen.at <= FOCUS_WINDOW)
+  const isFocused = surface === 'terminal' || !isButtonFocusSaid || (focusSeen?.element === element && focusSeen.requestId === requestId && at - (focusSeen.at ?? at) <= FOCUS_WINDOW)
+  focusSeen = undefined
   pressSteady.set(element, at - (paneMovedAt.get(requestId) ?? -Infinity) < STEADY ? 'moved' : isFocused ? 'steady' : 'unfocused')
 }
 // The reply box each pane last drew for each work's ask, so a press that did not count gives the keys back to it
@@ -273,19 +281,20 @@ const replyBoxes = new Map<string, string>()
 // A press that did not count, by work: why, for which answer and ask, and when; the card says it under its buttons
 const pressRefused = new Map<string, { why: 'typed' | 'moved' | 'unfocused'; choice: string; askAt: number; at: number }>()
 // An approving answer said back and not yet sent, by work: the press that takes it back calls settle(false)
-const answerHeld = new Map<string, { choice: string; askAt: number; settle: (isKept: boolean) => void }>()
+const answerHeld = new Map<string, { choice: string; askAt: number; settle: (isKept: boolean, isAnsweredElse?: boolean) => void }>()
 const refusedLine = (one: Todo, now: number) => {
   const refused = pressRefused.get(one.id)
   if (!refused || refused.askAt !== one.ask?.at || now - refused.at > REFUSED_SHOWN) return ''
   return {
     typed: `Not answered: your reply is still typed in the box. Send it, or clear the box and press “${refused.choice}” again.`,
     moved: `Not answered: the panel had just moved under your pointer. Press “${refused.choice}” again if you meant it.`,
-    unfocused: `Not answered: “${refused.choice}” was pressed by a key, not clicked. Your typing goes back to the box; click “${refused.choice}” if you meant it.`,
+    unfocused: `Not answered: no click reached “${refused.choice}” (a key, or the focus already on it). Your typing goes back to the box; click “${refused.choice}” again if you meant it.`,
   }[refused.why]
 }
 // A choice button's own press: answered only when its pane held still as it landed, and on the desktop when it was clicked (pressSeen)
 const answerPress = ($: EngineInterface, one: Todo, choice: string, press: { element?: string; requestId?: string } | undefined) => {
   const seen = press?.element === undefined ? 'moved' : (pressSteady.get(press.element) ?? 'moved')
+  if (press?.element !== undefined) pressSteady.delete(press.element)
   return answerAsk($, one, choice, false, seen, press?.requestId)
 }
 const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = false, seen: 'steady' | 'moved' | 'unfocused' = 'steady', paneId?: string) => {
@@ -331,14 +340,15 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   answeredAsks.add(asked)
   pressRefused.delete(one.id)
   // An answer that releases, allows or approves something is said back on the card and waits HOLD, with a press to take it back
+  let isTakenOver = false
   if (!isReply && APPROVING.test(said)) {
     const isKept = await new Promise<boolean>(resolve => {
-      const held = { choice: said, askAt: ask.at, settle: (kept: boolean) => (answerHeld.get(one.id) === held && answerHeld.delete(one.id), resolve(kept)) }
+      const held = { choice: said, askAt: ask.at, settle: (kept: boolean, isAnsweredElse = false) => (answerHeld.get(one.id) === held && answerHeld.delete(one.id), (isTakenOver = isAnsweredElse), resolve(kept)) }
       answerHeld.set(one.id, held)
       drawAgain($)
       $.clock.after(HOLD, () => held.settle(true))
     })
-    if (!isKept) return void (answeredAsks.delete(asked), log($, `answer "${cut(said, 40)}" for ${one.id} taken back before it was sent`), drawAgain($))
+    if (!isKept) return void (isTakenOver || answeredAsks.delete(asked), log($, `answer "${cut(said, 40)}" for ${one.id} taken back before it was sent`), drawAgain($))
   }
   const at = await $.clock.now()
   let isCleared = false
@@ -346,7 +356,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   await changeTodos($, list =>
     ((isCleared = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
   )
-  if (!isCleared) return
+  if (!isCleared) return void (!isReply && log($, `answer "${cut(said, 40)}" for ${one.id} not sent: its ask was replaced or withdrawn meanwhile`))
   answeredAt.set(one.id, ask.at)
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)

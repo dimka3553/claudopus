@@ -1,7 +1,7 @@
 // Above the prompt: the small octopus while work runs, and how Claude uses this computer
 
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
-let bandPick: { id: string; n: number } | undefined
+let bandPick: { id: string; n: number; at: number } | undefined
 const BAND_PICK = 6000
 // Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
 // Pressed, it takes the list back to its top; nothing else moves the list
@@ -52,9 +52,12 @@ const bandHooks = (on: On) => {
         const answers = (ask.choices?.length ? ask.choices : DEFAULT_ANSWERS).slice(0, 9)
         const id = `${first.id}:${ask.at}`
         const picked = bandPick?.id === id ? bandPick.n : -1
-        const press = (n: number, choice: string) => {
-          if (picked === n) return (bandPick = undefined), void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))
-          const pick = (bandPick = { id, n })
+        // The second press counts only once the pick has stood a moment (STEADY): a message that begins with the same digit twice
+        // ("11am") never answers
+        const press = async (n: number, choice: string) => {
+          const now = await $.clock.now()
+          if (picked === n && bandPick && now - bandPick.at >= STEADY) return (bandPick = undefined), void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))
+          const pick = (bandPick = { id, n, at: now })
           $.ui.invalidate('ui.render')
           // Left alone, the pick is let go
           $.clock.after(BAND_PICK, () => void (bandPick === pick && ((bandPick = undefined), $.ui.invalidate('ui.render'))))
@@ -72,7 +75,13 @@ const bandHooks = (on: On) => {
               </Box>
             </Box>
             {/* Acted on after the person's reply in words: that reply, and nothing to press */}
-            {isActingOnReply(first) ? (
+            {/* An answer that approves, pressed: said back, with 0 to take it back before it reaches the work */}
+            {answerHeld.get(first.id)?.askAt === ask.at ? (
+              <Box key="band-ask-held" flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
+                <Text bold>{`You answered “${answerHeld.get(first.id)?.choice ?? ''}”: it reaches the work ${HOLD / 1000} s after your press`}</Text>
+                <Button key={`band-ask-take-back-${first.id}-${ask.at}`} label="Take it back" plain hotkey="0" onPress={() => answerHeld.get(first.id)?.settle(false)} />
+              </Box>
+            ) : isActingOnReply(first) ? (
               <Text key="band-ask-replied" dimColor wrap="truncate-end">{`    ${sentLine(first, await $.clock.now()) || `✓ You replied “${cut(ask.replied?.text ?? '', 60)}”`}`}</Text>
             ) : (
               <Box flexDirection="column">
@@ -81,7 +90,7 @@ const bandHooks = (on: On) => {
                 {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
                 <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
                   {answers.map((choice, n) => (
-                    <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
+                    <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => void press(n, choice).catch(err => log($, `answer not sent: ${String(err)}`))} />
                   ))}
                   <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
                     {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to reply in words`}

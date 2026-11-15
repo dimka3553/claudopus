@@ -127,6 +127,8 @@ const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { 
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
 // they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them
 const draftsKept = atom({ plugin: 'claudopus', key: 'drafts' } as const, {}, { shape: 'drafts-1' })
+// Whether the app has said a button of the mod's took the person's focus, kept through a reload of the mod (pressSeen)
+const focusSaidKept = atom({ plugin: 'claudopus', key: 'focus-said' } as const, false, { shape: 'focus-said-1' })
 // Each load of this code in a chat, first or a reload, is told by a mark of its own, kept in the session's state as the load now in
 // charge. A /reload-plugins starts the new copy but leaves the old copy's timers running in the same chat, and work an old copy wakes
 // with $.session.send runs under that copy, whose hooks the engine no longer calls: every panel tool of that work answered "no

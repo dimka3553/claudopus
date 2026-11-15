@@ -152,6 +152,8 @@ const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { 
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
 // they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them
 const draftsKept = atom({ plugin: 'claudopus', key: 'drafts' } as const, {}, { shape: 'drafts-1' })
+// Whether the app has said a button of the mod's took the person's focus, kept through a reload of the mod (pressSeen)
+const focusSaidKept = atom({ plugin: 'claudopus', key: 'focus-said' } as const, false, { shape: 'focus-said-1' })
 // Each load of this code in a chat, first or a reload, is told by a mark of its own, kept in the session's state as the load now in
 // charge. A /reload-plugins starts the new copy but leaves the old copy's timers running in the same chat, and work an old copy wakes
 // with $.session.send runs under that copy, whose hooks the engine no longer calls: every panel tool of that work answered "no
@@ -5213,7 +5215,9 @@ let isTyping = false
 const CALM = 10_000
 // The last drawing of each pane on each surface and size: what it showed in shape (paneShape) and in full (paneContent), when, and
 // which call for a drawing of the mod's own it answered (freshness)
-const heldDrawings = new Map<string, { shape: string; content: string; at: number; fresh: number; drawing: unknown }>()
+const heldDrawings = new Map<string, { shape: string; content: string; at: number; fresh: number; drawing: unknown; askSign?: string }>()
+// What of an ask's card changes its layout beyond the pane's shape: what is said under its buttons, an answer held, an answer said back
+const askLayout = () => JSON.stringify([[...pressRefused].map(([id, r]) => [id, r.at]), [...answerHeld].map(([id, h]) => [id, h.askAt]), [...sentReplies].map(([id, r]) => [id, r.at, r.to])])
 // Counts the mod's own calls for a drawing: a press, a reply, a picture made, a box that came. Each one is drawn at once
 let freshness = 0
 const drawAgain = ($: EngineInterface) => {
@@ -5360,9 +5364,9 @@ const answersOnWay = new Set<Promise<unknown>>()
 // box and not sent wins over every button of its ask. An answer that releases, allows or approves is said back and reaches the work
 // only HOLD after the press, with a press to take it back meanwhile
 const STEADY = 700
-const HOLD = 5000
+const HOLD = 4000
 const REFUSED_SHOWN = 15_000
-const APPROVING = /\b(?:releas\w*|allow\w*|approv\w*|deploy\w*|merg\w*|push\w*|publish\w*|ship\w*|go ahead|delet\w*|remov\w*|yes|send\w*|run it|accept\w*|pay|buy)\b/i
+const APPROVING = /\b(?:releas\w*|allow\w*|approv\w*|deploy\w*|merg\w*|push\w*|publish\w*|ship\w*|go ahead|delet\w*|remov\w*|yes|ok|okay|send\w*|run\w*|accept\w*|pay|buy|proceed\w*|do it|continu\w*|confirm\w*|install\w*|commit\w*|overwrit\w*|restart\w*|updat\w*|upgrad\w*|start\w*|reset\w*|forc\w*|kill\w*|stop\w*|tag\w*|renam\w*|apply\w*|enabl\w*|disabl\w*|grant\w*|sign\w*|submit\w*|launch\w*|wip\w*|drop\w*|revert\w*|rollback|roll back|go live)\b/i
 // When each pane of the mod's last moved under the pointer: drawn afresh, or scrolled by anyone
 const paneMovedAt = new Map<string, number>()
 const paneMoved = (paneId: string, at: number) => paneMovedAt.set(paneId, Math.max(at, paneMovedAt.get(paneId) ?? 0))
@@ -5371,19 +5375,25 @@ const paneMoved = (paneId: string, at: number) => paneMovedAt.set(paneId, Math.m
 // by its place after each drawing, so a button that came where another was holds it, and the person typing a sentence presses it with
 // the first space. So on the desktop a press counts only within FOCUS_WINDOW of the person's focus moving onto that very button. A
 // copy of the app that never says a button took the focus (no such move seen since the mod loaded) is not held to it
-const FOCUS_WINDOW = 3000
-let focusSeen: { element: string; requestId: string; at: number } | undefined
+const FOCUS_WINDOW = 1500
+// Marked before the hook awaits anything, so a press hook running beside it finds it; its time is filled in once read (until then
+// it counts as now)
+let focusSeen: { element: string; requestId: string; at?: number } | undefined
 let isButtonFocusSaid = false
-const focusMoved = (element: string | undefined, requestId: string, at: number) => {
-  focusSeen = element ? { element, requestId, at } : undefined
+const focusMoved = (element: string | undefined, requestId: string) => {
+  const seen: typeof focusSeen = element ? { element, requestId } : undefined
+  focusSeen = seen
   if (element && !isTypedBox(element)) isButtonFocusSaid = true
+  return (at: number) => void (seen && (seen.at = at))
 }
 // Each press, by its element, as the press hook found it before anything it does draws the pane again: whether its pane held still,
 // and on the desktop whether the person's focus came onto it just before
 let pressSteady = new Map<string, 'steady' | 'moved' | 'unfocused'>()
+// Off only in the terminal, whose buttons are pressed by keys alone. A focus move counts for one press only
 const pressSeen = (element: string, requestId: string, surface: string, at: number) => {
   if (pressSteady.size > 50) pressSteady = new Map()
-  const isFocused = surface !== 'desktop' || !isButtonFocusSaid || (focusSeen?.element === element && focusSeen.requestId === requestId && at - focusSeen.at <= FOCUS_WINDOW)
+  const isFocused = surface === 'terminal' || !isButtonFocusSaid || (focusSeen?.element === element && focusSeen.requestId === requestId && at - (focusSeen.at ?? at) <= FOCUS_WINDOW)
+  focusSeen = undefined
   pressSteady.set(element, at - (paneMovedAt.get(requestId) ?? -Infinity) < STEADY ? 'moved' : isFocused ? 'steady' : 'unfocused')
 }
 // The reply box each pane last drew for each work's ask, so a press that did not count gives the keys back to it
@@ -5391,19 +5401,20 @@ const replyBoxes = new Map<string, string>()
 // A press that did not count, by work: why, for which answer and ask, and when; the card says it under its buttons
 const pressRefused = new Map<string, { why: 'typed' | 'moved' | 'unfocused'; choice: string; askAt: number; at: number }>()
 // An approving answer said back and not yet sent, by work: the press that takes it back calls settle(false)
-const answerHeld = new Map<string, { choice: string; askAt: number; settle: (isKept: boolean) => void }>()
+const answerHeld = new Map<string, { choice: string; askAt: number; settle: (isKept: boolean, isAnsweredElse?: boolean) => void }>()
 const refusedLine = (one: Todo, now: number) => {
   const refused = pressRefused.get(one.id)
   if (!refused || refused.askAt !== one.ask?.at || now - refused.at > REFUSED_SHOWN) return ''
   return {
     typed: `Not answered: your reply is still typed in the box. Send it, or clear the box and press “${refused.choice}” again.`,
     moved: `Not answered: the panel had just moved under your pointer. Press “${refused.choice}” again if you meant it.`,
-    unfocused: `Not answered: “${refused.choice}” was pressed by a key, not clicked. Your typing goes back to the box; click “${refused.choice}” if you meant it.`,
+    unfocused: `Not answered: no click reached “${refused.choice}” (a key, or the focus already on it). Your typing goes back to the box; click “${refused.choice}” again if you meant it.`,
   }[refused.why]
 }
 // A choice button's own press: answered only when its pane held still as it landed, and on the desktop when it was clicked (pressSeen)
 const answerPress = ($: EngineInterface, one: Todo, choice: string, press: { element?: string; requestId?: string } | undefined) => {
   const seen = press?.element === undefined ? 'moved' : (pressSteady.get(press.element) ?? 'moved')
+  if (press?.element !== undefined) pressSteady.delete(press.element)
   return answerAsk($, one, choice, false, seen, press?.requestId)
 }
 const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = false, seen: 'steady' | 'moved' | 'unfocused' = 'steady', paneId?: string) => {
@@ -5449,14 +5460,15 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   answeredAsks.add(asked)
   pressRefused.delete(one.id)
   // An answer that releases, allows or approves something is said back on the card and waits HOLD, with a press to take it back
+  let isTakenOver = false
   if (!isReply && APPROVING.test(said)) {
     const isKept = await new Promise<boolean>(resolve => {
-      const held = { choice: said, askAt: ask.at, settle: (kept: boolean) => (answerHeld.get(one.id) === held && answerHeld.delete(one.id), resolve(kept)) }
+      const held = { choice: said, askAt: ask.at, settle: (kept: boolean, isAnsweredElse = false) => (answerHeld.get(one.id) === held && answerHeld.delete(one.id), (isTakenOver = isAnsweredElse), resolve(kept)) }
       answerHeld.set(one.id, held)
       drawAgain($)
       $.clock.after(HOLD, () => held.settle(true))
     })
-    if (!isKept) return void (answeredAsks.delete(asked), log($, `answer "${cut(said, 40)}" for ${one.id} taken back before it was sent`), drawAgain($))
+    if (!isKept) return void (isTakenOver || answeredAsks.delete(asked), log($, `answer "${cut(said, 40)}" for ${one.id} taken back before it was sent`), drawAgain($))
   }
   const at = await $.clock.now()
   let isCleared = false
@@ -5464,7 +5476,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   await changeTodos($, list =>
     ((isCleared = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
   )
-  if (!isCleared) return
+  if (!isCleared) return void (!isReply && log($, `answer "${cut(said, 40)}" for ${one.id} not sent: its ask was replaced or withdrawn meanwhile`))
   answeredAt.set(one.id, ask.at)
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
@@ -9844,6 +9856,9 @@ const workHooks = (on: On) => {
       // own work, or the helper that asked. Marked at once, so a press on the card at the same moment counts once; undone if refused
       const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => one.ask?.from === target.id)) : undefined
       const asked = asking?.ask ? `${asking.id}:${asking.ask.at}:${asking.ask.text}` : ''
+      // Their words passed on while a press of theirs waits to be taken back win over it: the press is taken back, the words answer
+      const heldPress = asking?.ask ? answerHeld.get(asking.id) : undefined
+      if (asking?.ask && heldPress?.askAt === asking.ask.at) (heldPress.settle(false, true), answeredAsks.delete(asked), void log($, `a held press for ${asking.id} taken back: the person's words came first`))
       if (asking?.ask && !answeredAsks.has(asked)) {
         answeredAsks.add(asked)
         answered = asking.ask.text
@@ -10147,7 +10162,12 @@ const commandHooks = (on: On) => {
   // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
     // Where the person's focus last moved in the mod's panes: a press on the desktop counts only on a button it just moved onto (pressSeen)
-    if (e.origin.kind === 'person' && e.plugin === 'claudopus') focusMoved(e.element, e.requestId, await $.clock.now())
+    if (e.origin.kind === 'person' && e.plugin === 'claudopus') {
+      const wasSaid = isButtonFocusSaid
+      const timed = focusMoved(e.element, e.requestId)
+      timed(await $.clock.now())
+      if (!wasSaid && isButtonFocusSaid) await update($, focusSaidKept, () => true).catch(() => undefined)
+    }
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
@@ -10627,7 +10647,7 @@ const hashOf = (text: string) => {
 // Above the prompt: the small octopus while work runs, and how Claude uses this computer
 
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
-let bandPick: { id: string; n: number } | undefined
+let bandPick: { id: string; n: number; at: number } | undefined
 const BAND_PICK = 6000
 // Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
 // Pressed, it takes the list back to its top; nothing else moves the list
@@ -10678,9 +10698,12 @@ const bandHooks = (on: On) => {
         const answers = (ask.choices?.length ? ask.choices : DEFAULT_ANSWERS).slice(0, 9)
         const id = `${first.id}:${ask.at}`
         const picked = bandPick?.id === id ? bandPick.n : -1
-        const press = (n: number, choice: string) => {
-          if (picked === n) return (bandPick = undefined), void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))
-          const pick = (bandPick = { id, n })
+        // The second press counts only once the pick has stood a moment (STEADY): a message that begins with the same digit twice
+        // ("11am") never answers
+        const press = async (n: number, choice: string) => {
+          const now = await $.clock.now()
+          if (picked === n && bandPick && now - bandPick.at >= STEADY) return (bandPick = undefined), void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))
+          const pick = (bandPick = { id, n, at: now })
           $.ui.invalidate('ui.render')
           // Left alone, the pick is let go
           $.clock.after(BAND_PICK, () => void (bandPick === pick && ((bandPick = undefined), $.ui.invalidate('ui.render'))))
@@ -10698,7 +10721,13 @@ const bandHooks = (on: On) => {
               </Box>
             </Box>
             {/* Acted on after the person's reply in words: that reply, and nothing to press */}
-            {isActingOnReply(first) ? (
+            {/* An answer that approves, pressed: said back, with 0 to take it back before it reaches the work */}
+            {answerHeld.get(first.id)?.askAt === ask.at ? (
+              <Box key="band-ask-held" flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
+                <Text bold>{`You answered “${answerHeld.get(first.id)?.choice ?? ''}”: it reaches the work ${HOLD / 1000} s after your press`}</Text>
+                <Button key={`band-ask-take-back-${first.id}-${ask.at}`} label="Take it back" plain hotkey="0" onPress={() => answerHeld.get(first.id)?.settle(false)} />
+              </Box>
+            ) : isActingOnReply(first) ? (
               <Text key="band-ask-replied" dimColor wrap="truncate-end">{`    ${sentLine(first, await $.clock.now()) || `✓ You replied “${cut(ask.replied?.text ?? '', 60)}”`}`}</Text>
             ) : (
               <Box flexDirection="column">
@@ -10707,7 +10736,7 @@ const bandHooks = (on: On) => {
                 {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
                 <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
                   {answers.map((choice, n) => (
-                    <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
+                    <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => void press(n, choice).catch(err => log($, `answer not sent: ${String(err)}`))} />
                   ))}
                   <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
                     {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to reply in words`}
@@ -10822,8 +10851,12 @@ const panelHooks = (on: On) => {
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
-    // Drawn afresh, a pane is new under the pointer: a press on an ask's answer counts only once it has held still (STEADY)
-    paneMoved(paneId, heldAt)
+    // Drawn afresh with a new layout (cards come, go or reorder, an ask or what is said under its buttons changes), what is under the
+    // pointer moved: a press on an ask's answer counts only once it has held still (STEADY), from when the drawing is given back. One
+    // drawn afresh for a running time or a step of other work moves nothing
+    const askSign = askLayout()
+    const isMoved = !held || held.shape !== shape || held.askSign !== askSign
+    if (isMoved) paneMoved(paneId, heldAt)
     if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
@@ -12475,7 +12508,8 @@ const panelHooks = (on: On) => {
       </Box>
     )
     })()
-    heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing, askSign })
+    if (isMoved) paneMoved(paneId, await $.clock.now())
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     return drawing
     } finally {
@@ -12496,6 +12530,7 @@ const tabHooks = (on: On) => {
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
     // Whether its pane held still as it landed is noted first, before anything it does draws the pane again (answerPress)
+    if (e.plugin === 'claudopus' && !isButtonFocusSaid) isButtonFocusSaid = Boolean(await read($, focusSaidKept).catch(() => false))
     if (e.plugin === 'claudopus') pressSeen(e.element, e.requestId, e.surface, await $.clock.now())
     if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
