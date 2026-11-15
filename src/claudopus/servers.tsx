@@ -134,7 +134,7 @@ const serversTabHooks = (on: On) => {
         ))}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
 

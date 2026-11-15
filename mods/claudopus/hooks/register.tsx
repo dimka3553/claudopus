@@ -595,7 +595,11 @@ const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: stri
 const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
   `The background work "${title}" asked {name}, on its card and in this chat as a notice from the Claudopus panel that {name} sees and you do not: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, shown to {name} whole with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} has it already: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and start no work for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that work with SendMessage to "${id}", in their words; its card then stops asking.`
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it
-const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks.`
+const ASK_ANSWERED = (title: string, said: string) => `✓ {Name} answered the work "${title}" on its card: ${said}. It no longer asks: the answer reached it from the card, so it needs no second copy.`
+// What the chat is told when it sends work an answer of the person's that reached it from the card a moment ago
+const ANSWER_ALREADY_SENT = (said: string) => `Not sent: "${said}" is the answer {name} gave on that work's card, which reached it from there, and it has asked nothing since. A second copy would only start it again. Should {name} mean those words for something new, send them with what they are for.`
+// How long an answer given on the card counts as the one the chat would send again
+const ANSWER_ECHO = 60 * 60_000
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
 const ASK_REPLIED = (title: string, said: string) => `✓ {Name} replied to the work "${title}" on its card: ${said}. It acts on that now, and asks again if it still needs {name}.`
 // What the work is told with a reply that does not settle its ask: the ask stays open on its card until it clears or replaces it
@@ -962,6 +966,13 @@ const handedBack = new Map<string, string>()
 const endedByHandback = new Set<string>()
 // Work stopped by the chat or the panel: whatever the engine still lists of it is going, so it is never said to have left something running
 const stoppedHere = new Set<string>()
+// Work that ended with nothing of its own running that the mod or the engine's stop knew of: the engine still listing it as held
+// (once, for a whole evening, on nothing any tool showed open) is no sign it left something running
+const leftNothing = new Set<string>()
+// Nothing of its own runs: no command or watch it started that has not ended, no detached run it is followed on, no helper at work. The engine's list of what is in
+// flight as work stops is the whole session's, every other work's too, so it says nothing of this work's own (what it lists that
+// this work started is let go of from its card as it ends, at its stop)
+const ownsNothing = (list: Todo[], id: string) => !list.find(one => one.id === id)?.bg?.length && !list.find(one => one.id === id)?.detached?.length && !list.some(kid => kid.parentId === id && kid.status === 'working')
 // Work stopped after its report, so ended done just now, keeps that report for good, as work that finished outright does
 const keepStoppedReports = async ($: EngineInterface, now: number) => {
   for (const card of (await read($, todos)).filter(one => !one.parentId && one.status === 'done' && one.answeredAt && one.endedAt === now && one.answer.trim()))
@@ -1090,7 +1101,7 @@ const sync = async ($: EngineInterface) => {
             ? ended(card, 'done', now)
           : // Work that handed in its report and that the engine still holds on its own background work left something running;
             // once nothing does, or it was stopped, not
-            !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id)) !== Boolean(card.leftSince)
+            !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id) && !leftNothing.has(card.id)) !== Boolean(card.leftSince)
             ? { ...card, leftSince: card.leftSince ? undefined : now }
           : card.parentId === HELPER && !one.parentId && ownCalls.has(one.description)
             ? { ...card, parentId: '', title: card.title || oneLine(one.description) }
@@ -1679,7 +1690,7 @@ const serversTabHooks = (on: On) => {
         ))}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
 
@@ -2096,6 +2107,7 @@ const frontAsked = async ($: EngineInterface, id: string, title: string) => {
   const was = (await $.ui.panes()).find(pane => pane.id === id)
   if (was && !was.isShown) await $.ui.close({ id }).catch(() => undefined)
   const opened = await $.ui.open({ id, title, focus: true })
+  void watchTabs($, [id], 'it opened').catch(() => undefined)
   if (isRunFromAfar) await log($, `front ${id}: ${holding.length} let go first; opened ${opened.isPlaced ? 'drawn' : `undrawn (${opened.reason})`}; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
   // The pane pressed in stays in front while its press runs: once it has run, the new pane is opened again, which brings it forward
   // Only where the surface says which pane it shows: a chat the app runs on another Mac over ssh says none is shown, ever, and there
@@ -2621,7 +2633,7 @@ const memoryHooks = (on: On) => {
         )}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
 
@@ -3145,8 +3157,8 @@ const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, a
 
 // A card's three dots, a brighter one passing along them as the app's pulse does; still once the work is not at work
 const DOT_FRAMES = ['●•·', '•●•', '·•●', '•·•']
-const termDots = (ui: Ui, $: EngineInterface, requestId: string, key: string) =>
-  liveRaster(ui, $, requestId, key, DOT_FRAMES.map(one => glyphCells(one, colorOf(LIVE))), 300, Infinity, Date.now() % 1200)
+const termDots = (ui: Ui, $: EngineInterface, requestId: string, key: string, color = LIVE) =>
+  liveRaster(ui, $, requestId, key, DOT_FRAMES.map(one => glyphCells(one, colorOf(color))), 300, Infinity, Date.now() % 1200)
 // A helper at work: its dot with a ring that grows out of it and fades
 const RING_FRAMES = ['●', '◉', '◎', '○']
 const termRing = (ui: Ui, $: EngineInterface, requestId: string, key: string) =>
@@ -3662,6 +3674,7 @@ const flowStarted = async ($: EngineInterface, input: { script?: unknown; script
   const now = await $.clock.now()
   const args = input.args
   const task = args && typeof args === 'object' && typeof (args as { task?: unknown }).task === 'string' ? String((args as { task: string }).task) : typeof args === 'string' ? args : ''
+  const bar = args && typeof args === 'object' && typeof (args as { bar?: unknown }).bar === 'string' ? String((args as { bar: string }).bar).replace(/\s+/g, ' ').trim() : ''
   const f: Flow = {
     id: answer.runId,
     taskId: answer.taskId,
@@ -3672,6 +3685,7 @@ const flowStarted = async ($: EngineInterface, input: { script?: unknown; script
     // The rounds script's own cap: 3 when none is given, at most 5
     ...((capOf(args) ?? (meta.name === 'rounds' ? 3 : undefined)) ? { cap: meta.name === 'rounds' ? Math.min(capOf(args) ?? 3, 5) : capOf(args) } : {}),
     task: task.trim().slice(0, 4000),
+    ...(bar ? { bar: bar.slice(0, 1000) } : {}),
     words: said.trim().slice(0, 4000),
     session: await sessionName($),
     parent: ccd.parent,
@@ -4562,7 +4576,7 @@ const holdTimes = ($: EngineInterface) => {
 const freeTimes = () => void ((typing += 1), (isTyping = false))
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
-type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean }
+type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean; isCard?: boolean }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -4627,7 +4641,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   if (isReply) freeTimes()
   const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line })
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
   void askGone($, one, said)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
@@ -4635,8 +4649,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
   // Marked on its way once written, so a step that began before it never counts as reading it
   const told = working ? await tell($, target, to) : undefined
-  if (told && !told.deny) return void (writtenIn(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line }), redraw($))
-  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line })
+  if (told && !told.deny) return void (writtenIn(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true }), redraw($))
+  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true })
 }
 // A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
 // and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its
@@ -4659,7 +4673,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   drafts.delete(one.id)
   freeTimes()
   const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line })
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
   // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
   if (inChat.has(one.id)) (inChat.delete(one.id), void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
@@ -4667,7 +4681,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const to = `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) return void (writtenIn(target, one.id), redraw($))
-  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line })
+  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true })
 }
 // An answer to work that has ended starts that work again with it, as a message to it: the chat then gets the work's report as
 // it gets any, and nothing goes into the chat in the person's place.
@@ -6981,6 +6995,8 @@ const chatHooks = (on: On) => {
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)
     $.clock.after(3000, () => closeUndrawn($))
+    // and every tab left open is drawn, though the app asked for it while this code was away (watchTabs)
+    await watchLoaded($).catch(err => log($, `tabs not watched: ${String(err)}`))
 
     // The engine's id names this chat's files, as its transcript is named
     const id = await $.session.id()
@@ -7122,6 +7138,7 @@ const chatHooks = (on: On) => {
       await shareMine($).catch(err => log($, `work not shared: ${String(err)}`))
       // The hidden boxes of the admin and secret runners, drawn in the panel in every chat
       await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
+      await watchFront($).catch(err => log($, `tab in front not watched: ${String(err)}`))
       if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
@@ -7266,9 +7283,13 @@ const chatHooks = (on: On) => {
       // what it hands back on the way (an answer to a question while it waits) is no report, and its card stays at work
       const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
       const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || answer.length >= REPORT_LEAST)
+      // A report in words, with nothing of its own running, has finished the work as a handback does: the engine may hold it on what
+      // no tool shows open, and the chat need not stop it. Its card ends with its clock, and an ask it leaves stays to be answered
+      const isIdleReport = isReport && ownsNothing(await read($, todos), id)
       // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
       // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
-      const isHandedBack = how === 'done' && handedBack.has(id) && !isGoingOn
+      const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
+      if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
       // Work nothing holds any more has nothing of its own left running in the background
@@ -8363,6 +8384,15 @@ const workHooks = (on: On) => {
       const now = await $.clock.now()
       const list = await read($, todos)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
+      // The chat passing on an answer the person gave on the card, which reached the work from there already, sends nothing: a
+      // second copy started work that had ended again, with nothing to do but say it was done
+      const given = target && e.agentId === undefined ? sentReplies.get(target.id) : undefined
+      // Only the very words given on the card, to work that has asked nothing since: words for a newer question still go
+      const isRepeat = Boolean(given?.isCard && (given.to === 'work' || given.to === 'read') && now - given.at < ANSWER_ECHO && plainWords(message) === plainWords(given.text))
+      if (given && target && isRepeat && !(target.ask && target.ask.at > given.at)) {
+        await log($, `refused a second copy of an answer to ${target.id}`)
+        return { deny: named(ANSWER_ALREADY_SENT(cut(given.text, 120))) }
+      }
       // The person's words passed on to work whose card asks them something answer that ask, as a press on the card does: the card's
       // own work, or the helper that asked. Marked at once, so a press on the card at the same moment counts once; undone if refused
       const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => one.ask?.from === target.id)) : undefined
@@ -9012,6 +9042,8 @@ const panelHooks = (on: On) => {
   // tab of the mod's but the panel has a first row whose Close, pressed or keyed x, closes it and hands the keys back to the panel
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const id = e.requestId ?? ''
+    // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
+    await noteTabAsked($, id)
     const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start))
     if (e.surface !== 'terminal' || !isTab) return next(e)
     const { Box, Button, Text } = uiOf($, e)
@@ -9026,7 +9058,7 @@ const panelHooks = (on: On) => {
         {body}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // Beside the chat: one small card per piece of work under way, as wide as the panel, every card the same height whatever the work
   // writes. Work that has ended leaves the panel. A card's Details is a tab of its own, drawn here too: all its to-dos, then its own chat
@@ -9604,7 +9636,6 @@ const panelHooks = (on: On) => {
     const endedFlows = flowList.filter(f => f.status !== 'working' && !isLingering(f, at))
     const flowShown = paneId.startsWith(FLOW_PANE) ? flowList.find(f => flowPaneOf(f.id) === paneId) : undefined
     const flowTokens = (f: Flow) => f.agents.reduce((sum, one) => sum + (one.tokens ?? 0), 0)
-    const boldRow = Math.max(20, Math.floor(perRow * 0.88))
     const agentsWord = (n: number) => `${n} ${n === 1 ? 'agent' : 'agents'}`
     // Where it stands, as Claude's own view of a workflow says it: "Workflow", how many agents it has started, its tokens and time,
     // in as many of those words as the row holds
@@ -9651,66 +9682,134 @@ const panelHooks = (on: On) => {
       if (f.status === 'failed') return 'Error'
       return round?.pass === true ? 'Passed' : round?.pass === false ? 'Not passed' : 'Ended'
     }
-    // The last round the checker has judged, in a few words: its verdict's mark, its number and what the checker found, or that it passed
-    const outcomeRow = (f: Flow, rounds: Round[], most: number) => {
-      const r = rounds.filter(one => !one.isOpen && (one.pass !== undefined || one.why)).at(-1)
-      if (!r) return <Text dimColor>{fitWords(f.status === 'working' ? 'No round checked yet' : 'No round was checked', most)}</Text>
-      // The round's number goes first when the row holds it; the squares above say which round it was when it does not
-      const why = (r.why || (r.pass ? 'passed' : r.pass === false ? 'failed' : 'ended')).replace(/[.。]+$/, '')
-      const whole = `Round ${r.n}: ${why}`
+    // The small card, built as every other card is: its title, which opens its Details, with Stop at the far end of that row; where
+    // it stands; the bar it is held to; then a row per round up to the cap, each led by its own squares, one per step, and saying
+    // what came of it: the round at work has the moving dots and who is at work, a checked round what its check found, a round not
+    // run yet that it runs only if needed. Once it ended, how it ended takes the place of the moving dots
+    const flowModel = (f: Flow) => modelName(f.agents.find(one => one.model)?.model ?? f.phases.find(one => one.model)?.model ?? '')
+    // As a card's facts line: every part, cut at its end on a narrow panel as a card's is
+    const flowFacts = (f: Flow, rounds: Round[]) => {
+      const time = took((f.endedAt || at) - f.startedAt)
+      const round = rounds.length && f.cap ? `round ${rounds.length} of ${f.cap}` : rounds.length ? `round ${rounds.length}` : ''
+      return [stood[f.status], flowModel(f), agentsWord(f.agents.length), round, time].filter(Boolean).join(' · ')
+    }
+    // Who is at work in a round, in plain words: the rounds script's maker and checker by name, any other stage by its own
+    const atWork = (f: Flow, r: Round) => {
+      const one = [...r.agents].reverse().find(agent => agent.status === 'working')
+      const phase = one?.phase || stageOf(f)
+      if (!one) return 'between steps'
+      if (phase === 'Make') return r.n === 1 ? 'Maker building it' : 'Maker fixing what the check found'
+      if (phase === 'Check') return 'Checker testing it against the bar'
+      return doing(phase || 'Working')
+    }
+    const flowDots = (key: string) =>
+      'Svg' in table && e.surface !== 'terminal' ? (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={dots(FLOW, LINE)} alt="Being done now" width={22} height={LINE} isInteractive />
+        </Box>
+      ) : e.surface === 'terminal' ? (
+        (termDots(table, $, paneId, key, FLOW) ?? <Text key={key} color={FLOW}>▸</Text>)
+      ) : (
+        <Text key={key} color={FLOW}>▸</Text>
+      )
+    const roundRow = (f: Flow, rounds: Round[], n: number, isPassed: boolean) => {
+      const r = rounds[n - 1]
+      const key = `flow-round-${f.id}-${n}`
+      const label = (color: string | undefined, isDim = false) => (
+        <Box key={`${key}-label`} flexShrink={0}>
+          <Text color={color} dimColor={isDim}>{`Round ${n}`}</Text>
+        </Box>
+      )
+      const row = (parts: unknown[]) => (
+        <Box key={key} flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
+          {squaresRow(f, r ? [r] : [], `${key}-squares`, n)}
+          {parts as never}
+        </Box>
+      )
+      if (!r && n === 1 && f.status === 'working') return row([label(FLOW), flowDots(`${key}-dots`), <Text key={`${key}-why`} color={FLOW} wrap="truncate-end">Starting</Text>])
+      if (!r) return row([label(undefined, true), <Text key={`${key}-why`} dimColor wrap="truncate-end">{isPassed ? 'not needed' : f.status === 'working' ? 'if needed' : 'not run'}</Text>])
+      if (r.isOpen)
+        return row([
+          label(FLOW),
+          f.status === 'working' ? flowDots(`${key}-dots`) : null,
+          <Box key={`${key}-what`} flexShrink={1} minWidth={0}>
+            <Text color={FLOW} wrap="truncate-end">{atWork(f, r)}</Text>
+          </Box>,
+        ])
+      const cutShort = r.pass === undefined && !r.why && r.agents.some(one => one.status !== 'done')
+      const why = (r.why || (r.pass ? 'passed' : r.pass === false ? 'failed' : cutShort ? (f.status === 'failed' ? 'stopped by an error' : 'stopped') : 'ended')).replace(/[.。]+$/, '')
+      const found = r.pass === false && r.findings.length ? `${r.findings.length} found · ` : ''
+      return row([
+        label(r.pass ? DONE : undefined),
+        <Box key={`${key}-why`} flexShrink={1} minWidth={0}>
+          <Text dimColor wrap="truncate-end">{r.pass ? `passed · ${why}` : `${found}${why}`}</Text>
+        </Box>,
+      ])
+    }
+    // Whether a run passed: its last round's verdict, else what the run itself returned
+    const flowPassed = (f: Flow, rounds: Round[]) => {
+      const pass = rounds.at(-1)?.pass
+      if (pass !== undefined) return pass
+      if (/"passed"\s*:\s*false|\bnot passed\b/i.test(f.result)) return false
+      if (/"passed"\s*:\s*true|\bpassed\b/i.test(f.result)) return true
+      return undefined
+    }
+    // How it ended, as its last line; a stopped run's facts line already says it was stopped
+    const flowEnd = (f: Flow, rounds: Round[]) => {
+      if (f.status !== 'done') return null
+      const n = rounds.length
+      const pass = flowPassed(f, rounds)
+      const of = f.cap ? ` of ${f.cap}` : ''
+      const said = pass === true ? `✓ Passed in round ${n}${of}` : pass === false ? `Not passed after ${n}${of} ${(f.cap ?? n) === 1 ? 'round' : 'rounds'}` : '✓ Finished'
       return (
-        <Box flexDirection="row" gap={1}>
-          <Text color={r.pass ? DONE : r.pass === false ? 'error' : undefined} dimColor={r.pass === undefined}>
-            {r.pass ? '✓' : r.pass === false ? '✕' : '·'}
-          </Text>
-          <Text dimColor>{whole.length <= most - 2 ? whole : fitWords(why, most - 2)}</Text>
+        <Box key={`flow-end-${f.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" paddingLeft={lead}>
+          {pass === false ? <Text color="error">✕</Text> : null}
+          <Text color={pass === false ? undefined : DONE} wrap="truncate-end">{said}</Text>
         </Box>
       )
     }
-
-    // The small card, the height of every other card: its title and where it stands; the squares with the step being run beside
-    // them, and the last round checked; Details, Stop and the round against the cap. Every line written to fit its row, never cut
     const flowSmall = (f: Flow) => {
       const rounds = roundsOf(f)
-      const word = stateWord(f, rounds)
-      const groups = squaresOf(f, rounds)
-      const squaresLetters = Math.ceil(squaresWidth(groups.length ? groups : [['waiting']]) / 7.5) + 2
+      const count = Math.max(rounds.length, f.cap ?? 0)
+      const isPassed = f.status === 'done' && flowPassed(f, rounds) === true
+      const scope = `flow-${f.id}`
       return (
         <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-          {/* Blue while it runs, green only when its last round passed */}
-          {f.status === 'working' || (f.status === 'done' && rounds.at(-1)?.pass !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE} /> : <Box width={1} flexShrink={0} />}
+          {/* Blue while it runs, green only when it finished and its last round did not fail */}
+          {f.status === 'working' || (f.status === 'done' && flowPassed(f, rounds) !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE} /> : <Box width={1} flexShrink={0} />}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-            <Box flexDirection="column" paddingLeft={lead}>
-              <Box height={1} overflow="hidden">
-                <Text bold>{fitWords(f.title, boldRow)}</Text>
-              </Box>
-              <Box height={1} overflow="hidden">
-                <Text dimColor>{flowGlance(f, perRow)}</Text>
-              </Box>
-            </Box>
-            <Box flexDirection="column" paddingLeft={lead}>
-              <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-                {squaresRow(f, rounds, `flow-squares-${f.id}`)}
-                <Text color={f.status === 'working' ? FLOW : word === 'Passed' ? DONE : undefined} dimColor={f.status !== 'working' && word !== 'Passed'}>
-                  {fitWords(word, Math.max(6, perRow - squaresLetters))}
-                </Text>
-              </Box>
-              <Box height={1} overflow="hidden">
-                {outcomeRow(f, rounds, perRow)}
-              </Box>
-            </Box>
-            <Box flexDirection="row" alignItems="center" gap={1} paddingLeft={lead}>
-              <Button key={`flow-open-${f.id}-${presses}`} label="Details" onPress={() => openFlow($, f.id)} />
-              {f.status === 'working' && f.session === flowMine ? <Button key={`flow-stop-${f.id}`} label="Stop" onPress={() => void stopFlow($, f.id)} /> : null}
-              <Box flexGrow={1} />
-              {roundsLabel(f, rounds) ? (
-                <Box flexShrink={0}>
-                  <Text color={f.status === 'working' ? FLOW : undefined} dimColor={f.status !== 'working'}>
-                    {roundsLabel(f, rounds)}
-                  </Text>
+            <Box flexDirection="column">
+              <Box flexDirection="row" gap={1} height={1} overflow="hidden">
+                <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
+                  <Button key={`flow-open-${f.id}-${presses}`} plain hover={{ scope, underline: true }} onPress={() => openFlow($, f.id)}>
+                    <Text bold wrap="truncate-end">{f.title}</Text>
+                  </Button>
                 </Box>
-              ) : null}
+                <Box flexGrow={1} />
+                {f.status === 'working' && f.session === flowMine ? (
+                  <Box flexShrink={0}>
+                    <Button key={`flow-stop-${f.id}`} label="Stop" plain dimColor hover={{ scope: `flow-stop-${f.id}`, underline: true }} onPress={() => void stopFlow($, f.id)} />
+                  </Box>
+                ) : null}
+              </Box>
+              <Box paddingLeft={lead}>
+                <Text dimColor wrap="truncate-end">{flowFacts(f, rounds)}</Text>
+              </Box>
             </Box>
+            {f.bar ? (
+              <Box flexDirection="row" gap={1} height={2} overflow="hidden" paddingLeft={lead}>
+                <Box flexShrink={0}>
+                  <Text dimColor>Bar ·</Text>
+                </Box>
+                <Box flexShrink={1} minWidth={0}>
+                  <Text dimColor wrap="wrap">{cut(f.bar, Math.max(20, room - 12))}</Text>
+                </Box>
+              </Box>
+            ) : null}
+            <Box flexDirection="column" paddingLeft={lead}>
+              {Array.from({ length: Math.max(1, count) }, (_, i) => roundRow(f, rounds, i + 1, isPassed))}
+            </Box>
+            {flowEnd(f, rounds)}
           </Box>
         </Box>
       )
@@ -10399,7 +10498,7 @@ const panelHooks = (on: On) => {
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
 
@@ -10445,7 +10544,7 @@ const tabHooks = (on: On) => {
         {reportsView($, uiOf($, e), kept, await $.clock.now(), line, e.props.scroll.bodyRows)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // Stats, in a pane of its own: drawn at once from what was read last, while the records are read again at most once a minute
   on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
@@ -10456,7 +10555,7 @@ const tabHooks = (on: On) => {
         {statsView(() => $.ui.invalidate('ui.render'), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // About, in a pane of its own
   on('ui.render', { component: 'Pane', requestId: CONFIG_PANE }, async ($, e) => {
@@ -10466,7 +10565,7 @@ const tabHooks = (on: On) => {
         {configView(ui, await configShown($), configActs($), band, presses, dir)}
       </ui.Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   on('ui.render', { component: 'Pane', requestId: ABOUT_PANE }, async ($, e) => {
     const { Box } = uiOf($, e)
@@ -10475,7 +10574,7 @@ const tabHooks = (on: On) => {
         {await aboutView($, uiOf($, e), e.surface)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // The changelog, in a pane of its own
   on('ui.render', { component: 'Pane', requestId: CHANGELOG_PANE }, async ($, e) => {
@@ -10485,7 +10584,7 @@ const tabHooks = (on: On) => {
         {await changelogView($, uiOf($, e), e.surface)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // A picture opened large, in a chat the app runs on another Mac over ssh
   on('ui.render', { component: 'Pane', requestId: PICTURE_PANE }, async ($, e) => {
@@ -10495,7 +10594,7 @@ const tabHooks = (on: On) => {
         {await pictureView($, e)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // A report opened as a pane of its own, named after it
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
@@ -10513,8 +10612,72 @@ const tabHooks = (on: On) => {
         {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
+}
+
+
+// ---- Tabs the app would leave saying "Nothing to show yet" ----
+
+// The app asks a tab for its drawing once, as it shows it, and again only when told the drawing changed. One ask that comes back
+// empty (the chat could not be reached that moment, or the drawing failed) leaves the tab empty until then, and a tab that reads
+// nothing that changes, as Stats, About or a result, is never told. So each ask is noted, and a tab open but not asked for since it
+// opened, since this code loaded, or since it came in front, is drawn again after 2, 6, 15 and 40 seconds until it is asked for. A
+// redraw tells the app to ask every tab it shows, so it reaches one the engine has never drawn as well
+const TAB_CHECKS = [2_000, 6_000, 15_000, 40_000]
+const tabAsked = new Map<string, number>()
+const tabFails = new Map<string, number[]>()
+let tabInFront = ''
+const noteTabAsked = async ($: EngineInterface, id: string | undefined) => {
+  if (id) tabAsked.set(id, await $.clock.now())
+}
+// `since`: how long before now an ask already counts, for a tab seen in front a moment after the app asked for it
+const watchTabs = async ($: EngineInterface, ids: string[], why: string, since = 0) => {
+  if (!ids.length) return
+  const from = (await $.clock.now()) - since
+  for (const wait of TAB_CHECKS)
+    $.clock.after(wait, async () => {
+      const open = new Set((await $.ui.panes().catch(() => [])).map(pane => pane.id))
+      const empty = ids.filter(id => open.has(id) && (tabAsked.get(id) ?? 0) < from)
+      if (!empty.length) return
+      $.ui.invalidate('ui.render')
+      if (wait === TAB_CHECKS.at(-1)) await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}: drawn again`)
+    })
+}
+// As this code loads: the tab in front where the engine says which it is, else every tab open (a tab behind the others is never
+// asked for, so it costs four redraws and no more)
+const watchLoaded = async ($: EngineInterface) => {
+  const panes = await $.ui.panes().catch(() => [])
+  const shown = panes.filter(pane => pane.isShown)
+  // the tab in front is watched here, not again by the first look each second
+  tabInFront = shown[0]?.id ?? ''
+  await watchTabs($, (shown.length ? shown : panes).map(pane => pane.id), 'this code loaded')
+}
+// Each second: a tab the person brought in front
+const watchFront = async ($: EngineInterface) => {
+  const front = (await $.ui.panes().catch(() => [])).find(pane => pane.isShown)?.id ?? ''
+  if (front === tabInFront) return
+  tabInFront = front
+  if (front) await watchTabs($, [front], 'it came in front', 2_000)
+}
+// A tab whose drawing failed shows why, in place of nothing, and is asked for again in a few seconds: three times a minute at most
+const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0] & { requestId?: string }, error: { kind: string; message?: string } | undefined) => {
+  const id = e.requestId ?? ''
+  const now = await $.clock.now()
+  const fails = [...(tabFails.get(id) ?? []).filter(at => now - at < 60_000), now]
+  tabFails.set(id, fails)
+  const why = error?.kind === 'timeout' ? 'It took too long to draw.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.'
+  await log($, `tab ${id} not drawn (${error?.kind ?? 'unknown'}): ${why}`)
+  const isAgain = fails.length < 3
+  if (isAgain) await watchTabs($, [id], 'its drawing failed')
+  const { Box, Text } = uiOf($, e)
+  return (
+    <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
+      <Text bold>This tab could not be drawn</Text>
+      <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
+      <Text dimColor wrap="wrap">{isAgain ? 'Trying again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
+    </Box>
+  )
 }
 
 // The hooks module's entry: the hooks of each part, in the order the engine runs them. The parts are the files beside it,

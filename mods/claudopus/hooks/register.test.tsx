@@ -2140,6 +2140,7 @@ test('work that answered while only its own background work held it, then stoppe
   const report = `The hover is gone and idle chats are no longer listed. ${'All tests pass and the version is pushed to main, installed on both Macs. '.repeat(8)}`
   // Its turn ends with its report while a watcher it started still runs: the engine holds it, and its card goes on working
   const answer = async (id: string, turnId: string) => {
+    await $.tool.call({ tool: 'Monitor', tool_use_id: `w-${turnId}`, agentId: id, command: 'tail -f build.log', description: 'watch the build', timeout_ms: 0 } as never)
     agents[id] = 'waiting'
     kinds[id] = 'general-purpose'
     await $.turn.complete({ answer: report, durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId: id } as never)
@@ -2199,6 +2200,7 @@ test('work that answered while only its own background work held it, then stoppe
   await $.agent.spawn({ ...spawn, description: 'Name the octopus', prompt: 'name it' } as never)
   agents.a4 = 'waiting'
   kinds.a4 = 'general-purpose'
+  await $.tool.call({ tool: 'Monitor', tool_use_id: 'w4', agentId: 'a4', command: 'tail -f names.log', description: 'watch the names', timeout_ms: 0 } as never)
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a4', message: 'Named it Otto.' } as never)
   // Its turn may end with no text of its own: the handback is its answer
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4s', reason: 'answer', agentId: 'a4' } as never)
@@ -2414,6 +2416,101 @@ test('work that answers on the way while a helper of its still works, with its t
   await clock.advance(20_000)
   expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined()
   await pane.unmount()
+})
+
+test('work that reports with nothing of its own running finishes, though the engine still holds it: the 14 Nov Azure card, which an answer passed on twice kept at work for hours, its clock running', SLOW, async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const { clock, resumed } = world(on, { art: true, agents, kinds })
+  on('classic.SubagentStop', () => ({ value: {} }) as never)
+  await $.session.start(start)
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const call = (tool: string, id: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, tool_use_id: id, agentId: 'a1', ...input } as never)
+  const labels = async () => (await pane.findAll({ type: 'Button' })).map(b => String(b.props.label))
+  // The card's line with its clock
+  const line = async () => (await pane.findAll({ type: 'Text' })).map(one => one.text ?? '').find(text => / · (\d+m )?\d+s$/.test(text))
+  // As the engine stops any work, it lists everything in flight in the whole session: here another work and its command
+  const stop = (id: string) =>
+    $.classic.SubagentStop({ agent_id: id, agent_type: 'general-purpose', agent_transcript_path: '', stop_hook_active: false, background_tasks: [{ id: 'a2', type: 'local_agent', status: 'running', description: 'Eyes, next round' }, { id: 'b9', type: 'local_bash', status: 'running', description: 'Fit the eyes' }] } as never)
+  await $.prompt.submit({ text: 'use the cloud for heavy work', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Heavy work on Azure', prompt: 'use azure' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Eyes, next round', prompt: 'eyes' } as never)
+  kinds.a1 = 'general-purpose'
+  agents.a2 = 'running'
+  // As at 22:24: everything it set out to do is done, it asks for the release and hands in its report. Every command and helper of
+  // its had ended, yet the engine went on listing it as held on background work of its own
+  await call('mcp__claudopus__todo', 't1', { item: 'One command that runs a job on Azure', state: 'done' })
+  await call('mcp__claudopus__ask', 'k1', { text: 'Release the Azure heavy-jobs route?', choices: ['Release it', 'Not now'] })
+  await call('SubagentHandback', 'h1', { message: 'Heavy work can now run on Azure. Built, tested and pushed on its own branch; it waits for your Release it.' })
+  agents.a1 = 'waiting'
+  await stop('a1')
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(20_000)
+  // Ended, its question on its card to answer, its clock stopped, and never said to have left something running: nothing of its own runs
+  expect(await drawn(pane)).toEqual(['wave'])
+  expect(await labels()).toContain('Release it')
+  expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined()
+  const asking = await line()
+  expect(asking).toMatch(/^Waits for your answer/)
+  await clock.advance(10 * 60_000)
+  expect(await line()).toBe(asking)
+
+  // The press starts it again with the answer, once
+  const release = (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')
+  await pane.press({ key: release?.key ?? '' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()
+  // It finds the release already done and reports in words, still held by the engine
+  await call('mcp__claudopus__note', 'n1', { text: 'Released: the route is on main.' })
+  await clock.advance(70_000)
+  const report = `The Azure heavy-jobs route is on main and its deploy succeeded. ${'Any worktree that merged main can send a job to its own large Azure machine. '.repeat(7)}`
+  await stop('a1')
+  await $.turn.complete({ answer: report, durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a1' } as never)
+  // It has finished: not at work, its clock stopped
+  expect(await drawn(pane)).toEqual(['happy'])
+  expect(await pane.find({ type: 'Text', text: /^Still at work/ })).toBeUndefined()
+  expect((await pane.findAll({ type: 'Button' })).some(b => b.key === 'stop-a1')).toBe(false)
+  expect(await line()).toMatch(/^Finished · /)
+  // and once its moment is over it leaves the list, as finished work does, never counting on
+  await clock.advance(60_000)
+  expect(await line()).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined()
+
+  // The chat, told of the press, passes the same answer on: it is not sent, so the ended work is not started a third time
+  const sends = resumed.length
+  const again = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Release it' } as never)
+  expect(String((again as { deny?: unknown }).deny)).toContain('gave on that work\'s card')
+  expect(resumed.length).toBe(sends)
+  expect(await line()).toBeUndefined()
+  // Words of the person's own that say something new still go
+  const steer = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'Also file the quota request.' } as never)
+  expect((steer as { deny?: unknown }).deny).toBeUndefined()
+  await pane.unmount()
+})
+
+test('the same words as a card answer still go when they answer a newer question, or when the person typed them in the chat', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Merge the branch', prompt: 'merge' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Proceed?', choices: ['Yes', 'Not now'] } as never)
+  const yes = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Yes')
+  await list.press({ key: yes?.key ?? '' })
+  await clock.advance(5_000)
+  // The work asks again, with the same answer to give: the chat passing the person's "Yes" on goes
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Also merge it?', choices: ['Yes', 'Not now'] } as never)
+  const sent = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Yes' } as never)
+  expect((sent as { deny?: unknown }).deny).toBeUndefined()
+  // An answer typed in the chat and passed on, then passed on again in the same words: only a card's answer is refused as a repeat
+  await clock.advance(5_000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'Tag it?', choices: ['Yes', 'Not now'] } as never)
+  await $.prompt.submit({ text: 'Yes', wait: false, origin: composer })
+  const first = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'Yes' } as never)
+  const second = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a1', message: 'Yes' } as never)
+  expect((first as { deny?: unknown }).deny).toBeUndefined()
+  expect((second as { deny?: unknown }).deny).toBeUndefined()
+  await list.unmount()
 })
 
 // Sounds and notifications: work that is ready, and work that needs the person
@@ -3439,43 +3536,36 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   // One card for the run, none for its agents
   expect(await until(async () => pane.find({ type: 'Text', text: /^Roman numerals$/ }))).toBeDefined()
   expect(await keyed(pane, 'open-a1')).toBeUndefined()
-  // Where it stands in as many words as fit its row: the models give way to the agents' count on a card this narrow
-  expect(await pane.find({ type: 'Text', text: /^Workflow · 3 agents · \d+s$/ })).toBeDefined()
-  // The run as squares, one per step, grouped by round: round 1's make done and its check failed, round 2's make running and its
-  // check not started. No moving dots
-  const squares = (await pane.findAll({ type: 'Svg' })).find(one => /^round 1/.test(String(one.props.alt)))
-  expect(squares?.props.alt).toBe('round 1: done, failed; round 2: running, waiting')
-  expect(String(squares?.props.source)).toContain('#E5534B')
-  expect(String(squares?.props.source)).toContain('#4E93EF')
-  expect(String(squares?.props.source).match(/<rect/g)).toHaveLength(4)
-  // What is happening now in one plain line, and each checked round in a few words: no "under way", nothing cut
-  expect((await pane.find({ type: 'Text', text: /^Making$/ }))?.props.color).toBe('#4E93EF')
-  expect(await pane.find({ type: 'Text', text: /^to_roman\(True\) is not refused$/ })).toBeDefined()
-  // Who is in it is said once, in Details: the card names no role or model
-  expect((await pane.findAll({ type: 'Text' })).filter(one => /maker|checker|Opus|Sonnet/.test(String(one.text)) && !/This chat/.test(String(one.text)))).toEqual([])
-  const said = (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
-  expect(said.filter(one => one.includes('…') || one.includes('under way'))).toEqual([])
-  expect((await pane.findAll({ type: 'Text' })).filter(one => one.props.wrap === 'truncate-end' && /Workflow|Roman/.test(String(one.text)))).toEqual([])
-  expect((await pane.find({ type: 'Text', text: /^round 2 of 3$/ }))?.props.color).toBe('#4E93EF')
-  // On a narrow panel every line still fits whole, shortened and never cut
+  // Built as every card is: the title opens Details and Stop sits at its right end; where it stands, as a card's facts line says it
+  expect(await keyed(pane, 'flow-open-wf_1')).toBeDefined()
+  expect((await pane.find({ type: 'Button', key: 'flow-stop-wf_1' }))?.props.plain).toBe(true)
+  expect(await pane.find({ type: 'Text', text: /^Opus 5\.5 · 3 agents · round 2 of 3 · \d+s$/ })).toBeDefined()
+  // The bar it is held to, under it
+  expect(await pane.find({ type: 'Text', text: /^Every case holds\.$/ })).toBeDefined()
+  // A row per round up to the cap, each led by its own squares: round 1's make done and its check failed, round 2's make running
+  // and its check not started, round 3 not run
+  const alts = (await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).filter(alt => /^round \d/.test(alt))
+  expect(alts).toEqual(['round 1: done, failed', 'round 2: running, waiting', 'round 3: waiting, waiting'])
+  const first = (await pane.findAll({ type: 'Svg' })).find(one => one.props.alt === 'round 1: done, failed')
+  expect(String(first?.props.source)).toContain('#E5534B')
+  // What round 1's check found, with how many; who is at work in round 2, in blue beside the moving dots; round 3 runs if needed
+  expect(await pane.find({ type: 'Text', text: /^1 found · to_roman\(True\) is not refused$/ })).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: /^Maker fixing what the check found$/ }))?.props.color).toBe('#4E93EF')
+  expect((await pane.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Being done now' && String(one.props.source).includes('#4E93EF'))).toBe(true)
+  expect(await pane.find({ type: 'Text', text: /^if needed$/ })).toBeDefined()
+  // No boxed Details button and no round count at the bottom: the card's own parts say it
+  expect((await pane.findAll({ type: 'Button' })).filter(one => one.props.label === 'Details')).toEqual([])
+  // On a narrow panel the rounds keep their rows
   await pane.unmount()
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 16 }, surface: 'desktop' } as never)
   await until(async () => narrow.find({ type: 'Text', text: /^Roman numerals$/ }))
-  expect(await narrow.find({ type: 'Text', text: /^Workflow · 3 agents · \d+s$/ })).toBeDefined()
-  expect(await narrow.find({ type: 'Text', text: /^Making$/ })).toBeDefined()
-  expect(await narrow.find({ type: 'Text', text: /^to_roman\(True\)$/ })).toBeDefined()
+  expect(await narrow.find({ type: 'Text', text: /^Maker fixing what the check found$/ })).toBeDefined()
   await narrow.unmount()
-  // On a wide panel the checker's words are whole
-  const wide = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  await until(async () => wide.find({ type: 'Text', text: /^Roman numerals$/ }))
-  expect(await wide.find({ type: 'Text', text: /^Round 1: to_roman\(True\) is not refused$/ })).toBeDefined()
-  expect(await wide.find({ type: 'Text', text: /^Workflow · 3 agents · \d+k tokens · \d+s$/ })).toBeDefined()
-  await wide.unmount()
   pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  // A surface that draws no pictures has the squares as letters
+  // A surface that draws no pictures has the squares as letters, a round's pair on its row
   const words = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   await until(async () => words.find({ type: 'Text', text: /^Roman numerals$/ }))
-  expect((await words.findAll({ type: 'Text', text: /^[■□]$/ })).map(one => one.text).join('')).toBe('■■■□')
+  expect((await words.findAll({ type: 'Text', text: /^[■□]$/ })).map(one => one.text).join('')).toBe('■■■□□□')
   await words.unmount()
   expect(await pane.find({ type: 'Text', text: /^Working on 1 thing$/ })).toBeDefined()
   // Kept in a file of its own, for the chat that started this session
@@ -3505,6 +3595,9 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeDefined()
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect(await pane.find({ type: 'Button', key: 'flow-stop-wf_1' })).toBeUndefined()
+  // Its last line says how it ended, from what the run returned when its last round has no verdict; a round it did not need says so
+  expect(await pane.find({ type: 'Text', text: /^✓ Passed in round 2 of 3$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^not needed$/ })).toBeDefined()
   // A workflow that passed makes the octopus happy for its pause too, then it rests
   const octopus = async () => (await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).find(alt => /^Claudopus/.test(alt))
   expect(await octopus()).toBe('Claudopus, work finished')
@@ -3513,7 +3606,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeUndefined()
   expect(await octopus()).toBe('Claudopus')
   await pressed(pane, 'finished-fold')
-  expect(await until(async () => pane.find({ type: 'Text', text: /^Finished · Workflow/ }))).toBeDefined()
+  expect(await until(async () => pane.find({ type: 'Text', text: /^Finished · (Opus 5\.5 · )?(\d agents · )?round 2 of 3/ }))).toBeDefined()
   expect(JSON.parse(files.get(`${MEMORY}/flows/wf_1.json`) ?? '{}').result).toBe('passed in 2 rounds')
   // Its end was heard and told, as a piece of work's is
   expect(played).toEqual(['sounds/ready.wav'])
@@ -3699,6 +3792,48 @@ test('a first install starts the record of changes seen at its own version, and 
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
   expect(await until(async () => (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
   expect(await pane.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+})
+
+
+// "Nothing to show yet": the app asks a tab for its drawing as it shows it, and asks again only when told something changed; one
+// empty answer (the chat out of reach that moment) left Stats, About or a result empty for good, as none of them reads anything that
+// changes. A tab open and never asked for since is drawn again until it is
+test('a tab opened but not asked for its drawing is drawn again within seconds, and one asked for costs nothing more', async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: true, isPlaced: true }]
+  const { clock } = world(on, { live })
+  let redraws = 0
+  on('ui.invalidate', () => ((redraws += 1), { value: undefined }) as never)
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  await pressed(pane, 'about-open')
+  await clock.advance(500)
+  const before = redraws
+  // The app's ask for About never came: two seconds on, the mod draws again, and asks the app to
+  await clock.advance(2_000)
+  expect(redraws).toBeGreaterThan(before)
+  // Opened again and asked for at once: no redraw of its own follows
+  await pressed(pane, 'about-open')
+  await clock.advance(100)
+  await $.ui.mount({ ...LIST, requestId: 'about', props: { ...LIST.props, title: 'About', bodyColumns: 80 }, surface: 'desktop' } as never)
+  await clock.advance(500)
+  const asked = redraws
+  await clock.advance(20_000)
+  expect(redraws).toBe(asked)
+})
+
+test('a tab left open as the mod loads, after an update or a reload, is drawn again if the app does not ask for it', async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: false, isPlaced: false }, { id: 'stats', isShown: false, isPlaced: false }]
+  const { clock } = world(on, { live })
+  let redraws = 0
+  on('ui.invalidate', () => ((redraws += 1), { value: undefined }) as never)
+  await $.session.start(start)
+  await clock.advance(500)
+  const before = redraws
+  await clock.advance(2_000)
+  expect(redraws).toBeGreaterThan(before)
+  // Four times at most, while nothing asks for it: a tab behind the others is never asked for
+  await clock.advance(60_000)
+  expect(redraws - before).toBeLessThanOrEqual(4)
 })
 
 // Config: the person's own texts, settings, and models

@@ -93,6 +93,8 @@ const chatHooks = (on: On) => {
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)
     $.clock.after(3000, () => closeUndrawn($))
+    // and every tab left open is drawn, though the app asked for it while this code was away (watchTabs)
+    await watchLoaded($).catch(err => log($, `tabs not watched: ${String(err)}`))
 
     // The engine's id names this chat's files, as its transcript is named
     const id = await $.session.id()
@@ -234,6 +236,7 @@ const chatHooks = (on: On) => {
       await shareMine($).catch(err => log($, `work not shared: ${String(err)}`))
       // The hidden boxes of the admin and secret runners, drawn in the panel in every chat
       await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
+      await watchFront($).catch(err => log($, `tab in front not watched: ${String(err)}`))
       if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
@@ -378,9 +381,13 @@ const chatHooks = (on: On) => {
       // what it hands back on the way (an answer to a question while it waits) is no report, and its card stays at work
       const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
       const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || answer.length >= REPORT_LEAST)
+      // A report in words, with nothing of its own running, has finished the work as a handback does: the engine may hold it on what
+      // no tool shows open, and the chat need not stop it. Its card ends with its clock, and an ask it leaves stays to be answered
+      const isIdleReport = isReport && ownsNothing(await read($, todos), id)
       // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
       // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
-      const isHandedBack = how === 'done' && handedBack.has(id) && !isGoingOn
+      const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
+      if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
       // Work nothing holds any more has nothing of its own left running in the background

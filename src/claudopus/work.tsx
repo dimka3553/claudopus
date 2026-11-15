@@ -205,6 +205,15 @@ const workHooks = (on: On) => {
       const now = await $.clock.now()
       const list = await read($, todos)
       const target = to ? (list.find(one => one.id === to) ?? list.find(one => to.startsWith(one.id))) : undefined
+      // The chat passing on an answer the person gave on the card, which reached the work from there already, sends nothing: a
+      // second copy started work that had ended again, with nothing to do but say it was done
+      const given = target && e.agentId === undefined ? sentReplies.get(target.id) : undefined
+      // Only the very words given on the card, to work that has asked nothing since: words for a newer question still go
+      const isRepeat = Boolean(given?.isCard && (given.to === 'work' || given.to === 'read') && now - given.at < ANSWER_ECHO && plainWords(message) === plainWords(given.text))
+      if (given && target && isRepeat && !(target.ask && target.ask.at > given.at)) {
+        await log($, `refused a second copy of an answer to ${target.id}`)
+        return { deny: named(ANSWER_ALREADY_SENT(cut(given.text, 120))) }
+      }
       // The person's words passed on to work whose card asks them something answer that ask, as a press on the card does: the card's
       // own work, or the helper that asked. Marked at once, so a press on the card at the same moment counts once; undone if refused
       const asking = target && words && e.agentId === undefined ? (list.find(one => one.id === target.id && one.ask) ?? list.find(one => one.ask?.from === target.id)) : undefined
