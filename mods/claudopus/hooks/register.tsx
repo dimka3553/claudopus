@@ -4594,7 +4594,9 @@ const skipPress = async ($: EngineInterface, version: string) => {
 const heldChecked = new Map<string, boolean>()
 const isDownloadHeld = async ($: EngineInterface, src: Source, steps: Steps) => {
   if (src.kind === 'none' || !steps.commit || !steps.tree) return false
-  if (pageRead && (pageRead.page.version !== steps.version || pageRead.page.tree !== steps.tree)) return false
+  // Checked against what this chat read on the page itself, never only against what the file says the tree is
+  const page = pageRead?.page ?? (await pageFor($, steps.version))
+  if (!page || page.version !== steps.version || page.tree !== steps.tree) return false
   const key = `${src.repo}|${steps.commit}|${steps.tree}`
   const known = heldChecked.get(key)
   if (known !== undefined) return known
@@ -4729,8 +4731,8 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   }
   if (n.kind === 'downloaded') {
     const replaces = isFolder
-      ? `Checked: it is what the release published. Move forward takes ${folder} from v${loaded} to v${v}, a fast-forward that never overwrites your own changes.`
-      : `Checked: it is what the release published. Install replaces v${loaded} in Claude Code's installed copy; new chats start on v${v}.`
+      ? `Checked against the release. Move forward takes ${folder} from v${loaded} to v${v}, fast-forward only.`
+      : `Checked against the release. Install replaces v${loaded}; new chats start on v${v}.`
     return box(
       'downloaded',
       [title(`Claudopus ${v} ${isFolder ? 'fetched' : 'downloaded'}`), line('replaces', replaces), track(1)],

@@ -309,12 +309,13 @@ export const fetchProgress = (said: string): { pct: number; got: number; phase: 
   return undefined
 }
 
-// git's fingerprint of a folder as it is on disk, counted as the release counts it: every file but those the folder's own ignore
-// files leave out (the engine's `.claude-plugin/types`, which a copy from a folder of the code carries) and the engine's `.in_use`
-// and `.orphaned_at` marks, never the person's global ignore list; so a copy Claude Code installed is compared with the release's `tree` file for file
+// git's fingerprint of a folder as it is on disk, every file counted, whatever ignore files in it say (a folder that ignores itself
+// would otherwise hide what it holds), but for what the engine itself makes in each copy it keeps: its `.in_use` and
+// `.orphaned_at` marks and the types it writes in `.claude-plugin/types`. So a copy Claude Code installed is compared with the
+// release's `tree` file for file
 export const TREE_OF_FOLDER =
   'd=$(mktemp -d) || exit 1; trap \'rm -rf "$d"\' EXIT; git init -q --bare "$d/g" || exit 1; ' +
-  'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" -c core.excludesFile=/dev/null add -A -- . ":(exclude).in_use" ":(exclude).orphaned_at" >/dev/null 2>&1 || exit 1; ' +
+  'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" -c core.excludesFile=/dev/null add -A -f -- . ":(exclude).in_use" ":(exclude).orphaned_at" ":(exclude).claude-plugin/types" >/dev/null 2>&1 || exit 1; ' +
   'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" write-tree'
 export const treeOfFolder = async (io: Pick<LookIo, 'run'>, folder: string) => {
   const out = await io.run(['sh', '-c', TREE_OF_FOLDER, 'sh', folder], 60_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))

@@ -8900,7 +8900,7 @@ test('Download, Install and Reload are each their own press: the folder moves on
   await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
   await pressed(panel, 'update-download')
   await shownIn(panel, 'Claudopus 0.1.2 fetched')
-  await shownIn(panel, /^Checked: it is what the release published\. Move forward takes .* from v0\.1\.0 to v0\.1\.2/)
+  await shownIn(panel, /^Checked against the release\. Move forward takes .* from v0\.1\.0 to v0\.1\.2, fast-forward only\.$/)
   expect(JSON.parse(files.get(`${MEMORY}/update-steps.json`) ?? '{}')).toMatchObject({ version: '0.1.2', stage: 'downloaded', commit: COMMIT, tree: TREE })
   // Downloaded, nothing the chat runs has moved
   expect(gitRan.some(one => one.startsWith('merge '))).toBe(false)

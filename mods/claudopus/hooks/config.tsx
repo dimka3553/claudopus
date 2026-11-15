@@ -324,7 +324,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             shown.version ? `This chat runs v${shown.version}` : 'Check now',
             [
               shown.updates?.where ? `It loads from ${shown.updates.where}.` : '',
-              shown.updates?.lookedAt ? `Last looked ${agoText(shown.updates.now - shown.updates.lookedAt)}${shown.updates.seen ? `: v${shown.updates.seen} is the newest out` : ''}.` : 'Not looked yet.',
+              shown.updates?.lookedAt ? `Last looked ${agoText(shown.updates.now - shown.updates.lookedAt)}${shown.updates.seen && !shown.check.said ? `: v${shown.updates.seen} is the newest out` : ''}.` : 'Not looked yet.',
             ]
               .filter(Boolean)
               .join(' '),
