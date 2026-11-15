@@ -297,6 +297,8 @@ const chatHooks = (on: On) => {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    // The texts a message is answered with are the ones known: a change made since is put back first
+    if (dir) await personCheck($).catch(err => log($, `files not compared as a message came: ${String(err)}`))
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
     // The notice that a workflow ended ends its card
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))

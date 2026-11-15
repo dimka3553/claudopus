@@ -446,6 +446,18 @@ const fakeSeal = (key: string, message: string) =>
 const boxSealed = (key: string, value: string) => `${[...`${key.slice(0, 12)}|${value}`].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('')}`.padEnd(344, 'A')
 // The public half of a runner's key, as bin/admin puts it in a request
 const BOX_PUBLIC = `MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA${'x'.repeat(300)}IDAQAB`
+// One of the person's settings or texts as Config writes it: the file, and what Claudopus knows it holds, so no check puts it back
+const ownSet = (files: Map<string, string>, name: string, text: string) => {
+  const known = (() => {
+    try {
+      return JSON.parse(files.get(`${MEMORY}/admin-known.json`) ?? '{}') as Record<string, unknown>
+    } catch {
+      return {}
+    }
+  })()
+  files.set(`${MEMORY}/admin-known.json`, JSON.stringify({ ...known, [name]: text }))
+  files.set(`${MEMORY}/${name}`, text)
+}
 // A button of the open card by its key less the count of presses the card adds to it
 const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; props: Record<string, unknown> }[]> }, base: string) =>
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))

@@ -164,6 +164,8 @@ let person = ''
 let models: Models = modelsOf({})
 // The settings read again: at a session's start, and after a change in the Config tab
 const loadSettings = async ($: EngineInterface) => {
+  // A change to the person's settings or texts made while no chat watched is put back before anything reads them
+  if (dir) await personCheck($).catch(err => log($, `files not compared as the mod loads: ${String(err)}`))
   const config = await readConfig($, dir)
   isOff = config.agents === false
   // Admin passwords an earlier version kept leave the keychain as the mod loads: none is kept any more

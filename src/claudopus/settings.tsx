@@ -5,7 +5,7 @@
 // The person's own copy of one of the three texts the mod ships (TEXTS in ./config), each written at its own fixed place in the
 // memory folder; the Config tab is the only writer, and nothing else is written there
 async function writeOwnText($: EngineInterface, memory: string, path: string, text: string) {
-  personWrote(memory, path, text)
+  await personWrote($, memory, path, text)
   if (path === 'rules/CLAUDE.md') return $.fs.write(`${memory}/rules/CLAUDE.md`, text)
   if (path === 'roles/chat.md') return $.fs.write(`${memory}/roles/chat.md`, text)
   if (path === 'roles/work.md') return $.fs.write(`${memory}/roles/work.md`, text)
@@ -47,7 +47,7 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
     else delete config.models
   } else if (value === undefined) delete config[key]
   else config[key] = value
-  personWrote(memory, 'config.json', `${JSON.stringify(config, null, 2)}\n`)
+  await personWrote($, memory, 'config.json', `${JSON.stringify(config, null, 2)}\n`)
   await $.fs.write(`${memory}/config.json`, `${JSON.stringify(config, null, 2)}\n`)
 }
 
@@ -67,7 +67,7 @@ async function putBack($: EngineInterface, memory: string, path: string) {
   const own = `${memory}/${path}`
   // Each copy put back is kept under a name of its own, so a second Reset never loses the first
   const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
-  personWrote(memory, path, null)
+  await personWrote($, memory, path, null)
   const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   return r.exitCode === 0 ? '' : r.stderr || 'not put back'
 }

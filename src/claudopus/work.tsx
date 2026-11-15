@@ -96,21 +96,25 @@ const workHooks = (on: On) => {
       if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool, e as never).catch(err => log($, `call not followed: ${String(err)}`))
       if (isWatched) callStarted(e.tool_use_id, await $.clock.now())
       let r: Awaited<ReturnType<typeof raw>> | undefined
-      // What a command does to the person's own files is looked at as it ends: a change is put back, and the work is told
+      // The person's own files are compared with what they are known to hold as every call begins, and as a command ends: a change
+      // is put back, and the work is told of what its command changed
       const isPersonWatched = e.tool === 'Bash' && Boolean(dir)
-      if (isPersonWatched) await personBegin($).catch(err => log($, `files not read before a command: ${String(err)}`))
+      const writes = FILE_TOOLS.includes(e.tool) ? personNamed(e) : ''
+      if (dir) await personCheck($).catch(err => log($, `files not compared before a call: ${String(err)}`))
+      if (writes) personWriting.add(writes)
       let isPersonEnded = false
       try {
         r = await raw(call)
         if (isPersonWatched) {
           isPersonEnded = true
-          const undone = await personEnd($, e).catch(() => [] as string[])
+          const undone = await personCheck($, e).catch(() => [] as string[])
           if (undone.length && !r.deny) r = { ...r, context: [...(r.context ?? []), PERSON_UNDONE(undone)] } as typeof r
         }
         if (!r.deny) await personSeen($, e).catch(() => undefined)
         return r
       } finally {
-        if (isPersonWatched && !isPersonEnded) await personEnd($, e).catch(() => undefined)
+        if (writes) personWriting.delete(writes)
+        if (isPersonWatched && !isPersonEnded) await personCheck($, e).catch(() => undefined)
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
