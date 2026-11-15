@@ -44,7 +44,7 @@ const prompts: string[] = []
 // A release on GitHub as the test world gives it: its version, commit and the tree it published; `got` a different tree that came
 // down instead, `manifest` a different version in it, `online` a newer commit online, and a fetch that fails, a folder with commits of its
 // own, or uncommitted changes the move would overwrite
-type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean }
+type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
 const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
@@ -282,7 +282,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (args[0] === 'rev-parse' && args.includes('--show-toplevel')) return ok('/plugins-src\n')
       if (args[0] === 'ls-files') return ok('mods/claudopus/.claude-plugin/plugin.json\n')
       if (args[0] === 'rev-parse' && args.includes('--git-dir')) return ok(release.worktree ? '/plugins-src/.git/worktrees/fix\n/plugins-src/.git\n' : '/plugins-src/.git\n/plugins-src/.git\n')
-      if (args[0] === 'symbolic-ref') return ok(release.worktree ? 'fix-bar\n' : 'main\n')
+      if (args[0] === 'symbolic-ref') return release.noBranch ? ok('', 1) : ok(release.worktree ? 'fix-bar\n' : 'main\n')
       if (args.includes('--symbolic-full-name')) return ok('origin/main\n')
       if (args[0] === 'rev-parse' && args.includes('--verify')) {
         const what = args.at(-1) ?? ''

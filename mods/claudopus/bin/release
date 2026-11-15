@@ -367,6 +367,7 @@ for try in 1 2 3 4 5; do
     rm -f "$notes" "$notes.err"
     git -C "$top" fetch -q "$REMOTE" "$MAIN"
     echo "released ${label}${what} as $sha"
+    [ "$NAME" = Claudopus ] && [ -n "${ver:-}" ] && echo "Claudopus $ver is out: once the panel shows it (at its next look, or at once with Config's Check now), press Update, then type /reload-plugins in each open chat."
     cd "$top" || exit 0
     if [ -n "$AFTER" ]; then bash -c "$AFTER" || say "released, but the after-step failed"; fi
     [ -n "$failed" ] && die "$failed" 4

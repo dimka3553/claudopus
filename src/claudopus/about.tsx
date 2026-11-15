@@ -55,7 +55,7 @@ const aboutView = async ($: EngineInterface, ui: Ui, surface?: string) => {
         {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving', $, { surface, requestId: ABOUT_PANE })}
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold>Claudopus</Text>
-          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} is installed, new chats use it` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
+          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} ready, type /reload-plugins` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
         </Box>
       </Box>
       {band(

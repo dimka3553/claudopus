@@ -126,7 +126,7 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   expect(await until(() => config.find({ type: 'Text', text: 'This chat runs v0.1.0' }))).toBeDefined()
   // Where it loads from, said as it is
-  expect(await until(() => config.find({ type: 'Text', text: /^It loads from the folder .*, Claudopus's own checkout on main\. Not looked yet\.$/ }))).toBeDefined()
+  expect(await until(() => config.find({ type: 'Text', text: /^It loads from Claudopus's released code on this Mac\. Not looked yet\.$/ }))).toBeDefined()
   await pressed(config, 'config-check')
   expect(await until(() => config.find({ type: 'Text', text: 'Checking…' }))).toBeDefined()
   expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check now')).toBe(false)
@@ -146,7 +146,7 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page has no fingerprint/ }))
+  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page has nothing to check the new version against/ }))
   expect(failed?.props.color).toBe('error')
   // How often: one choice, written as the two keys; Only when I ask is updates false
   await config.select({ key: 'config-look-pick', value: '24' })
