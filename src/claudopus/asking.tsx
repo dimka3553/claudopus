@@ -265,7 +265,9 @@ const asPressed = (one: Todo): Todo => {
 // times a second, and reports each move as the person's own scroll (found live, 15 Nov: stuck at the box while typing, a bounce
 // once the moves were refused). A pane has no part that stays still, so on a surface whose bar above the prompt takes a box
 // (barBoxes: the bar was drawn there with an Input in its table) an ask's reply box is drawn in that bar, a site of its own that the
-// pane's scrolling does not reach, and never in the pane
+// pane's scrolling does not reach, and never in the pane. It is there only once the person asks for it: the card's answers end
+// with "Reply in your own words", which opens the box in the bar for that card, and Close takes it away again (16 Nov: a box
+// always in the bar looked bad, and the person asked for it as one of the options)
 const barBoxes = new Set<string>()
 // Surfaces whose bar is folded by the person or held by a survey: nothing of the mod's shows there just now
 const barShut = new Set<string>()
@@ -276,15 +278,29 @@ const repliesInBar = (surface: string) => barBoxes.has(surface)
 let barBoxAt = 0
 const BAR_BOX_HELD = 300_000
 const isBarBox = (element: string | undefined) => /^band-.*-reply-/.test(element ?? '')
-// The card the bar's box is for: it stays with a card until that one is answered, so a newer question never takes the box from
-// under what the person is typing; then it goes to the one that asked last. A press on another card points it there (Reply to this one)
+// The card whose reply box is open in the bar, none when it is closed: opened by the card's "Reply in your own words", closed by
+// Close (on the card or in the bar), by the reply sent, or by the ask going. One box at a time: opened on another card it is that
+// card's, and what was half typed is kept for the card it was typed for
 let replyTo = ''
-// This chat's cards that wait for a reply, the newest ask first, as the panel orders them
-const asksForBar = (cards: Todo[]) =>
-  cards.filter(one => !one.parentId && !one.chat && Boolean(asPressed(one).ask) && !isActingOnReply(one)).sort((a, b) => (b.ask?.at ?? 0) - (a.ask?.at ?? 0))
-const barTarget = (cards: Todo[]) => {
-  const asking = asksForBar(cards)
-  return asking.find(one => one.id === replyTo) ?? asking[0]
+// This chat's cards that wait for an answer
+const asksForBar = (cards: Todo[]) => cards.filter(one => !one.parentId && !one.chat && Boolean(asPressed(one).ask) && !isActingOnReply(one))
+const barTarget = (cards: Todo[]) => (replyTo ? asksForBar(cards).find(one => one.id === replyTo) : undefined)
+// The bar's own id on each surface, as its drawing is asked for: where the cursor is put when the box opens
+const barIds = new Map<string, string>()
+// Opens the bar's reply box for a card, or closes it. Opening it, the cursor is asked into the box: the app gives it only where
+// the bar already holds the keys, so where it does not the person clicks the box
+const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) => {
+  replyTo = one?.id ?? ''
+  barBoxAt = 0
+  presses += 1
+  redraw($)
+  const ask = one?.ask
+  const bar = barIds.get(surface)
+  if (!one || !ask || !bar) return
+  void $.ui
+    .focus({ requestId: bar, key: `band-${one.id}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}` })
+    .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
+    .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
 }
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another

@@ -1829,7 +1829,9 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
   const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   const barBox = async () => (await bar.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await clock.advance(3000)
-  await barBox()
+  const open = await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Reply in your own words'))
+  await list.press({ key: open?.key ?? '' })
+  expect(await until(async () => barBox())).toBeDefined()
   await box()
   for (const typed of ['M', 'Mo', 'Mossy heron 2203']) await bar.input({ key: (await barBox())?.key ?? '', text: typed, kind: 'change' } as never)
   await clock.advance(200_000)
@@ -1845,7 +1847,7 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
   await list.unmount()
 })
 
-test("where the bar above the prompt takes a box, an ask's reply is typed there and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); with several asking a card's press points the bar's box at it and each draft is kept; a folded bar is said on the card", async ($, on) => {
+test("where the bar above the prompt takes a box, a card's answers end with Reply in your own words, which opens the reply box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time", async ($, on) => {
   const { appended, clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
@@ -1856,21 +1858,33 @@ test("where the bar above the prompt takes a box, an ask's reply is typed there 
   type Site = typeof list
   const boxesIn = async (site: Site) => (await site.findAll({ type: 'Input' } as never)).filter(one => /-reply-/.test(one.key ?? ''))
   const says = async (site: Site, text: RegExp) => (await site.findAll({ type: 'Text' })).some(one => text.test(one.text ?? ''))
+  const labelled = async (site: Site, label: string) => (await site.findAll({ type: 'Button' })).filter(b => b.props.label === label)
+  const OPEN = 'Reply in your own words'
+  const CLOSE = 'Close the reply box'
   // A surface whose bar was never drawn keeps the card's own box: a reply in words can always be typed somewhere
   expect((await boxesIn(list)).length).toBe(1)
-  // The bar drawn on the desktop: the box is in it, under a line naming the work, and gone from the panel and Details
+  expect((await labelled(list, OPEN)).length).toBe(0)
+  // The bar drawn on the desktop: no box anywhere until it is asked for, and the card's answers, in the panel and in Details, end
+  // with the one that opens it
   const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   expect(await until(async () => ((await boxesIn(list)).length === 0 && (await boxesIn(details)).length === 0 ? true : undefined))).toBe(true)
-  expect((await boxesIn(bar)).length).toBe(1)
-  expect(await says(bar, /Reply to “Check the ears”/)).toBe(true)
-  expect(await says(list, /^✎ Or reply in words in the bar above the chat's prompt$/)).toBe(true)
-  expect(await says(details, /^✎ Or reply in words in the bar above the chat's prompt$/)).toBe(true)
-  // The card keeps its buttons
-  expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label))).toEqual(expect.arrayContaining(['Left', 'Right']))
+  expect((await boxesIn(bar)).length).toBe(0)
+  expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label)).filter(label => ['Left', 'Right', OPEN].includes(label))).toEqual(['Left', 'Right', OPEN])
+  expect((await labelled(details, OPEN)).length).toBe(1)
   // The terminal's panel keeps its own box: only the desktop app drags a pane to it
   const term = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   expect((await boxesIn(term)).length).toBe(1)
+  expect((await labelled(term, OPEN)).length).toBe(0)
   await term.unmount()
+  // Pressed: one box, in the bar, beside the name of the work it goes to and a Close; the card says where it is and offers to close it
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(bar)).length === 1 ? true : undefined))).toBe(true)
+  expect(await says(bar, /^↳ Your reply to “Check the ears”$/)).toBe(true)
+  expect((await labelled(bar, 'Close')).length).toBe(1)
+  expect((await boxesIn(list)).length + (await boxesIn(details)).length).toBe(0)
+  expect(await says(list, /^✎ Your reply box is open above the chat's prompt$/)).toBe(true)
+  expect((await labelled(list, CLOSE)).length).toBe(1)
+  expect((await labelled(list, OPEN)).length).toBe(0)
   // Half typed: the same box through the bar's own drawings, drawn with the text it was last drawn with, never with letters
   // older than the box holds
   const [first] = await boxesIn(bar)
@@ -1878,35 +1892,42 @@ test("where the bar above the prompt takes a box, an ask's reply is typed there 
   await clock.advance(6000)
   expect((await boxesIn(bar))[0]?.key).toBe(first?.key)
   expect((await boxesIn(bar))[0]?.props.value ?? '').toBe('')
-  // A second piece of work asks while that reply is half typed: the box stays the first card's, the bar says one more asks, and
-  // the newer card offers the box
+  // Closed from the bar: the box is gone and the card offers it again; opened again, what was typed is back
+  await bar.press({ key: (await labelled(bar, 'Close'))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(bar)).length === 0 ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await labelled(list, OPEN)).length === 1 ? true : undefined))).toBe(true)
+  expect(await says(list, /reply box is open/)).toBe(false)
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(bar))[0]?.props.value === 'The left, but ke' ? true : undefined))).toBe(true)
+  // Closed from the card, the same
+  await list.press({ key: (await labelled(list, CLOSE))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(bar)).length === 0 ? true : undefined))).toBe(true)
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(bar)).length === 1 ? true : undefined))).toBe(true)
+  // A second piece of work asks while the box is open: the box stays the first card's, and the newer card offers its own
   await $.agent.spawn({ ...spawn, description: 'Sort the invoices', prompt: 'sort the invoices' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which month?', choices: ['October', 'November'] } as never)
-  expect(await until(async () => ((await says(bar, /^ · 1 more waits in the panel · Which ear first\?$/)) ? true : undefined))).toBe(true)
-  expect(await says(bar, /Reply to “Check the ears”/)).toBe(true)
-  expect((await boxesIn(bar)).map(one => one.key)).toEqual([first?.key])
-  expect((await boxesIn(list)).length).toBe(0)
-  const offer = async () => (await list.findAll({ type: 'Button' })).filter(b => b.props.label === '✎ Reply to this one in words')
-  expect(await until(async () => ((await offer()).length === 1 ? true : undefined))).toBe(true)
-  // Pressed, the box is the newer card's, empty; pressed on the first card again, its half-typed reply is back
-  await list.press({ key: (await offer())[0]?.key ?? '' })
-  expect(await until(async () => ((await says(bar, /Reply to “Sort the invoices”/)) ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await labelled(list, OPEN)).length === 1 && (await labelled(list, CLOSE)).length === 1 ? true : undefined))).toBe(true)
+  expect(await says(bar, /^↳ Your reply to “Check the ears”$/)).toBe(true)
+  // Opened on the newer card it is that card's, empty; opened on the first again, its half-typed reply is back
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await says(bar, /^↳ Your reply to “Sort the invoices”$/)) ? true : undefined))).toBe(true)
+  expect((await boxesIn(bar)).length).toBe(1)
   expect((await boxesIn(bar))[0]?.props.value ?? '').toBe('')
-  expect((await offer()).length).toBe(1)
-  await list.press({ key: (await offer())[0]?.key ?? '' })
-  expect(await until(async () => ((await says(bar, /Reply to “Check the ears”/)) ? true : undefined))).toBe(true)
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await says(bar, /^↳ Your reply to “Check the ears”$/)) ? true : undefined))).toBe(true)
   expect((await boxesIn(bar))[0]?.props.value).toBe('The left, but ke')
-  // Sent from the bar: it reaches the work in the person's own words, and the box moves on to the card that still asks
+  // Sent from the bar: it reaches the work in the person's own words, and the box goes with the ask, on to no other card
   await bar.input({ key: (await boxesIn(bar))[0]?.key ?? '', text: 'The left, but keep the scan' })
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('in their own words: The left, but keep the scan')))).toBeDefined()
-  expect(await until(async () => ((await says(bar, /Reply to “Sort the invoices”/)) ? true : undefined))).toBe(true)
-  expect(await says(bar, / more wait/)).toBe(false)
-  // The bar folded by the person: nothing of it shows, so the card says how to get the box back
+  expect(await until(async () => ((await boxesIn(bar)).length === 0 ? true : undefined))).toBe(true)
+  expect((await labelled(list, OPEN)).length).toBe(1)
+  // The bar folded by the person: nothing of it shows, so the card says how to get at the box instead of offering it
   await bar.unmount()
   await clock.advance(2000)
   const folded = await $.ui.mount({ ...BAND, props: { ...BAND.props, isCollapsed: true }, surface: 'desktop' } as never)
   expect(await until(async () => ((await says(list, /^✎ To reply in words, open the folded bar above the chat's prompt$/)) ? true : undefined))).toBe(true)
-  expect((await boxesIn(list)).length).toBe(0)
+  expect((await boxesIn(list)).length + (await labelled(list, OPEN)).length).toBe(0)
   // One of the app's surveys in the bar: the box has no place there, and the card has its own again
   await folded.unmount()
   await clock.advance(2000)
@@ -1914,9 +1935,11 @@ test("where the bar above the prompt takes a box, an ask's reply is typed there 
   expect(await until(async () => ((await boxesIn(list)).length === 1 ? true : undefined))).toBe(true)
   await surveyed.unmount()
   await clock.advance(2000)
-  // The bar back: a button pressed on the card answers it, and the box leaves the bar with the ask
+  // The bar back and the box opened: a button pressed on the card answers it, and the box leaves the bar with the ask
   const again = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-  expect(await until(async () => ((await boxesIn(again)).length === 1 && (await boxesIn(list)).length === 0 ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await labelled(list, OPEN)).length === 1 ? true : undefined))).toBe(true)
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(again)).length === 1 ? true : undefined))).toBe(true)
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'October')?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"October"')))).toBeDefined()
   expect(await until(async () => ((await boxesIn(again)).length === 0 ? true : undefined))).toBe(true)

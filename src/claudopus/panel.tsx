@@ -305,20 +305,24 @@ const panelHooks = (on: On) => {
             {answers.map((choice, n) => (
               <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
+            {/* Where the bar above the prompt holds the reply box, the last answer opens it there for this card, and closes it again */}
+            {'Input' in table && repliesInBar(e.surface) && !barShut.has(e.surface) ? (
+              replyTo === one.id ? (
+                <Button key={`${key}-inbar-close-${presses}`} label="Close the reply box" onPress={press => openReply($, undefined, press.surface)} />
+              ) : (
+                <Button key={`${key}-inbar-${presses}`} label="Reply in your own words" onPress={press => openReply($, one, press.surface)} />
+              )
+            ) : null}
           </Box>
           )}
-          {/* Where the bar above the prompt holds the reply box, the card only says so: a box typed in here is what the app drags the
-              panel to. With several asking, a press points the bar's box at this one */}
+          {/* Where the bar above the prompt holds the reply box, the card has none: a box typed in here is what the app drags the
+              panel to. It says where the box is once opened, and how to get at it while the bar is folded */}
           {'Input' in table && !one.chat && repliesInBar(e.surface) ? (
             barShut.has(e.surface) ? (
               <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ To reply in words, open the folded bar above the chat's prompt</Text>
-            ) : barTarget(own)?.id === one.id ? (
-              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Or reply in words in the bar above the chat's prompt</Text>
-            ) : (
-              <Box flexDirection="row">
-                <Button key={`${key}-inbar-${presses}`} label="✎ Reply to this one in words" plain onPress={() => void ((replyTo = one.id), (presses += 1), redraw($))} />
-              </Box>
-            )
+            ) : replyTo === one.id ? (
+              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Your reply box is open above the chat's prompt</Text>
+            ) : null
           ) : 'Input' in table && !one.chat ? (
             <Box width="100%" flexDirection="column">
               <table.Input

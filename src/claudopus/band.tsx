@@ -6,8 +6,7 @@ const BAND_PICK = 6000
 // Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
 // Pressed, it takes the list back to its top; nothing else moves the list
 // Work that just finished, in its moment at the top, is pointed at the same way, in green, under what waits
-// At the end of the reply box's own line (barReply) it is said short, so the name of the work replied to keeps its room
-const waitMarker = async ($: EngineInterface, ui: Ui, surface: string, isShort = false) =>
+const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
   (waitsAtTop > 0 || finishedAtTop.length > 0) && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced) ? (
     <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden">
       <ui.Button
@@ -17,43 +16,40 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string, isShort =
         onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
       >
         {waitsAtTop > 0 ? (
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 waits' : `${waitsAtTop} wait`}${isShort ? '' : ' for you'} at the top${isShort ? '' : ' of the panel'}${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
+          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 waits' : `${waitsAtTop} wait`} for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
         ) : (
-          <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${isShort ? cut(finishedAtTop[0] ?? '', 24) : finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}${isShort ? '' : ', at the top of the panel'}`}</ui.Text>
+          <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}, at the top of the panel`}</ui.Text>
         )}
       </ui.Button>
     </ui.Box>
   ) : null
-// The reply box of the card that asks, in the bar above the prompt (asking.tsx, repliesInBar): one line naming the work the reply goes
-// to and how many more things wait in the panel, with the line that points at the panel's top at its end, so the bar keeps its
-// height as the panel is scrolled; and the box under it. While the box holds the cursor the bar is not drawn anew for that line
-// (the bar's hook), so nothing in it moves as the person scrolls the panel. The box is the card's own: the same drafts, the same
-// answer, a new one for each ask
-const barReply = ($: EngineInterface, ui: Ui, one: Todo, ask: NonNullable<Todo['ask']>, more: number, marker: JSX.Element | null) => {
+// The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
+// to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
+// panel's scrolling. The box is the card's own: the same drafts, the same answer, a new one for each ask. It takes the cursor when
+// the person clicks anywhere in the bar (autoFocus)
+const barReply = ($: EngineInterface, ui: Ui, one: Todo, ask: NonNullable<Todo['ask']>) => {
   const draft = draftOf(one.id, ask)
   return (
-    <ui.Box key="band-reply" flexDirection="column" flexShrink={0}>
-      <ui.Box key="band-reply-to" flexDirection="row" gap={2} height={1} overflow="hidden">
-        <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
-          <ui.Text wrap="truncate-end">
-            <ui.Text color={NEEDS} bold>{`↳ Reply to “${cut(titleOf(one), 48)}”`}</ui.Text>
-            <ui.Text dimColor>{`${more > 0 ? ` · ${more} more ${more === 1 ? 'waits' : 'wait'} in the panel` : ''} · ${oneLine(ask.text)}`}</ui.Text>
-          </ui.Text>
-        </ui.Box>
-        {marker}
+    <ui.Box key="band-reply" flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
+      <ui.Box flexShrink={1} minWidth={0}>
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your reply to “${cut(titleOf(one), 40)}”`}</ui.Text>
       </ui.Box>
       {'Input' in ui ? (
-        <ui.Box width="100%" flexDirection="column">
+        <ui.Box flexShrink={0}>
           <ui.Input
             key={`band-${one.id}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
-            placeholder="Reply in your own words"
+            placeholder="Type your reply"
             value={draftShown(one.id, ask)}
             submitLabel="send"
+            autoFocus
             onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
             onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
           />
         </ui.Box>
       ) : null}
+      <ui.Box flexShrink={0}>
+        <ui.Button key={`band-reply-close-${presses}`} label="Close" plain onPress={press => openReply($, undefined, press.surface)} />
+      </ui.Box>
     </ui.Box>
   )
 }
@@ -74,6 +70,7 @@ const bandHooks = (on: On) => {
     // While one of the app's surveys holds the bar the box has no place in it, and the card has its own again
     const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey
     const isShut = canBox && Boolean(e.props.isCollapsed)
+    if (e.requestId) barIds.set(e.surface, e.requestId)
     const cards = await read($, todos)
     const flipAt = await $.clock.now()
     if ((canBox !== barBoxes.has(e.surface) || isShut !== barShut.has(e.surface)) && flipAt - barFlipAt >= 1000) {
@@ -147,19 +144,16 @@ const bandHooks = (on: On) => {
         )
       }
     }
-    // Where the bar takes the reply box: the card that asks, or the one the person pointed it at, and how many more ask
-    const asking = canBox && !isShut ? asksForBar(cards) : []
-    const target = asking.length ? barTarget(cards) : undefined
+    // The reply box the person opened from a card, while that card still asks; its ask answered or gone, the box goes with it
+    const target = canBox && !isShut ? barTarget(cards) : undefined
+    if (replyTo && canBox && !isShut && !target) replyTo = ''
     if (target?.ask) {
-      // The box stays this card's until it is answered
-      replyTo = target.id
-      // What else waits at the panel's top, this ask aside: the other cards that ask, and the notices and gates the panel counts
-      const more = Math.max(asking.length, waitsAtTop) - 1
-      const shape = JSON.stringify([target.id, askMark(target.ask), replies.get(target.id) ?? 0, more, working.length > 0, happy])
+      // Drawn as it was while the box is typed in or holds the cursor: nothing but the card it is for, or work starting or ending,
+      // draws it anew, so the panel scrolled under the cursor moves nothing here
+      const shape = JSON.stringify([target.id, askMark(target.ask), replies.get(target.id) ?? 0, working.length > 0, happy])
       const held = barHeld.get(e.surface)
       if ((isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)) && held?.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
-      // Drawn afresh, its line's end points at the panel's top when the panel is scrolled away from it
-      const reply = barReply($, ui, target, target.ask, more, await waitMarker($, ui, e.surface, true))
+      const reply = barReply($, ui, target, target.ask)
       let drawing: JSX.Element = reply
       if (working.length || happy) {
         await read($, figuresAt)
@@ -167,7 +161,7 @@ const bandHooks = (on: On) => {
         if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
         const drawn = figures ? usageDrawn(ui, figures) : null
         drawing = (
-          <Box flexDirection="column">
+          <Box flexDirection="column" gap="sm">
             {reply}
             <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
               {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
