@@ -583,6 +583,16 @@ const ownSet = (files: Map<string, string>, name: string, text: string) => {
 const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; props: Record<string, unknown> }[]> }, base: string) =>
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
+// The person pressing one of an ask's answers on purpose: the panel has held still under the pointer for a second first, and an answer
+// that releases, allows or approves is left to go once its moment to take it back is over
+const answer = async (clock: { advance: (ms: number) => Promise<unknown> }, pane: { press: (q: { key: string }) => Promise<unknown>; findAll: (q: { type: 'Text' }) => Promise<{ text: string }[]> }, key: string) => {
+  await clock.advance(1000)
+  let isDone = false
+  const pressing = pane.press({ key }).finally(() => void (isDone = true))
+  await until(async () => isDone || (await pane.findAll({ type: 'Text' })).some(one => one.text.startsWith('You answered: ')) || undefined)
+  if (!isDone) await clock.advance(5000)
+  return pressing
+}
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
 // What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
 // (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a

@@ -59,6 +59,8 @@ const panelHooks = (on: On) => {
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
+    // Drawn afresh, a pane is new under the pointer: a press on an ask's answer counts only once it has held still (STEADY)
+    paneMoved(paneId, heldAt)
     if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
@@ -298,17 +300,27 @@ const panelHooks = (on: On) => {
           {one.chat ? (
             <Text key={`${key}-elsewhere`} dimColor wrap="wrap">{`Answer it in its own chat, “${one.chat.title || 'another chat'}”${one.chat.host ? `, on ${one.chat.host}` : ''}.`}</Text>
           ) : null}
-          {one.chat ? null : (
+          {/* An approving answer pressed: said back, with a press to take it back before it reaches the work */}
+          {!one.chat && answerHeld.get(one.id)?.askAt === ask.at ? (
+            <Box key={`${key}-held`} flexDirection="column" gap={1}>
+              <Text wrap="wrap" bold>{`You answered: “${answerHeld.get(one.id)?.choice ?? ''}”. It reaches the work ${HOLD / 1000} seconds after your press, unless you take it back.`}</Text>
+              <Box flexDirection="row">
+                <Button key={`${key}-take-back-${askMark(ask)}`} label="Take it back" onPress={() => void ((presses += 1), answerHeld.get(one.id)?.settle(false))} />
+              </Box>
+            </Box>
+          ) : null}
+          {one.chat || answerHeld.get(one.id)?.askAt === ask.at ? null : (
           <Box flexDirection="row" flexWrap="wrap" gap={1}>
             {answers.map((choice, n) => (
-              <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
+              <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={press => void ((presses += 1), answerPress($, one, choice, press).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
           </Box>
           )}
-          {'Input' in table && !one.chat ? (
+          {refusedLine(one, at) ? <Text key={`${key}-refused`} color={NEEDS} wrap="wrap">{refusedLine(one, at)}</Text> : null}
+          {'Input' in table && !one.chat && answerHeld.get(one.id)?.askAt !== ask.at ? (
             <Box width="100%" flexDirection="column">
               <table.Input
-                key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
+                key={((replyBoxes.set(`${paneId}|${one.id}`, `${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`)), `${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`)}
                 autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={draftShown(one.id, ask)}

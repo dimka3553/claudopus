@@ -15,6 +15,8 @@ const commandHooks = (on: On) => {
   // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
   // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
+    // Where the person's focus last moved in the mod's panes: a press on the desktop counts only on a button it just moved onto (pressSeen)
+    if (e.origin.kind === 'person' && e.plugin === 'claudopus') focusMoved(e.element, e.requestId, await $.clock.now())
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
@@ -25,6 +27,9 @@ const commandHooks = (on: On) => {
   })
   // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
   on('ui.scroll', async ($, e, next) => {
+    // Scrolled by anyone, the app's own pull back to a focused box too, what is under the pointer moved: a press on an ask's answer
+    // that lands within STEADY of it does not count (answerPress)
+    paneMoved(e.requestId, await $.clock.now())
     if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
     return next(e)
   }).catch(($, e, next) => next(e))

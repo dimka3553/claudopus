@@ -1,0 +1,3 @@
+- An ask's button answers only when you deliberately click it: a press that lands just as the panel moved or scrolled under your pointer, or one made by a key (such as a space typed while the focus sat on a button), does not count. The card says so, gives your typing back to the reply box, and asks you to click again.
+- A reply typed in an ask's box and not sent wins over its buttons: pressing a button then answers nothing until you send the reply or clear the box.
+- An answer that releases, allows or approves something is said back on the card ("You answered: Release it") and reaches the work only five seconds later, with a Take it back button meanwhile.

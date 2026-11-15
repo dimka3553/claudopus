@@ -446,7 +446,7 @@ test('work that reports with nothing of its own running finishes, though the eng
 
   // The press starts it again with the answer, once
   const release = (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')
-  await pane.press({ key: release?.key ?? '' })
+  await answer(clock, pane, release?.key ?? '')
   expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()
   // It finds the release already done and reports in words, still held by the engine
   await call('mcp__claudopus__note', 'n1', { text: 'Released: the route is on main.' })
@@ -483,7 +483,7 @@ test('the same words as a card answer still go when they answer a newer question
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Proceed?', choices: ['Yes', 'Not now'] } as never)
   const yes = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Yes')
-  await list.press({ key: yes?.key ?? '' })
+  await answer(clock, list, yes?.key ?? '')
   await clock.advance(5_000)
   // The work asks again, with the same answer to give: the chat passing the person's "Yes" on goes
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Also merge it?', choices: ['Yes', 'Not now'] } as never)
