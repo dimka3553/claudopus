@@ -55,13 +55,13 @@ const PASTE_CHARS = 12_000
 const KEPT = 40
 const ENTRIES_KEPT = 200
 // How many of the to-dos not yet started an open card lists before "more"
-const NEXT_SHOWN = 3
 // What else a Details tab can unfold, kept beside its chat's numbers, far from them: the person's words whole, every to-do
 // not yet started, and those done or dropped
 const OPEN_ASK = -1_000_001
-const OPEN_NEXT = -1_000_002
 const OPEN_DONE = -1_000_003
 const OPEN_RESULT = -1_000_004
+// Under a command's row in Details, its last lines sit on a darker ground, as a terminal's
+const OUTPUT_FILL = '#0000003D'
 // How much of what work reported at its end its Details shows before Show all
 const RESULT_SHOWN = 600
 // Past this many done to-dos, Details folds them into one row
@@ -3577,7 +3577,8 @@ const loadTheirs = async ($: EngineInterface, one: Todo) => {
   loading.add(id)
   let isChanged = false
   try {
-    const key = [one.steps ?? 0, one.tokens, one.entries.at(-1)?.text ?? '', one.status, one.items.length, one.endedAt].join(':')
+    // Read again when it has made a step, said where it is, or ended: not as its context grows
+    const key = [one.steps ?? 0, one.entries.at(-1)?.text ?? '', one.status, one.items.length, one.endedAt].join(':')
     const now = await $.clock.now()
     const was = talks.get(id)
     if (was?.key === key && (was.lines || now - (was.at ?? 0) < RETRY_READ)) return
@@ -4948,6 +4949,8 @@ const liveDir = () => `${dir}/${LIVE_DIR}`
 // What this chat last wrote to its file and when: written again when it changes or its beat is due, with work or without, so the
 // panels of other Macs list it as open. It is removed as the chat ends
 let sharedSign = ''
+// The same without how its jobs and helpers move, which alone writes the file at most every LOOK_EVERY
+let sharedCore = ''
 let sharedAt = 0
 const ownLive = (id: string) => `${liveDir()}/${id}.json`
 // Set as the session ends, so a beat due after it does not write the file again
@@ -5002,8 +5005,12 @@ const shareMine = async ($: EngineInterface) => {
   const prompts: Prompt[] = waiting.map(shareOf)
   // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open
   const answeredNow: Prompt[] = answeredShown(now).map(shareOf)
-  const sign = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${signOf(helpers)}\n${jobsSign}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
+  // Helpers are signed by what their Details shows, not by the context they hold, which moves at every step
+  const helpersSign = JSON.stringify(helpers.map(one => [one.id, one.status, one.items, one.entries.at(-1)?.text ?? '']))
+  const core = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
+  const sign = `${core}\n${helpersSign}\n${jobsSign}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
+  if (core === sharedCore && now - sharedAt < LOOK_EVERY) return
   const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(helpers.length ? { helpers } : {}), ...(prompts.length ? { prompts } : {}), ...(answeredNow.length ? { answeredPrompts: answeredNow } : {}), ...(myLink ? { link: myLink } : {}) }
   // Ended work is written apart, under `ended`: a chat still running a version from before ended work was shared reads `cards` only,
   // and would show what is there as running for good
@@ -5014,6 +5021,7 @@ const shareMine = async ($: EngineInterface) => {
   if (text === undefined) return void log($, "this chat's file not shared: it could not be checked for kept keys")
   await $.fs.write(ownLive(id), text)
   sharedSign = sign
+  sharedCore = core
   sharedAt = now
 }
 // This chat's file goes as its session ends, and when it starts (a file a crash or a reload left behind): the others drop its cards
@@ -10020,13 +10028,13 @@ const panelHooks = (on: On) => {
     // Under a helper at work, the step it is on and where it says it is; under a job, the last lines its output ends with, as a
     // terminal shows them. Both sit where the row's name starts; one that ended has nothing under it
     const underTwig = (t: Twig) => {
-      const pad = t.depth * 2 + (e.surface === 'terminal' ? 4 : 3)
+      const pad = t.depth * 2 + 4
       if (t.job) {
         const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).slice(-OUTPUT_LINES)
         if (!tail.length) return null
         return (
           <Box key={`tail-${t.job.id}`} flexDirection="row" paddingLeft={pad} flexShrink={0}>
-            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={FILL} paddingX={1}>
+            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={OUTPUT_FILL}>
               {tail.map((line, n) => (
                 <Text key={`tail-${t.job?.id}-${n}`} dimColor wrap="truncate-end">
                   {line}

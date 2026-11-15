@@ -8,6 +8,8 @@ const liveDir = () => `${dir}/${LIVE_DIR}`
 // What this chat last wrote to its file and when: written again when it changes or its beat is due, with work or without, so the
 // panels of other Macs list it as open. It is removed as the chat ends
 let sharedSign = ''
+// The same without how its jobs and helpers move, which alone writes the file at most every LOOK_EVERY
+let sharedCore = ''
 let sharedAt = 0
 const ownLive = (id: string) => `${liveDir()}/${id}.json`
 // Set as the session ends, so a beat due after it does not write the file again
@@ -62,8 +64,12 @@ const shareMine = async ($: EngineInterface) => {
   const prompts: Prompt[] = waiting.map(shareOf)
   // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open
   const answeredNow: Prompt[] = answeredShown(now).map(shareOf)
-  const sign = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${signOf(helpers)}\n${jobsSign}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
+  // Helpers are signed by what their Details shows, not by the context they hold, which moves at every step
+  const helpersSign = JSON.stringify(helpers.map(one => [one.id, one.status, one.items, one.entries.at(-1)?.text ?? '']))
+  const core = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
+  const sign = `${core}\n${helpersSign}\n${jobsSign}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
+  if (core === sharedCore && now - sharedAt < LOOK_EVERY) return
   const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(helpers.length ? { helpers } : {}), ...(prompts.length ? { prompts } : {}), ...(answeredNow.length ? { answeredPrompts: answeredNow } : {}), ...(myLink ? { link: myLink } : {}) }
   // Ended work is written apart, under `ended`: a chat still running a version from before ended work was shared reads `cards` only,
   // and would show what is there as running for good
@@ -74,6 +80,7 @@ const shareMine = async ($: EngineInterface) => {
   if (text === undefined) return void log($, "this chat's file not shared: it could not be checked for kept keys")
   await $.fs.write(ownLive(id), text)
   sharedSign = sign
+  sharedCore = core
   sharedAt = now
 }
 // This chat's file goes as its session ends, and when it starts (a file a crash or a reload left behind): the others drop its cards

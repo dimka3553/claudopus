@@ -901,13 +901,13 @@ const panelHooks = (on: On) => {
     // Under a helper at work, the step it is on and where it says it is; under a job, the last lines its output ends with, as a
     // terminal shows them. Both sit where the row's name starts; one that ended has nothing under it
     const underTwig = (t: Twig) => {
-      const pad = t.depth * 2 + (e.surface === 'terminal' ? 4 : 3)
+      const pad = t.depth * 2 + 4
       if (t.job) {
         const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).slice(-OUTPUT_LINES)
         if (!tail.length) return null
         return (
           <Box key={`tail-${t.job.id}`} flexDirection="row" paddingLeft={pad} flexShrink={0}>
-            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={FILL} paddingX={1}>
+            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={OUTPUT_FILL}>
               {tail.map((line, n) => (
                 <Text key={`tail-${t.job?.id}-${n}`} dimColor wrap="truncate-end">
                   {line}

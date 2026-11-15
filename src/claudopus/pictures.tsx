@@ -405,7 +405,8 @@ const loadTheirs = async ($: EngineInterface, one: Todo) => {
   loading.add(id)
   let isChanged = false
   try {
-    const key = [one.steps ?? 0, one.tokens, one.entries.at(-1)?.text ?? '', one.status, one.items.length, one.endedAt].join(':')
+    // Read again when it has made a step, said where it is, or ended: not as its context grows
+    const key = [one.steps ?? 0, one.entries.at(-1)?.text ?? '', one.status, one.items.length, one.endedAt].join(':')
     const now = await $.clock.now()
     const was = talks.get(id)
     if (was?.key === key && (was.lines || now - (was.at ?? 0) < RETRY_READ)) return

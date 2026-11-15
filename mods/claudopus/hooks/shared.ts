@@ -22,6 +22,9 @@ const WORDS_SHARED = 1200
 const ANSWER_SHARED = 1500
 // Its helpers, the newest first, so its Details lists them as its own chat's does
 const HELPERS_SHARED = 24
+const HELPER_ITEMS = 12
+// Text cut short says so
+const upTo = (text: string, most: number) => (text.length > most ? `${text.slice(0, most - 1).trimEnd()}…` : text)
 
 // Work that ended is shown in other chats' panels too, where it turns happy and folds into Finished as in its own: the newest few
 // that ended in the last hours, while its chat is open
@@ -38,7 +41,7 @@ export const shareable = (list: readonly Todo[], now = 0): Todo[] =>
       words: one.words.slice(0, WORDS_SHARED),
       items: one.items.slice(-ITEMS_SHARED),
       entries: [...one.entries].reverse().filter(entry => entry.kind !== 'steer').slice(0, 1),
-      answer: one.answer.slice(0, ANSWER_SHARED),
+      answer: upTo(one.answer, ANSWER_SHARED),
     }))
 // The helpers under the work a chat shares, however deep, cut as their work is: another chat's Details lists them, and opens each
 export const shareableHelpers = (list: readonly Todo[], shared: readonly Todo[]): Todo[] => {
@@ -54,9 +57,10 @@ export const shareableHelpers = (list: readonly Todo[], shared: readonly Todo[])
   }
   return list
     .filter(one => one.parentId && !one.chat && ids.has(topOf(one)))
-    .sort((a, b) => b.startedAt - a.startedAt)
+    // Those at work first, so a busy chat never drops a running helper behind ended ones
+    .sort((a, b) => Number(b.status === 'working') - Number(a.status === 'working') || b.startedAt - a.startedAt)
     .slice(0, HELPERS_SHARED)
-    .map(one => ({ ...one, words: '', items: one.items.slice(-ITEMS_SHARED), entries: [...one.entries].reverse().filter(entry => entry.kind !== 'steer').slice(0, 1), answer: one.answer.slice(0, ANSWER_SHARED) }))
+    .map(one => ({ ...one, words: '', items: one.items.slice(-HELPER_ITEMS), entries: [...one.entries].reverse().filter(entry => entry.kind !== 'steer').slice(0, 1), answer: upTo(one.answer, ANSWER_SHARED / 2) }))
 }
 
 // What tells one shared state from another, the running times aside: a file is written again when it changes or its beat is due
