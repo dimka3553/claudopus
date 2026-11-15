@@ -153,7 +153,7 @@ const sideSign = () =>
   JSON.stringify([
     waiting.map(one => [one.agent, one.tool, one.seen ?? 0, one.isPressedNo ?? false]), asked.length, answeredPrompts.length, [...promptSaid], [...promptHeld],
     [...gateHeld], [...gateSaid.keys()], looseGates.map(one => one.id), [...undoneOffers.keys()], boxes.map(one => one.id), doneNotes.length, [...boxSaid], [...boxSent], boxPresses,
-    [...pictureIn.keys()], isUpdating, isReloadRefused, updatedMoment ?? null, presses, loadMark, freshness,
+    [...pictureIn.keys()], isUpdating, updatedMoment ?? null, presses, loadMark, freshness,
   ])
 // While the person uses the panel (scrolls it, moves the focus in it, presses in it, or types) its running times stand still: they
 // move again ENGAGED after the person's last move

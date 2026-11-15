@@ -746,7 +746,7 @@ test('Update fetches the release and checks it against what the release publishe
   expect(reloads).toEqual([])
 })
 
-test('Update is one press for a chat run from its checkout: the fetch, its check, then a fast-forward; the chat reloads only at Reload', SLOW, async ($, on) => {
+test('Update is one press for a chat run from its checkout: the fetch, its check, then a fast-forward; then the header says, beside the version, to type /reload-plugins, and nothing reloads the chat', SLOW, async ($, on) => {
   const { files, clock, gitRan } = world(on, { release: RELEASE })
   const reloads = reloadsOf(on)
   pageOn(on, () => pageText())
@@ -756,9 +756,7 @@ test('Update is one press for a chat run from its checkout: the fetch, its check
   await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
   expect(changing(gitRan)).toEqual([])
   await pressed(panel, 'update-download')
-  await shownIn(panel, 'Claudopus 0.1.2 is ready')
-  await shownIn(panel, '✓ Update   ● Reload')
-  await shownIn(panel, 'This chat still runs v0.1.0. Each open chat switches at its own Reload.')
+  await shownIn(panel, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
   // One press: fetched, checked against the release's tree, and only then moved forward, fast-forward only
   const fetched = gitRan.findIndex(one => one.includes('fetch'))
   const checked = gitRan.findIndex(one => one.includes(`${COMMIT}:mods/claudopus`))
@@ -769,11 +767,11 @@ test('Update is one press for a chat run from its checkout: the fetch, its check
   expect(JSON.parse(files.get(`${MEMORY}/update-steps.json`) ?? '{}')).toMatchObject({ version: '0.1.2', stage: 'installed', commit: COMMIT, tree: TREE })
   expect(await keyed(panel, 'update-install')).toBeUndefined()
   expect(await panel.find({ type: 'Text', text: /folder|Fetch|Move forward/ })).toBeUndefined()
+  // No box and no press is left: only the line beside the version, and the chat is never reloaded for the person
+  expect(await panel.find({ type: 'Text', text: /^Claudopus 0\.1\.2/ })).toBeUndefined()
+  expect((await panel.findAll({ type: 'Button' })).some(one => /^update-/.test(one.key ?? ''))).toBe(false)
+  await later(clock, 16 * 60_000)
   expect(reloads).toEqual([])
-  await pressed(panel, 'update-reload')
-  expect(await until(async () => reloads.length || undefined)).toBe(1)
-  const mark = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/reloads/`))?.[1]
-  expect(JSON.parse(mark ?? '{}')).toMatchObject({ version: '0.1.2', from: '0.1.0' })
 })
 
 // Update never overwrites uncommitted work nor moves a main with commits of its own: it says why it could not move forward, and nothing moves
@@ -805,7 +803,7 @@ for (const one of STAYS)
     expect(reloads).toEqual([])
   })
 
-test('each step stands through a reload: a chat that loads finds the download waiting for Update, a step cut short said as stopped, and a copy newer than it runs offered its Reload', SLOW, async ($, on) => {
+test('each step stands through a reload: a chat that loads finds the download waiting for Update, a step cut short said as stopped, and a copy newer than it runs told to type /reload-plugins', SLOW, async ($, on) => {
   const { files, clock, gitRan } = world(on, { release: RELEASE })
   pageOn(on, () => pageText())
   files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: UPD_NOW, version: '0.1.2', result: 'seen' }))
@@ -831,7 +829,7 @@ test('each step stands through a reload: a chat that loads finds the download wa
   files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.2' }))
   await stopped.unmount()
   const behind = await $.ui.mount(listAt())
-  expect(await until(() => keyed(behind, 'update-reload'))).toBeDefined()
+  await shownIn(behind, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
 })
 
 test('a steps file that says a download was checked, with no such download in the repo, is not believed: the panel offers the download again', SLOW, async ($, on) => {
@@ -895,7 +893,7 @@ test('F-019 · a chat run from another Mac moves at Install but is not sent a re
   await clock.advance(3 * 60_000)
   files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.2' }))
   const panel = await $.ui.mount(listAt())
-  await shownIn(panel, 'This chat still runs v0.1.0. Type /reload-plugins in this chat to switch it.')
+  await shownIn(panel, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
   expect(await keyed(panel, 'update-reload')).toBeUndefined()
   expect(reloads).toEqual([])
 })

@@ -1,0 +1,1 @@
+- After Update (or Install) there is no Reload button: the header says beside the version that the new one is ready and to type /reload-plugins.
