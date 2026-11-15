@@ -74,7 +74,7 @@ test('Update fetches the release and checks it against what the release publishe
   await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
   await pressed(panel, 'update-download')
   await shownIn(panel, "Couldn't update Claudopus 0.1.2")
-  await shownIn(panel, "What came down isn't what the release published, so it was thrown away. Nothing was changed: this chat still runs v0.1.0.")
+  await shownIn(panel, "What was downloaded isn't what the release published, so it was thrown away. Nothing was changed: this chat still runs v0.1.0.")
   expect(await keyed(panel, 'update-install')).toBeUndefined()
   expect(gitRan).toContain('update-ref -d refs/claudopus/update')
   // A steps file that says it was downloaded, planted or left from before: the panel checks the download it names, finds it is not
@@ -119,12 +119,12 @@ test('Update is one press for a chat run from its checkout: the fetch, its check
 })
 
 // What updating says speaks only of versions, Update and /reload-plugins: never of where the code sits or how git moves it
-const UPDATE_JARGON = /folder|checkout|fetch|forward|detached|brought|commit|\bmain\b|branch/i
+const UPDATE_JARGON = /folder|checkout|fetch|forward|detached|brought|commit|\bmain\b|branch|worktree|\bgit\b|fingerprint|marketplace|~\/|\/Users\//i
 // Update never overwrites uncommitted work nor moves a main with commits of its own: it says why it could not move forward, and nothing moves
 const STAYS: { name: string; release: Release; said: string; isNewerAfterFetch?: boolean; title?: string }[] = [
-  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes of its own in files this version changes, so updating would lose them. Nothing was changed: this chat still runs v0.1.0.' },
+  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes of its own in files this version changes, so updating would lose them: ask a chat to set them aside, then press Try again. Nothing was changed: this chat still runs v0.1.0.' },
   { name: 'a newer version out between its fetch and its move', release: RELEASE, isNewerAfterFetch: true, title: 'Claudopus 0.1.3 is out', said: 'The bar shows the battery · and 3 more changes' },
-  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes of its own that this version doesn't have, so updating would lose them. Nothing was changed: this chat still runs v0.1.0." },
+  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes of its own that this version doesn't have, so Update leaves it as it is. Nothing was changed: this chat still runs v0.1.0." },
 ]
 for (const one of STAYS)
   test(`Update with ${one.name}: it says why it could not move forward, and nothing is overwritten or moved`, SLOW, async ($, on) => {
@@ -221,8 +221,8 @@ test('Not now keeps a version quiet for a day, Skip this version until a newer o
 
 // A chat whose code Update must leave alone is told so in plain words, and offered no download
 const LEFT_ALONE: { name: string; release: Release; said: string }[] = [
-  { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a build of Claudopus that a piece of work is changing: Update leaves it alone, and it gets new versions from that work.' },
-  { name: 'a test build', release: { ...RELEASE, noBranch: true }, said: 'This chat runs a test build of Claudopus: Update leaves it alone until a chat puts the released version back.' },
+  { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a build of Claudopus that a piece of work is changing: Update leaves it alone, and it gets the newest version when that work takes it in.' },
+  { name: 'a test build', release: { ...RELEASE, noBranch: true }, said: 'This chat runs a test build of Claudopus: Update leaves it alone while it does.' },
 ]
 for (const one of LEFT_ALONE)
   test(`a chat run from ${one.name} is told Update leaves it alone, and offered no download`, SLOW, async ($, on) => {

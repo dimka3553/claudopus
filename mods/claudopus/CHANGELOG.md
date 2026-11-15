@@ -28,7 +28,7 @@ What changed in each version of Claudopus, newest first.
 - The cards are just their rows: the long explanation under the battery card and the graphics card's "Time at work" line are gone.
 
 ## 0.2.131 · 15 November 2026
-- Updating is now one press, Update, then Reload: it downloads the new version, checks it against what the release published and puts it in place only if that holds, never over changes of your own.
+- A chat that runs Claudopus's own code now updates with one press, Update, then Reload: it downloads the new version, checks it against what the release published and puts it in place only if that holds, never over changes of your own.
 
 ## 0.2.130 · 15 November 2026
 - Work that finishes comes to the top of the panel at once, right under anything that waits for you, outlined in green for its two seconds, then goes under Finished as before; several finishing together stack there newest first, each for its own two seconds
@@ -508,7 +508,7 @@ What changed in each version of Claudopus, newest first.
 ## 0.2.28 · 12 November 2026
 - Claudopus now updates itself: every few hours one chat runs Claude Code's own update for it, and chats that start afterwards load the new version.
 - About says when a newer version is installed.
-- A copy loaded straight from its code is never updated.
+- A chat that runs Claudopus's own code is never updated.
 
 ## 0.2.27 · 12 November 2026
 - Behind-the-scenes reorganisation of the mod's code; nothing changes in how it behaves or looks.

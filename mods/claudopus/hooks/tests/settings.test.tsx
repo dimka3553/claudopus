@@ -805,7 +805,7 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page has no fingerprint/ }))
+  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page has nothing to check the new version against/ }))
   expect(failed?.props.color).toBe('error')
   // How often: one choice, written as the two keys; Only when I ask is updates false
   await config.select({ key: 'config-look-pick', value: '24' })

@@ -225,19 +225,19 @@ const lastLine = (out: { stdout: string; stderr: string }) => `${out.stderr || o
 export type FolderReady = { ok: true; branch: string; upstream: string } | { ok: false; why: string; what: string }
 export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Promise<FolderReady> => {
   const git = gitIn(io, folder)
-  if ((await git(['rev-parse', '--show-toplevel'])).exitCode !== 0) return { ok: false, what: "a copy of Claudopus that Update can't change", why: "it isn't Claudopus's released code" }
+  if ((await git(['rev-parse', '--show-toplevel'])).exitCode !== 0) return { ok: false, what: "Claudopus code that Update can't change", why: "it isn't Claudopus's released code" }
   if ((await git(['ls-files', '--error-unmatch', ':/mods/claudopus/.claude-plugin/plugin.json'])).exitCode !== 0)
-    return { ok: false, what: "a copy of Claudopus that Update can't change", why: "it is part of another project's code" }
+    return { ok: false, what: "Claudopus code that Update can't change", why: "it is part of another project's code" }
   const [gitDir = '', commonDir = ''] = (await git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'])).stdout.trim().split('\n')
   // Names as plain words of a bounded length: they are shown in the panel
   const named = (text: string) => text.replace(/[^\w./-]/g, '').slice(0, 40)
   const branch = named((await git(['symbolic-ref', '-q', '--short', 'HEAD'])).stdout.trim())
   if (gitDir.trim() !== commonDir.trim())
-    return { ok: false, what: 'a build of Claudopus that a piece of work is changing', why: 'Update leaves it alone, and it gets new versions from that work' }
-  if (!branch) return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone until a chat puts the released version back' }
+    return { ok: false, what: 'a build of Claudopus that a piece of work is changing', why: 'Update leaves it alone, and it gets the newest version when that work takes it in' }
+  if (!branch) return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone while it does' }
   const upstream = named((await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim())
   if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream))
-    return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone until a chat puts the released version back' }
+    return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone while it does' }
   return { ok: true, branch, upstream }
 }
 
@@ -250,11 +250,11 @@ export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Prom
 export type Stage = 'downloading' | 'downloaded' | 'installing' | 'installed' | 'failed'
 export const FAILS = {
   page: "claudopus.ai's version page couldn't be read",
-  unchecked: 'the version page has no fingerprint to check a download against',
+  unchecked: 'the version page has nothing to check the new version against',
   fetch: "the release couldn't be downloaded from GitHub",
-  mismatch: "what came down isn't what the release published, so it was thrown away",
-  'own-commits': "your copy of Claudopus has changes of its own that this version doesn't have, so updating would lose them",
-  overwrite: 'your copy of Claudopus has changes of its own in files this version changes, so updating would lose them',
+  mismatch: "what was downloaded isn't what the release published, so it was thrown away",
+  'own-commits': "your copy of Claudopus has changes of its own that this version doesn't have, so Update leaves it as it is",
+  overwrite: 'your copy of Claudopus has changes of its own in files this version changes, so updating would lose them: ask a chat to set them aside, then press Try again',
   moved: "it couldn't be put in place",
   install: "Claude Code's update step failed",
   'installed-mismatch': "the copy Claude Code installed isn't what the release published, so the old one was put back",
@@ -262,7 +262,7 @@ export const FAILS = {
   stopped: 'it stopped before it finished, when its chat closed or reloaded',
   busy: 'another chat is updating Claudopus right now',
   gone: 'the download is no longer there',
-  'kept-copy': "it was put in place, but your copy's changes of its own kept Claude Code's copy as it was",
+  'kept-copy': "changes of your own kept Claude Code's copy on the old version: ask a chat to set them aside, then press Try again",
 } as const
 export type Fail = keyof typeof FAILS
 export type Steps = { version: string; stage: Stage; at: number; commit?: string; tree?: string; fail?: Fail; step?: 'download' | 'install'; pct?: number; got?: number; from?: string }
@@ -427,10 +427,10 @@ export const install = async (io: LookIo, src: Exclude<Source, { kind: 'none' }>
   const dirty = status.exitCode !== 0 || Boolean(status.stdout.trim())
   // An installed copy made from the folder is copied from it as it is on disk: with uncommitted changes there it is left as it was
   if (src.runs === 'copy' && dirty) {
-    await io.log(`Claudopus at ${src.repo} updated to ${page.version}, but its uncommitted changes kept Claude Code's copy as it was`)
+    await io.log(`Claudopus updated to ${page.version}, but changes of your own kept Claude Code's copy as it was`)
     return { ok: false, fail: 'kept-copy', detail: '' }
   }
-  await io.log(`Claudopus at ${src.repo} updated to ${page.version} (${commit})${dirty ? ', with uncommitted changes in it kept' : ''}`)
+  await io.log(`Claudopus updated to ${page.version}${dirty ? ', with changes of your own kept' : ''}`)
   // Claude Code's record of the folder follows it, only from a folder with nothing uncommitted, as it copies the folder as it is
   if (src.record && !dirty) {
     const failed = await viaClaudeCode(src.record)

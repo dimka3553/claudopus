@@ -4592,7 +4592,6 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       })
     }
     const location = typeof entry?.installLocation === 'string' ? entry.installLocation.replace(/\/+$/, '') : ''
-    const repoName = typeof entry?.source?.repo === 'string' && /^[\w.-]+\/[\w.-]+$/.test(entry.source.repo) ? entry.source.repo : ''
     const isGit = location && (await $.fs.exists(`${location}/.git`).catch(() => false))
     const subOf = async () => {
       try {
@@ -4604,12 +4603,12 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       }
     }
     const path = isGit ? await subOf() : ''
-    if (isGit && path) return done({ src: { kind: 'clone', repo: location, sub: path, ...record }, where: `Claude Code's installed copy, from GitHub${repoName ? ` (${repoName})` : ''}` })
-    return done({ src: { kind: 'none', why: 'its marketplace is not one Claudopus can check a download in' }, cannot: { what: "a copy from a marketplace Claudopus can't check", why: 'update it with /plugin in Claude Code' }, where: "Claude Code's installed copy" })
+    if (isGit && path) return done({ src: { kind: 'clone', repo: location, sub: path, ...record }, where: "Claude Code's installed copy" })
+    return done({ src: { kind: 'none', why: 'its marketplace is not one Claudopus can check a download in' }, cannot: { what: 'This chat runs a copy of Claudopus installed another way', why: 'update it with /plugin in Claude Code' }, where: "Claude Code's installed copy" })
   }
   // Run from a folder of the code: the folder is what a release has to reach
   const top = (await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim()
-  const ready = top ? await folderReady(io, top) : ({ ok: false, what: "a copy of Claudopus that Update can't change", why: "it isn't Claudopus's released code" } as const)
+  const ready = top ? await folderReady(io, top) : ({ ok: false, what: "Claudopus code that Update can't change", why: "it isn't Claudopus's released code" } as const)
   const marketplace = folderMarketplace(known, root)
   const scopes = (() => {
     try {
@@ -4838,7 +4837,7 @@ const STEPS = ['Download', 'Install'] as const
 // Why Update could not update this chat, where Update's own words differ from FAILS'
 const ONE_PRESS_FAILS: Partial<Record<Fail, string>> = {
   'newer-out': 'a newer version came out while it was updating',
-  unchecked: 'the version page has no fingerprint to check it against',
+  gone: 'the new version is no longer there',
 }
 const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loaded: string) => {
   const now = await $.clock.now()
@@ -4934,7 +4933,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   const why = (isOne ? ONE_PRESS_FAILS[n.fail] : undefined) ?? FAILS[n.fail]
   const kept =
     n.fail === 'installed-mismatch'
-      ? `${isOne ? `Claudopus ${v} was put in place, but ` : ''}Claude Code's record was put back, so new chats keep v${loaded}.`
+      ? `New chats keep v${loaded}.`
       : n.fail === 'kept-copy'
         ? `This chat still runs v${loaded}.`
         : `Nothing was changed: this chat still runs v${loaded}.`

@@ -32,4 +32,4 @@
 - Your to-dos, notes and report speak to {name} as "you".
 - Each helper's title (its `description`), and your to-dos, notes, asks and report, name what is being done, never the model doing it.
 - Memory is in `~/.claude/claudopus`: `index.md` lists the subjects, `streams/` holds one brief each, `words/` holds {name}'s messages word for word, `reports/` the results finished work left. The `recall` tool searches it.
-- When you speak of Claudopus's own versions, you say only which version {name}'s chats run, which is the newest, and that {name} presses Update in the panel, then types `/reload-plugins`; never where its code sits on the Mac or how git moves it.
+- When you speak of Claudopus's own versions, you say only which version {name}'s chats run, which is the newest, and that {name} presses Update in the panel (Download, then Install, on an installed copy), then types `/reload-plugins`; never where its code sits on the Mac or how it is moved.
