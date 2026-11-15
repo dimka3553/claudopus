@@ -520,12 +520,13 @@ test('in the terminal, a password box that comes while a reply is being typed le
   const inputs = async () => (await list.findAll({ type: 'Input' } as never)).map(one => ({ key: one.key ?? '', focus: Boolean(one.props.autoFocus) }))
   const reply = await until(async () => (await inputs()).find(one => one.focus))
   await list.input({ key: reply?.key ?? '', text: 'Not y', kind: 'change' } as never)
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never).catch(() => undefined)
+  void w.keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never))
   const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98'
   w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }))
   await w.clock.advance(1000)
   expect(await until(async () => ((await inputs()).some(one => one.key.startsWith('box-')) ? true : undefined))).toBe(true)
   expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([reply?.key])
+  await w.settle()
 })
 
 test('in the terminal, an ask that comes while a password is being typed leaves the keys with the password box', async ($, on) => {
@@ -534,7 +535,7 @@ test('in the terminal, an ask that comes while a password is being typed leaves 
   await $.prompt.submit({ text: 'two things', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never).catch(() => undefined)
+  void w.keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never))
   const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98'
   w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }))
   await w.clock.advance(1000)
@@ -544,4 +545,5 @@ test('in the terminal, an ask that comes while a password is being typed leaves 
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
   expect(await until(async () => ((await inputs()).some(one => one.key.startsWith('ask-')) ? true : undefined))).toBe(true)
   expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([box?.key])
+  await w.settle()
 })

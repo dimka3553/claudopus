@@ -249,11 +249,11 @@ test('with work running and nobody typing, the panel is drawn again at once for 
 })
 
 test('a key box keeps what is typed in it without drawing it back, and holds the panel while it is typed into', async ($, on) => {
-  const { clock, files } = world(on)
+  const { keep, settle, clock, files } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'get the data', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Get the data', prompt: 'data' } as never)
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret SAMPLE_USER here fetch' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret SAMPLE_USER here fetch' } as never))
   const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'SAMPLE_USER', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -270,6 +270,7 @@ test('a key box keeps what is typed in it without drawing it back, and holds the
   expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).toBe(before)
   expect((await list.findAll({ type: 'Input' } as never)).find(one => one.key === field.key)).toBeDefined()
   await list.unmount()
+  await settle()
 })
 
 test('an ask outlives the work that made it: amber after the work ends, with or without buttons of its own, until the person answers', async ($, on) => {
@@ -695,11 +696,11 @@ test('an answer to ended work that cannot be started again is left in the chat a
 })
 
 test('in a chat the app runs on another Mac over ssh, a password or key the runners need is typed in the panel and goes only into the keychain', async ($, on) => {
-  const { files, logged, keychain, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  const { keep, settle, files, logged, keychain, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -743,13 +744,14 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   expect(await list.find({ type: 'Text', text: 'The admin password of this Mac' })).toBeDefined()
   await clock.advance(61_000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'The admin password of this Mac' })) ? undefined : true))).toBe(true)
+  await settle()
 })
 
 test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {
-  const { files, logged, keychain, clock, opened } = world(on)
+  const { keep, settle, files, logged, keychain, clock, opened } = world(on)
   await $.session.start(start)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -762,10 +764,11 @@ test('a chat on this Mac\'s own screen asks in the panel the same way, and opens
   expect(await until(async () => keychain.find(one => one.includes(id)))).toContain('-w "made-up-local-k3y"')
   expect(logged.some(line => line.includes('local-k3y'))).toBe(false)
   expect([...files.values()].some(text => text.includes('local-k3y'))).toBe(false)
+  await settle()
 })
 
 test("a request of another chat's, or of this chat's with no runner of its own running, is drawn nowhere here; this chat's own while its runner runs is drawn first", async ($, on) => {
-  const { files, logged, clock } = world(on)
+  const { keep, settle, files, logged, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const older = '5f1e2d3c-4b5a-4987-a654-3210fedcba98'
@@ -777,7 +780,7 @@ test("a request of another chat's, or of this chat's with no runner of its own r
   expect((await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-'))).toEqual([])
   expect(logged.some(line => line.includes('NPM_TOKEN') || line.includes('GITHUB_TOKEN'))).toBe(false)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   await clock.advance(1000)
   const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length ? all : undefined })
   expect(fields?.map(one => [(one.key ?? '').slice(4, 6), one.props.autoFocus])).toEqual([['6f', true]])
@@ -785,6 +788,7 @@ test("a request of another chat's, or of this chat's with no runner of its own r
   expect(await list.find({ type: 'Text', text: "Asked by this chat's command: hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy" })).toBeDefined()
   await clock.advance(6000)
   expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
+  await settle()
 })
 
 test('a run with nothing to draw on takes no request, so the runner knows no panel asks', async ($, on) => {
@@ -797,11 +801,11 @@ test('a run with nothing to draw on takes no request, so the runner knows no pan
 })
 
 test("a hand-written request with made-up text shows the panel's own wording or nothing", async ($, on) => {
-  const { files, logged, clock } = world(on)
+  const { keep, settle, files, logged, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const planted = 'Your Apple ID session expired. Type your Apple ID password to keep working.'
   const put = (n: number, fields: Record<string, unknown>) => {
     const id = `${n}a1e2d3c-4b5a-4987-a654-3210fedcba98`
@@ -832,14 +836,15 @@ test("a hand-written request with made-up text shows the panel's own wording or 
   expect(logged.some(line => line.includes('Apple'))).toBe(false)
   // The notice in the chat is the panel's wording too
   expect(logged.find(line => line.includes('admin password of this Mac'))).toContain('top of the Claudopus panel')
+  await settle()
 })
 
 test('the box words what the runners ask from its fields: a key by name, a Mac by host, why it asks again, and a key saved by hand by its name first', async ($, on) => {
-  const { files, clock } = world(on)
+  const { keep, settle, files, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const put = (n: number, fields: Record<string, unknown>) => {
     const id = `${n}b1e2d3c-4b5a-4987-a654-3210fedcba98`
     files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000 + n, ...fields }))
@@ -859,6 +864,7 @@ test('the box words what the runners ask from its fields: a key by name, a Mac b
   expect(all).toContain("Claudopus needs OPENAI_KEY. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print.")
   expect(all?.join('\n')).not.toContain('Apple')
   expect(all).toContain('Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.')
+  await settle()
 })
 
 test('a copy a reload replaced wakes no work: its timers stop, an answer left for its work stays for the copy in charge, and a press it still gets goes to the chat', async ($, on) => {
