@@ -234,10 +234,10 @@ export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Prom
   const branch = named((await git(['symbolic-ref', '-q', '--short', 'HEAD'])).stdout.trim())
   if (gitDir.trim() !== commonDir.trim())
     return { ok: false, what: 'a build of Claudopus that a piece of work is changing', why: 'Update leaves it alone, and it gets the newest version when that work takes it in' }
-  if (!branch) return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone while it does' }
+  if (!branch) return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone' }
   const upstream = named((await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim())
   if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream))
-    return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone while it does' }
+    return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone' }
   return { ok: true, branch, upstream }
 }
 
