@@ -932,7 +932,8 @@ const panelHooks = (on: On) => {
     const underTwig = (t: Twig) => {
       const pad = t.depth * 2 + 4
       if (t.job) {
-        const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).slice(-OUTPUT_LINES)
+        // the line its row already says is not said again
+        const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).filter(line => line.trim() !== (t.job?.latest ?? '').trim()).slice(-OUTPUT_LINES)
         if (!tail.length) return null
         return (
           <Box key={`tail-${t.job.id}`} flexDirection="row" paddingLeft={pad} flexShrink={0}>
