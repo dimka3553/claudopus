@@ -4535,6 +4535,8 @@ const progressDrawn = { shown: '', phase: '', at: 0 }
 let isUpdatePress = false
 const downloadPress = ($: EngineInterface, version: string) => {
   presses += 1
+  // A press while a step runs does nothing, as atStep would, and leaves the flag to the press that set it
+  if (isStepping || isUpdating) return
   // Update's move, once its fetch was checked: each half takes the lock on its own, as two presses did, so neither holds it longer
   let next: { version: string; commit: string } | undefined
   isUpdatePress = true
