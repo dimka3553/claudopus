@@ -153,6 +153,7 @@ declare global {
   export import ConfigShown = M6.ConfigShown
   export import Models = M6.Models
   export import Role = M6.Role
+  export import Fail = M7.Fail
   export import LookIo = M7.LookIo
   export import Notice = M7.Notice
   export import Published = M7.Published
