@@ -1,26 +1,5 @@
 // The admin gate: an admin command waits for the person's press on its work's card
 
-const ADMIN = '/plug/claudopus/bin/admin'
-const GRANTS = `${MEMORY}/admin-grants/`
-const ALLOWED = `${MEMORY}/admin-allowed.json`
-// A piece of work under way in a chat of Sam's, and the panel
-const gated = async ($: Parameters<TestBody>[0], on: On, config: Record<string, unknown> = {}, options: Parameters<typeof world>[1] = {}) => {
-  const w = world(on, options)
-  w.files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', ...config }))
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'fix the hosts file', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Fix the hosts file', prompt: 'fix the hosts file' } as never)
-  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  const bash = (id: string, command: string, agentId = 'a1', more: Record<string, unknown> = {}) => $.tool.call({ tool: 'Bash', tool_use_id: id, command, agentId, ...more } as never)
-  const labels = async () => (await list.findAll({ type: 'Button' })).map(one => String(one.props.label ?? ''))
-  // The call is held once its buttons are on the card
-  const held = async (id: string) => until(async () => keyed(list, `gate-${id}-0-deny`))
-  const grants = () => [...w.files.keys()].filter(path => path.startsWith(GRANTS))
-  // A press on a card's gate, and the second after which the held call reads it
-  const press = async (key: string) => (await pressed(list, key), w.wake())
-  return { ...w, holding: w.held, list, bash, labels, held, grants, press }
-}
-
 test('an admin command is held however the runner is reached, and nothing else is taken for one', async ($, on) => {
   const { press, bash, held, admins, list } = await gated($, on)
   let n = 0

@@ -152,28 +152,6 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await Promise.all([list.unmount(), ears.unmount()])
 })
 
-test("while the person types into a card's reply box the list's running times stand still, and move again once they stop", async ($, on) => {
-  const { clock } = world(on)
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which ear first?' } as never)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const time = async () => (await list.findAll({ type: 'Text' })).map(one => one.text).find(text => /\d+s$/.test(text ?? ''))
-  await clock.advance(2000)
-  const before = await time()
-  expect(before).toBeDefined()
-  const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
-  await list.input({ key: box?.key ?? '', text: 'The le', kind: 'change' } as never)
-  await clock.advance(5000)
-  expect(await time()).toBe(before)
-  // Typing stopped for half a minute: the times move again, and the draft is still in the box
-  await clock.advance(31_000)
-  expect(await until(async () => ((await time()) !== before ? true : undefined))).toBe(true)
-  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('The le')
-  await list.unmount()
-})
-
 test('while the person types into an ask the panel holds its drawing whole, as other cards move, start and finish around it: the 15 Nov panel that jumped to its bottom and flickered with every letter typed', async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)
@@ -214,6 +192,28 @@ test('while the person types into an ask the panel holds its drawing whole, as o
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${surface}`, agentId: 'a1', text: 'Which source next?', choices: ['Kaggle', 'TCIA', 'Not now'] } as never)
     await Promise.all([list.unmount(), ears.unmount()])
   }
+})
+
+test("while the person types into a card's reply box the list's running times stand still, and move again once they stop", async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which ear first?' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const time = async () => (await list.findAll({ type: 'Text' })).map(one => one.text).find(text => /\d+s$/.test(text ?? ''))
+  await clock.advance(2000)
+  const before = await time()
+  expect(before).toBeDefined()
+  const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await list.input({ key: box?.key ?? '', text: 'The le', kind: 'change' } as never)
+  await clock.advance(5000)
+  expect(await time()).toBe(before)
+  // Typing stopped for half a minute: the times move again, and the draft is still in the box
+  await clock.advance(31_000)
+  expect(await until(async () => ((await time()) !== before ? true : undefined))).toBe(true)
+  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('The le')
+  await list.unmount()
 })
 
 test('with work running and nobody typing, the panel is drawn again at once for anything new, but for its running times alone only every ten seconds, so a button under the pointer keeps its hover and takes its click', async ($, on) => {
@@ -273,7 +273,7 @@ test('a key box keeps what is typed in it without drawing it back, and holds the
   await settle()
 })
 
-test('an ask outlives the work that made it: amber after the work ends, with or without buttons of its own, until the person answers', async ($, on) => {
+test('an ask outlives the work that made it: amber after the work ends, with or without buttons of its own, until the person answers', SLOW, async ($, on) => {
   const { submitted, resumed, clock } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'restart the old chat', wait: false, origin: composer })
@@ -695,7 +695,7 @@ test('an answer to ended work that cannot be started again is left in the chat a
   await list.unmount()
 })
 
-test('in a chat the app runs on another Mac over ssh, a password or key the runners need is typed in the panel and goes only into the keychain', async ($, on) => {
+test('in a chat the app runs on another Mac over ssh, a password or key the runners need is typed in the panel and goes only into the keychain', SLOW, async ($, on) => {
   const { keep, settle, files, logged, keychain, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })

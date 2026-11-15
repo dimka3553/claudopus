@@ -120,7 +120,7 @@ test("in a chat the app runs on another Mac over ssh, a large screenshot opened 
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   await pressed(tab, 'pic-open-1-0')
   // The copy is made out of the drawing, which is drawn again once it is ready
-  for (let tries = 0; tries < 50 && !(await tab.findAll({ type: 'Svg' })).length; tries += 1) await new Promise<void>(done => setTimeout(done, 20))
+  await until(async () => (await tab.findAll({ type: 'Svg' })).length || undefined)
   const svgs = await tab.findAll({ type: 'Svg' })
   expect(svgs.length).toBeGreaterThan(0)
   // The bands, one under the other, are the whole picture at one width
@@ -181,7 +181,7 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Pick one of the designs', details: 'Each picture is one design.', choices: ['A', 'B'], pictures: shots } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   // Made out of the drawing, which is drawn again once they are
-  for (let tries = 0; tries < 50 && !(await list.findAll({ type: 'Svg' })).some(one => String(one.props.alt).startsWith('Picture:')); tries += 1) await new Promise<void>(done => setTimeout(done, 20))
+  await until(async () => (await list.findAll({ type: 'Svg' })).some(one => String(one.props.alt).startsWith('Picture:')) || undefined)
   const small = (await list.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))
   // Four fit in what every ask's pictures may take; the rest are rows that open them
   expect(small.map(one => String(one.props.alt))).toEqual(['Picture: a.png', 'Picture: b.png', 'Picture: c.png', 'Picture: d.png'])
@@ -200,7 +200,7 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   const drawnIn = async () => (await tab.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).filter(alt => alt.startsWith('Picture:'))
   // Once the chat's own small copies are read: its newest three fill what the tab keeps for pictures, and of the ask's the first
   // alone still fits; the rest are rows that open them
-  for (let tries = 0; tries < 100 && !(await drawnIn()).includes('Picture: g.png'); tries += 1) await new Promise<void>(done => setTimeout(done, 20))
+  await until(async () => (await drawnIn()).includes('Picture: g.png') || undefined)
   expect((await drawnIn()).sort()).toEqual(['Picture: a.png', 'Picture: e.png', 'Picture: f.png', 'Picture: g.png'])
   expect(await drawnChars(tab)).toBeLessThan(APP_DRAWING_CHARS)
   await tab.unmount()

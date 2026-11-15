@@ -1,9 +1,5 @@
 // The app's own prompts shown amber in every panel
 
-// A prompt's Yes or No, by the start of its key: the prompt's id and the count of presses follow
-const button = async (pane: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; props: Record<string, unknown> }[]> }, start: string) =>
-  (await pane.findAll({ type: 'Button' })).find(one => String(one.key ?? '').startsWith(start))
-
 test("this chat waiting on the app's own prompt is listed with its prompt, and idle chats beside it are not", async ($, on) => {
   const { files, clock, wake } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
