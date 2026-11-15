@@ -372,7 +372,7 @@ const panelHooks = (on: On) => {
                 <Text dimColor wrap="wrap">{waitLine(one, at, jobsOf(one, at).length > 0)}</Text>
               </Box>
             ) : null}
-            {/* Its helpers running: how many, when they were last looked in on, and how many have gone quiet */}
+            {/* Its helpers gone quiet, in amber: those at work are rows on its tree */}
             {lookedInLine(one, at) && !one.chat ? (
               <Box key={`looked-${one.id}`} paddingLeft={lead}>
                 <Text dimColor={!one.lookedIn?.quiet} color={one.lookedIn?.quiet ? NEEDS : undefined} wrap="wrap">{lookedInLine(one, at)}</Text>
@@ -491,7 +491,7 @@ const panelHooks = (on: On) => {
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
         </Box>
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
@@ -499,77 +499,106 @@ const panelHooks = (on: On) => {
           <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>
       )
-    // Beside it, how it stands, so a glance tells whether it moves: paused, what a wait waits for gone or still, output that has
-    // not changed for long (in amber), or when it last changed; its percent when it shows progress, and its time last
-    const jobSide = (job: Job, width: number) => {
-      const time = took(at - job.at)
+    // Under its name, the tree's lines carried down past it, so its second line hangs in the same place
+    const jobRails = (t: Twig, key: string) =>
+      'Svg' in table && e.surface !== 'terminal' ? (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt="" width={twigWidth(t)} height={LINE} />
+        </Box>
+      ) : (
+        <Box key={key} flexShrink={0}>
+          <Text dimColor>{`${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}  `}</Text>
+        </Box>
+      )
+    // How it stands, its second line, so a glance tells whether it moves and how far it is: how much of how much, its percent,
+    // speed and time left as the run printed them; then paused, a wait's target, a watch's last event, nothing printed since it
+    // began, quiet for minutes (in amber), or when it last printed. Quiet is told apart from working in words, never by a clock
+    const jobStand = (job: Job, width: number) => {
       const pct = job.pct ? [job.pct] : []
       const quiet = job.wroteAt ? at - job.wroteAt : 0
-      const [state, isWarn] =
-        job.isPaused ? ['paused', true]
-        : job.kind === 'wait' ? (job.target ? [job.target, true] : ['waiting', false])
-        : job.wroteAt && quiet >= JOB_QUIET ? [`no new output for ${shortAgo(quiet)}`, true]
-        : job.wroteAt ? [`updated ${shortAgo(quiet)} ago`, false]
-        // A job whose output cannot be found says so, so a blank row is never taken for one that moves (a command held open has no
-        // output to read until it ends)
-        : !job.id.startsWith('call-') && !job.id.startsWith('more-') && job.kind !== 'watch' && at - job.at >= JOB_UNREAD ? ['output not found', true]
-        : ['', false]
-      const short = state.replace(/^no new output for /, 'quiet ').replace(/^output not found$/, 'no output').replace(/^updated (.*) ago$/, '$1 ago').replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still ')
-      const warn = Boolean(isWarn) && Boolean(state)
-      // A run that says how far it is puts how much of how much first, before its name: in full, then as done/total, its speed
-      // only where there is room, and it keeps whether it moves before its time; its name keeps what is left, 12 columns at least
-      if (job.done && job.kind !== 'wait') {
-        const full = job.total ? `${job.done} of ${job.total}` : job.done
-        const compact = job.total ? `${job.done}/${job.total}` : job.done
-        // its speed only while it writes: a speed a minute old is no longer how fast it goes
-        const rate = job.rate && !warn && job.wroteAt && quiet < 60_000 ? [job.rate] : []
-        // the side takes about half the row, so the name stays readable; a third when the latest line is not the progress, so it shows
-        const most = job.isEarlier ? Math.max(12, Math.floor(width / 3)) : Math.max(12, Math.floor(width / 2) + 4, Math.min(width - 13, 26))
-        return { text: firstFit([[full, ...rate, ...pct, state, time], [full, ...pct, state, time], [full, ...pct, short, time], [compact, ...pct, short, time], [full, ...pct, short], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
-      }
-      const text = firstFit([[...pct, state, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
+      const ran = at - job.at
+      const [state, short, isWarn]: [string, string, boolean] =
+        job.isPaused ? ['paused', 'paused', true]
+        : job.kind === 'wait' && (job.target || !job.wroteAt || job.isEmpty) ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
+        : job.kind === 'watch' ? (job.wroteAt && !job.isEmpty ? [`last event ${shortAgo(quiet)} ago`, `event ${shortAgo(quiet)} ago`, false] : ['no event yet', 'no event', false])
+        : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
+        // (a server prints only when asked, so its quiet is no warning)
+        : job.wroteAt && quiet >= JOB_QUIET && job.kind !== 'server' ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
+        : job.wroteAt ? [`printed ${shortAgo(quiet)} ago`, `printed ${shortAgo(quiet)} ago`, false]
+        // A job whose output cannot be found says so, so a blank row is never taken for one that moves
+        : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', 'no output', true]
+        : ['', '', false]
+      const warn = isWarn && Boolean(state)
+      // its speed and time left only while it prints: a minute old, they are no longer how it goes
+      const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
+      const left = job.left && isFresh ? [job.left] : []
+      const rate = job.rate && isFresh ? [job.rate] : []
+      const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
+      const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
+      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], [...compact, ...pct, short], [...compact, ...pct], [short]], width)
       return { text, isWarn: warn }
     }
+    // A job's two lines: what it is, in the work's own words, with its time; and under it how it stands, then the latest line it
+    // printed where that is not the progress already said
     const jobRow = (t: Twig, scope: string) => {
       const job = t.job
       if (!job) return null
       const key = `${scope}-job-${job.id}`
       const width = perRow - 4 - t.depth * 2
-      const isMore = job.id.startsWith('more-')
-      const { text: side, isWarn } = isMore ? { text: took(at - job.at), isWarn: false } : jobSide(job, width)
-      const room = Math.max(12, width - side.length - 1)
-      // Its percent, in blue, where the side says it as a part of its own
-      const pctAt = job.pct && !isWarn ? (side.startsWith(`${job.pct} · `) || side === job.pct ? 0 : side.includes(` · ${job.pct}`) ? side.indexOf(` · ${job.pct}`) + 3 : -1) : -1
-      // The latest line, unless it is only a progress bar its percent already says, in the room the name leaves; a wait says what
-      // it waits for. A run that says how far it is has that beside its time instead
-      // (one read from a progress line above the last still shows the last, such as an error after it)
-      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
-      const name = cut(jobHead(job), room)
-      const rest = room - name.length - 3
-      const detail = latest && rest >= 10 ? cut(latest, rest) : ''
-      return (
+      // its time, and how long it said it should take: in amber once well past that
+      const ran = at - job.at
+      const isLong = Boolean(job.expect && ran > (job.expect ?? 0) * 1.5)
+      const time = job.expectText ? `${took(ran)} of ~${job.expectText}` : took(ran)
+      const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
+      const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
           {jobLines(t, `twig-lines-${key}`, job)}
-          <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
-            <Box flexShrink={1} minWidth={0}>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            {/* A press shows its output whole in a Terminal window, where this Mac can open one */}
+            {canOpenJob(job) ? (
+              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => void openJobOutput($, job).catch(err => log($, `output not opened: ${String(err)}`))} />
+            ) : (
               <Text wrap="truncate-end">{name}</Text>
-            </Box>
-            {detail ? (
-              <Box flexShrink={1000} minWidth={0}>
-                <Text dimColor wrap="truncate-end">{` · ${detail}`}</Text>
-              </Box>
-            ) : null}
+            )}
           </Box>
           <Box flexShrink={0}>
-            {pctAt >= 0 && job.pct ? (
-              <Box flexDirection="row">
-                {pctAt > 0 ? <Text dimColor>{side.slice(0, pctAt)}</Text> : null}
-                <Text color={JOB_COLOR.download}>{job.pct}</Text>
-                <Text dimColor>{side.slice(pctAt + job.pct.length)}</Text>
-              </Box>
-            ) : (
-              <Text color={isWarn ? NEEDS : undefined} dimColor={!isWarn}>{side}</Text>
-            )}
+            <Text dimColor={!isLong} color={isLong ? NEEDS : undefined}>{time}</Text>
+          </Box>
+        </Box>
+      )
+      if (job.id.startsWith('more-')) return head
+      const { text: stand, isWarn } = jobStand(job, width)
+      // Its percent, in blue, where the line says it as a part of its own
+      const pctAt = job.pct && !isWarn ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
+      // The latest line, unless it is only a progress bar its percent already says; a wait says the work's own words for it.
+      // A run read from a progress line above its last still shows the last, such as an error after it
+      const latest = job.kind === 'wait' && job.waitsFor ? (job.isNamed && !isKindSaid(job.label) ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
+      const rest = width - stand.length - (stand ? 3 : 0)
+      const detail = latest && rest >= 10 ? cut(latest, rest) : ''
+      if (!stand && !detail) return head
+      return (
+        <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
+          {head}
+          <Box key={`stand-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+            {jobRails(t, `rails-${key}`)}
+            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+              {pctAt >= 0 && job.pct ? (
+                <Box flexDirection="row" flexShrink={0}>
+                  {pctAt > 0 ? <Text dimColor>{stand.slice(0, pctAt)}</Text> : null}
+                  <Text color={JOB_COLOR.download}>{job.pct}</Text>
+                  <Text dimColor>{stand.slice(pctAt + job.pct.length)}</Text>
+                </Box>
+              ) : stand ? (
+                <Box flexShrink={0}>
+                  <Text color={isWarn ? NEEDS : undefined} dimColor={!isWarn}>{stand}</Text>
+                </Box>
+              ) : null}
+              {detail ? (
+                <Box flexShrink={1000} minWidth={0}>
+                  <Text dimColor wrap="truncate-end">{stand ? ` · ${detail}` : detail}</Text>
+                </Box>
+              ) : null}
+            </Box>
           </Box>
         </Box>
       )

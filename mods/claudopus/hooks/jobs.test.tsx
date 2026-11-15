@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { detachedOf, foldJobs, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
+import { commandName, describedOf, detachedOf, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
 import type { Job } from './jobs'
 
 test('a job is told by its command: a server with its port, a download, else a script; its latest line is what a progress bar shows last', async () => {
@@ -144,7 +144,7 @@ test('how far a run is, read from the progress tools print and the line work is 
   // More shapes: Keras, a plain sentence, a count with what it counts after it, make's percent, az's long percent
   expect(of('450/1000 [=====>....] - ETA: 12s')).toMatchObject({ done: '450', total: '1,000', pct: '45%' })
   expect(of('Downloaded 460 MB of 1 GB (45%)')).toMatchObject({ done: '460 MB', total: '1 GB', pct: '45%' })
-  expect(of('Processed 450/1000 images')).toMatchObject({ done: '450', total: '1,000' })
+  expect(of('Processed 450/1000 images')).toMatchObject({ done: '450', total: '1,000 images' })
   expect(of('[ 45%] Building CXX object').pct).toBe('45%')
   expect(of('Alive[#####      ]  8.0123%').pct).toBe('8%')
   // The work's own line with a unit after each number, and a word after the total that is no unit
@@ -173,4 +173,87 @@ test('a detached start is followed only by the process `echo $!` printed and a l
   expect(detachedOf('export S=/tmp/x && nohup python a.py > $S/run.log 2>&1 & echo $!')?.log).toBe('/tmp/x/run.log')
   // A status code printed beside the process leaves it unknown
   expect(pidOf('200\n48213\n')).toBeUndefined()
+})
+
+test('a row is named by what it does and its kind by its own program; time left is only what a run said; 15 Nov rows read "Download · Reload page" and "cd /private/tmp/..."', async () => {
+  // `vercel curl` reads a page: vercel is the program, not curl
+  expect(jobKindOf('cd /w && vercel curl /ct --deployment d -- -s -o ct3.html; timeout 25 vercel logs d | grep -i storage', 'Reload page and check function logs')).toBe('script')
+  expect(jobKindOf('S=/x; nohup /usr/bin/curl -L -o a.zip https://e.com/a.zip > $S/f.log 2>&1 & echo $!', 'Fetch the archive')).toBe('download')
+  expect(jobKindOf('ls; wget --progress=dot:giga https://e.com/a.zip', 'Fetch it')).toBe('download')
+  // A command given no words of its own is named by what it runs
+  expect(labelOf('', 'bash /private/tmp/s/round3b_figs.sh')).toBe('bash round3b_figs.sh')
+  expect(labelOf('cd /w/review3 && ~/.venvs/ct/bin/python rc.py > rc.log 2>&1', 'cd /w/review3 && ~/.venvs/ct/bin/python rc.py > rc.log 2>&1')).toBe('python rc.py')
+  expect(commandName('S=/x && cd $S; CUDA=1 nohup python3 -m train --epochs 4 > t.log 2>&1 & echo $!')).toBe('python3 train')
+  expect(labelOf('Redraw all pictures', 'bash figs.sh')).toBe('Redraw all pictures')
+  // A wait led by `cd <folder>;` is a wait, named by what it waits for
+  expect(waitOf('cd /private/tmp/s; until grep -qE "exit [0-9]" vsd-sheet.log && grep -qE "exit [0-9]" idc-thin.log; do sleep 15; done; tail -2 vsd-sheet.log idc-thin.log; ls /d/sheets/')).toEqual({ what: 'exit [0-9] in vsd-sheet.log', file: '/private/tmp/s/vsd-sheet.log' })
+  // Time left, as each tool says it
+  expect(latestOf('  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n 45 1024M   45  460M    0     0  10.2M      0  0:01:40  0:00:45  0:00:55 10.5M').left).toBe('55s left')
+  expect(latestOf('big.bin   45%[=====>      ] 460.12M  10.2MB/s    eta 1m 35s').left).toBe('1m 35s left')
+  expect(latestOf('flame.pkl:  47%|####   | 1.41G/3.00G [01:18<01:28, 18.0MB/s]').left).toBe('1m 28s left')
+  expect(latestOf('  1,234,567,890  45%   10.21MB/s    0:00:55 (xfr#3, to-chk=2/10)').left).toBe('55s left')
+  expect(latestOf('progress: 3/6 steps fitting, eta 25m').left).toBe('25m left')
+  expect(latestOf('progress: 40/120 scans thumbnails 2h 5m remaining').left).toBe('2h 05m left')
+  // No time said, none shown; a percent alone is never made into one
+  expect(latestOf('progress: 3/6 steps fitting').left).toBeUndefined()
+  expect(latestOf('Receiving objects:  45% (450/1000), 460.00 MiB | 10.20 MiB/s').left).toBeUndefined()
+})
+
+test('a command held open is found by its own shell however few its words; times past an hour, units and names read true', async () => {
+  // A real shell line as ps listed it on 15 Nov, quotes and new lines as ps writes them
+  const shell = (pid: string, etime: string, body: string) => `${pid}  1423 Ss      ${etime} /bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1-ab.sh 2>/dev/null || true && \\builtin setopt NO_EXTENDED_GLOB 2>/dev/null || true && eval '${body}' < /dev/null && pwd -P >| /tmp/claude-a9a2-cwd`
+  const now = 1_700_000_100_000
+  const procs = procsOf([shell('31654', '00:08', 'python3 train.py'), shell('31700', '00:08', 'python3 train.py --epochs 4'), shell('31800', '00:30', `bash -c '"'"'echo hi'"'"'\\012sleep 9`)].join('\n'), now)
+  expect(heldShellOf(procs, 'python3 train.py', now - 8_000)).toBe('31654')
+  expect(heldShellOf(procs, "bash -c 'echo hi' sleep 9", now - 30_000)).toBe('31800')
+  // never one started far from when the call began
+  expect(heldShellOf(procs, 'python3 train.py', now - 120_000)).toBeUndefined()
+  // Time left past an hour, as it was said
+  expect(latestOf('progress: 3/60 scans fitting eta 1:59:59').left).toBe('2h left')
+  expect(latestOf('fit:   5%|  | 1/20 [00:08<1:59:40, 0.2it/s]').left).toBe('2h left')
+  expect(latestOf('progress: 3/6 steps fitting eta 5m20s').left).toBe('5m 20s left')
+  expect(latestOf('Copied 3 of 9 files, 5 minutes left').left).toBe('5m left')
+  // What a count counts is kept
+  expect(latestOf('Processed 9 of 20 files').total).toBe('20 files')
+  // Names and kinds
+  expect(labelOf('', 'for i in $(seq 1 20); do echo "progress: $i/20 x"; sleep 1; done')).toBe('a shell loop')
+  expect(labelOf('', 'uv run python train.py')).toBe('python train.py')
+  expect(labelOf('', 'git -C /repo pull')).toBe('git pull')
+  expect(labelOf('', '"/Applications/Some App/bin/tool" --go')).toBe('tool')
+  expect(jobKindOf('azcopy copy ./scans https://acct.blob.core.windows.net/c --recursive', 'Send the scans to Azure')).toBe('download')
+})
+
+test('a wait or check that reads pages with curl is no download: the 15 Nov "Download · Wait for deploy and verify the live pages"', async () => {
+  const deploy = `for i in $(seq 1 50); do n=$(curl -s --max-time 30 "https://example.com/support/terms?v=$i" | grep -c 'Governors'); [ "$n" -gt 0 ] && break; sleep 10; done; for p in terms privacy; do printf "$p %s\\n" $(curl -s "https://example.com/support/$p" | tee /tmp/p.html | grep -o 'Governors' | wc -l); done`
+  expect(jobKindOf(deploy, 'Wait for deploy and verify the live pages')).toBe('wait')
+  expect(jobKindOf(deploy, 'Verify the live pages')).toBe('script')
+  expect(jobKindOf('curl -s https://example.com/health | grep ok', 'Look at the site')).toBe('script')
+  expect(jobKindOf('wget --spider https://example.com/a.zip', 'See the file is there')).toBe('script')
+  expect(jobKindOf('curl -sL https://example.com/a.zip -o a.zip', 'Get the archive')).toBe('download')
+  expect(jobKindOf('curl -L https://example.com/a.zip > a.zip', 'Get the archive')).toBe('download')
+  expect(jobKindOf('curl -LO https://example.com/a.zip', 'Get the archive')).toBe('download')
+  expect(jobKindOf('wget https://example.com/a.zip', 'Get the archive')).toBe('download')
+  expect(jobKindOf('python3 check.py', 'Check the download finished')).toBe('script')
+})
+
+test('the work names each run in one form, its kind first and how long it should take in brackets, and the card reads that as it is', async () => {
+  expect(describedOf('Download the CT scans (about 3 min)')).toEqual({ text: 'Download the CT scans', kind: 'download', expect: 180_000, expectText: '3m' })
+  expect(describedOf('Wait for the deploy to go live (about 90s)')).toMatchObject({ text: 'Wait for the deploy to go live', kind: 'wait', expect: 90_000 })
+  expect(describedOf('Upload the fits to Azure (~1h 30m)')).toMatchObject({ kind: 'download', expectText: '1h 30m' })
+  expect(describedOf('Run the fit on all scans (about 20 min)')).toMatchObject({ kind: 'script', expectText: '20m' })
+  // Its words decide its kind, whatever the command: a wait that polls with curl is a wait
+  expect(jobKindOf('for i in $(seq 1 50); do curl -L -o p.html https://e.com; sleep 10; done', 'Wait for the deploy to go live (about 2 min)')).toBe('wait')
+  expect(jobKindOf('python3 fetch.py', 'Download the weights (about 5 min)')).toBe('download')
+  // Words in another form keep their own name and no time
+  expect(describedOf('Redraw all pictures')).toEqual({ text: 'Redraw all pictures', kind: undefined })
+})
+
+test('a description is read only as far as it is sure: a count in brackets is no time, a wait may say waiting, a range takes its end', async () => {
+  expect(describedOf('Run thumbnails (about 120 scans)')).toEqual({ text: 'Run thumbnails (about 120 scans)', kind: 'script' })
+  expect(describedOf('Run one more step (about 1 more min)').expect).toBeUndefined()
+  expect(describedOf('Download the CT scans (3 min)')).toMatchObject({ text: 'Download the CT scans', expectText: '3m' })
+  expect(describedOf('Waiting on Azure (about 2-3 min)')).toMatchObject({ kind: 'wait', expectText: '3m' })
+  expect(describedOf('Watch the queue (about 1h)')).toMatchObject({ kind: 'watch', expectText: '1h' })
+  // a curl in a loop that keeps its files is still a download
+  expect(jobKindOf('for i in 1 2; do curl -o f$i.bin https://e.com/f$i.bin; done', 'Get two files')).toBe('download')
 })
