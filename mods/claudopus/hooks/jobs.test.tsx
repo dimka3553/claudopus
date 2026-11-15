@@ -209,8 +209,8 @@ test('a command held open is found by its own shell however few its words; times
   // never one started far from when the call began
   expect(heldShellOf(procs, 'python3 train.py', now - 120_000)).toBeUndefined()
   // Time left past an hour, as it was said
-  expect(latestOf('progress: 3/60 scans fitting eta 1:59:59').left).toBe('2h 00m left')
-  expect(latestOf('fit:   5%|  | 1/20 [00:08<1:59:40, 0.2it/s]').left).toBe('2h 00m left')
+  expect(latestOf('progress: 3/60 scans fitting eta 1:59:59').left).toBe('2h left')
+  expect(latestOf('fit:   5%|  | 1/20 [00:08<1:59:40, 0.2it/s]').left).toBe('2h left')
   expect(latestOf('progress: 3/6 steps fitting eta 5m20s').left).toBe('5m 20s left')
   expect(latestOf('Copied 3 of 9 files, 5 minutes left').left).toBe('5m left')
   // What a count counts is kept
@@ -246,4 +246,14 @@ test('the work names each run in one form, its kind first and how long it should
   expect(jobKindOf('python3 fetch.py', 'Download the weights (about 5 min)')).toBe('download')
   // Words in another form keep their own name and no time
   expect(describedOf('Redraw all pictures')).toEqual({ text: 'Redraw all pictures', kind: undefined })
+})
+
+test('a description is read only as far as it is sure: a count in brackets is no time, a wait may say waiting, a range takes its end', async () => {
+  expect(describedOf('Run thumbnails (about 120 scans)')).toEqual({ text: 'Run thumbnails (about 120 scans)', kind: 'script' })
+  expect(describedOf('Run one more step (about 1 more min)').expect).toBeUndefined()
+  expect(describedOf('Download the CT scans (3 min)')).toMatchObject({ text: 'Download the CT scans', expectText: '3m' })
+  expect(describedOf('Waiting on Azure (about 2-3 min)')).toMatchObject({ kind: 'wait', expectText: '3m' })
+  expect(describedOf('Watch the queue (about 1h)')).toMatchObject({ kind: 'watch', expectText: '1h' })
+  // a curl in a loop that keeps its files is still a download
+  expect(jobKindOf('for i in 1 2; do curl -o f$i.bin https://e.com/f$i.bin; done', 'Get two files')).toBe('download')
 })

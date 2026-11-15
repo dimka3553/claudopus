@@ -1923,7 +1923,7 @@ test('what a piece of work and its helpers have running is in its Details too, e
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   // In drawing order, with the tree's lines: the server on the work's own line, the helper, its downloads one level under it
   const rows = (await tab.findAll({ type: 'Text' })).map(one => one.text)
-  const picked = (await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /^Serve the site|^Download weights/.test(text))
+  const picked = (await texts(tab)).filter(text => /^Serve the site|^Download weights/.test(text))
   // the server on the work's own line, the helper's downloads a level under it
   expect(rows.filter(text => /^ *[├└]───$/.test(text)).slice(0, 1)).toEqual(['├───'])
   expect(picked.sort()).toEqual([...[1, 2, 3, 4, 5].map(n => `Download weights ${n}`), 'Serve the site'])
@@ -2079,9 +2079,13 @@ test('every run under a card says how it stands: a command held open shows its p
   expect(shown).toContain(' · wrote vsd-02.png')
   // A press on a run's name shows its output whole in a Terminal window, as it goes on
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
-  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Command · Redraw all pictures')?.key ?? '' })
+  const before = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Command · Redraw all pictures')?.key ?? ''
+  await list.press({ key: before })
   const argv = await until(async () => opened.find(one => String(one[1]).endsWith('/output.command')))
   expect(files.get(String(argv?.[1]))).toContain(`exec tail -n 1000 -F '${TASKS}/bg-r1.output'`)
+  // and moves the buttons' keys, so the panel is not pulled back to the row it pressed
+  const after = await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Command · Redraw all pictures' && b.key !== before)?.key)
+  expect(after).toBeDefined()
   await list.unmount()
   held.get('dl')?.('')
   await call
@@ -2402,7 +2406,7 @@ test('work that answers a question while a copy of its own still runs, with that
   const wait = () => pane.find({ type: 'Text', text: /^Still at work: it waits for its background command to finish/ })
   expect((await wait())?.text).toBe('Still at work: it waits for its background command to finish')
   // The copy itself is a row on its tree: what it is in its own words, and how long it has run
-  const job = async () => (await pane.findAll({ type: 'Button' })).find(b => /^Command · Send the four/.test(String(b.props.label)))
+  const job = async () => (await pane.find({ type: 'Text', text: /^Command · Send the four/ })) ?? (await pane.findAll({ type: 'Button' })).find(b => /^Command · Send the four/.test(String(b.props.label)))
   expect(await job()).toBeDefined()
   // Forty minutes with nothing new is a long copy, not stuck work
   await clock.advance(40 * 60_000)

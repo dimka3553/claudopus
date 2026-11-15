@@ -76,13 +76,14 @@ const isFetching = (step: string) => {
 // should take in brackets: `Download the CT scans (about 3 min)`
 const KIND_WORDS: [RegExp, JobKind][] = [
   [/^(download|upload|fetch|copy|sync|clone)\b/i, 'download'],
-  [/^(wait|poll)\b/i, 'wait'],
+  [/^(wait(ing)?|poll(ing)?)\b/i, 'wait'],
   [/^watch\b/i, 'watch'],
   [/^serve\b/i, 'server'],
   [/^run\b/i, 'script'],
 ]
 export const describedOf = (what: string) => {
-  const m = what.match(/\s*\((?:about|around|roughly|up to|~)\s*([^)]+)\)\s*$/i)
+  // only a time in the brackets, never a count (about 120 scans): a range is taken at its end (about 2-3 min)
+  const m = what.match(new RegExp(String.raw`\s*\((?:about|around|roughly|up to|~)?\s*(?:\d+(?:\.\d+)?\s*[-–]\s*)?${TIME}\)\s*$`, 'i'))
   const seconds = m ? secondsIn((m[1] ?? '').trim()) : undefined
   const text = m ? what.slice(0, m.index).trim() : what.trim()
   return { text, kind: KIND_WORDS.find(([re]) => re.test(text))?.[1], ...(seconds ? { expect: seconds * 1000, expectText: (leftText(seconds) ?? '').replace(/ left$/, '') } : {}) }
@@ -98,7 +99,7 @@ const stepsOf = (cmd: string) =>
   cmd
     .replace(/"(\\.|[^"\\])*"|'[^']*'/g, m => m.replace(/[;&|\n]/g, ' '))
     .split(/\s*(?:&&|\|\||;|\||\n|(?<![>&])&(?![>&]))\s*/)
-    .map(step => step.trim().replace(/^\(+\s*/, '').replace(SETUP, '').trim())
+    .map(step => step.trim().replace(/^\(+\s*/, '').replace(/^(do|then|else)\s+/, '').replace(SETUP, '').trim())
     .filter(Boolean)
 
 // The port a server listens on, from its command or what it wrote
@@ -132,13 +133,13 @@ export type Progress = { pct?: string; done?: string; total?: string; rate?: str
 // worked out by the mod
 const secondsIn = (text: string) => {
   if (/^\d+(:\d\d){1,2}$/.test(text)) return text.split(':').reduce((sum, part) => sum * 60 + Number(part), 0)
-  const parts = [...text.matchAll(/(\d+(?:\.\d+)?)\s?(d|h|m(?:in)?|s)/gi)]
+  const parts = [...text.matchAll(/(\d+(?:\.\d+)?)\s?(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])/gi)]
   return parts.length ? parts.reduce((sum, m) => sum + Number(m[1]) * ({ d: 86400, h: 3600, m: 60, s: 1 }[(m[2] ?? 's').charAt(0).toLowerCase()] ?? 1), 0) : undefined
 }
 const leftText = (seconds: number | undefined) => {
   if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined
   const all = Math.round(seconds)
-  const text = all < 60 ? `${all}s` : all < 600 ? `${Math.floor(all / 60)}m${all % 60 ? ` ${String(all % 60).padStart(2, '0')}s` : ''}` : all < 3600 ? `${Math.round(all / 60)}m` : `${Math.floor(Math.round(all / 60) / 60)}h ${String(Math.round(all / 60) % 60).padStart(2, '0')}m`
+  const text = all < 60 ? `${all}s` : all < 600 ? `${Math.floor(all / 60)}m${all % 60 ? ` ${String(all % 60).padStart(2, '0')}s` : ''}` : all < 3600 ? `${Math.round(all / 60)}m` : `${Math.floor(Math.round(all / 60) / 60)}h${Math.round(all / 60) % 60 ? ` ${String(Math.round(all / 60) % 60).padStart(2, '0')}m` : ''}`
   return `${text} left`
 }
 const TIME = String.raw`(\d+(?::\d\d){1,2}|(?:\d+(?:\.\d+)?\s?(?:days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])\s*){1,3})`
