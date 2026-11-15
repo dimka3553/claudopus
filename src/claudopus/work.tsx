@@ -190,7 +190,7 @@ const workHooks = (on: On) => {
     let woken = ''
     const next = async (call: typeof e) => {
       const r = await run(call)
-      if (woken && !r.deny && !r.isError) await update($, todos, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
+      if (woken && !r.deny && !r.isError) await changeTodos($, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
       // Ended work a message starts again is at work from now: its card leaves Finished while it acts on the message
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
@@ -265,7 +265,7 @@ const workHooks = (on: On) => {
                   ? 'the work that started you'
                   : `the work${title(sender)}`
         }
-        await update($, todos, list =>
+        await changeTodos($, list =>
           list.map(one =>
             one.id !== target.id
               ? one
@@ -291,7 +291,7 @@ const workHooks = (on: On) => {
         const now = await $.clock.now()
         const isKeeping = isTool(e.tool, 'todo') || isTool(e.tool, 'note')
         let nudge = ''
-        await update($, todos, list =>
+        await changeTodos($, list =>
           list.map(one => {
             if (one.id !== id) return one
             const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined }
@@ -354,7 +354,7 @@ const workHooks = (on: On) => {
         await stopHelpers($, stopId)
         await dropBackground($, [stopId], 'stopped')
         const now = await $.clock.now()
-        await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
+        await changeTodos($, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
         await keepStoppedReports($, now)
         await lookEnds($)
       }
@@ -388,7 +388,7 @@ const workHooks = (on: On) => {
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
-    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     // A step the app sends to an older model or to Haiku after its safeguards flag a message is not moved back past the flag: the
     // work is ended there with a report that says so (FLAGGED), so its parent starts what is left again on a current model. An agent
@@ -406,7 +406,7 @@ const workHooks = (on: On) => {
       flaggedOnce.add(id)
       if (n === 1) await log($, `work ${id} was flagged and the app would send it to ${modelName(e.model)}: it is ended with a report instead`)
       if (dir) {
-        await update($, todos, list => list.map(one => (one.id === id ? { ...one, flagged: modelName(e.model), moved: undefined } : one)))
+        await changeTodos($, list => list.map(one => (one.id === id ? { ...one, flagged: modelName(e.model), moved: undefined } : one)))
         await stopHelpers($, id).catch(() => undefined)
       }
       // Its report goes back through the handback tool; where that does not end it, a plain last answer, and past a few the work is
@@ -431,7 +431,7 @@ const workHooks = (on: On) => {
     }
     // The card says so only while it holds: not once the app sends its steps to a right model again
     const moved = isMovedByApp ? modelName(e.model) : undefined
-    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
     // A pick the engine has since passed is its family's newest
     const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined
     const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead
@@ -440,7 +440,7 @@ const workHooks = (on: On) => {
     const model = (r.usage as { model?: string } | undefined)?.model
     if (model) seeModel(model)
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)
-    if (id !== undefined && tokens && dir) await update($, todos, list => list.map(one => (one.id === id ? { ...one, tokens, model: one.chosen ?? (modelName(model ?? '') ? model : one.model) } : one)))
+    if (id !== undefined && tokens && dir) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, tokens, model: one.chosen ?? (modelName(model ?? '') ? model : one.model) } : one)))
 
     return r
   })
@@ -513,7 +513,7 @@ const workHooks = (on: On) => {
     const named1 = isOwn && !fromReport && !e.resume ? (await read($, reports)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : []
     const goesOn = named1.length === 1 && named1[0] && [...aboutWords(named1[0].title)].some(word => aboutWords(e.description ?? '').has(word)) ? named1[0].id : ''
     const from = fromReport || goesOn
-    await update($, todos, list => {
+    await changeTodos($, list => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
       const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }

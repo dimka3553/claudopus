@@ -1,9 +1,11 @@
 # How Claudopus's release (mods/claudopus/bin/release) puts work on main here: the only way to main
 NAME=Claudopus
 VERSION_FILE=mods/claudopus/.claude-plugin/plugin.json
-DERIVED="mods/claudopus/hooks/register.tsx mods/claudopus/hooks/register.test.tsx src/claudopus/globals.d.ts src/claudopus/tests/globals.d.ts site/version.json site/changelog.html"
+DERIVED="mods/claudopus/hooks/register.tsx mods/claudopus/hooks/tests/*.test.tsx src/claudopus/globals.d.ts src/claudopus/tests/globals.d.ts site/version.json site/changelog.html"
 BUILD="node src/claudopus/build.mjs"
 ENGINE=${CLAUDE_CODE_EXECPATH:-claude}
 CHECK="node src/claudopus/build.mjs --check && sh mods/claudopus/notifier/check.sh && bash mods/claudopus/bin/admin.test.sh && bash mods/claudopus/bin/keep.test.sh && bash mods/claudopus/bin/linux.test.sh && '$ENGINE' plugin test mods/claudopus && '$ENGINE' plugin validate --strict mods/claudopus && '$ENGINE' plugin validate --strict ."
+# main moves only once these GitHub checks (.github/workflows/check.yml) passed on the very commit it is to become
+GITHUB_CHECKS="check (ubuntu-latest), check (macos-latest)"
 # Every version is made a GitHub release marked latest, with its changelog entry, so the repo page and its badge name it
 GITHUB_RELEASE="node src/claudopus/build.mjs --notes"

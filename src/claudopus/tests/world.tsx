@@ -1,8 +1,18 @@
 // The world beneath the mod in every test: files in memory, the app's session tools, a cheap model; and small helpers
 
 const HOME = '/home/sam'
-// For the longest tests, near the kit's 5 seconds on GitHub's runner, which runs them about twice as slow as a Mac
-const SLOW = { timeoutMs: 20_000 }
+// The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
+const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
+// Every test may take a minute, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's runner
+// (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
+// SLOW is that limit, kept for the tests that name it
+const SLOW = { timeoutMs: 60_000 }
+function test(name: string, body: TestBody): void
+function test(name: string, options: { timeoutMs?: number; plugins?: readonly Plugin[] }, body: TestBody): void
+function test(name: string, options: TestBody | { timeoutMs?: number; plugins?: readonly Plugin[] }, body?: TestBody) {
+  if (typeof options === 'function') kitTest(name, SLOW, options)
+  else kitTest(name, { ...SLOW, ...options }, body as TestBody)
+}
 const MEMORY = `${HOME}/.claude/claudopus`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
@@ -31,8 +41,12 @@ const SHIPPED_PRINCIPLES: string = '<shipped: rules/CLAUDE.md>'
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
+// A release on GitHub as the test world gives it: its version, commit and the tree it published; `got` a different tree that came
+// down instead, `manifest` a different version in it, `online` a newer commit online, and a fetch that fails, a folder with commits of its
+// own, or uncommitted changes the move would overwrite
+type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string; startedOn?: Record<string, string> } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -107,6 +121,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
     if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: options.shipped ? SHIPPED_PRINCIPLES : PRINCIPLES }
     if (isShipped && options.changelog !== undefined && e.path.endsWith('/CHANGELOG.md')) return { value: options.changelog }
+    // A release on GitHub, where the test gives one: the mod's folder is a main checkout, whose version a reload loads
+    if (options.release && e.path.endsWith('/.git/HEAD')) return { value: 'ref: refs/heads/main\n' }
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: files.get('manifest') ?? '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
@@ -244,6 +260,46 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return { value: { exitCode: 0, stdout: rest.includes('--targets') ? options.tailscale : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (tool === 'kill') killed.push(String(rest[0]))
+    // A release on GitHub, where the test gives one: the mod's folder is Claudopus's main checkout on main, a fetch of the release's
+    // tag lays its commit under the download ref (and git's progress where the step reads it), and the folder's tree in that commit
+    // is the one the release published unless the test says what came down instead
+    const release = options.release
+    if (release && tool === 'sh' && rest[1] === '"$@" 2>"$0"') {
+      const argv = rest.slice(3).map(String)
+      gitRan.push(argv.slice(argv.indexOf('-C') + 2).join(' '))
+      if (release.fetchFails) return (files.set(String(rest[2]), 'fatal: unable to access GitHub: Could not resolve host'), ok('', 128))
+      files.set(String(rest[2]), 'Receiving objects:  50% (10/20), 1.00 MiB | 2.00 MiB/s\rReceiving objects: 100% (20/20), 2.00 MiB | 2.00 MiB/s, done.\nResolving deltas: 100% (5/5), done.\n')
+      files.set('git:ref', release.commit)
+      return ok()
+    }
+    if (release && tool === 'git' && rest.includes('--show-toplevel')) return ok('/plugins-src\n')
+    if (release && tool === 'sh' && String(rest[1]).includes('write-tree')) return ok(`${files.get('tree:installed') ?? release.tree}\n`)
+    if (release && tool === 'env' && rest.includes('git')) {
+      const args = rest.slice(rest.indexOf('-C') + 2).map(String)
+      gitRan.push(args.join(' '))
+      const at = (arg?: string) => (arg ?? '').replace(/\^\{commit\}$/, '')
+      if (args[0] === 'rev-parse' && args.includes('--show-toplevel')) return ok('/plugins-src\n')
+      if (args[0] === 'ls-files') return ok('mods/claudopus/.claude-plugin/plugin.json\n')
+      if (args[0] === 'rev-parse' && args.includes('--git-dir')) return ok(release.worktree ? '/plugins-src/.git/worktrees/fix\n/plugins-src/.git\n' : '/plugins-src/.git\n/plugins-src/.git\n')
+      if (args[0] === 'symbolic-ref') return ok(release.worktree ? 'fix-bar\n' : 'main\n')
+      if (args.includes('--symbolic-full-name')) return ok('origin/main\n')
+      if (args[0] === 'rev-parse' && args.includes('--verify')) {
+        const what = args.at(-1) ?? ''
+        if (what.startsWith('refs/claudopus/update')) return files.has('git:ref') ? ok(`${files.get('git:ref')}\n`) : ok('', 1)
+        if (what.includes(':')) return what.startsWith(`${release.commit}:`) && files.has('git:ref') ? ok(`${release.got ?? release.tree}\n`) : ok('', 1)
+        return ok(`${at(what)}\n`)
+      }
+      if (args[0] === 'show') return ok(JSON.stringify({ name: 'claudopus', version: release.manifest ?? release.version }))
+      if (args[0] === 'update-ref' && args[1] === '-d') return (files.delete('git:ref'), ok())
+      if (args[0] === 'merge-base') return ok('', release.ownCommits ? 1 : 0)
+      if (args[0] === 'merge') {
+        if (release.overwrite) return { value: { exitCode: 1, stdout: '', stderr: 'error: Your local changes to the following files would be overwritten by merge', isStdoutTruncated: false, isStderrTruncated: false } }
+        files.set('manifest', JSON.stringify({ name: 'claudopus', version: release.version }))
+        return ok()
+      }
+      if (args[0] === 'ls-remote') return ok(`${release.online ?? release.commit}\tHEAD\n`)
+      return ok()
+    }
     // git in the mod's folder: no checkout unless the test lays git:online, the version its branch online has; then the folder is on
     // main following origin/main, behind it, and a fast-forward (refused with what git:merge says, where laid) moves the manifest there
     if (tool === 'env' && rest.includes('git')) {
@@ -398,6 +454,21 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   // A command a test holds running until it lets it go, with what it then prints: `held.get(id)?.(text)`
   const held = new Map<string, (text: string) => void>()
+  // A call a test starts and leaves running, kept so its test can end it: `keep(call)`, then `await settle()` as the test ends.
+  // Left running, the call ends after its test, and the look the mod takes as a call ends runs against a later test's files
+  const kept: Promise<unknown>[] = []
+  const keep = <T,>(call: Promise<T>) => (kept.push(call.catch(() => undefined)), call)
+  // Lets every held command go and every wait for a second end, until each kept call has ended
+  const settle = async () => {
+    let isDone = false
+    const all = Promise.all(kept.splice(0)).then(() => (isDone = true))
+    for (let n = 0; n < 2000 && !isDone; n++) {
+      for (const [id, go] of [...held]) (held.delete(id), go(''))
+      wake()
+      await Promise.race([all, new Promise<void>(resolve => setTimeout(() => resolve(), 5))])
+    }
+    if (!isDone) throw new Error('a call the test kept did not end')
+  }
   on('tool.call', async (_, e) => {
     if (e.tool === 'Agent') agentModels.push((e as { model?: string }).model)
     const command = String((e as { command?: string }).command ?? '')
@@ -478,7 +549,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -515,12 +586,65 @@ const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly 
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
-// What the panel shows after work that is not awaited, such as a look at the servers
+// What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
+// (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a
+// count of tries ran out before the work did
+declare const Date: { now: () => number; UTC: (year: number, month: number, day?: number, hours?: number) => number }
 const until = async <T,>(look: () => Promise<T | undefined>) => {
-  for (let tries = 0; tries < 100; tries += 1) {
+  for (const end = Date.now() + 40_000; ; ) {
     const got = await look()
     if (got) return got
+    if (Date.now() > end) return undefined
     await new Promise<void>(resolve => setTimeout(() => resolve(), 5))
   }
-  return undefined
 }
+
+// ---- Set-ups more than one area uses ----
+
+const steps = async ($: Parameters<TestBody>[0], index: number, model: string, agentId?: string) => {
+  const chunks: { kind: string; name?: string; text?: string }[] = []
+  for await (const c of $.turn.step({ turnId: 't', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) chunks.push(c as never)
+  return chunks
+}
+
+const ADMIN = '/plug/claudopus/bin/admin'
+const GRANTS = `${MEMORY}/admin-grants/`
+const ALLOWED = `${MEMORY}/admin-allowed.json`
+// A piece of work under way in a chat of Sam's, and the panel
+const gated = async ($: Parameters<TestBody>[0], on: On, config: Record<string, unknown> = {}, options: Parameters<typeof world>[1] = {}) => {
+  const w = world(on, options)
+  w.files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', ...config }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the hosts file', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fix the hosts file', prompt: 'fix the hosts file' } as never)
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  const bash = (id: string, command: string, agentId = 'a1', more: Record<string, unknown> = {}) => $.tool.call({ tool: 'Bash', tool_use_id: id, command, agentId, ...more } as never)
+  const labels = async () => (await list.findAll({ type: 'Button' })).map(one => String(one.props.label ?? ''))
+  // The call is held once its buttons are on the card
+  const held = async (id: string) => until(async () => keyed(list, `gate-${id}-0-deny`))
+  const grants = () => [...w.files.keys()].filter(path => path.startsWith(GRANTS))
+  // A press on a card's gate, and the second after which the held call reads it
+  const press = async (key: string) => (await pressed(list, key), w.wake())
+  return { ...w, holding: w.held, list, bash, labels, held, grants, press }
+}
+
+// A prompt's Yes or No, by the start of its key: the prompt's id and the count of presses follow
+const button = async (pane: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; props: Record<string, unknown> }[]> }, start: string) =>
+  (await pane.findAll({ type: 'Button' })).find(one => String(one.key ?? '').startsWith(start))
+
+const NOW = 1_700_000_000_000
+// This chat's own work as its file shares it with the other chats
+const read$todos = async (files: Map<string, string>) => (JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').cards?.find((one: { id: string }) => one.id === 'a1') ?? {}) as { ask?: { text: string } }
+// Another chat's file as that chat writes it: one piece of work that asks for a go-ahead, and one that runs
+const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
+  JSON.stringify({
+    chat,
+    title,
+    folder: '/repo/billing',
+    host: '',
+    at,
+    cards: [
+      { id: 'b1', parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: 'Send the invoices', words: 'send them', items: [{ text: 'Draft the mail', state: 'done' }], entries: [{ at, kind: 'note', text: 'I drafted the mail.' }], answer: '', ask: { text: 'May I send 12 invoices?', choices: ['Send', 'Not now'], from: 'b1', at }, startedAt: at - 60_000, endedAt: 0, status: 'working' },
+      { id: 'b2', parentId: '', isFork: false, tokens: 0, title: 'Check the totals', words: 'check', items: [], entries: [{ at, kind: 'note', text: 'Adding up March.' }], answer: '', startedAt: at - 30_000, endedAt: 0, status: 'working' },
+    ],
+  })

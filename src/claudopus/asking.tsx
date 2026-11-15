@@ -100,7 +100,7 @@ const heldDrawings = new Map<string, { shape: string; content: string; at: numbe
 let freshness = 0
 const drawAgain = ($: EngineInterface) => {
   freshness += 1
-  $.ui.invalidate('ui.render')
+  void drawFresh($)
 }
 // The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
 // arrive, so a drawing never puts older letters over the newer ones the box already holds
@@ -123,7 +123,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : ''])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -142,6 +142,45 @@ const freeTimes = ($: EngineInterface) => {
   typing += 1
   isTyping = false
   if (wasHeld) drawAgain($)
+}
+// Every pane of the mod's is drawn again, from the values as they are now
+const drawFresh = async ($: EngineInterface) => $.ui.invalidate('ui.render')
+// What each pane showed when last drawn afresh: its shape, its content and when, so calmLook knows what has moved since
+const drawnPanes = new Map<string, { shape: string; content: string; at: number; side: string }>()
+// What the panel shows from the mod's own memory rather than its values: what the app's prompts, the admin and file gates, the boxes,
+// pictures, the update and the presses hold. A change in it draws the panel again within a second
+const sideSign = () =>
+  JSON.stringify([
+    waiting.map(one => [one.agent, one.tool, one.seen ?? 0, one.isPressedNo ?? false]), asked.length, answeredPrompts.length, [...promptSaid], [...promptHeld],
+    [...gateHeld], [...gateSaid.keys()], looseGates.map(one => one.id), [...undoneOffers.keys()], boxes.map(one => one.id), doneNotes.length, [...boxSaid], [...boxSent], boxPresses,
+    [...pictureIn.keys()], isUpdating, isReloadRefused, updatedMoment ?? null, presses, loadMark, freshness,
+  ])
+// While the person uses the panel (scrolls it, moves the focus in it, presses in it, or types) its running times stand still: they
+// move again ENGAGED after the person's last move
+const ENGAGED = 15_000
+let engagedAt = 0
+let calmAt = 0
+const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
+// Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
+// draw it again only every CALM while work moves, and not while the person uses it
+const calmLook = async ($: EngineInterface, isMoving: boolean) => {
+  const now = await $.clock.now()
+  const list = drawnPanes.get(LIST) ?? { shape: '', content: '', at: 0, side: sideSign() }
+  // What the mod holds in memory, or a file the panel read, changed: drawn again at once, as anything new is
+  const side = sideSign()
+  let isNew = !isTyping && list.side !== side
+  for (const [path, text] of isTyping ? [] : drawnFiles) {
+    const now = await readOr($, path)
+    if (now !== text) (drawnFiles.set(path, now), (isNew = true))
+  }
+  // Asked for once: a panel the app does not draw just then is not asked for again each second
+  if (isNew) return void ((list.side = side), drawAgain($), (list.side = sideSign()))
+  // Counted from the panel's last drawing afresh or the last of these, so a Details tab or the band drawn without the panel moves on
+  // every CALM too, not each second
+  if (!isMoving || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
+  calmAt = now
+  await writeHeldOthers($)
+  $.ui.invalidate('ui.render')
 }
 // Whether an element of the mod's is a box the person types into: an ask's reply box or a key box
 const isTypedBox = (element: string | undefined) => /-reply-|^box-.*-field/.test(element ?? '')
@@ -223,8 +262,9 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   answeredAsks.add(asked)
   const at = await $.clock.now()
   let isCleared = false
-  await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
+  // Set afresh on each run of the change, as it runs again on a list written meanwhile
+  await changeTodos($, list =>
+    ((isCleared = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isCleared) return
   answeredAt.set(one.id, ask.at)
@@ -258,8 +298,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   // Acted on from now while the work is started again with it; never on a card no run of its own will end
   const listed = await read($, todos)
   const isWaking = listed.find(card => card.id === one.id)?.status !== 'working' && listed.find(card => card.id === target)?.status !== 'working'
-  await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
+  await changeTodos($, list =>
+    ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
   // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
@@ -297,7 +337,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
   // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
-  await update($, todos, list => list.map(card => (card.id === one.id && card.ask?.replied?.text === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? { ...card, ask: { ...card.ask, replied: { ...card.ask.replied, isWaking: true } } } : card)))
+  await changeTodos($, list => list.map(card => (card.id === one.id && card.ask?.replied?.text === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? { ...card, ask: { ...card.ask, replied: { ...card.ask.replied, isWaking: true } } } : card)))
   sentReplies.set(one.id, { ...sent, to: 'work' })
   redraw($)
   // One message for a work: a second answer for the same one joins the first
@@ -345,14 +385,16 @@ const writtenIn = (target: string, card: string) => {
 // Finished, while it acts on it
 const wakeCard = async ($: EngineInterface, target: string) => {
   const now = await $.clock.now()
-  await update($, todos, list => list.map(card => (card.id !== target || card.status === 'working' ? card : (endedByHandback.delete(target), resumed(card, now)))))
+  let isWoken = false
+  await changeTodos($, list => ((isWoken = false), list).map(card => (card.id !== target || card.status === 'working' ? card : ((isWoken = true), resumed(card, now)))))
+  if (isWoken) endedByHandback.delete(target)
 }
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
   if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
   await log($, `work ${target} not started again with an answer: ${reason}`)
   // An ask its reply held waits on the person again, every answer back
   const ids = new Set(answers.map(({ one }) => one.id))
-  await update($, todos, list => list.map(card => (ids.has(card.id) && card.ask?.replied?.isWaking ? { ...card, ask: { ...card.ask, replied: { text: card.ask.replied.text, at: card.ask.replied.at } } } : card)))
+  await changeTodos($, list => list.map(card => (ids.has(card.id) && card.ask?.replied?.isWaking ? { ...card, ask: { ...card.ask, replied: { text: card.ask.replied.text, at: card.ask.replied.at } } } : card)))
   for (const { one, sent } of answers) {
     sentReplies.set(one.id, { ...sent, to: 'chat' })
     const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))
@@ -401,7 +443,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   // Either way the ask is done with in the chat: the work asking again is sent to it afresh
   if (isHeld) answeredAsks.delete(a.key)
   inChat.delete(a.card.id)
-  await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
+  await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   dropDrafts($, a.card.id)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
   writtenIn(to, a.card.id)

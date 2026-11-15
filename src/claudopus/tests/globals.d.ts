@@ -7,9 +7,10 @@ import * as M3 from '../../../mods/claudopus/hooks/stats'
 declare global {
   export import expect = M0.expect
   export import mock = M0.mock
-  export import test = M0.test
+  export import kitTest = M0.test
   export import TestBody = M0.TestBody
   export import On = M1.On
+  export import Plugin = M1.Plugin
   export import headLine = M2.headLine
   export import headMood = M2.headMood
   export import OFF_LOOK = M2.OFF_LOOK

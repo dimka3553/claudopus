@@ -132,11 +132,21 @@ const configButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
     <ui.Button key={`config-open-${presses}`} label="Config" hotkey={isKeyed ? 'c' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
   </ui.Box>
 )
-// Check for updates as it stands in this chat: under way, and what the last press found, kept until the next press
+// Check now as it stands in this chat: under way, and what the last press found, kept until the next press
 const updateCheck = { isChecking: false, said: '', isError: false }
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
   version: (await versionsOf($).catch(() => ({ version: '' }))).version,
   check: { ...updateCheck },
+  updates: await (async () => {
+    const known = await knowSource($).catch(() => undefined)
+    const stamp = stampOf(await readOr($, lookedPath()))
+    return {
+      where: known ? `${known.where}${known.cannot ? `. ${known.cannot.why.replace(/^./, c => c.toUpperCase())}` : ''}` : '',
+      lookedAt: stamp?.at ?? 0,
+      seen: isVersion(stamp?.version) ? stamp.version : '',
+      now: await $.clock.now(),
+    }
+  })(),
   texts: await Promise.all(
     TEXTS.map(async text => {
       const { isOwn, isStale, path, text: body } = await inForce($, $.plugin.root, dir, text.path)
@@ -195,13 +205,19 @@ const configActs = ($: EngineInterface) => ({
   // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
   gateMode: (mode: 'each' | 'work' | 'never') => configAct($, 'Not saved', () => regate($, { mode })),
   gateRemove: (host: string, command: string) => configAct($, 'Not removed', () => regate($, { remove: { host, command } })),
-  // A press while a check runs does nothing: the tab shows it checking
+  // How often the look runs, or only at Check now: one choice, written as the two keys
+  lookEvery: (hours: number) =>
+    configAct($, 'Not saved', async () => {
+      await setConfig($, dir, 'updates', hours ? undefined : false)
+      await setConfig($, dir, 'updateEvery', hours && hours !== 1 ? hours : undefined)
+    }),
+  // A press while a check runs does nothing: the tab shows it checking. It only looks; the panel offers what it found
   check: () => {
     if (updateCheck.isChecking) return
     presses += 1
     Object.assign(updateCheck, { isChecking: true, said: '', isError: false })
     redraw($)
-    void checkForUpdates($)
+    void checkNow($)
       .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true }))
       .then(said => {
         Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError })

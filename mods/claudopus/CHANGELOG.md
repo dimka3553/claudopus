@@ -2,6 +2,33 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.129 · 15 November 2026
+- Work is told to add a test only when no test already covers what it changes, to show each new test fails without the change, and to remove tests a change makes redundant.
+
+## 0.2.128 · 15 November 2026
+- The panel and Details are no longer rebuilt every second while work runs. The app rebuilt the whole panel each time Claudopus wrote anything it shows, even when nothing changed, and Claudopus wrote its running times every second and the same list of work every few seconds. So whatever was under the pointer lost its hover look, and a click could land on a button that had just been replaced.
+- Now the panel is drawn again only when something it shows has changed. Running times and command output move every ten seconds, and not at all while you're using the panel (for fifteen seconds after you scroll it, click in it or type in it). A new ask, an admin command, work starting or finishing, and anything you press still show at once.
+- With nothing running, the panel isn't drawn again at all, so buttons like "Back to the panel" on the update screen keep working on the first click.
+- Other chats' work no longer redraws your panel each time those chats report in. Only what you'd see changing does.
+- While an update downloads, its figures move every two seconds at most, and not while you're using the panel, so its other buttons stay pressable.
+
+## 0.2.127 · 15 November 2026
+- A release now waits for GitHub's own checks on the exact version it is about to put out, and goes out only once they pass; a failed or unfinished check stops it and says which.
+- Tests that failed at random on GitHub's slower machines are steady again.
+
+## 0.2.126 · 15 November 2026
+- A newer Claudopus is now a small grey box in the panel's header, not a big notice: the version, how many versions it covers since yours, and in a line what is new.
+- Updating is three steps, each your press, the box showing where it stands: Download (with its size and progress as it comes), Install (saying what it replaces), and Reload (saying whether this chat or every chat needs it). Not now keeps it quiet for a day, Skip this version until a newer one.
+- A download is checked against the fingerprint the release published before it can be installed, and checked again at Install; one that does not match is thrown away, and an installed copy that does not match has Claude Code's record put back. A failed step says what failed and that what your chat runs is unchanged.
+- A chat run from a folder of the code says so, and its steps fetch into that folder and move it forward, a fast-forward only; a worktree or another branch is told a release never reaches it and is offered no download.
+- Config's Updates: look every hour, every 6 hours, once a day, once a week or only when you ask; Check now only looks; it says which version this chat runs and where it loads from.
+- After a chat moves to a newer version, one quiet line says so with What's new, in place of the screen that covered the whole panel.
+
+## 0.2.125 · 15 November 2026
+- The battery card now shows what the whole Mac draws, what the processors and the graphics processor each draw, and Claude's part of each; Claude's graphics power is marked as estimated, and the card says what "Claude" covers and that the screen, memory and storage count only in the whole.
+- Claude's watts, disk and network now count work a chat left running after its command ended, and processes that started between two readings, which were missed before.
+- The graphics card says busy is time at work at any speed, shows what the graphics processor draws, and lists who uses it most, with macOS drawing the screen named as such.
+
 ## 0.2.124 · 15 November 2026
 - After you answer an ask on its card (a button such as Release it or Done, or a reply from its box), the card stays where it was at the top for a minute, saying what you answered, instead of jumping away under your pointer.
 - A piece of work started again by your answer, such as Release it on work that had ended, keeps its place among the cards instead of moving to the very bottom of the panel.

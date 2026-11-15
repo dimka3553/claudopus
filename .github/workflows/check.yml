@@ -1,8 +1,19 @@
 name: Check
+# A release (mods/claudopus/bin/release, GITHUB_CHECKS in .release) starts this file as main has it on the very commit it is to make
+# main, given as `sha`, and moves main only once every job here passed on it
+run-name: ${{ inputs.sha && format('Release check {0}', inputs.sha) || github.event.pull_request.title || github.event.head_commit.message }}
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The commit a release is to make main
+        required: true
+# What runs here, a branch's tests among it, only reads the repo
+permissions:
+  contents: read
 jobs:
   # Every check on Linux and on a Mac: Claudopus runs on both
   check:
@@ -13,6 +24,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+      - name: The commit checked is the one the release asked for
+        if: inputs.sha
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          [[ $SHA =~ ^[0-9a-f]{40}$ ]] && test "$(git rev-parse HEAD)" = "$SHA"
       - uses: actions/setup-node@v4
         with:
           node-version: 22

@@ -11,8 +11,8 @@ import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, card
 import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
-import type { Look, LookIo } from './update'
-import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isUpdateDue, lookOnce, RELOAD_AGAIN, RELOAD_EVERY, stampOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
+import type { LookIo, Notice, Published, Source, Steps } from './update'
+import { copyOf, download, FAILS, folderMarketplace, folderReady, install, installedFrom, isNewer, isUpdateDue, isVersion, lookEveryOf, LOOK_EVERY_HOURS, missedOn, noticeOf, publishedOf, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, sizeText, stampOf, stepsOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
@@ -131,6 +131,18 @@ const figuresAt = atom({ plugin: 'claudopus', key: 'figures' } as const, 0, { sh
 // When the panel was last drawn, kept through a reload (drawnNow, written by the timer each second, never read while drawing)
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
 let drawnNow = 0
+// The list of work is written only when it changes. Each write of a value the panel or Details read draws them again, and the app
+// builds a pane it is asked to draw whole afresh, even when it shows the same: the element under the pointer loses its hover look,
+// and a press on a button of the drawing replaced meanwhile reaches nothing. The list was written over with the same list every
+// few seconds while work ran (15 Nov, a minute of running work: seven writes, none of them a change). Should another write land
+// between the look and the write, the change is made again on what that write left
+const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
+  const now = await read($, todos)
+  const before = JSON.stringify(now)
+  const next = fn(now)
+  if (JSON.stringify(next) === before) return now
+  return update($, todos, list => (JSON.stringify(list) === before ? next : fn(list)))
+}
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
 // they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them
@@ -338,7 +350,15 @@ const movedTo = (name: string, at: number) => {
   return `${MODEL_HEAD}${name} at ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}. ${who(true)} chose it in the panel: your next steps run on ${name}.`
 }
 
-const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() => '')
+const readOr = ($: EngineInterface, path: string) =>
+  $.fs.read(path).catch(() => '').then(text => (listDrawing > 0 && isWatched(path, text) && !drawnFiles.has(path) && drawnFiles.set(path, text), text))
+// While the panel is drawn, the files its drawing reads, as read then: looked at again each second, so a change in one draws it
+// again (calmLook), as nothing else would
+let listDrawing = 0
+// Another hook may read while the panel is drawn: what grows as work runs (transcripts, logs, other chats' live files, words, asks,
+// keep files) and anything large is never watched, so it cannot draw the panel again each second
+const isWatched = (path: string, text: string) => text.length < 64_000 && !/\.jsonl$|\/log\.md$|\/live\/|\/words\/|\/asks\/|\/keep\/|\/helpers\//.test(path)
+const drawnFiles = new Map<string, string>()
 // Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
 // Added to its end, never read and written back whole: every chat on this Mac writes here, and two rewriting it at once left runs of
@@ -923,11 +943,21 @@ const configButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
     <ui.Button key={`config-open-${presses}`} label="Config" hotkey={isKeyed ? 'c' : undefined} plain={isKeyed ? true : undefined} onPress={() => void openConfig($).catch(err => log($, `config not opened: ${String(err)}`))} />
   </ui.Box>
 )
-// Check for updates as it stands in this chat: under way, and what the last press found, kept until the next press
+// Check now as it stands in this chat: under way, and what the last press found, kept until the next press
 const updateCheck = { isChecking: false, said: '', isError: false }
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
   version: (await versionsOf($).catch(() => ({ version: '' }))).version,
   check: { ...updateCheck },
+  updates: await (async () => {
+    const known = await knowSource($).catch(() => undefined)
+    const stamp = stampOf(await readOr($, lookedPath()))
+    return {
+      where: known ? `${known.where}${known.cannot ? `. ${known.cannot.why.replace(/^./, c => c.toUpperCase())}` : ''}` : '',
+      lookedAt: stamp?.at ?? 0,
+      seen: isVersion(stamp?.version) ? stamp.version : '',
+      now: await $.clock.now(),
+    }
+  })(),
   texts: await Promise.all(
     TEXTS.map(async text => {
       const { isOwn, isStale, path, text: body } = await inForce($, $.plugin.root, dir, text.path)
@@ -986,13 +1016,19 @@ const configActs = ($: EngineInterface) => ({
   // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
   gateMode: (mode: 'each' | 'work' | 'never') => configAct($, 'Not saved', () => regate($, { mode })),
   gateRemove: (host: string, command: string) => configAct($, 'Not removed', () => regate($, { remove: { host, command } })),
-  // A press while a check runs does nothing: the tab shows it checking
+  // How often the look runs, or only at Check now: one choice, written as the two keys
+  lookEvery: (hours: number) =>
+    configAct($, 'Not saved', async () => {
+      await setConfig($, dir, 'updates', hours ? undefined : false)
+      await setConfig($, dir, 'updateEvery', hours && hours !== 1 ? hours : undefined)
+    }),
+  // A press while a check runs does nothing: the tab shows it checking. It only looks; the panel offers what it found
   check: () => {
     if (updateCheck.isChecking) return
     presses += 1
     Object.assign(updateCheck, { isChecking: true, said: '', isError: false })
     redraw($)
-    void checkForUpdates($)
+    void checkNow($)
       .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true }))
       .then(said => {
         Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError })
@@ -1235,7 +1271,7 @@ const sync = async ($: EngineInterface) => {
   )
   // The chat is read once for each such work, not at every look
   if (isUnseen) for (const one of live) if (!one.parentId) helpersChecked.add(one.id)
-  await update($, todos, list => {
+  await changeTodos($, list => {
     const cards = new Map(list.map(one => [one.id, one] as const))
     let isChanged = false
     for (const one of live) {
@@ -1276,7 +1312,7 @@ const sync = async ($: EngineInterface) => {
 const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: number) => Todo) => {
   const now = await $.clock.now()
   if (!(await read($, todos)).some(one => one.id === agentId)) await sync($)
-  await update($, todos, list => {
+  await changeTodos($, list => {
     const id = topOf(list, agentId)
     return list.map(one => (one.id === id ? fn(one, now) : one))
   })
@@ -1306,7 +1342,7 @@ const stop = async ($: EngineInterface, id: string) => {
   if (isYours) for (let at = wakes.length - 1; at >= 0; at -= 1) if (under.some(one => one.id === wakes[at]?.target)) wakes.splice(at, 1)
   const now = await $.clock.now()
   // What finished work left running is stopped with it
-  await update($, todos, list =>
+  await changeTodos($, list =>
     list.map(one =>
       one.id === id && one.status === 'working'
         ? { ...ended(one, stoppedAs(one), now), ...(isYours ? { byYou: { at: now }, ask: undefined } : {}) }
@@ -1339,7 +1375,7 @@ const choose = async ($: EngineInterface, id: string, model: string) => {
   await update($, view, v => ({ ...v, picking: '' }))
   const one = (await read($, todos)).find(todo => todo.id === id)
   if (!one || one.status !== 'working' || modelName(one.chosen ?? one.model ?? '') === modelName(model)) return
-  await update($, todos, list => list.map(todo => (todo.id === id ? { ...todo, model, chosen: model } : todo)))
+  await changeTodos($, list => list.map(todo => (todo.id === id ? { ...todo, model, chosen: model } : todo)))
   await tell($, id, movedTo(modelName(model), await $.clock.now()))
 }
 
@@ -1495,7 +1531,7 @@ const recoverEnded = async ($: EngineInterface) => {
   }
   // A card read back bare by an earlier version, with no times or model, is replaced
   if (found.length)
-    await update($, todos, now => capped(byEnd([...found.filter(one => !now.some(card => card.id === one.id && !isBare(card))), ...now.filter(card => !(isBare(card) && found.some(one => one.id === card.id)))])))
+    await changeTodos($, now => capped(byEnd([...found.filter(one => !now.some(card => card.id === one.id && !isBare(card))), ...now.filter(card => !(isBare(card) && found.some(one => one.id === card.id)))])))
 }
 
 // What was kept comes back into the list when the chat loads, below anything the list already holds
@@ -1504,7 +1540,7 @@ const loadFinished = async ($: EngineInterface) => {
   if (!id) return
   const kept = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   if (!Array.isArray(kept) || !kept.length) return
-  await update($, todos, list => {
+  await changeTodos($, list => {
     // What it left running is looked at afresh: the record of how it ended does not outlive the load
     const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined, bg: undefined, waitsSince: undefined }))
     return fresh.length ? capped(byEnd([...fresh, ...list])) : list
@@ -1522,7 +1558,6 @@ const follow = async ($: EngineInterface) => {
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)
   // Reports another chat kept since are listed here too
   await loadReports($).catch(() => undefined)
-  if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) await update($, tick, n => n + 1)
 }
 
 // A message as the panel quotes it: whole when short, else its first sentences
@@ -1841,7 +1876,8 @@ const refresh = async ($: EngineInterface) => {
   const open = await $.ui.panes().catch(() => [])
   if (!open.some(one => one.id === PANE && one.isShown)) return
   await scanServers($)
-  await update($, tick, n => n + 1)
+  // Its own value, which only the Servers tab reads: the panel is not drawn again with it
+  await update($, servers, list => [...list])
 }
 
 const stopServer = async ($: EngineInterface, pid: number) => {
@@ -2048,7 +2084,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
   // Its report holds them now: the work's next round records what still waits afresh
-  if (one.waits?.length) await update($, todos, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
+  if (one.waits?.length) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
   await loadReports($)
 }
 
@@ -4278,15 +4314,19 @@ const aloud = async ($: EngineInterface, what: string, title: string, text: stri
 }
 const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} needs you`, text, `ask-${one.id}`)
 
-// Updates as the person asks for them: every hour one chat only reads the version page on claudopus.ai, and the panel says when it names a newer version, with Install. Install, like Config's Check for updates, runs Claude Code's own update steps for it, or, for a copy run from a folder of its code, brings that folder up to date (the pure parts are in hooks/update.ts)
+// Updates as the person asks for them. A look only reads the version page on claudopus.ai, on its own as often as Config says or
+// only at Config's Check now, and the panel's header then says a newer version is out, quietly, in one small box. Each step is a
+// press: Download fetches the release and checks it is what the release published, Install puts it in place (Claude Code's own
+// steps for an installed copy, a fast-forward for a folder of the code), Reload switches this chat. Not now and Skip this version
+// keep it quiet. The pure parts are in hooks/update.ts
 
-// ---- Keeping itself up to date (the pure parts are in ./update) ----
+// ---- One at a time, under a lock the other chats see ----
 
-// A look and an install run one at a time, under a lock the other chats see; what an install learnt is kept in update.json, what
-// the hourly look saw on the page in update-seen.json
+// A look and each step run one at a time, under a lock the other chats see; the look keeps what it saw in update-seen.json (a
+// version number only), the steps where they stand in update-steps.json
 let isUpdating = false
 // The lock is one file made only where none is (the shell's noclobber), holding when it was taken and by whom; a lock left by a
-// chat that closed mid-look is moved aside by exactly one chat once it is old (by what it says, else by when it was written).
+// chat that closed mid-step is moved aside by exactly one chat once it is old (by what it says, else by when it was written).
 // Taken, the act runs and only this chat's own lock is removed after it; held by another chat, nothing runs and 'busy' comes back
 const UPDATE_BUSY = 'busy' as const
 const LOCK_SKEW = 60_000
@@ -4300,8 +4340,11 @@ const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): P
     const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
     // A lock dated ahead of this Mac's clock, past what two chats' clocks can differ by, was never taken by a chat here: it is stale
     if (now - at < UPDATE_LOOK && at - now <= LOCK_SKEW) return UPDATE_BUSY
+    const seen = await readOr($, lock)
     const aside = `${lock}.${token.split(' ')[1]}`
     if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
+    // Another chat took the stale lock over in between: what was moved is its fresh lock, put back where it was
+    if ((await readOr($, aside)) !== seen) return ((await $.process.run(['mv', '-n', aside, lock]).catch(() => undefined)), UPDATE_BUSY)
     await $.process.run(['rm', '-f', aside]).catch(() => undefined)
     if (!(await take())) return UPDATE_BUSY
   }
@@ -4312,7 +4355,7 @@ const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): P
     if ((await readOr($, lock)) === token) await $.process.run(['rm', '-f', lock]).catch(() => undefined)
   }
 }
-// The Mac, as one look needs it
+// The Mac, as one step needs it
 const lookIo = ($: EngineInterface): LookIo => ({
   read: path => readOr($, path),
   write: (path, text) => $.fs.write(path, text),
@@ -4324,10 +4367,8 @@ const lookIo = ($: EngineInterface): LookIo => ({
     ]),
   now: () => $.clock.now(),
   log: text => log($, text),
+  wait: ms => new Promise<void>(done => void $.clock.after(ms, done)),
 })
-// One look: an installed copy runs Claude Code's own update steps, a copy run from a folder of its code brings that folder up to date
-// A folder's looks keep their own stamp, so they never stand in for an installed copy's hourly look on the same Mac
-const stampFor = (from: ReturnType<typeof installedFrom>) => `${dir}/${from ? 'update' : 'update-folder'}.json`
 // Claude Code's own program: the one the app names, else the first on the PATH, else where its installer puts it, as a terminal started without a login shell
 // (seen on Linux, in tmux started over ssh) has no ~/.local/bin on its PATH, else claude on the PATH
 const engineOf = async ($: EngineInterface) => {
@@ -4339,133 +4380,470 @@ const engineOf = async ($: EngineInterface) => {
     if (one.startsWith('/') && (await $.fs.exists(one).catch(() => false))) return one
   return 'claude'
 }
-const lookAt = async ($: EngineInterface, from: ReturnType<typeof installedFrom>) => {
-  const engine = await engineOf($)
-  const stampPath = stampFor(from)
-  if (!from) return folderLook(lookIo($), { root: $.plugin.root, plugins: dir.replace(/\/claudopus$/, '/plugins'), engine, stampPath })
-  return lookOnce(lookIo($), { from, root: $.plugin.root, cwd, engine, stampPath })
-}
 
-// Claudopus never installs an update by itself: Claude Code leaves automatic updates off for a marketplace other than Anthropic's
-// own, and what an update installs carries no signature the mod could check. Every hour one chat only reads the version page (one
-// small fetch: nothing is downloaded or run), and when it names a newer version the panel says so, with Install. A new version
-// comes only from a press: Install, or Config's Check for updates (Claude Code's own update steps, as /plugin update runs them)
+// ---- Looking: the version page only ----
+
+// What the last look saw, a version number and when, shared by every chat; and the page itself as this chat last read it, kept in
+// this chat only, as the lines of what is new are shown from it and never from a file any program could write
 const lookedPath = () => `${dir}/update-seen.json`
+let pageRead: { page: Published; at: number } | undefined
+const PAGE_AGAIN = 10 * 60_000
+let pageAsked = 0
+// One read of the page; a page with no fingerprint is no release a download can be checked against, and is read as none
+const readPage = async ($: EngineInterface): Promise<{ page?: Published; why: string }> => {
+  const answer = await lookIo($).page()
+  const page = answer.ok ? publishedOf(answer.text) : undefined
+  if (page) pageRead = { page, at: await $.clock.now() }
+  return { page, why: page ? '' : answer.ok ? (versionOnPage(answer.text) ? FAILS.unchecked : 'claudopus.ai named no version') : answer.status ? `claudopus.ai answered ${answer.status}` : 'claudopus.ai did not answer' }
+}
+// The page, read now under the lock, its version kept for every chat
+const lookOnly = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  const before = stampOf(await readOr($, lookedPath()))
+  const { page, why } = await readPage($)
+  await $.fs.write(lookedPath(), JSON.stringify({ at: now, version: page?.version ?? before?.version ?? '', result: page ? 'seen' : `version page not read: ${why}` }))
+  if (page) redraw($)
+  return { page, why }
+}
+// The look on its own, as often as Config says; Only when I ask reads nothing
 const lookForNew = async ($: EngineInterface) => {
   if (isUpdating || !dir) return
-  // The hourly look turned off in Config reads nothing
-  if ((await readConfig($, dir)).updates === false) return
-  if (!isUpdateDue(stampOf(await readOr($, lookedPath())), await $.clock.now())) return
+  const config = await readConfig($, dir)
+  if (config.updates === false) return
+  const every = lookEveryOf(config.updateEvery)
+  if (!isUpdateDue(stampOf(await readOr($, lookedPath())), await $.clock.now(), every)) return
   isUpdating = true
   try {
     await underUpdateLock($, async () => {
       // Another chat may have looked between this chat's reading and its lock, or the person turned the look off meanwhile
-      const before = stampOf(await readOr($, lookedPath()))
-      const now = await $.clock.now()
-      if (!isUpdateDue(before, now) || (await readConfig($, dir)).updates === false) return
-      const page = await lookIo($).page()
-      const version = page.ok ? versionOnPage(page.text) : undefined
-      await $.fs.write(lookedPath(), JSON.stringify({ at: now, version: version ?? before?.version ?? '', result: version ? 'seen' : `version page not read: ${page.status || page.text.slice(0, 120)}` }))
-      if (version) redraw($)
+      const again = await readConfig($, dir)
+      if (!isUpdateDue(stampOf(await readOr($, lookedPath())), await $.clock.now(), lookEveryOf(again.updateEvery)) || again.updates === false) return
+      await lookOnly($)
     })
   } finally {
     isUpdating = false
   }
 }
-// The newer version the hourly look saw, while neither this chat nor the Mac has it yet, and the look is on
-const newOut = async ($: EngineInterface, loaded: string, installed: string) => {
-  if (!dir || !loaded) return ''
-  const said = stampOf(await readOr($, lookedPath()))?.version ?? ''
-  // Only a version number is ever shown: anything else in the file is no version
-  const seen = /^\d{1,4}(?:\.\d{1,6}){1,3}$/.test(said) ? said : ''
-  if (!seen || !isNewer(seen, loaded) || (installed && !isNewer(seen, installed)) || installPress.done === seen) return ''
-  return (await readConfig($, dir)).updates === false ? '' : seen
-}
-
-// One look now, under the lock: a look already under way here, or another chat's, is waited for (CHECK_STEP at a time, up to
-// UPDATE_LOOK, after which a stale lock is taken over), then this one runs, so two never run at once; it is cheap when the other one
-// already downloaded the newest version. A Look, or why there was none
-const CHECK_STEP = 3000
-const lookNow = async ($: EngineInterface, by: string): Promise<Look | string> => {
-  const from = installedFrom($.plugin.root)
-  if (!dir) return "Couldn't check: Claudopus has no memory folder in this chat."
-  const until = (await $.clock.now()) + UPDATE_LOOK + CHECK_STEP
-  for (;;) {
+// Config's Check now: the page read now, whatever the setting; it only looks, and the panel offers what it found
+const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
+  if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
+  const loaded = (await versionsOf($)).version
+  for (let tries = 0; tries < 20; tries++) {
     if (!isUpdating) {
       isUpdating = true
       try {
-        const look = await underUpdateLock($, () => lookAt($, from))
-        if (look !== UPDATE_BUSY) {
-          await log($, `Claudopus checked for updates from ${by}: ${look.kind}${'version' in look && look.version ? ` ${look.version}` : ''}`)
-          return look
+        const got = await underUpdateLock($, () => lookOnly($))
+        if (got !== UPDATE_BUSY) {
+          await log($, `Claudopus looked for a new version from Config: ${got.page?.version ?? got.why}`)
+          if (!got.page) return { text: `Couldn't check: ${got.why}. Try again later.`, isError: true }
+          await knowSource($, true)
+          return loaded && isNewer(got.page.version, loaded) ? { text: `v${got.page.version} is out: the panel offers it.`, isError: false } : { text: `You're on the newest version (v${got.page.version}).`, isError: false }
         }
       } finally {
         isUpdating = false
       }
     }
-    if ((await $.clock.now()) > until) return "Couldn't check: another chat's check did not finish. Try again later."
-    await new Promise<void>(done => void $.clock.after(CHECK_STEP, done))
+    await new Promise<void>(done => void $.clock.after(3000, done))
   }
+  return { text: "Couldn't check: another chat's update did not finish. Try again later.", isError: true }
 }
-// Config's Check for updates: the look, now, whatever the hour says; a chat switches to what it got when /reload-plugins is typed
-const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
-  const loaded = (await versionsOf($)).version
-  const look = await lookNow($, 'Config')
-  return typeof look === 'string' ? { text: look, isError: true } : checkSaid(look, loaded, true, !installedFrom($.plugin.root))
+// A chat whose panel shows a newer version than any page it has read reads the page itself once, for that version's lines, at most
+// every PAGE_AGAIN; never while the look is set to only when asked, when only a press reads it
+const pageFor = async ($: EngineInterface, version: string) => {
+  if (pageRead && !isNewer(version, pageRead.page.version)) return pageRead.page
+  const now = await $.clock.now()
+  if (now - pageAsked < PAGE_AGAIN || (await readConfig($, dir)).updates === false) return pageRead?.page
+  pageAsked = now
+  void readPage($).then(({ page }) => page && redraw($)).catch(() => undefined)
+  return pageRead?.page
 }
-// The panel's Install, pressed for the version it showed: the same look as Check for updates, then this chat alone reloads to what it
-// got, with Claude Code's own /reload-plugins. Other open chats keep theirs, and their header says to type /reload-plugins. A chat run
-// from another Mac is never sent one (the engine refuses it there), nor one whose reload the engine refused: it says to type it
-const installPress = { version: '', isBusy: false, said: '', isError: false, done: '' }
-let isReloadRefused = false
-const installNew = async ($: EngineInterface, version: string) => {
-  if (installPress.isBusy) return
-  Object.assign(installPress, { version, isBusy: true, said: '', isError: false })
+
+// ---- Where this chat's copy comes from ----
+
+// Known once a load and again at each look and step: where this chat's copy comes from, and, for a set-up a release never reaches,
+// what it is and why
+let sourceKnown: { src: Source; cannot?: { what: string; why: string }; where: string } | undefined
+const homeShort = (path: string) => path.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, '~')
+const knowSource = async ($: EngineInterface, isAgain = false) => {
+  if (sourceKnown && !isAgain) return sourceKnown
+  const root = $.plugin.root.replace(/\/+$/, '')
+  const from = installedFrom(root)
+  const io = lookIo($)
+  const plugins = from?.plugins ?? dir.replace(/\/claudopus$/, '/plugins')
+  const known = await readOr($, `${plugins}/known_marketplaces.json`)
+  const entryOf = (name: string) => {
+    try {
+      return (JSON.parse(known) as Record<string, { source?: { source?: string; path?: string; repo?: string }; installLocation?: string }>)?.[name]
+    } catch {
+      return undefined
+    }
+  }
+  const installed = await readOr($, `${plugins}/installed_plugins.json`)
+  const done = (one: NonNullable<typeof sourceKnown>) => (sourceKnown = one)
+  if (from) {
+    const entry = entryOf(from.marketplace)
+    const scope = scopeOf(installed, `${from.plugin}@${from.marketplace}`, root) ?? scopeOf(installed, `${from.plugin}@${from.marketplace}`, copyOf(installed, `${from.plugin}@${from.marketplace}`, root, cwd)?.installPath ?? root)
+    const record = { plugins: from.plugins, marketplace: from.marketplace, plugin: from.plugin, scope }
+    if (entry?.source?.source === 'directory' && typeof entry.source.path === 'string') {
+      const repo = entry.source.path.replace(/\/+$/, '')
+      const ready = await folderReady(io, repo)
+      return done({
+        src: { kind: 'folder', repo, sub: 'mods/claudopus', runs: 'copy', record },
+        cannot: ready.ok ? undefined : { what: `Claude Code installs it from ${ready.what}`, why: ready.why },
+        where: ready.ok ? `Claude Code's installed copy, made from the folder ${homeShort(repo)}` : "Claude Code's installed copy, made from a folder of the code",
+      })
+    }
+    const location = typeof entry?.installLocation === 'string' ? entry.installLocation.replace(/\/+$/, '') : ''
+    const repoName = typeof entry?.source?.repo === 'string' && /^[\w.-]+\/[\w.-]+$/.test(entry.source.repo) ? entry.source.repo : ''
+    const isGit = location && (await $.fs.exists(`${location}/.git`).catch(() => false))
+    const subOf = async () => {
+      try {
+        const market = JSON.parse(await readOr($, `${location}/.claude-plugin/marketplace.json`)) as { plugins?: { name?: string; source?: unknown }[] }
+        const source = market.plugins?.find(one => one.name === from.plugin)?.source
+        return typeof source === 'string' && /^\.\/[\w./-]+$/.test(source) && !source.includes('..') ? source.slice(2).replace(/\/+$/, '') : ''
+      } catch {
+        return ''
+      }
+    }
+    const path = isGit ? await subOf() : ''
+    if (isGit && path) return done({ src: { kind: 'clone', repo: location, sub: path, ...record }, where: `Claude Code's installed copy, from GitHub${repoName ? ` (${repoName})` : ''}` })
+    return done({ src: { kind: 'none', why: 'its marketplace is not one Claudopus can check a download in' }, cannot: { what: "a copy from a marketplace Claudopus can't check", why: 'update it with /plugin in Claude Code' }, where: "Claude Code's installed copy" })
+  }
+  // Run from a folder of the code: the folder is what a release has to reach
+  const top = (await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim()
+  const ready = top ? await folderReady(io, top) : ({ ok: false, what: 'a folder', why: "it isn't a git checkout, so a release can't be brought into it" } as const)
+  const marketplace = folderMarketplace(known, root)
+  const scopes = (() => {
+    try {
+      return ((JSON.parse(installed)?.plugins?.[`claudopus@${marketplace}`] ?? []) as { scope?: unknown }[]).map(one => one?.scope)
+    } catch {
+      return []
+    }
+  })()
+  const scope = scopes.includes('user') ? 'user' : (scopes.find(one => typeof one === 'string' && /^(user|project|local)$/.test(one)) as string | undefined)
+  const sub = top && root.startsWith(`${top}/`) ? root.slice(top.length + 1) : 'mods/claudopus'
+  return done({
+    src: { kind: 'folder', repo: top || root, sub, runs: 'folder', ...(marketplace && scope ? { record: { plugins, marketplace, plugin: 'claudopus', scope } } : {}) },
+    cannot: ready.ok ? undefined : { what: `This chat runs from ${ready.what}`, why: ready.why },
+    where: `the folder ${homeShort(root)}${ready.ok ? ", Claudopus's own checkout on main" : `, ${ready.what}`}`,
+  })
+}
+
+// ---- The steps ----
+
+const stepsPath = () => `${dir}/update-steps.json`
+const laterPath = () => `${dir}/update-later.json`
+// Not now keeps a version quiet for this long
+const LATER_FOR = 24 * 3_600_000
+const writeSteps = ($: EngineInterface, steps: Steps) => $.fs.write(stepsPath(), JSON.stringify(steps))
+// What the last step in this chat said beyond its kind of failure, kept in this chat only
+const stepSaid = { version: '', detail: '', dirty: false }
+let isStepping = false
+// The press found another chat at a step: said for a moment in this chat
+let busyAt = 0
+const atStep = async ($: EngineInterface, act: () => Promise<void>) => {
+  if (isStepping || isUpdating || !dir) return
+  isStepping = true
+  isUpdating = true
   redraw($)
-  const loaded = (await versionsOf($)).version
-  const from = installedFrom($.plugin.root)
   try {
-    const look = await lookNow($, 'the panel\'s Install')
-    if (typeof look === 'string' || look.kind === 'failed' || !loaded || !isNewer(look.version, loaded)) {
-      const said = typeof look === 'string' ? { text: look, isError: true } : checkSaid(look, loaded, true, !from)
-      return void Object.assign(installPress, { said: said.text, isError: said.isError })
-    }
-    installPress.done = version
-    if (isRunFromAfar || isReloadRefused) return void Object.assign(installPress, { said: checkSaid(look, loaded, true, !from).text })
-    // The mark lets the next load know what it moved from, so the header shows the moment
-    await $.fs.write(`${dir}/reloads/${await $.session.id()}.json`, JSON.stringify({ version: look.version, from: loaded, at: await $.clock.now() }))
-    await log($, `Claudopus ${look.version} installed from the panel's Install, and this chat runs ${loaded}: reloading it`)
-    const said = await $.command.run({ command: 'reload-plugins' })
-    if (/isn't available/i.test(String((said as { text?: unknown } | undefined)?.text ?? ''))) {
-      isReloadRefused = true
-      Object.assign(installPress, { said: checkSaid(look, loaded, true, !from).text })
-      await log($, `Claudopus not reloaded to ${look.version}: the engine refused it; the panel says to type /reload-plugins`)
-    }
+    const got = await underUpdateLock($, act)
+    if (got === UPDATE_BUSY) busyAt = await $.clock.now()
   } catch (err) {
-    Object.assign(installPress, { said: `Couldn't install: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true })
+    await log($, `update step failed: ${String(err)}`)
   } finally {
-    installPress.isBusy = false
+    isStepping = false
+    isUpdating = false
     redraw($)
   }
 }
-// The panel's card for a newer version out: what it is and Install; while it installs, that; after, what came of it
-const newOutCard = ($: EngineInterface, ui: Ui, version: string) => {
-  // After a press, what came of it stays once the card's version is installed
-  const shown = !version || installPress.version === version ? installPress : undefined
-  if (!version && !shown?.said) return null
-  return (
-    <ui.Box key="update-out" flexDirection="column" flexShrink={0}>
-      {version ? <ui.Text key="update-out-title" bold wrap="wrap">{`Claudopus ${version} is out`}</ui.Text> : null}
-      {version ? <ui.Text key="update-out-what" dimColor wrap="wrap">Nothing is downloaded until you press Install, which gets it through Claude Code's own update steps and reloads this chat.</ui.Text> : null}
-      {shown?.isBusy ? (
-        <ui.Text key="update-out-busy" dimColor>Installing…</ui.Text>
-      ) : version ? (
-        <ui.Box key="update-out-buttons" flexDirection="row">
-          <ui.Button key={`update-install-${presses}`} label="Install" onPress={() => void ((presses += 1), installNew($, version))} />
+// The page read again at each press: a step is checked only against what claudopus.ai says now, never against a kept file
+const freshPage = async ($: EngineInterface, version: string, step: 'download' | 'install', now: number) => {
+  const { page } = await readPage($)
+  if (!page) await writeSteps($, { version, stage: 'failed', fail: 'page', step, at: now })
+  return page
+}
+// Download, pressed for the version the notice showed: the newest the page names now is what is fetched
+let downloadProgress: { version: string; pct: number; got: number; phase: string } | undefined
+// What the download's last drawing showed, and when
+const progressDrawn = { shown: '', phase: '', at: 0 }
+const downloadPress = ($: EngineInterface, version: string) => {
+  presses += 1
+  void atStep($, async () => {
+    const now = await $.clock.now()
+    const { src } = await knowSource($, true)
+    if (src.kind === 'none') return
+    const page = await freshPage($, version, 'download', now)
+    if (!page) return
+    const loaded = (await versionsOf($)).version
+    // The page names no newer version than this chat runs (the notice came from a look that is out of date, or a planted file): the
+    // look's record is set right, and nothing is fetched
+    if (!loaded || !isNewer(page.version, loaded)) return void (await $.fs.write(lookedPath(), JSON.stringify({ at: now, version: page.version, result: 'seen' })))
+    Object.assign(stepSaid, { version: page.version, detail: '', dirty: false })
+    await writeSteps($, { version: page.version, stage: 'downloading', step: 'download', at: now, from: loaded })
+    let wrote = 0
+    const got = await download(lookIo($), src, page, `${dir}/update-progress.txt`, async p => {
+      downloadProgress = { version: page.version, ...p }
+      const at = await $.clock.now()
+      if (at - wrote >= 1000) ((wrote = at), await writeSteps($, { version: page.version, stage: 'downloading', step: 'download', at, pct: p.pct, got: p.got, from: loaded }))
+      // Each drawing makes the panel's buttons new, and a click on one just replaced is lost: the figures move every 2 s, and not
+      // while the person is using the panel, unless the download moves to its next phase
+      const shown = `${Math.round(p.pct)}|${p.got ? sizeText(p.got) : ''}|${p.phase}`
+      const isPhase = p.phase !== progressDrawn.phase
+      if (shown !== progressDrawn.shown && (isPhase || (at - progressDrawn.at >= 2000 && at - engagedAt >= ENGAGED))) {
+        Object.assign(progressDrawn, { shown, phase: p.phase, at })
+        redraw($)
+      }
+    })
+    downloadProgress = undefined
+    const at = await $.clock.now()
+    heldChecked.clear()
+    if (got.ok) await writeSteps($, { version: page.version, stage: 'downloaded', step: 'download', commit: got.commit, tree: page.tree, at, from: loaded })
+    else {
+      // What git or GitHub said is kept in the log only: the panel shows what failed in its own words
+      if (got.detail) await log($, `Claudopus ${page.version} download failed (${got.fail}): ${got.detail}`)
+      await writeSteps($, { version: page.version, stage: 'failed', step: 'download', fail: got.fail, at, from: loaded })
+    }
+  })
+}
+// Install, pressed for the download the notice showed: checked against the page read now, then put in place
+const installPress = ($: EngineInterface, version: string, commit: string) => {
+  presses += 1
+  void atStep($, async () => {
+    const now = await $.clock.now()
+    const { src } = await knowSource($, true)
+    if (src.kind === 'none') return
+    const page = await freshPage($, version, 'install', now)
+    if (!page) return
+    const loaded = (await versionsOf($)).version
+    if (page.version !== version) return void (await writeSteps($, { version, stage: 'failed', step: 'install', fail: 'newer-out', at: now, from: loaded }))
+    await writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at: now, from: loaded })
+    // A long install keeps its step alive for the other chats
+    let isOn = true
+    const beat = (): unknown =>
+      $.clock.after(20_000, () => void (isOn && $.clock.now().then(at => writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at, from: loaded })).then(() => isOn && beat())))
+    beat()
+    const got = await install(lookIo($), src, page, commit, await engineOf($)).finally(() => (isOn = false))
+    const at = await $.clock.now()
+    Object.assign(stepSaid, { version, detail: '', dirty: got.ok && got.dirty })
+    if (!got.ok && got.detail) await log($, `Claudopus ${version} install failed (${got.fail}): ${got.detail}`)
+    await writeSteps($, got.ok ? { version, stage: 'installed', step: 'install', commit, tree: page.tree, at, from: loaded } : { version, stage: 'failed', step: 'install', fail: got.fail, commit, at, from: loaded })
+  })
+}
+// Reload: this chat switches with Claude Code's own /reload-plugins. A chat run from another Mac is never sent one (the engine
+// refuses it there), nor one whose reload the engine refused: it says to type it
+let isReloadRefused = false
+const reloadPress = async ($: EngineInterface, version: string) => {
+  presses += 1
+  const loaded = (await versionsOf($)).version
+  if (isRunFromAfar || isReloadRefused) return void ((isReloadRefused = true), redraw($))
+  // The mark lets the next load know what it moved from, so the header shows the moment
+  await $.fs.write(`${dir}/reloads/${await $.session.id()}.json`, JSON.stringify({ version, from: loaded, at: await $.clock.now() }))
+  await log($, `Claudopus reloading this chat from ${loaded} to ${version}, at the panel's Reload`)
+  const said = await $.command.run({ command: 'reload-plugins' }).catch(err => ({ text: String(err) }))
+  if (/isn't available|not available|refused/i.test(String((said as { text?: unknown } | undefined)?.text ?? ''))) {
+    isReloadRefused = true
+    await log($, `Claudopus not reloaded to ${version}: the engine refused it; the panel says to type /reload-plugins`)
+    redraw($)
+  }
+}
+// Not now: quiet for a day, for this version; Skip this version: quiet until a newer one, kept as the person's own setting
+const laterPress = async ($: EngineInterface, version: string) => {
+  presses += 1
+  await $.fs.write(laterPath(), JSON.stringify({ version, until: (await $.clock.now()) + LATER_FOR }))
+  redraw($)
+}
+const skipPress = async ($: EngineInterface, version: string) => {
+  presses += 1
+  await setConfig($, dir, 'skipVersion', version)
+  // What Check now said last is about the version just skipped
+  Object.assign(updateCheck, { said: '', isError: false })
+  await loadSettings($)
+  redraw($)
+}
+
+// ---- The notice ----
+
+// What this chat found of each download it was told of, by commit and tree, so the check runs once
+const heldChecked = new Map<string, boolean>()
+const isDownloadHeld = async ($: EngineInterface, src: Source, steps: Steps) => {
+  if (src.kind === 'none' || !steps.commit || !steps.tree) return false
+  // Checked against what this chat read on the page itself, never only against what the file says the tree is
+  const page = pageRead?.page ?? (await pageFor($, steps.version))
+  if (!page || page.version !== steps.version || page.tree !== steps.tree) return false
+  const key = `${src.repo}|${steps.commit}|${steps.tree}`
+  const known = heldChecked.get(key)
+  if (known !== undefined) return known
+  const git = (args: string[]) => $.process.run(['env', 'GIT_TERMINAL_PROMPT=0', 'git', '-C', src.repo, ...args], { timeoutMs: 20_000 }).catch(() => ({ exitCode: 1, stdout: '' }))
+  const held = (await git(['rev-parse', '--verify', '-q', 'refs/claudopus/update^{commit}'])).stdout.trim()
+  const tree = held === steps.commit ? (await git(['rev-parse', '--verify', '-q', `${steps.commit}:${src.sub}`])).stdout.trim() : ''
+  const isHeld = tree === steps.tree
+  heldChecked.set(key, isHeld)
+  return isHeld
+}
+
+// Where updating stands for this chat, from what is true now
+const noticeNow = async ($: EngineInterface, loaded: string, installed: string): Promise<Notice | undefined> => {
+  if (!dir || !loaded) return undefined
+  const config = await readConfig($, dir)
+  const seen = stampOf(await readOr($, lookedPath()))?.version ?? ''
+  const laterText = await readOr($, laterPath())
+  const later = () => {
+    try {
+      const v = JSON.parse(laterText) as { version?: unknown; until?: unknown }
+      return isVersion(v?.version) && typeof v.until === 'number' ? { version: v.version, until: v.until } : undefined
+    } catch {
+      return undefined
+    }
+  }
+  const known = await knowSource($)
+  const steps = stepsOf(await readOr($, stepsPath()))
+  return noticeOf({
+    loaded,
+    installed,
+    seen: isVersion(seen) ? seen : '',
+    // A download is said to be checked only once this chat has seen it so: its repo's download ref holds that commit, whose mod folder
+    // is the tree the steps name, and the page this chat read names it too
+    steps: steps?.stage === 'downloaded' && !(await isDownloadHeld($, known.src, steps)) ? undefined : steps,
+    page: pageRead?.page,
+    skipped: isVersion(config.skipVersion) ? config.skipVersion : undefined,
+    later: later(),
+    cannot: known.cannot,
+    now: await $.clock.now(),
+  })
+}
+
+// Where updating stands, as far as the panel's drawing changes with it: a step, a look, a press put off or skipped, what the Mac has,
+// the seen record of the note after a move, and this chat's own progress and presses, so a held drawing is never shown past it
+const updateShape = async ($: EngineInterface) =>
+  dir
+    ? JSON.stringify([
+        await readOr($, lookedPath()),
+        await readOr($, stepsPath()),
+        await readOr($, laterPath()),
+        await readOr($, `${dir}/seen.json`),
+        (await readConfig($, dir)).skipVersion ?? '',
+        await installedNow($).catch(() => ''),
+        pageRead?.page.version ?? '',
+        downloadProgress ? Math.round(downloadProgress.pct) : -1,
+        isStepping,
+        busyAt,
+        isReloadRefused,
+      ])
+    : ''
+
+// The notice: a small grey outlined box in the header, under the version this chat runs, never a demand as the amber boxes are.
+// What is out and, in a line, what is new; the three steps and where they stand; the one press that comes next, Not now and Skip
+const NOTICE_EDGE = '#80808070'
+const STEPS = ['Download', 'Install', 'Reload'] as const
+const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loaded: string) => {
+  const now = await $.clock.now()
+  const busy = now - busyAt < 10_000 ? <ui.Text key="update-busy" dimColor wrap="wrap">Another chat is updating Claudopus. Try again in a moment.</ui.Text> : null
+  if (!n) return null
+  const known = await knowSource($)
+  const { src } = known
+  const isFolder = src.kind === 'folder'
+  const folder = isFolder ? homeShort(src.repo) : ''
+  const track = (at: number) => (
+    <ui.Text key="update-track" dimColor wrap="truncate-end">
+      {STEPS.map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${i === 0 && isFolder ? 'Fetch' : i === 1 && isFolder ? 'Move forward' : one}`).join('   ')}
+    </ui.Text>
+  )
+  const quiet = (key: string, version: string, withSkip = true) => [
+    <ui.Button key={`update-later-${key}-${presses}`} label="Not now" plain dimColor onPress={() => void laterPress($, version).catch(err => log($, `update not put off: ${String(err)}`))} />,
+    withSkip ? <ui.Button key={`update-skip-${key}-${presses}`} label="Skip this version" plain dimColor onPress={() => void skipPress($, version).catch(err => log($, `version not skipped: ${String(err)}`))} /> : null,
+  ]
+  const box = (key: string, lines: (JSX.Element | null)[], buttons: (JSX.Element | null)[]) => (
+    <ui.Box key="update-notice" flexDirection="column" borderStyle="round" borderColor={NOTICE_EDGE} paddingX={1} flexShrink={0}>
+      {lines.filter(Boolean)}
+      {buttons.some(Boolean) ? (
+        <ui.Box key={`update-${key}-buttons`} flexDirection="row" flexWrap="wrap" columnGap={2} alignItems="center">
+          {buttons.filter(Boolean)}
         </ui.Box>
       ) : null}
-      {shown?.said ? <ui.Text key="update-out-said" color={shown.isError ? 'error' : undefined} wrap="wrap">{shown.said}</ui.Text> : null}
+      {busy}
     </ui.Box>
+  )
+  const title = (text: string, side = '') => (
+    <ui.Box key="update-title" flexDirection="row" gap={1} minWidth={0}>
+      <ui.Box flexShrink={0}>
+        <ui.Text>{text}</ui.Text>
+      </ui.Box>
+      {side ? <ui.Text dimColor wrap="truncate-end">{side}</ui.Text> : null}
+    </ui.Box>
+  )
+  const line = (key: string, text: string, color?: string) => (
+    <ui.Text key={`update-${key}`} dimColor={!color} color={color} wrap="wrap">
+      {text}
+    </ui.Text>
+  )
+  const v = n.version
+  if (n.kind === 'available' || n.kind === 'cannot') {
+    const page = await pageFor($, v)
+    const missed = page && page.version === v ? missedOn(page, loaded) : []
+    const newest = missed[0]
+    const more = missed.reduce((sum, one) => sum + 1 + one.more, 0) - 1
+    const count = n.kind === 'available' ? n.count : missed.length || 1
+    const what = newest?.line ? `${newest.line}${more > 0 ? ` · and ${more} more ${more === 1 ? 'change' : 'changes'}` : ''}` : ''
+    const head = title(`Claudopus ${v} is out`, count > 1 ? `· ${count} versions since v${loaded}` : '')
+    if (n.kind === 'cannot') return box('cannot', [head, line('why', `${n.what}: ${n.why}.`)], quiet('cannot', v))
+    return box(
+      'available',
+      [head, what ? line('what', what) : null],
+      [
+        <ui.Button key={`update-download-${presses}`} label={isFolder ? 'Fetch into the folder' : page?.size ? `Download · ${sizeText(page.size)}` : 'Download'} onPress={() => downloadPress($, v)} />,
+        ...quiet('available', v),
+      ],
+    )
+  }
+  if (n.kind === 'downloading') {
+    const live = downloadProgress?.version === v ? downloadProgress : undefined
+    const pct = live?.pct ?? n.pct
+    const got = live?.got ?? n.got
+    const said = live?.phase === 'checking' ? 'checking it against what the release published' : [pct !== undefined ? `${Math.round(pct)}%` : '', got ? sizeText(got) : '', live?.phase === 'resolving' ? 'unpacking' : ''].filter(Boolean).join(' · ')
+    return box('downloading', [title(`${isFolder ? 'Fetching' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
+  }
+  if (n.kind === 'downloaded') {
+    const replaces = isFolder
+      ? `Checked against the release. Move forward takes ${folder} from v${loaded} to v${v}, fast-forward only.`
+      : `Checked against the release. Install replaces v${loaded}; new chats start on v${v}.`
+    return box(
+      'downloaded',
+      [title(`Claudopus ${v} ${isFolder ? 'fetched' : 'downloaded'}`), line('replaces', replaces), track(1)],
+      [<ui.Button key={`update-install-${presses}`} label={isFolder ? 'Move forward' : 'Install'} onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
+    )
+  }
+  if (n.kind === 'installing') return box('installing', [title(`${isFolder ? 'Moving the folder to' : 'Installing'} Claudopus ${v}…`), track(1)], [])
+  if (n.kind === 'reload') {
+    const who =
+      isFolder && src.runs === 'folder'
+        ? `This chat still runs v${loaded}. Every chat run from ${folder} switches only at its own reload, which its panel offers.`
+        : `This chat still runs v${loaded}. Reload switches this chat only; new chats start on v${v}.`
+    const typed = isRunFromAfar || isReloadRefused
+    return box(
+      'reload',
+      [
+        title(`Claudopus ${v} is ${isFolder && src.runs === 'folder' ? 'in the folder' : 'installed'}`),
+        line('who', typed ? `This chat still runs v${loaded}. Type /reload-plugins in this chat to switch it.` : who),
+        stepSaid.version === v && stepSaid.dirty ? line('dirty', 'The uncommitted changes in the folder stay, and a reload loads them on top.') : null,
+        track(2),
+      ],
+      [typed ? null : <ui.Button key={`update-reload-${presses}`} label="Reload this chat" onPress={() => void reloadPress($, v).catch(err => log($, `chat not reloaded: ${String(err)}`))} />, ...quiet('reload', v, false)],
+    )
+  }
+  // A step that failed: what failed, and that what this chat runs is as it was
+  const detail = ''
+  const which = n.step === 'download' ? (isFolder ? 'fetch' : 'download') : isFolder ? 'move the folder to' : 'install'
+  const kept =
+    n.fail === 'installed-mismatch'
+      ? `${isFolder ? `The folder moved to v${v}, but ` : ''}Claude Code's record was put back, so new chats keep v${loaded}.`
+      : n.fail === 'kept-copy'
+        ? `This chat still runs v${loaded}.`
+        : `Nothing was changed: this chat still runs v${loaded}.`
+  return box(
+    'failed',
+    [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${FAILS[n.fail].replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
+    [<ui.Button key={`update-again-${presses}`} label="Try again" onPress={() => downloadPress($, v)} />, ...quiet('failed', v)],
   )
 }
 
@@ -4703,43 +5081,42 @@ const closeScreen = async ($: EngineInterface, version: string) => {
   if (!isNewer(seenIn(await readOr($, seenPath())), version)) await writeSeen($, version)
   drawAgain($)
 }
-// The screen, over the panel: the blue happy octopus jumping, the version moved to, the changes of every version after the one seen
-// last, and the way back. Nothing in a copy a newer load of this chat replaced, nor for a version whose changes were seen
-const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: number, surface?: string) => {
+// The first sentence of a change, short: up to its first full stop, colon or semicolon, cut at a word near 110 characters
+const firstClause = (text: string) => {
+  const plain = text.replace(/`/g, '').replace(/\s+/g, ' ').trim()
+  const first = /^(.{20,}?[.;:])(\s|$)/.exec(plain)?.[1] ?? plain
+  if (first.length <= 110) return first.replace(/[.;:]$/, '')
+  // Too long: up to its last comma that fits, else the words that fit
+  const comma = first.slice(0, 110).lastIndexOf(',')
+  return comma > 40 ? first.slice(0, comma) : `${first.slice(0, 107).replace(/\s+\S*$/, '')}…`
+}
+// The note a chat shows once it moved to a newer version whose changes the person has not seen on this Mac: one quiet box in the
+// header, where the update's steps were, saying what it moved from and how many versions that covers, with What's new (the
+// Changelog tab) and Close, which marks it seen for every chat. Nothing in a copy a newer load of this chat replaced
+const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, _asks: number, _surface?: string) => {
   if (!dir || !loaded) return undefined
   const seen = seenIn(await readOr($, seenPath()))
   if (!isScreenDue(loaded, seen) || (await read($, ranVersion)) !== loaded) return undefined
   const { shown, left } = missedOf(await versionsLogged($), seen, loaded)
-  // The screen is the moment, bigger: the header's is not played behind it, and the sound plays once for the version on this Mac
-  if (updatedMoment) updatedMoment = undefined
+  // The sound plays once for the version on this Mac
   if (screenSounded !== loaded) void playUpdated($, (screenSounded = loaded))
-  const back = (key: string) => (
-    <ui.Box key={key} flexDirection="row" flexWrap="wrap" gap={1} flexShrink={0}>
-      <ui.Button key={`${key}-close-${presses}`} label="Back to the panel" hotkey="b" onPress={() => void closeScreen($, loaded).catch(err => log($, `update screen not closed: ${String(err)}`))} />
-      <ui.Button key={`${key}-log-${presses}`} label="Changelog" plain onPress={() => void openChangelog($).catch(err => log($, `changelog not opened: ${String(err)}`))} />
-    </ui.Box>
-  )
   const count = shown.length + left
   return (
-    <ui.Box key="update-screen" flexDirection="column" gap={1} flexGrow={1} {...(surface === 'terminal' ? { width: '100%' } : {})}>
-      {/* The terminal leaves a column's rows as wide as what they hold, so there the head is made as wide as the panel to centre in it */}
-      <ui.Box key="update-head" flexDirection="column" alignItems="center" gap={1} backgroundColor={FILL} paddingX={2} paddingY={2} flexShrink={0} {...(surface === 'terminal' ? { width: '100%' } : {})}>
-        {octopus(ui, 'update-mark', 'updated', UPDATE_MARK, `Claudopus, updated to ${loaded}`, $, { surface, requestId: LIST })}
-        <ui.Text bold color={FLOW}>Claudopus updated</ui.Text>
-        <ui.Text dimColor wrap="wrap">{`v${seen} → v${loaded}${count > 1 ? ` · ${count} versions` : ''}`}</ui.Text>
+    <ui.Box key="update-notice" flexDirection="column" borderStyle="round" borderColor={NOTICE_EDGE} paddingX={1} flexShrink={0}>
+      <ui.Box key="update-title" flexDirection="row" gap={1} minWidth={0}>
+        <ui.Box flexShrink={0}>
+          <ui.Text color={FLOW}>{`Updated to Claudopus ${loaded}`}</ui.Text>
+        </ui.Box>
+        <ui.Text dimColor wrap="truncate-end">{`· from v${seen}${count > 1 ? `, ${count} versions` : ''}`}</ui.Text>
       </ui.Box>
-      {back('update-top')}
-      {asks ? <ui.Text key="update-asks" color={NEEDS} wrap="wrap">{`${asks === 1 ? 'Something needs' : `${asks} things need`} you: go back to the panel to see ${asks === 1 ? 'it' : 'them'}.`}</ui.Text> : null}
-      <ui.Text key="update-new" bold>{"What's new"}</ui.Text>
-      {shown.length ? null : <ui.Text dimColor>This version has no changes written down.</ui.Text>}
-      {shown.map(v => versionBand(ui, `update-${v.version}`, v, v.date))}
-      {olderLine(ui, 'update-older', left, () => void openChangelog($).catch(err => log($, `changelog not opened: ${String(err)}`)))}
-      {shown.length > 1 ? back('update-bottom') : null}
+      {shown[0]?.changes[0] ? <ui.Text key="update-what" dimColor wrap="wrap">{firstClause(shown[0].changes[0])}</ui.Text> : null}
+      <ui.Box key="update-done-buttons" flexDirection="row" flexWrap="wrap" columnGap={2}>
+        <ui.Button key={`update-new-${presses}`} label="What's new" onPress={() => void ((presses += 1), closeScreen($, loaded).then(() => openChangelog($))).catch(err => log($, `changelog not opened: ${String(err)}`))} />
+        <ui.Button key={`update-close-${presses}`} label="Close" plain dimColor onPress={() => void closeScreen($, loaded).catch(err => log($, `update note not closed: ${String(err)}`))} />
+      </ui.Box>
     </ui.Box>
   )
 }
-// The octopus on the update screen, twice the header's
-const UPDATE_MARK = 96
 
 // The asking card: an ask's text to copy, its buttons and reply box, and the answer reaching the work
 
@@ -4843,7 +5220,7 @@ const heldDrawings = new Map<string, { shape: string; content: string; at: numbe
 let freshness = 0
 const drawAgain = ($: EngineInterface) => {
   freshness += 1
-  $.ui.invalidate('ui.render')
+  void drawFresh($)
 }
 // The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
 // arrive, so a drawing never puts older letters over the newer ones the box already holds
@@ -4866,7 +5243,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : ''])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -4885,6 +5262,45 @@ const freeTimes = ($: EngineInterface) => {
   typing += 1
   isTyping = false
   if (wasHeld) drawAgain($)
+}
+// Every pane of the mod's is drawn again, from the values as they are now
+const drawFresh = async ($: EngineInterface) => $.ui.invalidate('ui.render')
+// What each pane showed when last drawn afresh: its shape, its content and when, so calmLook knows what has moved since
+const drawnPanes = new Map<string, { shape: string; content: string; at: number; side: string }>()
+// What the panel shows from the mod's own memory rather than its values: what the app's prompts, the admin and file gates, the boxes,
+// pictures, the update and the presses hold. A change in it draws the panel again within a second
+const sideSign = () =>
+  JSON.stringify([
+    waiting.map(one => [one.agent, one.tool, one.seen ?? 0, one.isPressedNo ?? false]), asked.length, answeredPrompts.length, [...promptSaid], [...promptHeld],
+    [...gateHeld], [...gateSaid.keys()], looseGates.map(one => one.id), [...undoneOffers.keys()], boxes.map(one => one.id), doneNotes.length, [...boxSaid], [...boxSent], boxPresses,
+    [...pictureIn.keys()], isUpdating, isReloadRefused, updatedMoment ?? null, presses, loadMark, freshness,
+  ])
+// While the person uses the panel (scrolls it, moves the focus in it, presses in it, or types) its running times stand still: they
+// move again ENGAGED after the person's last move
+const ENGAGED = 15_000
+let engagedAt = 0
+let calmAt = 0
+const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
+// Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
+// draw it again only every CALM while work moves, and not while the person uses it
+const calmLook = async ($: EngineInterface, isMoving: boolean) => {
+  const now = await $.clock.now()
+  const list = drawnPanes.get(LIST) ?? { shape: '', content: '', at: 0, side: sideSign() }
+  // What the mod holds in memory, or a file the panel read, changed: drawn again at once, as anything new is
+  const side = sideSign()
+  let isNew = !isTyping && list.side !== side
+  for (const [path, text] of isTyping ? [] : drawnFiles) {
+    const now = await readOr($, path)
+    if (now !== text) (drawnFiles.set(path, now), (isNew = true))
+  }
+  // Asked for once: a panel the app does not draw just then is not asked for again each second
+  if (isNew) return void ((list.side = side), drawAgain($), (list.side = sideSign()))
+  // Counted from the panel's last drawing afresh or the last of these, so a Details tab or the band drawn without the panel moves on
+  // every CALM too, not each second
+  if (!isMoving || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
+  calmAt = now
+  await writeHeldOthers($)
+  $.ui.invalidate('ui.render')
 }
 // Whether an element of the mod's is a box the person types into: an ask's reply box or a key box
 const isTypedBox = (element: string | undefined) => /-reply-|^box-.*-field/.test(element ?? '')
@@ -4966,8 +5382,9 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   answeredAsks.add(asked)
   const at = await $.clock.now()
   let isCleared = false
-  await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
+  // Set afresh on each run of the change, as it runs again on a list written meanwhile
+  await changeTodos($, list =>
+    ((isCleared = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isCleared) return
   answeredAt.set(one.id, ask.at)
@@ -5001,8 +5418,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   // Acted on from now while the work is started again with it; never on a card no run of its own will end
   const listed = await read($, todos)
   const isWaking = listed.find(card => card.id === one.id)?.status !== 'working' && listed.find(card => card.id === target)?.status !== 'working'
-  await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
+  await changeTodos($, list =>
+    ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
   // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
@@ -5040,7 +5457,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
   // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
-  await update($, todos, list => list.map(card => (card.id === one.id && card.ask?.replied?.text === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? { ...card, ask: { ...card.ask, replied: { ...card.ask.replied, isWaking: true } } } : card)))
+  await changeTodos($, list => list.map(card => (card.id === one.id && card.ask?.replied?.text === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? { ...card, ask: { ...card.ask, replied: { ...card.ask.replied, isWaking: true } } } : card)))
   sentReplies.set(one.id, { ...sent, to: 'work' })
   redraw($)
   // One message for a work: a second answer for the same one joins the first
@@ -5088,14 +5505,16 @@ const writtenIn = (target: string, card: string) => {
 // Finished, while it acts on it
 const wakeCard = async ($: EngineInterface, target: string) => {
   const now = await $.clock.now()
-  await update($, todos, list => list.map(card => (card.id !== target || card.status === 'working' ? card : (endedByHandback.delete(target), resumed(card, now)))))
+  let isWoken = false
+  await changeTodos($, list => ((isWoken = false), list).map(card => (card.id !== target || card.status === 'working' ? card : ((isWoken = true), resumed(card, now)))))
+  if (isWoken) endedByHandback.delete(target)
 }
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
   if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
   await log($, `work ${target} not started again with an answer: ${reason}`)
   // An ask its reply held waits on the person again, every answer back
   const ids = new Set(answers.map(({ one }) => one.id))
-  await update($, todos, list => list.map(card => (ids.has(card.id) && card.ask?.replied?.isWaking ? { ...card, ask: { ...card.ask, replied: { text: card.ask.replied.text, at: card.ask.replied.at } } } : card)))
+  await changeTodos($, list => list.map(card => (ids.has(card.id) && card.ask?.replied?.isWaking ? { ...card, ask: { ...card.ask, replied: { text: card.ask.replied.text, at: card.ask.replied.at } } } : card)))
   for (const { one, sent } of answers) {
     sentReplies.set(one.id, { ...sent, to: 'chat' })
     const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))
@@ -5144,7 +5563,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   // Either way the ask is done with in the chat: the work asking again is sent to it afresh
   if (isHeld) answeredAsks.delete(a.key)
   inChat.delete(a.card.id)
-  await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
+  await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   dropDrafts($, a.card.id)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
   writtenIn(to, a.card.id)
@@ -5438,8 +5857,24 @@ const readOthers = async ($: EngineInterface) => {
   for (const key of [...endSeen.keys()]) if (!ids.has(key)) endSeen.delete(key)
   const isAppChanged = found.some(s => s.host) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
   const next = ordered(found)
-  if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
-  else if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) redraw($)
+  const was = await read($, others)
+  if (JSON.stringify(next) === JSON.stringify(was)) {
+    othersHeld = undefined
+    if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) redraw($)
+  } else if (calmOthers(next) !== calmOthers(was) || next.some(s => now - (was.find(w => w.host === s.host && w.chat === s.chat)?.at ?? 0) > STALE / 2)) {
+    othersHeld = undefined
+    await update($, others, () => next)
+  } else othersHeld = next
+}
+// Other chats' work as the panel shows it, but for what moves by itself as it runs (their beats, times, tokens and output): a change
+// in only that is not written at once, as each write draws the panel afresh under the pointer. It is held here and written with the
+// panel's running times (calmLook), and at the latest once a chat's beat is half way to being taken for gone
+let othersHeld: Shared[] | undefined
+const calmOthers = (list: Shared[]) => JSON.stringify(list.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })))
+const writeHeldOthers = async ($: EngineInterface) => {
+  const held = othersHeld
+  othersHeld = undefined
+  if (held) await update($, others, () => held)
 }
 
 // The chats this Mac's Claude app holds: its session files, one per chat, under
@@ -6464,10 +6899,16 @@ const unquoted = (command: string) => command.replace(/["'\\]/g, '')
 // (its comment lines left out, so a test script that makes a home of its own and only names a runner in a comment is not refused)
 const RUNNER_NAMED = /\bbin\/(?:admin|secret|release|keyring)(?![\w.-])/
 const RUNNER_MOVED = /(?:^|[\s;&|(`'"])(?:HOME|XDG_DATA_HOME|CLAUDECODE)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:HOME|XDG_DATA_HOME|CLAUDECODE)\b|\benv\b[^;&|\n]*\s(?:-u\s*|--unset[= ])CLAUDECODE\b|\benv\b[^;&|\n]*\s-i\b|\benv(?:\s+-\w+)*\s+-(?=\s|$)|\bexec\s+-\w*c/
+// The release runs as itself (#!/bin/bash -p: no startup file, no functions from the environment), so what its shell runs, the
+// GitHub checks' verdict among it, is its own: a command that names it and sets what a shell or git reads first (a startup file,
+// functions, options, the PATH, git's settings), sources a script first, or starts it through a shell of its own choosing, is refused
+const RELEASE_NAMED = /\bbin\/release(?![\w.-])/
+const RELEASE_MOVED =
+  /(?:^|[\s;&|(`'"])(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+|BASH_FUNC_\S+)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+)\b|\b(?:export|declare|typeset)\s+(?:-\w+\s+)*-\w*f|(?:^|[;&|(]\s*)(?:source|\.)\s|\b(?:ba|z|da|k|c|tc|fi)?sh\s+(?:-\S+\s+)*\S*bin\/release(?![\w.-])/
 const movesRunner = (command: string) =>
-  [command, unquoted(command)].map(one => one.replace(/^\s*#.*$/gm, '')).some(one => RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one))
+  [command, unquoted(command)].map(one => one.replace(/^\s*#.*$/gm, '')).some(one => (RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one)) || (RELEASE_NAMED.test(one) && RELEASE_MOVED.test(one)))
 const NO_RUNNER_MOVED =
-  "This command did not run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the marks Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or takes CLAUDECODE away, is refused. Run the runner as it is."
+  "This command did not run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the marks Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or takes CLAUDECODE away, is refused, and so is one that sets the PATH, BASH_ENV, shell options or git's settings for bin/release, sources a script before it, or starts it through a shell. Run the runner as it is."
 const touchesGate = (e: ToolCallInput) => {
   if (e.tool === 'Bash') {
     const command = String((e as { command?: unknown }).command ?? '')
@@ -6479,14 +6920,14 @@ const touchesGate = (e: ToolCallInput) => {
 
 const setGates = async ($: EngineInterface, top: string, fn: (list: Gate[]) => Gate[]) => {
   if (!top) looseGates = fn(looseGates)
-  else await update($, todos, list => list.map(one => (one.id !== top ? one : { ...one, admins: fn(one.admins ?? []).length ? fn(one.admins ?? []) : undefined })))
+  else await changeTodos($, list => list.map(one => (one.id !== top ? one : { ...one, admins: fn(one.admins ?? []).length ? fn(one.admins ?? []) : undefined })))
   redraw($)
 }
 // No hold outlives the copy of the mod that made it: a card that still shows one as a chat starts is cleared
 const clearGates = async ($: EngineInterface) => {
   looseGates = looseGates.filter(one => gateHeld.has(one.id))
   if ((await read($, todos)).some(one => one.admins?.some(gate => !gateHeld.has(gate.id))))
-    await update($, todos, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(gate => gateHeld.has(gate.id)).length ? one.admins.filter(gate => gateHeld.has(gate.id)) : undefined } : one)))
+    await changeTodos($, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(gate => gateHeld.has(gate.id)).length ? one.admins.filter(gate => gateHeld.has(gate.id)) : undefined } : one)))
 }
 // Holds the call until the person presses. A hook's own time is bounded, and time spent in a call on the engine is not counted:
 // the wait is a one-second sleep run by the engine, again and again, the press read from memory between them
@@ -6883,7 +7324,9 @@ const personLook = async ($: EngineInterface, by?: ToolCallInput): Promise<strin
     await personPut($, name, was, is)
     undone.push(name)
     await log($, `${name} was changed outside Claudopus${by ? ' by a command' : ''}, and put back`)
-    if (name !== 'admin-allowed.json') void offerUndone($, by, name, is).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
+    // Offered before the look ends, so the card is there once the call or the load that found it goes on (left to run on its own, a
+    // slow Mac drew it late, and one begun under an earlier load could land after the next load's and take its card away)
+    if (name !== 'admin-allowed.json') await offerUndone($, by, name, is).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
   }
   for (const name of PERSON_FILES) if (now.has(name) && !known.has(name)) known.set(name, null)
   if (!sealedKnown) {
@@ -7422,7 +7865,7 @@ const heldLook = async ($: EngineInterface, id: string) => {
   const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
   if (listed === 'idle' || listed === undefined) {
     const now = await $.clock.now()
-    await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
+    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
   if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
   await replyUnread($, id)
@@ -7618,13 +8061,11 @@ const chatHooks = (on: On) => {
       // Held while the person types into a reply box (holdTimes)
       // A pane held while only its running times moved is drawn again once CALM is over (heldDrawings)
       const calmNow = await $.clock.now()
-      const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length)
-      let isStale = false
-      if (!isTyping && isMoving) for (const [key, held] of heldDrawings) if (calmNow - held.at >= CALM) (heldDrawings.delete(key), (isStale = true))
+      const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.some(card => card.status === 'working'))
       // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
       if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
-      if (isStale) $.ui.invalidate('ui.render')
-      if (!isTyping && isMoving) await update($, tick, n => n + 1)
+      // The mod alone says when its panes are drawn again, and only when what they show has moved (calmLook)
+      await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
       if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
@@ -7708,7 +8149,7 @@ const chatHooks = (on: On) => {
     // Their message lifts the hold on work they stopped: the chat is reminded it was stopped, and starts it again only if asked
     const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
     if ((await read($, todos)).some(isHeld)) {
-      await update($, todos, list => list.map(one => (isHeld(one) && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
+      await changeTodos($, list => list.map(one => (isHeld(one) && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
       if (stillHeld.length) context.push(named(STOPPED_EARLIER(stillHeld.map(one => `"${titleOf(one)}" (${one.id})`))))
     }
     let text = e.text
@@ -7787,8 +8228,8 @@ const chatHooks = (on: On) => {
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
       // Work nothing holds any more has nothing of its own left running in the background
-      if (!isHeld) await update($, todos, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
-      await update($, todos, list => {
+      if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
+      await changeTodos($, list => {
         const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
         // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
         // Work that gave its report waits on nothing it means to finish
@@ -7926,7 +8367,7 @@ const callBegun = async ($: EngineInterface, id: string, agent: string, tool: st
   const cmd = tool === 'Bash' ? oneLine(String(input?.command ?? '')).slice(0, 400) : ''
   const label = oneLine(String(input?.description ?? '') || cmd.split('\n')[0] || '').slice(0, 160)
   inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now(), ...(cmd ? { cmd, label } : {}) })
-  await update($, todos, list => withRunning(list, agent))
+  await changeTodos($, list => withRunning(list, agent))
 }
 
 // A call of a piece of work ended with what it returned: a line its agent had not seen come back before is news. The mod's own
@@ -7941,7 +8382,7 @@ const callEnded = async ($: EngineInterface, id: string, agent: string, tool: st
     if (seen.size > SEEN_KEPT) seenLines.set(agent, new Set([...seen].slice(-SEEN_KEPT / 2)))
     else seenLines.set(agent, seen)
   }
-  await update($, todos, list => withRunning(list, agent, isNew ? now : undefined))
+  await changeTodos($, list => withRunning(list, agent, isNew ? now : undefined))
 }
 
 // When something last moved under a piece of work: it or a helper started, ended, or had something new come back
@@ -7953,7 +8394,9 @@ const movedAt = (list: Todo[], top: Todo) => Math.max(...[top, ...underOf(list, 
 const lookStuck = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const told: Todo[] = []
-  await update($, todos, list => {
+  await changeTodos($, list => {
+    // Told afresh on each run of the change, as it runs again on a list written meanwhile
+    told.length = 0
     let isChanged = false
     const isPrompted = (one: Todo) => waiting.some(p => p.agent && topOf(list, p.agent) === one.id)
     const next = list.map(one => {
@@ -8009,7 +8452,7 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
   const told = (result && typeof result === 'object' ? result : {}) as { timeoutMs?: unknown; persistent?: unknown }
   const isForGood = [call.persistent, told.persistent].some(p => p === true || p === 'true')
   const limit = call.tool !== 'Monitor' || isForGood ? undefined : Number(told.timeoutMs) > 0 ? Math.min(Number(told.timeoutMs), WATCH_MOST) : (expiresIn(said) ?? (Number(call.timeout_ms) > 0 ? Math.min(Number(call.timeout_ms), WATCH_MOST) : undefined))
-  await update($, todos, list =>
+  await changeTodos($, list =>
     list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(cmd ? { cmd } : {}), ...(call.tool === 'Monitor' ? { isWatch: true } : {}), ...(limit ? { expiresAt: now + limit } : {}) }].slice(-BG_KEPT) } : one)),
   )
 }
@@ -8039,7 +8482,7 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
     const one = typeof how === 'string' || 'how' in how ? (how as EndAs) : ((how as Record<string, EndAs>)[id] ?? 'ended')
     return typeof one === 'string' ? { how: one } : one
   }
-  return update($, todos, list => {
+  return changeTodos($, list => {
     const isGone = (id: string) => ids.includes(id)
     if (!list.some(one => one.bg?.some(b => isGone(b.id)))) return list
     return list.map(one => {
@@ -8164,7 +8607,7 @@ const keepDetached = async ($: EngineInterface, agent: string, call: { tool: str
   const what = oneLine(String(call.description ?? '') || found.core).slice(0, 160)
   const now = await $.clock.now()
   const id = `detached-${String(call.tool_use_id ?? now)}`
-  await update($, todos, list =>
+  await changeTodos($, list =>
     list.map(one => (one.id === agent ? { ...one, detached: [...(one.detached ?? []), { id, what, at: now, cmd: oneLine(command).slice(0, 400), log: logFile, pid }].slice(-BG_KEPT) } : one)),
   )
 }
@@ -8237,15 +8680,17 @@ const lookJobs = async ($: EngineInterface) => {
   if (!r) return
   const [body = '', tail = ''] = r.stdout.split('\n@@ALIVE@@')
   const [aliveText = '', psText] = tail.split('@@PS@@\n')
-  if (psText !== undefined) ((jobProcs = procsOf(psText, now)), (jobProcsAt = now))
+  // ps gives each process's age: its start is that age before ps answered, not before this look began (on a slow Mac the look can
+  // start well before its ps runs, and every shell then seemed to start earlier than it did, too early to be the command held open)
+  if (psText !== undefined) ((jobProcs = procsOf(psText, await $.clock.now())), (jobProcsAt = now))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
   // A detached job whose process ended leaves its card, kept as ended (how its process ended is not known)
   const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
   if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
     const runsOf = (one: Todo) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' as const }))
-    await update($, todos, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined, ...keepEnded(one, runsOf(one)) } : one)))
-    $.ui.invalidate('ui.render')
+    await changeTodos($, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined, ...keepEnded(one, runsOf(one)) } : one)))
+    void drawFresh($)
   }
   // Each background command's shell, found by its words among the engine's shells: paused when any of its processes is, and gone
   // when no shell has been found for it twice in a row while others were (so a way of running the engine has not changed), as one the engine never said ended (only once a minute has passed)
@@ -8311,8 +8756,8 @@ const lookJobs = async ($: EngineInterface) => {
     isChanged = true
   }
   for (const owner of moved) jobNews.set(owner, now)
-  if (moved.size) await update($, todos, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
-  if (isChanged) $.ui.invalidate('ui.render')
+  if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
+  if (isChanged) void drawFresh($)
 }
 
 // A short time since, for a row's side: seconds, minutes, or hours and minutes
@@ -8336,7 +8781,7 @@ const openJobOutput = async ($: EngineInterface, job: Job) => {
   const file = jobFiles.get(job.id)
   // A press moves the buttons' keys, so the panel does not keep pulling back to this row
   presses += 1
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   if (!file || !canOpenJob(job)) return
   const at = await $.clock.now()
   const base = `${dir}/terminal`
@@ -8474,16 +8919,16 @@ const lookInOnHelpers = async ($: EngineInterface) => {
     if (isQuiet && helper.quietTold !== last) {
       const running = helper.running ? `${helper.running.what} for ${took(now - helper.running.at)}` : ''
       told.push({ to: parent.id, line: QUIET_HELPER(titleOf(helper), helper.id, Math.round((now - last) / 60_000), running) })
-      await update($, todos, all => all.map(one => (one.id === helper.id ? { ...one, quietTold: last } : one)))
+      await changeTodos($, all => all.map(one => (one.id === helper.id ? { ...one, quietTold: last } : one)))
     }
     const seen = stepsSeen.get(helper.id)
     if (seen && seen.steps >= SERIAL_STEPS && seen.singles / seen.steps >= SERIAL_SHARE && !helper.serialTold) {
       told.push({ to: parent.id, line: SERIAL_HELPER(titleOf(helper), helper.id, seen.steps) })
-      await update($, todos, all => all.map(one => (one.id === helper.id ? { ...one, serialTold: true } : one)))
+      await changeTodos($, all => all.map(one => (one.id === helper.id ? { ...one, serialTold: true } : one)))
     }
   }
   // Each card with helpers running keeps when they were last looked at and how many were quiet; one with none running keeps nothing
-  await update($, todos, all => {
+  await changeTodos($, all => {
     const changed = all.some(one => (looked.get(one.id)?.quiet ?? -1) !== (one.lookedIn?.quiet ?? -1) || (looked.get(one.id)?.running ?? -1) !== (one.lookedIn?.running ?? -1))
     return changed || looked.size ? all.map(one => ({ ...one, lookedIn: looked.get(one.id) ?? (one.lookedIn && one.status === 'working' ? undefined : one.lookedIn) })) : all
   })
@@ -8746,7 +9191,7 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   }
   if (!back.length && !lost.length) return
   const now = await $.clock.now()
-  await update($, todos, list => {
+  await changeTodos($, list => {
     const known = new Set(list.map(one => one.id))
     const added = [...back, ...lost].filter(one => !known.has(one)).map(one => ({ ...started(one, '', '', '', cutAt), status: 'stopped' as const, endedAt: cutAt }))
     return [...list, ...added].map(one =>
@@ -9270,7 +9715,7 @@ const workHooks = (on: On) => {
     let woken = ''
     const next = async (call: typeof e) => {
       const r = await run(call)
-      if (woken && !r.deny && !r.isError) await update($, todos, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
+      if (woken && !r.deny && !r.isError) await changeTodos($, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
       // Ended work a message starts again is at work from now: its card leaves Finished while it acts on the message
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
@@ -9345,7 +9790,7 @@ const workHooks = (on: On) => {
                   ? 'the work that started you'
                   : `the work${title(sender)}`
         }
-        await update($, todos, list =>
+        await changeTodos($, list =>
           list.map(one =>
             one.id !== target.id
               ? one
@@ -9371,7 +9816,7 @@ const workHooks = (on: On) => {
         const now = await $.clock.now()
         const isKeeping = isTool(e.tool, 'todo') || isTool(e.tool, 'note')
         let nudge = ''
-        await update($, todos, list =>
+        await changeTodos($, list =>
           list.map(one => {
             if (one.id !== id) return one
             const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined }
@@ -9434,7 +9879,7 @@ const workHooks = (on: On) => {
         await stopHelpers($, stopId)
         await dropBackground($, [stopId], 'stopped')
         const now = await $.clock.now()
-        await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
+        await changeTodos($, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
         await keepStoppedReports($, now)
         await lookEnds($)
       }
@@ -9468,7 +9913,7 @@ const workHooks = (on: On) => {
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
-    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     // A step the app sends to an older model or to Haiku after its safeguards flag a message is not moved back past the flag: the
     // work is ended there with a report that says so (FLAGGED), so its parent starts what is left again on a current model. An agent
@@ -9486,7 +9931,7 @@ const workHooks = (on: On) => {
       flaggedOnce.add(id)
       if (n === 1) await log($, `work ${id} was flagged and the app would send it to ${modelName(e.model)}: it is ended with a report instead`)
       if (dir) {
-        await update($, todos, list => list.map(one => (one.id === id ? { ...one, flagged: modelName(e.model), moved: undefined } : one)))
+        await changeTodos($, list => list.map(one => (one.id === id ? { ...one, flagged: modelName(e.model), moved: undefined } : one)))
         await stopHelpers($, id).catch(() => undefined)
       }
       // Its report goes back through the handback tool; where that does not end it, a plain last answer, and past a few the work is
@@ -9511,7 +9956,7 @@ const workHooks = (on: On) => {
     }
     // The card says so only while it holds: not once the app sends its steps to a right model again
     const moved = isMovedByApp ? modelName(e.model) : undefined
-    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
     // A pick the engine has since passed is its family's newest
     const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined
     const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead
@@ -9520,7 +9965,7 @@ const workHooks = (on: On) => {
     const model = (r.usage as { model?: string } | undefined)?.model
     if (model) seeModel(model)
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)
-    if (id !== undefined && tokens && dir) await update($, todos, list => list.map(one => (one.id === id ? { ...one, tokens, model: one.chosen ?? (modelName(model ?? '') ? model : one.model) } : one)))
+    if (id !== undefined && tokens && dir) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, tokens, model: one.chosen ?? (modelName(model ?? '') ? model : one.model) } : one)))
 
     return r
   })
@@ -9593,7 +10038,7 @@ const workHooks = (on: On) => {
     const named1 = isOwn && !fromReport && !e.resume ? (await read($, reports)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : []
     const goesOn = named1.length === 1 && named1[0] && [...aboutWords(named1[0].title)].some(word => aboutWords(e.description ?? '').has(word)) ? named1[0].id : ''
     const from = fromReport || goesOn
-    await update($, todos, list => {
+    await changeTodos($, list => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
       const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
@@ -9626,11 +10071,18 @@ const commandHooks = (on: On) => {
   // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
+      // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
+      if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
     }
     return next(e)
   })
+  // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
+  on('ui.scroll', async ($, e, next) => {
+    if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
+    return next(e)
+  }).catch(($, e, next) => next(e))
   // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts
   on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)))
   // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
@@ -9883,7 +10335,8 @@ const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
 // More of each figure, for a pointer resting on it: a heading with the figure in full, then rows of a name and its value (Claude's
 // part, the parts of a speed, who uses the most), and for the battery its state in words. Only what the looks gave: a part that is
 // not known is left out
-type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][] }
+// foot: what the figures above it cover, under them
+type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][]; foot?: string }
 const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
   const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? top.map(([name, n]): [string, string] => [name, text(n)]) : undefined)
   const b = f.battery
@@ -9895,24 +10348,36 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
       rows: [...(f.ncpu && f.ncpu > 1 ? [['Cores', `${f.ncpu}`] as [string, string]] : []), ['Claude and what it started', `${pctText(f.cpuClaude ?? 0)}%`]],
       most: most(f.cpuTop, n => `${pctText(n)}%`),
     },
+    // Busy is time at work at any speed, so a busy graphics processor can draw little; drawing the screen is macOS's own
+    // (WindowServer), for every app's window, Claude's too, so it is no one's part
     gpu: f.gpu === undefined ? undefined : {
       title: 'Graphics processor',
       value: `${pctText(f.gpu)}% busy`,
+      note: 'Time at work, at any speed',
       rows: [
         ...(f.gpuClaude !== undefined ? [['Claude and what it started', `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
+        ...(f.wattsGpu !== undefined ? [['Drawing', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
         ...(f.gpuMem !== undefined ? [['Graphics memory in use', f.gpuMemTotal ? `${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB` : `${gbText(f.gpuMem)} GB`] as [string, string]] : []),
       ],
+      most: most(f.gpuTop?.map(([name, n]): [string, number] => [name === 'WindowServer' ? 'macOS drawing the screen' : name, n]), n => `${pctText(n)}%`),
     },
     battery: !b ? undefined : {
       title: 'Battery',
       value: `${batteryShown(b).pct}%`,
       note: upperFirst(batteryNote(b)),
-      // The strain on it: what the whole Mac draws, and what Claude's processors draw of that (the Mac counts no process's graphics
-      // or screen power)
+      // The strain on it: what the whole Mac draws, the processors and the graphics processor each, and Claude's part of each. The
+      // Mac counts each process's own processor energy, not its graphics power: Claude's graphics is its share of the graphics
+      // processor's time times what that draws, and says it is estimated. The screen, memory and storage are no one's part
       rows: [
-        ...(f.watts !== undefined ? [['The Mac is drawing', `${wattText(f.watts)} W`] as [string, string]] : []),
-        ...(f.wattsClaude !== undefined ? [["Claude's processors draw", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.watts !== undefined ? [['The whole Mac draws', `${wattText(f.watts)} W`] as [string, string]] : []),
+        ...(f.wattsCpu !== undefined ? [['Processors, every program', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [["Claude's own processes", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.wattsGpu !== undefined ? [['Graphics, every program', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
+        ...(f.wattsGpuClaude !== undefined ? [['Claude of that, estimated', `${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
       ],
+      ...(f.wattsClaude !== undefined || f.wattsGpuClaude !== undefined
+        ? { foot: `Claude: the app, its chats and all their work.${f.wattsGpuClaude === undefined ? ' Graphics is not in its watts.' : ''} Part of what the processors draw is no program's, and work that ends within seconds is missed. The screen, memory and storage count only in the whole, which the Mac updates about once a minute.` }
+        : {}),
     },
     disk: f.disk === undefined ? undefined : {
       title: 'Disk',
@@ -9961,6 +10426,7 @@ const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
           {card.most.map(([name, value], n) => row(name, value, n, 'most'))}
         </Box>
       ) : null}
+      {card.foot ? <Text key={`${key}-card-foot`} dimColor>{card.foot}</Text> : null}
     </Box>
   )
 }
@@ -10236,6 +10702,8 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
+    if (paneId === LIST) listDrawing += 1
+    try {
     // While the person types into a box the pane is drawn as it last was, whole, but for a change in its shape; not typing, as it last
     // was while only its running times moved, for CALM at most (heldDrawings)
     const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}|${e.props.scroll.offset > 0 ? 1 : 0}`
@@ -10245,6 +10713,7 @@ const panelHooks = (on: On) => {
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return held.drawing as Awaited<ReturnType<typeof next>>
+    if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
     const drawing = await (async () => {
@@ -11763,7 +12232,7 @@ const panelHooks = (on: On) => {
     const isKeyed = e.surface === 'terminal' && !boxes.length
     keyed = isKeyed
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
-    // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
+    // Just moved to a newer version whose changes the person has not seen: one quiet line in the header, with What's new, until closed
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     // A password or key box stays above it: the runner waits on it
     if (paneId === LIST && !alone) {
@@ -11773,10 +12242,9 @@ const panelHooks = (on: On) => {
       const count = waitsCount
       if (count !== waitsAtTop || (was > 0) !== ((listOffsets.get(e.surface) ?? 0) > 0)) ((waitsAtTop = count), drawAgain($))
     }
-    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{notices.map(one => one.node)}{doneNotesPart(ui, at)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
-    // A newer version the hourly look saw: its card under the header's lines, with Install
-    const outCard = alone ? null : newOutCard($, ui, await newOut($, versions.version, versions.installed).catch(() => ''))
+    // Where updating stands for this chat: a small box under the header's lines, its steps each a press
+    const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 
     return (
       <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={e.props.scroll.bodyRows}>
@@ -11798,7 +12266,7 @@ const panelHooks = (on: On) => {
                     <Box flexShrink={0}>
                       <Text bold>Claudopus</Text>
                     </Box>
-                    {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed, type /reload-plugins` : ''}`}</Text> : null}
+                    {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}`}</Text> : null}
                   </Box>
                 )}
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>
@@ -11851,7 +12319,11 @@ const panelHooks = (on: On) => {
     )
     })()
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     return drawing
+    } finally {
+      if (paneId === LIST) listDrawing -= 1
+    }
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
@@ -11866,7 +12338,7 @@ const tabHooks = (on: On) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
-    if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1))
+    if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>
@@ -12039,12 +12511,6 @@ const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
 // The hooks module's entry: the hooks of each part, in the order the engine runs them. The parts are the files beside it,
 // each named for its job; build.mjs joins them into mods/claudopus/hooks/register.tsx, the one file the mod loads
 
-// Every hook of the mod lets go the moment its signal aborts (the person interrupted, a hook above settled first, or its own ten
-// seconds ran out): Claude Code has gone on without it by then, and gives it five seconds more. A hook still running past that twice
-// in a row is taken for a runaway, and Claude Code ends the hooks worker: every call the mod held dies with it (exit 137), and the
-// mod is unloaded, tools, rules and holds, until /reload-plugins. What the hook was doing still finishes on its own, unwaited.
-// The case of 15 Nov: a dozen pieces of work on a Mac under heavy load each waited in turn for the look over the person's files;
-// waits past their time went on past their signal, the mod was ended twice, and a release Sam allowed was killed in its checks
 export const register: Register = on => {
   chatHooks(on)
   promptHooks(on)
