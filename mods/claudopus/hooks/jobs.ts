@@ -105,7 +105,7 @@ const secondsIn = (text: string) => {
 const leftText = (seconds: number | undefined) => {
   if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined
   const all = Math.round(seconds)
-  const text = all < 60 ? `${all}s` : all < 600 ? `${Math.floor(all / 60)}m ${String(all % 60).padStart(2, '0')}s` : all < 3600 ? `${Math.round(all / 60)}m` : `${Math.floor(all / 3600)}h ${String(Math.round(all / 60) % 60).padStart(2, '0')}m`
+  const text = all < 60 ? `${all}s` : all < 600 ? `${Math.floor(all / 60)}m${all % 60 ? ` ${String(all % 60).padStart(2, '0')}s` : ''}` : all < 3600 ? `${Math.round(all / 60)}m` : `${Math.floor(all / 3600)}h ${String(Math.round(all / 60) % 60).padStart(2, '0')}m`
   return `${text} left`
 }
 const TIME = String.raw`(\d+(?::\d\d){1,2}|(?:\d+(?:\.\d+)?\s?(?:d|h|min|m|s)\b\s*){1,3})`

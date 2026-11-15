@@ -1917,7 +1917,7 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   expect(await until(async () => ((await texts()).includes('460 MB of 1 GB · ') || undefined))).toBe(true)
   const shown = await texts()
   expect(shown).toContain('45%')
-  expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · (printed )?\d+s ago · /.test(text))).toBe(true)
+  expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · (printed )?\d+s ago$/.test(text))).toBe(true)
   // In a narrower panel its speed gives way first
   expect((await texts(100)).some(text => /^460 MB(\/| of )1 GB · $/.test(text))).toBe(true)
   // The work's own line, as its scripts are told to print it
@@ -1942,7 +1942,7 @@ test('a run whose output cannot be found says so after a minute, so a blank row 
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   const shown = (await list.findAll({ type: 'Text' })).map(one => one.text)
   expect(shown.some(text => /^Download · Fetch the CT scans/.test(text))).toBe(true)
-  expect(shown.some(text => /^output not found · 1m 1\ds$/.test(text))).toBe(true)
+  expect(shown.some(text => /^output not found$/.test(text))).toBe(true)
   await list.unmount()
 })
 
@@ -1988,15 +1988,15 @@ test('every run under a card says how it stands: a command held open shows its p
   })
   // The download held open: how much of how much, its percent, speed and time left, as curl printed them
   expect(shown.some(text => /^Download · Download the CT scans/.test(text))).toBe(true)
-  expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · (printed )?2s ago · 9m/.test(text))).toBe(true)
+  expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · printed 2s ago$/.test(text))).toBe(true)
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
-  expect(shown.some(text => /^nothing printed in 9m · 9m/.test(text))).toBe(true)
+  expect(shown.some(text => /^nothing printed in 9m$/.test(text))).toBe(true)
   expect(shown.some(text => /updated/.test(text))).toBe(false)
   // The watch, its last event and when it came
   expect(shown.some(text => /^Watch · Azure jobs finishing/.test(text))).toBe(true)
-  expect(shown.some(text => /wrote vsd-02.png/.test(text))).toBe(true)
-  expect(shown.some(text => /^last event 30s ago · 9m/.test(text))).toBe(true)
+    expect(shown).toContain('last event 30s ago')
+  expect(shown).toContain(' · wrote vsd-02.png')
   held.get('curl --location --output scans.zip https://example.com/scans.zip')?.('')
   await call
 })
