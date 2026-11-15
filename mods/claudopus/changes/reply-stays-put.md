@@ -1,4 +1,4 @@
-- In the desktop app a card's reply box is now in the bar above the chat's prompt, named after the work it goes to, so the panel scrolls freely while you type a reply; the card keeps its buttons
-- With several cards asking, the box stays with the card you are replying to, and "Reply to this one in words" on another card points it there; each half-typed reply is kept
+- In the desktop app a card's answers now end with "Reply in your own words": it opens the reply box in the bar above the chat's prompt, named after the work it goes to, so the panel scrolls freely while you type; the card itself has no box, and one Send
+- Close in the bar, or "Close the reply box" on the card, takes the box away again and keeps what you had typed; pressing "Reply in your own words" on another card moves the box to that one
 - Taken out: the 0.2.135 change that made the panel bounce while a reply box held the cursor. The box for a password or key is still at the top of the panel, which stays at its top while your cursor is in that box
 - The panel's recorder also notes which button each press reached, where the focus went, and what happens in the bar above the prompt
