@@ -99,11 +99,17 @@ const view = atom({ plugin: 'claudopus', key: 'view' } as const, { openId: '' },
 const servers = atom({ plugin: 'claudopus', key: 'servers' } as const, [], { shape: 'servers-2' })
 // Counts the passes that bring the screen up to date: each one redraws what reads it
 const tick = atom({ plugin: 'claudopus', key: 'tick' } as const, 0, { shape: 'tick-1' })
+// When the figures above the prompt last changed: the band redraws on that alone, never each second, since each redraw of it closes
+// and opens again a hover card the pointer rests on, and can leave one open after the pointer has gone on to the next figure
+const figuresAt = atom({ plugin: 'claudopus', key: 'figures' } as const, 0, { shape: 'figures-1' })
 // Whether the panel was open when last looked: a reload of the mod closes it, and it comes back by itself if it was
 // When the panel was last drawn, kept through a reload (drawnNow, written by the timer each second, never read while drawing)
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
 let drawnNow = 0
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
+// What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
+// they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them
+const draftsKept = atom({ plugin: 'claudopus', key: 'drafts' } as const, {}, { shape: 'drafts-1' })
 // Each load of this code in a chat, first or a reload, is told by a mark of its own, kept in the session's state as the load now in
 // charge. A /reload-plugins starts the new copy but leaves the old copy's timers running in the same chat, and work an old copy wakes
 // with $.session.send runs under that copy, whose hooks the engine no longer calls: every panel tool of that work answered "no

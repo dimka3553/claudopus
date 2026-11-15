@@ -38,7 +38,7 @@ const pictureSaid = new Map<string, { text: string; copy?: string }>()
 const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale']
 const shQuoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`
 const sendPicture = async ($: EngineInterface, path: string) => {
-  const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), $.ui.invalidate('ui.render'))
+  const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), drawAgain($))
   // A terminal with no word of where it is watched from: where the picture is, and no more
   if (!termFrom) return say(`It is at ${path} on ${thisMac()}`)
   say('Sending it to your device…')
@@ -79,7 +79,7 @@ const showPictureIn = async ($: EngineInterface, path: string, pane: string, row
   pictureIn.set(pane, { path, row })
   // One that could not be made is tried again on a new press
   for (const [id, one] of larges) if (!one && id.startsWith(`${path}:`)) larges.delete(id)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   // To its top, now and again once the picture is likely drawn in place of the Details
   await $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(() => undefined)
   $.clock.after(150, () => void $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(() => undefined))
@@ -94,7 +94,7 @@ const scrollTo = ($: EngineInterface, pane: string, key: string, tries: number) 
 const pictureBack = ($: EngineInterface, pane: string) => {
   const was = pictureIn.get(pane)
   pictureIn.delete(pane)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   // Once the Details are drawn again, the picture's row is brought into view, where the person was
   if (was?.row) scrollTo($, pane, was.row, 6)
 }
@@ -200,7 +200,7 @@ const largeOf = ($: EngineInterface, path: string, id: string): Large | undefine
           if (larges.size >= 6) larges.delete(larges.keys().next().value ?? '')
           larges.set(id, one)
           making.delete(id)
-          $.ui.invalidate('ui.render')
+          drawAgain($)
           return one
         }),
     )

@@ -87,7 +87,7 @@ const chatHooks = (on: On) => {
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press
     // reached nothing. Keys no load before used make it take each button afresh: the moment of the load, with room for a thousand presses
-    if ((await $.ui.panes().catch(() => [])).length) loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000
+    if ((await $.ui.panes().catch(() => [])).length) (loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000), (freshness += 1)
     await loadSettings($)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
@@ -106,6 +106,7 @@ const chatHooks = (on: On) => {
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
     await readOthers($).catch(() => undefined)
+    keysOnStart($)
 
     await $.tool.register({
       name: 'update',
@@ -203,6 +204,8 @@ const chatHooks = (on: On) => {
     void recoverEnded($).catch(err => log($, `ended work not read back: ${String(err)}`))
     await sync($).catch(() => undefined)
     await loadReports($).catch(() => undefined)
+    // What the person had typed into a reply box before a reload of the mod is in its box again
+    await readDrafts($).catch(() => undefined)
     // Work that is running when the chat loads brings the panel up, if it has never opened
     // and comes back after a reload of the mod (which closes it) if it was open or work is running
     // Once the person has opened or closed the panel, every chat follows that choice instead, as it loads and every PANEL_EVERY
@@ -244,16 +247,24 @@ const chatHooks = (on: On) => {
       }
       const isFlowing = (await read($, flows)).some(f => f.status === 'working')
       // Held while the person types into a reply box (holdTimes)
-      if (!isTyping && (isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length))) await update($, tick, n => n + 1)
+      // A pane held while only its running times moved is drawn again once CALM is over (heldDrawings)
+      const calmNow = await $.clock.now()
+      const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length)
+      let isStale = false
+      if (!isTyping && isMoving) for (const [key, held] of heldDrawings) if (calmNow - held.at >= CALM) (heldDrawings.delete(key), (isStale = true))
+      // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
+      if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
+      if (isStale) $.ui.invalidate('ui.render')
+      if (!isTyping && isMoving) await update($, tick, n => n + 1)
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
       if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
       const now = await $.clock.now()
-      for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)].filter(card => isLingering(card, now))) {
+      for (const one of [...(await read($, flows)), ...(await read($, todos))].filter(card => isLingering(card, now))) {
         const key = `${one.id}:${one.endedAt}`
         if (lingerSet.has(key)) continue
         lingerSet.add(key)
-        $.clock.after(pauseFrom(one) + LINGER - now + 20, () => void ((lingerSet.delete(key), update($, tick, n => n + 1))))
+        $.clock.after(pauseFrom(one) + LINGER - now + 20, () => void ((lingerSet.delete(key), drawAgain($), update($, tick, n => n + 1))))
       }
     })
     everyLoad($, TICK, () => refresh($).catch(err => log($, `servers not looked at again: ${String(err)}`)))
@@ -309,12 +320,28 @@ const chatHooks = (on: On) => {
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
     // The notice that a workflow ended ends its card
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))
+    // The engine's notice that work the person stopped has ended says it was stopped "by Claude": the chat is told it was them
+    if (dir && !isOff && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) {
+      const ids = [...e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map(m => m[1] ?? '')
+      const held = (await read($, todos)).filter(one => !one.parentId && isHeld(one) && ids.includes(one.id))
+      if (held.length) {
+        const told = held.map(one => named(STOPPED_BY_YOU(titleOf(one), one.id, stopLeft.get(one.id) ?? [])))
+        for (const one of held) stopLeft.delete(one.id)
+        return next({ ...e, context: [...(e.context ?? []), ...told] })
+      }
+    }
     if (e.isMeta || e.command || !dir) return next(e)
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
     if (!isPerson) return next(e)
     const context = [...(e.context ?? [])]
+    // Their message lifts the hold on work they stopped: the chat is reminded it was stopped, and starts it again only if asked
+    const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
+    if ((await read($, todos)).some(isHeld)) {
+      await update($, todos, list => list.map(one => (isHeld(one) && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
+      if (stillHeld.length) context.push(named(STOPPED_EARLIER(stillHeld.map(one => `"${titleOf(one)}" (${one.id})`))))
+    }
     let text = e.text
     const m = await read($, me)
 

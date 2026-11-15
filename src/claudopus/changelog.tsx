@@ -91,7 +91,7 @@ let screenSounded = ''
 const closeScreen = async ($: EngineInterface, version: string) => {
   presses += 1
   if (!isNewer(seenIn(await readOr($, seenPath())), version)) await writeSeen($, version)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 // The note a chat shows once it moved to a newer version whose changes the person has not seen on this Mac: one quiet box in the
 // header, where the update's steps were, saying what it moved from and how many versions that covers, with What's new (the

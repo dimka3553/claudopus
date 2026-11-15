@@ -372,6 +372,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (rest[0] === 'set') return (files.set(key, String(e.init?.stdin ?? '').replace(/\n$/, '')), ok())
       if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
       if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))
+      // Every service and account a value is kept under, never a value: the keys laid as secret:<name> and keychain-entry:<service>\t<account>
+      // (a keychain that does not answer, where the test lays keyring:refused, fails it)
+      if (rest[0] === 'entries' && files.has('keyring:refused')) return ok('', 1)
+      if (rest[0] === 'entries') return ok([...files.keys()].flatMap(one => (one.startsWith('secret:') && one !== 'secret:refused' ? [`claudopus-secret\t${one.slice(7)}\n`] : one.startsWith('keychain-entry:') ? [`${one.slice(15)}\n`] : [])).join(''))
       return ok('', 2)
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
@@ -382,9 +386,15 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
     if (tool?.endsWith('bin/secret')) {
-      const said = rest[0] === '--list' ? (kept ? 'API_KEY\n' : '') : kept ? String(e.init?.stdin ?? '').replaceAll(kept, '[hidden API_KEY]') : String(e.init?.stdin ?? '')
+      // and the keys a test lays as secret:<name>, each listed by its name and hidden in what passes through
+      const more = [...files].filter(([key]) => key.startsWith('secret:')).map(([key, value]) => [key.slice(7), value] as const)
+      if (rest[0] === '--hide' && files.has('secret:refused')) return ok('', 1)
+      const hidden = more.reduce((text, [name, value]) => text.replaceAll(value, `[hidden ${name}]`), kept ? String(e.init?.stdin ?? '').replaceAll(kept, '[hidden API_KEY]') : String(e.init?.stdin ?? ''))
+      const said = rest[0] === '--list' ? `${kept ? 'API_KEY\n' : ''}${more.map(([name]) => `${name}\n`).join('')}` : hidden
       return { value: { exitCode: 0, stdout: said, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
+    if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
     const stdout = tool?.endsWith('jq')
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
@@ -465,7 +475,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
     if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
-    if (e.tool === 'Monitor') return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: 0, persistent: true } } as never
+    // SBOS's list of names, as the test lays it
+    if (e.tool === 'mcp__sbos__secrets') return { result: { content: [{ type: 'text', text: files.get('sbos:secrets') ?? '[]' }] } } as never
+    if (e.tool === 'Monitor') {
+      // as the engine answers: a watch not kept for good ends at its time limit, at most 30 minutes
+      const w = e as { timeout_ms?: number; persistent?: boolean | string }
+      const forGood = w.persistent === undefined || w.persistent === true || w.persistent === 'true'
+      return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: forGood ? 0 : Math.min(w.timeout_ms ?? 300_000, 1_800_000), persistent: forGood } } as never
+    }
     if (e.tool === 'Workflow') return { result: { status: 'async_launched', taskId: 'wt1', runId: 'wf_1', taskType: 'local_workflow', workflowName: 'rounds', transcriptDir: '/t/wf_1', scriptPath: '/t/wf_1.js' } } as never
     return { result: 'ran' } as never
   })
