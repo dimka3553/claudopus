@@ -8250,6 +8250,12 @@ test('a key taken out of a store goes from the list, and nothing is written when
   files.set('sbos:secrets', '[]')
   await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's2', agentId: 'w1' } as never)
   expect(files.get(`${MEMORY}/keys.md`)).not.toContain('github-token')
+  // A kept value that is also a word of the list's own shape changes nothing else in it
+  files.set('secret:SHORT_PIN', 'true')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b5', agentId: 'w1', command: '/plug/bin/secret SHORT_PIN here true' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('| SHORT_PIN |')
+  expect(JSON.parse(files.get(`${MEMORY}/keys.json`) ?? '{}').entries.every((one: { isPresent: unknown }) => typeof one.isPresent === 'boolean')).toBe(true)
+  files.delete('secret:SHORT_PIN')
   // A keychain that does not answer is not read as an empty one: what was known of it stays
   files.set('keyring:refused', 'yes')
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b4', agentId: 'w1', command: '/plug/bin/secret ELEVENLABS_API_KEY here true' } as never)
@@ -8301,6 +8307,14 @@ test('an ask for a key the list has is refused with where it is; a key not kept 
   expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd1', agentId: 'w1', text: 'Paste the key in the box', details: 'It is your ElevenLabs API key.' } as never)).deny).toContain('ELEVENLABS_API_KEY')
   expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd2', agentId: 'w1', text: 'Paste your ElevenLabs API key', details: 'The kept ELEVENLABS_API_KEY is refused by ElevenLabs: 401.' } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'd3', agentId: 'w1', name: 'elevenlabs-key', label: 'x', for: 'ELEVENLABS_API_KEY in the keychain answers 401' } as never)).deny).toBeUndefined()
+  // A word for a key after other words is another key; the word secret in a command that runs no runner is no ask
+  files.set('secret:STRIPE_SECRET_KEY', 'st-made-up-value-0011')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n4', agentId: 'w1', command: '/plug/bin/secret STRIPE_SECRET_KEY here true' } as never)
+  for (const text of ['Paste the Stripe webhook signing secret', 'Paste the Stripe publishable key', 'Type your GitHub login email'])
+    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `s-${text.length}`, agentId: 'w1', text } as never)).deny).toBeUndefined()
+  for (const command of ['git commit -m "keep the secret STRIPE_KEY here for now"', 'kubectl get secret STRIPE_KEY default'])
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `k-${command.length}`, agentId: 'w1', command } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 's1', agentId: 'w1', text: 'Paste your Stripe secret key' } as never)).deny).toContain('STRIPE_SECRET_KEY')
   // The runner by other paths to it
   for (const command of ["cd /plug/bin && ./secret ELEVENLABS_KEY here 'x'", "/plug/bin//secret ELEVENLABS_KEY here 'x'"])
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `p-${command.length}`, agentId: 'w1', command } as never)).deny).toContain('ELEVENLABS_API_KEY')

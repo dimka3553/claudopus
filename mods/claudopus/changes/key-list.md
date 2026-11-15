@@ -1,3 +1,3 @@
-- Claudopus now remembers which keys, tokens and logins you have given, by name and where each is kept, never a value: Claudopus's keychain, the rest of this Mac's keychain, SBOS, and the .env files in your subjects' folders. A Keys button beside Memory shows the list, and work reads it before asking.
-- The list is made again from each store's own list of names as each chat starts and whenever a key is given or forgotten, so a key taken out of a store stops being listed.
+- Claudopus now remembers which keys, tokens and logins you have given, by name and where each is kept, never a value: Claudopus's keychain, keys you saved by hand in this Mac's keychain, SBOS, and the .env files in your subjects' folders. A Keys button beside Memory shows the list, and work reads it before asking.
+- The list is made again from each store's own list of names whenever you open it, a key is given or forgotten, or work asks for one, so a key taken out of a store stops being listed.
 - Work that asks for a key the list already has is stopped and told where it is and how to use it.

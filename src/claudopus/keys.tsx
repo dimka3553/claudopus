@@ -99,22 +99,29 @@ const refreshKeys = async ($: EngineInterface, sbos?: SbosName[], isListed = tru
     ...env.map(one => made('env', one.name, { where: one.where })),
     ...kept('sbos', sbos?.map(one => made('sbos', one.name, { label: one.label, kind: one.kind, isPresent: one.isPresent }))),
   ]
-  // Every kept value is hidden in the names and labels as they came, before anything is cut or changed, so no part of one can be
-  // left; the text is made from what was hidden, and nothing is written when it could not be checked
-  const state = await keysHidden($, `${JSON.stringify({ at: now, sbosAt: sbos && isListed ? now : before.sbosAt, entries }, null, 2)}\n`)
-  let hidden: KeysState | undefined
+  // Every kept value is hidden in each name, place and label as it came, before anything is cut or changed, so no part of one can be
+  // left: the texts alone go through, as one list of strings, so a value that is also a number or a word of the list's own shape changes
+  // nothing else. The list is made from what was hidden, and nothing is written when it could not be checked
+  const texts = entries.flatMap(one => [one.name, one.where ?? '', one.label ?? ''])
+  const back = await keysHidden($, JSON.stringify(texts))
+  let hidden: string[] | undefined
   try {
-    hidden = state === undefined ? undefined : (JSON.parse(state) as KeysState)
+    hidden = back === undefined ? undefined : (JSON.parse(back) as string[])
   } catch {}
-  if (state === undefined || !hidden || !Array.isArray(hidden.entries)) return (await log($, 'the list of keys was not written: it could not be checked for kept values'), keys)
-  keys = hidden
-  await $.fs.write(`${dir}/${KEYS_STATE}`, state)
+  if (!Array.isArray(hidden) || hidden.length !== texts.length || hidden.some(one => typeof one !== 'string')) return (await log($, 'the list of keys was not written: it could not be checked for kept values'), keys)
+  const seen = hidden
+  keys = {
+    at: now,
+    sbosAt: sbos && isListed ? now : before.sbosAt,
+    entries: entries.map((one, i) => ({ ...one, name: seen[i * 3] ?? '', ...(one.where ? { where: seen[i * 3 + 1] } : {}), ...(one.label ? { label: seen[i * 3 + 2] } : {}) })),
+  }
+  await $.fs.write(`${dir}/${KEYS_STATE}`, `${JSON.stringify(keys, null, 2)}\n`)
   await $.fs.write(`${dir}/${KEYS_FILE}`, keysText($.plugin.root, keys))
   return keys
 }
 // The text with every kept value hidden, as bin/secret hides a command's output; undefined when it could not be checked
 const keysHidden = async ($: EngineInterface, text: string) => {
-  const r = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide'], { stdin: text }).catch(() => undefined)
+  const r = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json'], { stdin: text }).catch(() => undefined)
   return r && r.exitCode === 0 && !r.isStdoutTruncated && r.stdout.trim() ? r.stdout : undefined
 }
 const keysFresh = async ($: EngineInterface) => {
@@ -167,8 +174,8 @@ const sbosListed = (result: unknown) => {
       if (!Array.isArray(list)) continue
       return list
         .filter((one): one is { name: string; label?: unknown; put_in?: unknown; database?: unknown; login?: unknown } => Boolean(one) && typeof one === 'object' && typeof (one as { name?: unknown }).name === 'string')
-        // the label as it came, uncut: it is cut only once every kept value in it is hidden
-        .map((one): SbosName => ({ name: plainName(one.name), label: typeof one.label === 'string' ? one.label.slice(0, 2000) : undefined, ...(one.database === true ? { kind: 'database' as const } : one.login ? { kind: 'login' as const } : {}), isPresent: one.put_in === true }))
+        // the label as it came, uncut (one too long to hide whole is left out): it is cut only once every kept value in it is hidden
+        .map((one): SbosName => ({ name: plainName(one.name), label: typeof one.label === 'string' && one.label.length <= 2000 ? one.label : undefined, ...(one.database === true ? { kind: 'database' as const } : one.login ? { kind: 'login' as const } : {}), isPresent: one.put_in === true }))
         .filter(one => one.name)
     } catch {}
   }
@@ -187,19 +194,19 @@ const AGAIN_IN = (one: KeyEntry, field: string) => `If it no longer works, ask a
 const AGAIN_FORGET = (root: string, one: KeyEntry) => `If it no longer works, take it out first with \`${root}/bin/secret ${one.name} --forget\`; the next run asks for it.`
 // A name written whole in a text, as it is: not inside another word
 const namesWhole = (text: string, name: string) => new RegExp(`(?:^|[^A-Za-z0-9_-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^A-Za-z0-9_-])`).test(text)
-// The kept key a text asks for: its whole name in it, in any case and with any dashes, or every word of its name there as whole words.
-// The key whose name has the most words found wins, so "the Kaggle username" is KAGGLE_USERNAME, not KAGGLE_KEY
+// The kept key a text asks for: its whole name in it, in any case and with any dashes, or the words of its name in their order right
+// before a word for a key ("your ElevenLabs API key"), so "the Stripe webhook secret" or "the GitHub login email" is no ask for
+// STRIPE_SECRET_KEY or github-token. The key whose name has the most words found wins
 const askedIn = (text: string, listed: KeyEntry[]) => {
   const flat = ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `
-  const words = new Set(flat.split(' ').filter(Boolean))
   return listed
     .map(one => ({ one, core: coreOf(one.name), whole: flat.includes(` ${one.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `) }))
-    .filter(({ core, whole }) => whole || (core.length > 0 && core.every(word => words.has(word))))
+    .filter(({ core, whole }) => whole || (core.length > 0 && new RegExp(` ${core.join(' ')}(?: (?:api|access|secret|auth|personal))* (?:key|token|secret|password|pat|credentials?)s? `).test(flat)))
     .sort((a, b) => b.core.length - a.core.length)[0]?.one
 }
 // The secret runner's calls in a text, by any path to it (bin/secret, ./secret from its folder, a doubled slash), each with the names
-// it takes and what it does with them
-const SECRET_RUNS = /(?:^|[\s/;&|('"=`])secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?(--add|[^\s'"-][^\s'"]*)/g
+// it takes and what it does with them; the word secret alone, as in a commit message or kubectl's, is none
+const SECRET_RUNS = /\/secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?(--add|[^\s'"-][^\s'"]*)/g
 const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; name?: unknown; text?: unknown; copy?: unknown; details?: unknown; for?: unknown; agent?: unknown }
@@ -273,7 +280,7 @@ const keysLearn = async ($: EngineInterface, e: { tool: string }, r: { deny?: un
     const was = all.find(one => one.name === name)
     const sbos: SbosName[] = all.filter(one => one.name !== name).map(one => ({ name: one.name, label: one.label, kind: one.kind, isPresent: one.isPresent }))
     // one SBOS already holds stays as it is
-    if (e.tool.endsWith('ask_secret') && name) sbos.push(was ? { name, label: was.label, kind: was.kind, isPresent: was.isPresent } : { name, label: typeof label === 'string' ? label.slice(0, 2000) : undefined, isPresent: false })
+    if (e.tool.endsWith('ask_secret') && name) sbos.push(was ? { name, label: was.label, kind: was.kind, isPresent: was.isPresent } : { name, label: typeof label === 'string' && label.length <= 2000 ? label : undefined, isPresent: false })
     await refreshKeys($, sbos, false)
-  } else if (/\bbin\/secret\b/.test(command)) await refreshKeys($)
+  } else if (/\/secret\b/.test(command)) await refreshKeys($)
 }
