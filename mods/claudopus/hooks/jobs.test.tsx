@@ -48,22 +48,6 @@ test('a detached start is one sent off with & by nohup or setsid on this Mac; a 
   expect(labelOf('Step 2: fit the mesh', 'python fit.py')).toBe('Step 2: fit the mesh')
 })
 
-test('a score a command prints is no progress: the 14 Nov "99.2%" was a coverage figure, and a progress bar still gives its percent', async () => {
-  expect(latestOf('HEADLINE two-way mean: 0.804 mm (coverage 99.2% within 2 mm)\n').pct).toBeUndefined()
-  expect(latestOf('flame.pkl:  47%|####   | 1.41G/3.00G [01:18<01:28, 18.0MB/s]\n').pct).toBe('47%')
-  expect(latestOf('Training:  96%| 4800/5000 [12:01<00:30]\n').pct).toBe('96%')
-  expect(latestOf('Training: 96%|███| 4800/5000 [12:01<00:30, acc=95.1%]\n').pct).toBe('96%')
-  expect(latestOf('Computing coverage: 45%|████| 45/100\n').pct).toBe('45%')
-  expect(latestOf('step 120 of 2000 (6%)\n').pct).toBe('6%')
-  expect(latestOf('| model A | 99.2% |\n').pct).toBeUndefined()
-  expect(latestOf('95% of tests passed\n').pct).toBeUndefined()
-  expect(latestOf('frame 81/120 coverage 99.2%\n').pct).toBe('67%')
-  expect(latestOf('######################                   47.2%\n').pct).toBe('47%')
-  expect(latestOf('Rendering ━━━━━━━━━━  45% 0:00:10\n').pct).toBe('45%')
-  expect(isOutputEnded('1794640530\n\n[exited with code 0]\n')).toBe(true)
-  expect(isOutputEnded('frame 81/120\n')).toBe(false)
-})
-
 test('a command that only polls is a wait that says what for; one that does real work after its loop is not', async () => {
   const rerun = 'until grep -q "RERUN_DONE" /Users/x/contest/work/5/rerun.log; do sleep 15; done; date'
   expect(waitOf(rerun)).toEqual({ what: 'RERUN_DONE in rerun.log', file: '/Users/x/contest/work/5/rerun.log' })
@@ -159,6 +143,16 @@ test('how far a run is, read from the progress tools print and the line work is 
   expect(latestOf('progress: 3/6 steps fitting\nRuntimeError: CUDA out of memory\n')).toMatchObject({ done: '3', isEarlier: true, latest: 'RuntimeError: CUDA out of memory' })
   expect(latestOf(`progress: 3/6 steps\n${'loss 0.1\n'.repeat(40)}`)).toMatchObject({ done: '3', isEarlier: true })
   expect(of('HEADLINE two-way mean: 0.804 mm (coverage 99.2% within 2 mm)').pct).toBeUndefined()
+  // A score beside a bar is no percent of it (the 14 Nov "99.2%" was a coverage figure); the bar's own still is
+  expect(latestOf('Training:  96%| 4800/5000 [12:01<00:30]\n').pct).toBe('96%')
+  expect(latestOf('Training: 96%|███| 4800/5000 [12:01<00:30, acc=95.1%]\n').pct).toBe('96%')
+  expect(latestOf('Computing coverage: 45%|████| 45/100\n').pct).toBe('45%')
+  expect(latestOf('step 120 of 2000 (6%)\n').pct).toBe('6%')
+  expect(latestOf('| model A | 99.2% |\n').pct).toBeUndefined()
+  expect(latestOf('95% of tests passed\n').pct).toBeUndefined()
+  expect(latestOf('frame 81/120 coverage 99.2%\n').pct).toBe('67%')
+  expect(latestOf('######################                   47.2%\n').pct).toBe('47%')
+  expect(latestOf('Rendering ━━━━━━━━━━  45% 0:00:10\n').pct).toBe('45%')
 })
 
 test('a detached start is followed only by the process `echo $!` printed and a log it can name: the 15 Nov download stayed blank for hours', async () => {
@@ -269,4 +263,6 @@ test('how a run ended, from the last line the engine writes on its output: finis
   expect(expiresIn('expires in 26m 40s unless')).toBe(1_600_000)
   expect(leftSeconds('1h 05m left')).toBe(3900)
   expect(leftSeconds('55s left')).toBe(55)
+  expect(isOutputEnded('1794640530\n\n[exited with code 0]\n')).toBe(true)
+  expect(isOutputEnded('frame 81/120\n')).toBe(false)
 })
