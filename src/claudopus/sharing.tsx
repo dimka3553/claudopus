@@ -103,7 +103,7 @@ const SEEN_ENDING = 60_000
 // Whether ended work is in its pause after ending: this chat's from its end, another chat's from when this panel saw it end
 const lingers = (one: Todo, at: number) => {
   if (!one.chat) return isLingering(one, at)
-  const seen = endSeen.get(one.id) ?? 0
+  const seen = endSeen.get(`${one.id}:${one.endedAt}`) ?? 0
   return one.status !== 'working' && seen > 0 && at >= seen && at - seen < LINGER
 }
 // Another chat's running work as last read, by its id here, with its chat: a chat on a version from before ended work was shared
@@ -219,7 +219,8 @@ const readOthers = async ($: EngineInterface) => {
   const ids = new Set<string>()
   for (const s of found)
     for (const card of s.cards.filter(one => one.status !== 'working')) {
-      const key = remoteId(s, card.id)
+      // By its end too: work that ends, goes on and ends again between two reads has a moment for each end
+      const key = `${remoteId(s, card.id)}:${card.endedAt}`
       ids.add(key)
       if (endSeen.has(key)) continue
       const isNew = now - card.endedAt < SEEN_ENDING

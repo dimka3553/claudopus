@@ -5,8 +5,9 @@ let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
 // Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
 // Pressed, it takes the list back to its top; nothing else moves the list
+// Work that just finished, in its moment at the top, is pointed at the same way, in green, under what waits
 const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
-  waitsAtTop > 0 && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced) ? (
+  (waitsAtTop > 0 || finishedAtTop.length > 0) && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced) ? (
     <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden">
       <ui.Button
         key={`band-waits-${presses}`}
@@ -14,7 +15,11 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         hover={{ scope: 'band-waits', underline: true }}
         onPress={() => ((presses += 1), void $.ui.scroll({ in: LIST, to: 'start', block: 'start' }).catch(() => undefined))}
       >
-        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 waits' : `${waitsAtTop} wait`} for you at the top of the panel`}</ui.Text>
+        {waitsAtTop > 0 ? (
+          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 waits' : `${waitsAtTop} wait`} for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
+        ) : (
+          <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}, at the top of the panel`}</ui.Text>
+        )}
       </ui.Button>
     </ui.Box>
   ) : null
