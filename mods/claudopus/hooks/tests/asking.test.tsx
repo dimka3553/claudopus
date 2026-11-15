@@ -1641,12 +1641,21 @@ test("a press on an ask shows it answered in the press's own drawing, before the
 
 test('an answer that could not be written says so on the card and puts its buttons back; pressed again it goes', async ($, on) => {
   const s = await askScene($, on)
+  // Another work asks after it: newer, it is above
+  await s.clock.advance(1000)
+  await $.agent.spawn({ ...spawn, description: 'Draw the logo', prompt: 'draw it' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which logo?', choices: ['Round', 'Square'] } as never)
+  const order = async () => (await s.list.findAll({ type: 'Text' })).map(one => one.text).filter(text => text === 'Which logo?' || text === 'Release the branch?')
+  expect(await until(async () => ((await order()).length === 2 ? order() : undefined))).toEqual(['Which logo?', 'Release the branch?'])
   const release = await s.key('Release it')
+  await s.clock.advance(1000)
   s.failWrites(1000)
   await s.list.press({ key: release }).catch(() => undefined)
   expect(await until(async () => s.list.find({ type: 'Text', text: 'Not sent: “Release it” did not reach the work. Press it again' }))).toBeDefined()
   expect(await s.list.find({ type: 'Text', text: /^✓ You answered/ })).toBeUndefined()
   expect(s.answers()).toEqual([])
+  // Its ask back, the card keeps its ask's place under the newer one: a failed press never lifts it to the top
+  expect(await order()).toEqual(['Which logo?', 'Release the branch?'])
   // Its buttons are back, and a press now answers it
   s.failWrites(0)
   const again = await s.key('Release it')

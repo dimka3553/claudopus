@@ -297,7 +297,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     if (answeredAt.get(one.id) === ask.at) answeredAt.delete(one.id)
     if (pending.get(target) === one.id) pending.delete(target)
     const isBack = !isCleared || (await changeTodos($, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: card.entries.filter(entry => !(entry.kind === 'steer' && entry.at === steerAt)) } : card))).then(() => true).catch(() => false))
-    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true })
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true, askAt: ask.at })
     // and when even that could not be written, the chat is told, so the ask is not lost unseen
     if (!isBack) $.ui.log(`The answer “${cut(said, 120)}” to "${titleOf(one)}" (${ask.text}) did not reach it, and its ask could not be put back on its card. Type your answer in this chat instead.`)
     redraw($)
