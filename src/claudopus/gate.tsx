@@ -271,7 +271,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
       if (next.signal?.aborted || (await isReplaced($))) said = 'gone'
       else if ((next.budget?.remainingMs ?? Infinity) < 1500) said = 'late'
       if (said) break
-      await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
+      await aSecond($, next.signal)
     }
   } finally {
     gateHeld.delete(gate.id)
@@ -588,7 +588,7 @@ let personChecking: Promise<string[]> | undefined
 const personCheck = async ($: EngineInterface, by?: ToolCallInput): Promise<string[]> => {
   if (!dir) return []
   // One look at a time in a chat: one asked for while another runs waits for it, then looks again
-  while (personChecking) await personChecking.catch(() => undefined)
+  while (personChecking) await waitOn($, personChecking)
   const look = personLook($, by)
   personChecking = look
   try {
@@ -598,7 +598,7 @@ const personCheck = async ($: EngineInterface, by?: ToolCallInput): Promise<stri
   }
 }
 const personLook = async ($: EngineInterface, by?: ToolCallInput): Promise<string[]> => {
-  await knownQueue
+  await waitOn($, knownQueue)
   let sealedKnown = await knownRead($)
   // Not checked, as the keychain did not answer: a chat that knows what they hold leaves them for the next look, and reads what it
   // knows meanwhile; one that knows nothing yet says so below

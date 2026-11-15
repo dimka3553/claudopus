@@ -436,6 +436,51 @@ const openOn = async ($: EngineInterface, target: string, isText = false) => {
 // macOS's sips on a Mac; on Linux bin/sips, which answers the same calls with ImageMagick and fails, drawing no small copy, without it
 const sips = ($: EngineInterface) => (isLinux ? `${$.plugin.root}/bin/sips` : 'sips')
 
+// A hook's work, as its hook returns it: what it comes to, or, once the hook's signal aborts, `gone` at once. Claude Code has gone on
+// without the hook by then and gives it five seconds more: a hook of the mod still running past that twice in a row is taken for a
+// runaway, and Claude Code ends the hooks worker, so every call the mod held dies with it (exit 137) and the mod is unloaded, tools,
+// rules and holds, until /reload-plugins. What the hook was doing finishes on its own, unwaited
+const untilSignal = <T,>($: EngineInterface, signal: AbortSignal | undefined, running: Promise<T>, gone: T): Promise<T> => {
+  if (!signal) return running
+  return new Promise<T>((resolve, reject) => {
+    const go = () => {
+      // Its own end is no one's now: a fault in it is only logged
+      running.catch(err => log($, `a hook let go at its signal failed later: ${String(err)}`).catch(() => undefined))
+      resolve(gone)
+    }
+    if (signal.aborted) return go()
+    signal.addEventListener('abort', go, { once: true })
+    running.then(
+      value => (signal.removeEventListener('abort', go), resolve(value)),
+      err => (signal.removeEventListener('abort', go), reject(err)),
+    )
+  })
+}
+// A hold's wait between two looks at what was pressed: a one-second sleep the engine runs, whose time the hook's budget does not
+// count, cut short when the hook's signal aborts, so a hold let go ends at once, never a slow sleep later on a busy Mac
+const aSecond = async ($: EngineInterface, signal: AbortSignal | undefined) => {
+  if (signal?.aborted) return
+  let unhook = () => {}
+  const aborted = new Promise<void>(done => {
+    unhook = () => (signal?.removeEventListener('abort', done), done())
+    signal?.addEventListener('abort', () => done(), { once: true })
+  })
+  await Promise.race([$.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined), aborted])
+  unhook()
+}
+// Waiting on another call's work (a look over the person's files, a write in its turn) counts against a hook's own ten seconds, as
+// only the engine's own calls do not. On a busy Mac with many pieces of work, a call that waited its turn that long had its hook
+// skipped (the call ran without the mod's checks) and was then taken as running past its signal. So the wait is made beside a
+// sleep the engine runs, which stops that count, half a second at a time
+const waitOn = async ($: EngineInterface, other: Promise<unknown>) => {
+  let isDone = false
+  const done = other.then(
+    () => void (isDone = true),
+    () => void (isDone = true),
+  )
+  while (!isDone) await Promise.race([done, $.process.run(['/bin/sleep', '0.5'], { timeoutMs: 10_000 }).catch(() => undefined)])
+}
+
 // What chats and work are told: the brief rule, refusals, the work's panel rule, steers and reminders
 
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
@@ -6464,7 +6509,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
       if (next.signal?.aborted || (await isReplaced($))) said = 'gone'
       else if ((next.budget?.remainingMs ?? Infinity) < 1500) said = 'late'
       if (said) break
-      await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
+      await aSecond($, next.signal)
     }
   } finally {
     gateHeld.delete(gate.id)
@@ -6781,7 +6826,7 @@ let personChecking: Promise<string[]> | undefined
 const personCheck = async ($: EngineInterface, by?: ToolCallInput): Promise<string[]> => {
   if (!dir) return []
   // One look at a time in a chat: one asked for while another runs waits for it, then looks again
-  while (personChecking) await personChecking.catch(() => undefined)
+  while (personChecking) await waitOn($, personChecking)
   const look = personLook($, by)
   personChecking = look
   try {
@@ -6791,7 +6836,7 @@ const personCheck = async ($: EngineInterface, by?: ToolCallInput): Promise<stri
   }
 }
 const personLook = async ($: EngineInterface, by?: ToolCallInput): Promise<string[]> => {
-  await knownQueue
+  await waitOn($, knownQueue)
   let sealedKnown = await knownRead($)
   // Not checked, as the keychain did not answer: a chat that knows what they hold leaves them for the next look, and reads what it
   // knows meanwhile; one that knows nothing yet says so below
@@ -7246,7 +7291,7 @@ const holdPrompt = async ($: EngineInterface, next: { signal?: AbortSignal; budg
       if (said) break
       if (!waiting.some(one => one.id === id) || next.signal?.aborted || (next.budget?.remainingMs ?? Infinity) < 1500 || (await isReplaced($))) break
       if ((await $.clock.now()) - since > HOLD_LONGEST) break
-      await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
+      await aSecond($, next.signal)
     }
   } finally {
     promptHeld.delete(id)
@@ -9120,10 +9165,13 @@ const touchesKeyring = (e: { tool: string }) => {
   })
 }
 
+// What a call the mod let go at its signal answers; Claude Code had gone on without it, so no one reads it
+const LET_GO = 'This call was let go: Claude Code went on without it.'
+
 const workHooks = (on: On) => {
 
   // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
-  on('tool.call', async ($, e, raw) => {
+  on('tool.call', async ($, e, raw) => untilSignal($, raw.signal, (async () => {
     // A prompt the call raised goes as the call ends: refused, interrupted, or allowed and run
     const run = async (call: typeof e) => {
       // What work runs, and what comes back of it, tells the stuck check whether it moves
@@ -9402,7 +9450,7 @@ const workHooks = (on: On) => {
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
 
     return { deny: REFUSED }
-  })
+  })(), { deny: LET_GO }))
 
   // How full this chat's context is, as the app counts it, each time it moves
   on('session.measure', async ($, e, next) => {
@@ -11991,6 +12039,12 @@ const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
 // The hooks module's entry: the hooks of each part, in the order the engine runs them. The parts are the files beside it,
 // each named for its job; build.mjs joins them into mods/claudopus/hooks/register.tsx, the one file the mod loads
 
+// Every hook of the mod lets go the moment its signal aborts (the person interrupted, a hook above settled first, or its own ten
+// seconds ran out): Claude Code has gone on without it by then, and gives it five seconds more. A hook still running past that twice
+// in a row is taken for a runaway, and Claude Code ends the hooks worker: every call the mod held dies with it (exit 137), and the
+// mod is unloaded, tools, rules and holds, until /reload-plugins. What the hook was doing still finishes on its own, unwaited.
+// The case of 15 Nov: a dozen pieces of work on a Mac under heavy load each waited in turn for the look over the person's files;
+// waits past their time went on past their signal, the mod was ended twice, and a release Sam allowed was killed in its checks
 export const register: Register = on => {
   chatHooks(on)
   promptHooks(on)

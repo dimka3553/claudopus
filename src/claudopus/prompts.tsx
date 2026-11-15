@@ -239,7 +239,7 @@ const holdPrompt = async ($: EngineInterface, next: { signal?: AbortSignal; budg
       if (said) break
       if (!waiting.some(one => one.id === id) || next.signal?.aborted || (next.budget?.remainingMs ?? Infinity) < 1500 || (await isReplaced($))) break
       if ((await $.clock.now()) - since > HOLD_LONGEST) break
-      await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined)
+      await aSecond($, next.signal)
     }
   } finally {
     promptHeld.delete(id)

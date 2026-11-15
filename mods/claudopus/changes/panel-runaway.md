@@ -1,0 +1,2 @@
+- With many pieces of work running on a busy Mac, Claudopus no longer drops out of the chat. Each call waited its turn for the check of your settings files, and that wait ate the call's time, so Claude Code skipped the mod's checks (a release ran without its allow box) and then took the mod for a runaway and shut it down, killing every command it was holding, a release you had allowed among them. The wait no longer counts against a call, and a call Claude Code gives up on is let go at once.
+- An allow box whose call was given up on leaves its card at once.

@@ -183,7 +183,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('process.run', (_, e) => {
     const [tool, ...rest] = e.argv
     const ok = (stdout = '', exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    // The admin gate's wait between two looks at what was pressed: it lasts until the test lets it go with wake(), as a second passing
+    // A wait for another call's work, half a second, passes as it does; the admin gate's wait between two looks at what was pressed
+    // lasts until the test lets it go with wake(), as a second passing
+    if (tool === '/bin/sleep' && rest[0] !== '1') return new Promise(done => void setTimeout(() => done(ok()), Number(rest[0]) * 1000 || 0)) as never
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())

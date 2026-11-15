@@ -85,10 +85,13 @@ const touchesKeyring = (e: { tool: string }) => {
   })
 }
 
+// What a call the mod let go at its signal answers; Claude Code had gone on without it, so no one reads it
+const LET_GO = 'This call was let go: Claude Code went on without it.'
+
 const workHooks = (on: On) => {
 
   // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
-  on('tool.call', async ($, e, raw) => {
+  on('tool.call', async ($, e, raw) => untilSignal($, raw.signal, (async () => {
     // A prompt the call raised goes as the call ends: refused, interrupted, or allowed and run
     const run = async (call: typeof e) => {
       // What work runs, and what comes back of it, tells the stuck check whether it moves
@@ -367,7 +370,7 @@ const workHooks = (on: On) => {
     if (grants.length) await dropGrants($, grants).catch(() => undefined)
 
     return { deny: REFUSED }
-  })
+  })(), { deny: LET_GO }))
 
   // How full this chat's context is, as the app counts it, each time it moves
   on('session.measure', async ($, e, next) => {
