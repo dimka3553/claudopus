@@ -251,6 +251,8 @@ const chatHooks = (on: On) => {
       const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length)
       let isStale = false
       if (!isTyping && isMoving) for (const [key, held] of heldDrawings) if (calmNow - held.at >= CALM) (heldDrawings.delete(key), (isStale = true))
+      // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
+      if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
       if (isStale) $.ui.invalidate('ui.render')
       if (!isTyping && isMoving) await update($, tick, n => n + 1)
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds

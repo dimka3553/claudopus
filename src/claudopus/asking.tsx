@@ -129,7 +129,7 @@ const calmCard = (one: Todo) => {
   const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, ...rest } = one as Todo & Record<string, unknown>
   return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([(await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates])
+const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, (await read($, reports)).length, (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates])
 const holdTimes = ($: EngineInterface) => {
   const made = (typing += 1)
   isTyping = true

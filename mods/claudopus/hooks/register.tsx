@@ -4759,7 +4759,7 @@ const calmCard = (one: Todo) => {
   const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, ...rest } = one as Todo & Record<string, unknown>
   return rest
 }
-const paneContent = async ($: EngineInterface) => JSON.stringify([(await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates])
+const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, (await read($, reports)).length, (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates])
 const holdTimes = ($: EngineInterface) => {
   const made = (typing += 1)
   isTyping = true
@@ -7470,6 +7470,8 @@ const chatHooks = (on: On) => {
       const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length)
       let isStale = false
       if (!isTyping && isMoving) for (const [key, held] of heldDrawings) if (calmNow - held.at >= CALM) (heldDrawings.delete(key), (isStale = true))
+      // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
+      if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
       if (isStale) $.ui.invalidate('ui.render')
       if (!isTyping && isMoving) await update($, tick, n => n + 1)
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds

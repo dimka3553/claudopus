@@ -4610,6 +4610,13 @@ test('with work running and nobody typing, the panel is drawn again at once for 
   // A press shows what it did at once
   await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key ?? '' })
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'May I go on?' })) ? undefined : true))).toBe(true)
+  // and so does one that only opens a part of the panel, Finished, with work ended and other work running
+  await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' } as never)
+  await $.turn.complete({ answer: 'Nose checked.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a2' } as never)
+  await clock.advance(12_000)
+  const shut = await texts()
+  await pressed(list, 'finished-fold')
+  expect(await until(async () => ((await texts()) !== shut ? true : undefined))).toBe(true)
   await list.unmount()
 })
 
