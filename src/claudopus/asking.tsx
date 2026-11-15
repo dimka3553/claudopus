@@ -187,6 +187,9 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
 }
 // Whether an element of the mod's is a box the person types into: an ask's reply box or a key box
 const isTypedBox = (element: string | undefined) => /-reply-|^box-.*-field/.test(element ?? '')
+// A card's reply box's Send, by the box's key: the place the focus is put when the person scrolls away from the box
+const sendKeyOf = (replyKey: string) => replyKey.replace('-reply-', '-send-')
+const isReplyBox = (element: string | undefined) => /^ask-.*-reply-/.test(element ?? '')
 // Kept through a reload of the mod, and read back as it loads; drafts for work no longer kept go then
 const keepDraft = ($: EngineInterface, key: string, value: string | undefined) =>
   void update($, draftsKept, kept => {

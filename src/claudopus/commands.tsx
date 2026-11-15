@@ -5,6 +5,8 @@ const boxFocused = new Set<string>()
 const lastMoves = new Map<string, { at: number; by: number }>()
 // Where the app's last refused pull would have put each pane: the focused box's place
 const pulledTo = new Map<string, number>()
+// The box holding the focus in each pane, by its key
+const focusedBox = new Map<string, string>()
 
 const commandHooks = (on: On) => {
 
@@ -28,8 +30,8 @@ const commandHooks = (on: On) => {
       else freeTimes($)
     }
     // Which panes have the focus in a box typed into, for the pull back below
-    if (e.plugin === 'claudopus' && isTypedBox(e.element)) boxFocused.add(e.requestId)
-    else boxFocused.delete(e.requestId)
+    if (e.plugin === 'claudopus' && isTypedBox(e.element)) (boxFocused.add(e.requestId), focusedBox.set(e.requestId, e.element ?? ''))
+    else (boxFocused.delete(e.requestId), focusedBox.delete(e.requestId))
     return next(e)
   })
   // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
@@ -38,6 +40,15 @@ const commandHooks = (on: On) => {
     // The app pulling the pane back to the box the person types in, reported as their move, is refused: the window stays where
     // they scrolled it (scrolls.ts)
     if (e.origin.kind === 'person') {
+      // In the desktop app a reply box holding the focus is pulled back into view at each of the person's scroll moves, and the panel
+      // bounced between where they scrolled and the box (recorded 15 Nov; a Button holding the focus pulls nothing). Their first move
+      // away puts the focus on the box's own Send beside it, in view, so nothing is left to pull to; what they typed stays in the
+      // box, and a click in it takes the focus back
+      const box = focusedBox.get(e.requestId)
+      if (box && isReplyBox(box)) {
+        focusedBox.delete(e.requestId)
+        void $.ui.focus({ requestId: e.requestId, key: sendKeyOf(box) }).then(r => recordEvent($, 'focus-to-send', { deny: Boolean(r.deny) })).catch(() => undefined)
+      }
       const move = { at: await $.clock.now(), by: e.by, to: e.offset }
       if (!isPullGuardOff && isPulledBack(lastMoves.get(e.requestId), move, boxFocused.has(e.requestId), pulledTo.get(e.requestId)))
         return (Math.abs(e.by) >= PULL_MARKS && pulledTo.set(e.requestId, e.offset), recordEvent($, 'pull-refused', { by: e.by, to: e.offset }), {})

@@ -307,7 +307,7 @@ const panelHooks = (on: On) => {
           </Box>
           )}
           {'Input' in table && !one.chat ? (
-            <Box width="100%" flexDirection="column">
+            <Box width="100%" flexDirection={e.surface === 'terminal' ? 'column' : 'row'} alignItems="center" gap={1}>
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
                 autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
@@ -317,6 +317,23 @@ const panelHooks = (on: On) => {
                 onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($))}
                 onSubmit={value => void (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
               />
+              {/* In the desktop app the box's own Send: where the focus goes when the person scrolls away from the box (commands.tsx),
+                  so the app has no box to pull the panel back to, and Enter there still sends what they typed */}
+              {e.surface === 'terminal' ? null : (
+                <Button
+                  key={sendKeyOf(`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`)}
+                  label="Send"
+                  plain
+                  onPress={() => {
+                    const value = drafts.get(draftOf(one.id, ask)) ?? ''
+                    if (!value.trim()) return
+                    dropDrafts($, one.id)
+                    replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
+                    freeTimes($)
+                    void answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))
+                  }}
+                />
+              )}
             </Box>
           ) : null}
           {/* An answer that could not be left for another Mac says so, under the ask that is back */}

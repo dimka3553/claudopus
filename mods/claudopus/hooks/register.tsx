@@ -5429,6 +5429,9 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
 }
 // Whether an element of the mod's is a box the person types into: an ask's reply box or a key box
 const isTypedBox = (element: string | undefined) => /-reply-|^box-.*-field/.test(element ?? '')
+// A card's reply box's Send, by the box's key: the place the focus is put when the person scrolls away from the box
+const sendKeyOf = (replyKey: string) => replyKey.replace('-reply-', '-send-')
+const isReplyBox = (element: string | undefined) => /^ask-.*-reply-/.test(element ?? '')
 // Kept through a reload of the mod, and read back as it loads; drafts for work no longer kept go then
 const keepDraft = ($: EngineInterface, key: string, value: string | undefined) =>
   void update($, draftsKept, kept => {
@@ -10405,6 +10408,8 @@ const boxFocused = new Set<string>()
 const lastMoves = new Map<string, { at: number; by: number }>()
 // Where the app's last refused pull would have put each pane: the focused box's place
 const pulledTo = new Map<string, number>()
+// The box holding the focus in each pane, by its key
+const focusedBox = new Map<string, string>()
 
 const commandHooks = (on: On) => {
 
@@ -10428,8 +10433,8 @@ const commandHooks = (on: On) => {
       else freeTimes($)
     }
     // Which panes have the focus in a box typed into, for the pull back below
-    if (e.plugin === 'claudopus' && isTypedBox(e.element)) boxFocused.add(e.requestId)
-    else boxFocused.delete(e.requestId)
+    if (e.plugin === 'claudopus' && isTypedBox(e.element)) (boxFocused.add(e.requestId), focusedBox.set(e.requestId, e.element ?? ''))
+    else (boxFocused.delete(e.requestId), focusedBox.delete(e.requestId))
     return next(e)
   })
   // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
@@ -10438,6 +10443,15 @@ const commandHooks = (on: On) => {
     // The app pulling the pane back to the box the person types in, reported as their move, is refused: the window stays where
     // they scrolled it (scrolls.ts)
     if (e.origin.kind === 'person') {
+      // In the desktop app a reply box holding the focus is pulled back into view at each of the person's scroll moves, and the panel
+      // bounced between where they scrolled and the box (recorded 15 Nov; a Button holding the focus pulls nothing). Their first move
+      // away puts the focus on the box's own Send beside it, in view, so nothing is left to pull to; what they typed stays in the
+      // box, and a click in it takes the focus back
+      const box = focusedBox.get(e.requestId)
+      if (box && isReplyBox(box)) {
+        focusedBox.delete(e.requestId)
+        void $.ui.focus({ requestId: e.requestId, key: sendKeyOf(box) }).then(r => recordEvent($, 'focus-to-send', { deny: Boolean(r.deny) })).catch(() => undefined)
+      }
       const move = { at: await $.clock.now(), by: e.by, to: e.offset }
       if (!isPullGuardOff && isPulledBack(lastMoves.get(e.requestId), move, boxFocused.has(e.requestId), pulledTo.get(e.requestId)))
         return (Math.abs(e.by) >= PULL_MARKS && pulledTo.set(e.requestId, e.offset), recordEvent($, 'pull-refused', { by: e.by, to: e.offset }), {})
@@ -11351,7 +11365,7 @@ const panelHooks = (on: On) => {
           </Box>
           )}
           {'Input' in table && !one.chat ? (
-            <Box width="100%" flexDirection="column">
+            <Box width="100%" flexDirection={e.surface === 'terminal' ? 'column' : 'row'} alignItems="center" gap={1}>
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
                 autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
@@ -11361,6 +11375,23 @@ const panelHooks = (on: On) => {
                 onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($))}
                 onSubmit={value => void (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
               />
+              {/* In the desktop app the box's own Send: where the focus goes when the person scrolls away from the box (commands.tsx),
+                  so the app has no box to pull the panel back to, and Enter there still sends what they typed */}
+              {e.surface === 'terminal' ? null : (
+                <Button
+                  key={sendKeyOf(`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`)}
+                  label="Send"
+                  plain
+                  onPress={() => {
+                    const value = drafts.get(draftOf(one.id, ask)) ?? ''
+                    if (!value.trim()) return
+                    dropDrafts($, one.id)
+                    replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
+                    freeTimes($)
+                    void answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`))
+                  }}
+                />
+              )}
             </Box>
           ) : null}
           {/* An answer that could not be left for another Mac says so, under the ask that is back */}
