@@ -79,6 +79,8 @@ const askMark = (ask: NonNullable<Todo['ask']>) => `${ask.at}-${[...ask.text].re
 // and a newer ask of the same work starts with an empty box
 const drafts = new Map<string, string>()
 const draftOf = (id: string, ask: NonNullable<Todo['ask']>) => `${id}|${askMark(ask)}`
+// Whether the person has typed something not sent into a work's reply box
+const hasDraft = (id: string) => [...drafts].some(([key, value]) => key.startsWith(`${id}|`) && Boolean(value))
 // While the person types into a reply box or a key box the panel and every Details tab hold their drawing whole. The app builds a
 // pane afresh at each drawing, the box in it too: a pane drawn every few seconds under the person's typing flickered the box's ring,
 // put older letters over newer ones, and, as Markdown came or went above, threw the panel to its bottom, out of the person's reach

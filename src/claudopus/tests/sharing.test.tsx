@@ -35,9 +35,10 @@ test("the panel shows every open chat's running work under that chat's name, thi
   expect(bold.indexOf('This chat')).toBeGreaterThan(-1)
   expect(bold.indexOf('This chat')).toBeLessThan(bold.indexOf('Fix the nose'))
   expect(bold.indexOf('Fix the nose')).toBeLessThan(bold.indexOf('Billing page'))
-  // Under the other chat's name, its ask first
-  expect(bold.indexOf('Billing page')).toBeLessThan(bold.indexOf('Send the invoices'))
-  expect(bold.indexOf('Send the invoices')).toBeLessThan(bold.indexOf('Check the totals'))
+  // Its ask is at the top with everything that waits on the person, above every chat's name; the rest under that chat's name
+  expect(bold.indexOf('Send the invoices')).toBeGreaterThan(-1)
+  expect(bold.indexOf('Send the invoices')).toBeLessThan(bold.indexOf('This chat'))
+  expect(bold.indexOf('Billing page')).toBeLessThan(bold.indexOf('Check the totals'))
   expect(bold).not.toContain('Old landing page')
   expect(await list.find({ type: 'Text', text: 'billing' })).toBeDefined()
   // The header counts every chat's: the ask first, then all that runs, here and there

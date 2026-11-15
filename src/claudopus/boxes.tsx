@@ -71,7 +71,8 @@ let boxes: Asked[] = []
 // what happens now, so nothing that needed them just vanishes
 // A note tied to the call the press let go (`call`) goes once that call ends, never before DONE_LEAST so it can be read, and at
 // most DONE_LONGEST while it runs; one with no call is shown DONE_SHOWN
-type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number }
+// `card`: the work whose card held the gate; the note is drawn in that card, not at the top
+type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number; card?: string }
 let doneNotes: DoneNote[] = []
 const DONE_SHOWN = 60_000
 const DONE_LEAST = 15_000
@@ -111,7 +112,23 @@ const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, lines: str
   </ui.Box>
 )
 const doneNotesPart = (ui: Ui, at: number) =>
-  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
+  doneNotes.filter(one => !one.card && isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
+// What was done with a gate on a work's card, in that card where the amber box was: the same outlined box, green once allowed, grey
+// once refused, saying what was allowed, until its note goes
+const cardNotesOf = (card: string, at: number) => doneNotes.filter(one => one.card === card && isNoteShown(one, at))
+const cardNotesPart = (ui: Ui, card: string, at: number) =>
+  cardNotesOf(card, at).map(one => (
+    <ui.Box key={`done-${one.id}`} flexDirection="column" borderStyle="round" borderColor={one.isOn ? DONE : '#808080'} paddingX={1} flexShrink={0}>
+      <ui.Text wrap="truncate-end" dimColor>{`${one.head} · ${one.isOn ? 'allowed' : 'refused'}`}</ui.Text>
+      <ui.Box flexDirection="row" gap={1}>
+        <ui.Text color={one.isOn ? DONE : undefined} dimColor={!one.isOn}>{one.isOn ? '✓' : '✕'}</ui.Text>
+        <ui.Box flexShrink={1} minWidth={0}>
+          <ui.Text wrap="wrap" color={one.isOn ? DONE : undefined} bold={one.isOn}>{one.said}</ui.Text>
+        </ui.Box>
+      </ui.Box>
+      {one.what ? <ui.Text key={`done-${one.id}-what`} dimColor wrap="truncate-end">{one.what}</ui.Text> : null}
+    </ui.Box>
+  ))
 // What a box asks for, in a few words, for its note once answered
 const boxHead = (text: string) => {
   const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
@@ -121,6 +138,8 @@ const boxHead = (text: string) => {
 // What is typed in a box is kept by the surface alone, never here or drawn back: a drawing that carried it put older letters over
 // newer ones. Each try that left the box to be typed again gives its field a new key, so the field starts empty
 const boxTries = new Map<string, number>()
+// The boxes something is typed in, unsent, so an ask's reply box does not take the keys from them
+const boxTyped = new Set<string>()
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map<string, string>()
 // Sent from here: the box goes at once, before the runner removes its request
@@ -196,7 +215,7 @@ const lookBoxes = async ($: EngineInterface) => {
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
-  for (const id of [...boxTries.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id))
+  for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
   drawAgain($)
@@ -268,11 +287,12 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled �
   drawAgain($)
 }
 
-const boxesPart = ($: EngineInterface, ui: Ui) => {
-  if (!boxes.length || !('Input' in ui)) return null
-  // This chat's own requests first, the first of them with the keys, so a value typed for the notice it told goes to its own box
+// Each box with when it was asked, so the panel puts it among what waits on the person, the newest first
+const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false) => {
+  if (!boxes.length || !('Input' in ui)) return []
+  // This chat's own first request holds the keys, so a value typed for the notice it told goes to its own box, wherever it is drawn
   const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
-  return shown.map((one, n) => (
+  return shown.map((one, n) => ({ at: one.at, node: (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
       <ui.Text dimColor wrap="truncate-end">{`${one.key ? 'Admin password' : 'Key'} · waits for you to type it`}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
@@ -283,9 +303,9 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
           key={`box-${one.id}-field-${boxTries.get(one.id) ?? 0}`}
           placeholder="Type or paste it here"
           submitLabel="send"
-          autoFocus={n === 0 ? true : undefined}
-          onInput={() => holdTimes($)}
-          onSubmit={value => void (freeTimes($), sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`)))}
+          autoFocus={n === 0 && !isKeysHeld ? true : undefined}
+          onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($))}
+          onSubmit={value => void (boxTyped.delete(one.id), freeTimes($), sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`)))}
         />
       </ui.Box>
       {boxSaid.get(one.id) ? <ui.Text key={`box-${one.id}-said`} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
@@ -293,5 +313,5 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
         <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain onPress={() => void cancelBox($, one.id)} />
       </ui.Box>
     </ui.Box>
-  ))
+  ) }))
 }
