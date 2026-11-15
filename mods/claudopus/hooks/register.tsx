@@ -5639,15 +5639,20 @@ const DONE_LEAST = 15_000
 const DONE_LONGEST = 30 * 60_000
 const isNoteShown = (one: DoneNote, at: number) =>
   !one.call ? at - one.at < DONE_SHOWN : one.endedAt === undefined ? at - one.at < DONE_LONGEST : at < Math.max(one.endedAt, one.at + DONE_LEAST)
+// The calls that have ended, so a note made after its call ended (a runner sent to the background) is over from the start
+const callsEnded = new Set<string>()
 const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
   const at = await $.clock.now()
-  doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), { ...note, at }].slice(-6)
+  const made = { ...note, at, ...(note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}) }
+  doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), made].slice(-6)
   $.ui.invalidate('ui.render')
   // Drawn again as its time ends, so it goes with nothing else to redraw the panel
-  $.clock.after((note.call ? DONE_LONGEST : DONE_SHOWN) + 100, () => $.ui.invalidate('ui.render'))
+  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => $.ui.invalidate('ui.render'))
 }
 // The call a note tells of has ended: what it said is over, so the note goes (after DONE_LEAST from its press)
 const noteCallEnded = async ($: EngineInterface, call: string) => {
+  callsEnded.add(call)
+  if (callsEnded.size > 200) callsEnded.delete(callsEnded.values().next().value ?? '')
   if (!doneNotes.some(one => one.call === call && one.endedAt === undefined)) return
   const at = await $.clock.now()
   doneNotes = doneNotes.map(one => (one.call === call && one.endedAt === undefined ? { ...one, endedAt: at } : one))
@@ -6229,10 +6234,10 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const found: ReleaseCall[] = []
   for (const said of shellWords(command)) {
-    // `release>log` is the runner and a redirection, as the shell reads it
+    // `release>log` is the runner and a redirection, as the shell reads it: the runner's own word alone is split
     const words = said.flatMap(word => {
-      const at = word.search(/[<>]/)
-      return at > 0 && !/^\d+$/.test(word.slice(0, at)) ? [word.slice(0, at), word.slice(at)] : [word]
+      const cut = word.search(/[<>]/)
+      return cut > 0 && isAdminPath(word.slice(0, cut), root, 'release') ? [word.slice(0, cut), word.slice(cut)] : [word]
     })
     const i = commandAt(words)
     const name = (words[i] ?? '').split('/').pop() ?? ''

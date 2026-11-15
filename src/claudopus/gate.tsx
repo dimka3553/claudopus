@@ -376,10 +376,10 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const found: ReleaseCall[] = []
   for (const said of shellWords(command)) {
-    // `release>log` is the runner and a redirection, as the shell reads it
+    // `release>log` is the runner and a redirection, as the shell reads it: the runner's own word alone is split
     const words = said.flatMap(word => {
-      const at = word.search(/[<>]/)
-      return at > 0 && !/^\d+$/.test(word.slice(0, at)) ? [word.slice(0, at), word.slice(at)] : [word]
+      const cut = word.search(/[<>]/)
+      return cut > 0 && isAdminPath(word.slice(0, cut), root, 'release') ? [word.slice(0, cut), word.slice(cut)] : [word]
     })
     const i = commandAt(words)
     const name = (words[i] ?? '').split('/').pop() ?? ''
