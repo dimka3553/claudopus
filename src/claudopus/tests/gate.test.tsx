@@ -178,7 +178,8 @@ test('Always allow this command keeps the exact command for its Mac, sealed; Con
   }
   // An entry with no seal, or another entry's seal, as work could write into the file, allows nothing
   const forged = { here: [...(kept.here ?? []), { command: 'rm -rf /', seal: kept.here?.[0]?.seal ?? '', at: 1 }, { command: 'reboot', seal: '', at: 1 }] }
-  files.set(ALLOWED, JSON.stringify(forged))
+  // As if it got past the guards with the kept copy (a key F-007's way): the seals still allow nothing
+  ownSet(files, 'admin-allowed.json', JSON.stringify(forged))
   for (const [id, command] of [['f1', `${ADMIN} here 'rm -rf /'`], ['f2', `${ADMIN} here 'reboot'`]] as const) {
     const call = bash(id, command)
     expect(await held(id)).toBeDefined()

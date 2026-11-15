@@ -101,6 +101,7 @@ const workHooks = (on: On) => {
       const isPersonWatched = e.tool === 'Bash' && Boolean(dir)
       const writes = FILE_TOOLS.includes(e.tool) ? personNamed(e) : ''
       if (dir) await personCheck($).catch(err => log($, `files not compared before a call: ${String(err)}`))
+      const before = writes ? await personRead($, writes).catch(() => undefined) : undefined
       if (writes) personWriting.add(writes)
       let isPersonEnded = false
       try {
@@ -110,7 +111,7 @@ const workHooks = (on: On) => {
           const undone = await personCheck($, e).catch(() => [] as string[])
           if (undone.length && !r.deny) r = { ...r, context: [...(r.context ?? []), PERSON_UNDONE(undone)] } as typeof r
         }
-        if (!r.deny) await personSeen($, e).catch(() => undefined)
+        if (!r.deny) await personSeen($, e, before).catch(() => undefined)
         return r
       } finally {
         if (writes) personWriting.delete(writes)

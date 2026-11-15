@@ -680,7 +680,8 @@ async function writeOwnText($: EngineInterface, memory: string, path: string, te
 }
 // The text in force: the person's own copy when it holds anything, the shipped one otherwise
 async function inForce($: EngineInterface, root: string, memory: string, path: string) {
-  const own = memory ? await readOr($, `${memory}/${path}`) : ''
+  // What is read is what is known: a change made since is never read, and is put back
+  const own = memory ? await personText($, memory, path) : ''
   const shipped = await readOr($, `${root}/${path}`)
   // A copy the same as what shipped is no change of the person's
   // A copy made before an update can lack a place the shipped text now fills (a setting such as the models): it is stale
@@ -691,12 +692,13 @@ async function inForce($: EngineInterface, root: string, memory: string, path: s
 }
 
 async function readConfig($: EngineInterface, memory: string) {
-  return parse(await readOr($, `${memory}/config.json`))
+  return parse(await personText($, memory, 'config.json'))
 }
 // Sets one key, or with undefined puts it back to what shipped; every other key, ones this tab does not know included, is kept
 async function setConfig($: EngineInterface, memory: string, key: keyof Config, value: unknown, role?: Role) {
+  // A change is made on what is known, never on a copy changed since
   const path = `${memory}/config.json`
-  const text = await readOr($, path)
+  const text = await personText($, memory, 'config.json')
   const config = (() => {
     try {
       return JSON.parse(text || '{}') as Record<string, unknown>
@@ -726,7 +728,7 @@ async function openedInEditor($: EngineInterface, path: string) {
 // Edit: the person's own copy, made from the shipped text the first time, opened in their editor
 async function editText($: EngineInterface, root: string, memory: string, path: string) {
   const own = `${memory}/${path}`
-  if (!(await readOr($, own)).trim()) await writeOwnText($, memory, path, await readOr($, `${root}/${path}`))
+  if (!(await personText($, memory, path)).trim()) await writeOwnText($, memory, path, await readOr($, `${root}/${path}`))
   return openedInEditor($, own)
 }
 // Put back: the person's copy moves aside as .old, and the shipped text is in force again
@@ -4101,7 +4103,9 @@ const lookForNew = async ($: EngineInterface) => {
 // The newer version the hourly look saw, while neither this chat nor the Mac has it yet, and the look is on
 const newOut = async ($: EngineInterface, loaded: string, installed: string) => {
   if (!dir || !loaded) return ''
-  const seen = stampOf(await readOr($, lookedPath()))?.version ?? ''
+  const said = stampOf(await readOr($, lookedPath()))?.version ?? ''
+  // Only a version number is ever shown: anything else in the file is no version
+  const seen = /^\d{1,4}(?:\.\d{1,6}){1,3}$/.test(said) ? said : ''
   if (!seen || !isNewer(seen, loaded) || (installed && !isNewer(seen, installed)) || installPress.done === seen) return ''
   return (await readConfig($, dir)).updates === false ? '' : seen
 }
@@ -5896,17 +5900,21 @@ const SEAL = `set -u
 PATH=/usr/bin:/bin
 mode=$1
 shift
+# The kept copy of the person's settings and texts has a key of its own ("known"), so its being there says a copy was made here
+acct=seal
+case $mode in known-*) acct=known; mode=\${mode#known-} ;; esac
 if [ -x /usr/bin/security ]; then
-  key() { /usr/bin/security find-generic-password -s ${GATE_SERVICE} -a seal -w 2>/dev/null; }
-  keep() { printf 'add-generic-password -U -s "${GATE_SERVICE}" -a "seal" -l "Claudopus admin gate" -w "%s"\\n' "$1" | /usr/bin/security -i >/dev/null 2>&1; }
+  key() { /usr/bin/security find-generic-password -s ${GATE_SERVICE} -a "$acct" -w 2>/dev/null; }
+  keep() { printf 'add-generic-password -U -s "${GATE_SERVICE}" -a "%s" -l "Claudopus admin gate" -w "%s"\\n' "$acct" "$1" | /usr/bin/security -i >/dev/null 2>&1; }
 else
   # Linux: where bin/keyring keeps it, a file only this user reads, under the home folder (never XDG_DATA_HOME)
   d=$HOME/.local/share
   f=$d/claudopus/keyring/${GATE_SERVICE}
-  key() { [ -f "$f/seal" ] && cat "$f/seal" 2>/dev/null; }
-  keep() { (umask 077; mkdir -p "$f" && chmod 700 "$d/claudopus" "$d/claudopus/keyring" "$f" && printf '%s' "$1" >"$f/.seal.new" && mv -f "$f/.seal.new" "$f/seal"); }
+  key() { [ -f "$f/$acct" ] && cat "$f/$acct" 2>/dev/null; }
+  keep() { (umask 077; mkdir -p "$f" && chmod 700 "$d/claudopus" "$d/claudopus/keyring" "$f" && printf '%s' "$1" >"$f/.$acct.new" && mv -f "$f/.$acct.new" "$f/$acct"); }
 fi
 k=$(key)
+if [ "$mode" = has ]; then [ -n "$k" ] && exit 0; exit 3; fi
 if [ "$mode" = new ] || { [ -z "$k" ] && [ "$mode" = make ]; }; then
   k=$(/usr/bin/openssl rand -hex 32 2>/dev/null || od -An -tx1 -N32 /dev/urandom | tr -d ' \\n') || exit 1
   [ \${#k} = 64 ] || exit 1
@@ -5917,7 +5925,7 @@ fi
 for m in "$@"; do
   printf '%s\\n%s' "$k" "$m" | /usr/bin/perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m // "", $k), "\\n"' || exit 1
 done`
-const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new', messages: string[]) => {
+const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-make' | 'known-has', messages: string[]) => {
   const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
   const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
@@ -5940,7 +5948,7 @@ const allowedPath = () => `${dir}/admin-allowed.json`
 const allowMessage = (one: AdminCall) => `allow\n${one.host}\n${one.command}`
 const readAllowed = async ($: EngineInterface): Promise<Allowed[]> => {
   try {
-    const kept = JSON.parse((await readOr($, allowedPath())) || '{}') as Record<string, unknown>
+    const kept = JSON.parse((await personText($, dir, 'admin-allowed.json')) || '{}') as Record<string, unknown>
     return Object.entries(kept).flatMap(([host, list]) =>
       (Array.isArray(list) ? list : []).flatMap(one => {
         const { command, seal, at } = (one ?? {}) as { command?: unknown; seal?: unknown; at?: unknown }
@@ -6241,15 +6249,17 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
 
 // What a command did to them: a command can write the person's own settings and texts, and the commands always allowed, in ways no
 // reading of its text finds (a path built from variables, a program's own code, a process left running that writes later), so they
-// are judged by what is in them. What each one last held as the mod or the person put it there is kept in admin-known.json, which
-// work never reads or writes (as the gate's own files), and every chat compares the files with it as the mod loads, as a message of
-// the person's comes, as each tool call begins and as each command ends. One that differs is put back as it was, whatever changed it
-// and whenever, and a change to the settings or texts is shown on a card, the work's when a command of its made it, where Allow
-// makes it again. The mod's own writes (a press in Config, an Edit or Write the person allowed, an Allow on such a card) are what it
-// is kept as; a change the person makes in an editor is put back the same way until they press Allow on its card. What this does
-// not stop: a program that also rewrites admin-known.json, which, as with the gate's key, any program running as the person can do
+// are judged by what is in them. What each one last held as the mod or the person put it there is kept in admin-known.json, sealed
+// with the gate's key as the always-allowed list is, which work never reads or writes. Every chat compares the files with it as the
+// mod loads, as a message of the person's comes, as each tool call begins, as each command ends, and before the mod reads one of
+// them (the texts a chat or work is told, the settings the gate and Config read). One that differs is put back as it was, whatever
+// changed it and whenever, what it held is kept beside it as <file>.<time>.put-back, and a change to the settings or texts is
+// shown on a card, the work's when a command of its made it, where Allow makes it again. A kept copy that is missing, or whose seal
+// is not right, is never taken as what they hold: each of them there is moves aside to its .put-back copy, and is offered on a card.
+// What this does not stop: a program running as the person that reads the gate's key (F-007) and seals a copy of its own
 const PERSON_FILES = ['config.json', 'rules/CLAUDE.md', 'roles/chat.md', 'roles/work.md', 'admin-allowed.json']
 const knownPath = () => `${dir}/admin-known.json`
+const knownMessage = (files: Record<string, string | null>) => `known\n${JSON.stringify(files)}`
 // A file's text, null when there is none, undefined when it could not be read (then it is left alone)
 const personRead = async ($: EngineInterface, name: string): Promise<string | null | undefined> => {
   const path = `${dir}/${name}`
@@ -6265,24 +6275,38 @@ const personNow = async ($: EngineInterface) => {
   }
   return now
 }
-// What each file is known to hold: undefined when nothing is kept yet (the first load of this version) or it could not be read
+// What this chat last found sealed, or sealed itself: the kept copy is checked again only when its text changed
+let knownSeen: { text: string; files: Map<string, string | null> } | undefined
+// What each file is known to hold: undefined when no sealed copy is there (missing, changed by hand, or never made)
 const knownRead = async ($: EngineInterface): Promise<Map<string, string | null> | undefined> => {
-  const isThere = await $.fs.exists(knownPath()).catch(() => undefined)
-  if (!isThere) return isThere === false ? undefined : new Map()
+  const text = await $.fs.read(knownPath()).catch(() => '')
+  if (knownSeen && knownSeen.text === text) return new Map(knownSeen.files)
   try {
-    const kept = JSON.parse(await $.fs.read(knownPath())) as Record<string, unknown>
-    return new Map(Object.entries(kept).flatMap(([name, text]) => (PERSON_FILES.includes(name) && (text === null || typeof text === 'string') ? [[name, text as string | null]] : [])))
+    const kept = JSON.parse(text) as { files?: Record<string, unknown>; seal?: unknown }
+    const files = Object.fromEntries(Object.entries(kept.files ?? {}).filter(([name, one]) => PERSON_FILES.includes(name) && (one === null || typeof one === 'string'))) as Record<string, string | null>
+    if (typeof kept.seal !== 'string' || (await sealed($, 'known-read', [knownMessage(files)]))?.[0] !== kept.seal) return undefined
+    knownSeen = { text, files: new Map(Object.entries(files)) }
+    return new Map(knownSeen.files)
   } catch {
-    return new Map()
+    return undefined
   }
+}
+const knownWrite = async ($: EngineInterface, known: Map<string, string | null>) => {
+  const files = Object.fromEntries(known)
+  const seal = (await sealed($, 'known-make', [knownMessage(files)]))?.[0]
+  if (!seal) throw new Error(`the kept copy could not be sealed in ${keptWhere()}`)
+  const text = `${JSON.stringify({ files, seal }, null, 2)}\n`
+  await $.fs.write(knownPath(), text)
+  knownSeen = { text, files: new Map(known) }
 }
 // One chat's changes to it at a time, so two never lose each other's
 let knownQueue: Promise<unknown> = Promise.resolve()
 const knownSet = ($: EngineInterface, change: (known: Map<string, string | null>) => void) => {
   const step = knownQueue.then(async () => {
-    const known = (await knownRead($)) ?? new Map<string, string | null>()
+    // A copy that is not sealed right is built on what this chat last knew, never on what it says
+    const known = (await knownRead($)) ?? new Map(knownSeen?.files ?? [])
     change(known)
-    await $.fs.write(knownPath(), `${JSON.stringify(Object.fromEntries(known), null, 2)}\n`)
+    await knownWrite($, known)
   })
   knownQueue = step.catch(() => undefined)
   return step
@@ -6293,47 +6317,91 @@ const personWrote = async ($: EngineInterface, memory: string, name: string, tex
   if (!dir || memory !== dir || !PERSON_FILES.includes(name)) return
   await knownSet($, known => void known.set(name, text))
 }
-const personPut = async ($: EngineInterface, name: string, text: string | null) => {
+// Put back as it was; what it held is kept beside it, so nothing the person wrote is ever lost, whatever is pressed
+const personPut = async ($: EngineInterface, name: string, text: string | null, is: string | null) => {
+  if (is !== null) {
+    const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
+    await $.fs.write(`${dir}/${name}.${at}.put-back`, is).catch(() => undefined)
+  }
   // Taken away first, so a link put in its place is replaced, never written through
   await $.process.run(['rm', '-f', `${dir}/${name}`], { timeoutMs: 10_000 }).catch(() => undefined)
   if (text !== null) await $.fs.write(`${dir}/${name}`, text)
 }
 // The files compared with what they are known to hold: what differs is put back and offered on a card. `by` is the call whose
 // command just ended, when one did; a change found as a call begins, or as the mod loads, is offered at the top of the panel
-let isFirstKept = false
+let personChecking: Promise<string[]> | undefined
 const personCheck = async ($: EngineInterface, by?: ToolCallInput): Promise<string[]> => {
   if (!dir) return []
+  // One look at a time in a chat: one asked for while another runs waits for it, then looks again
+  while (personChecking) await personChecking.catch(() => undefined)
+  const look = personLook($, by)
+  personChecking = look
+  try {
+    return await look
+  } finally {
+    personChecking = undefined
+  }
+}
+const personLook = async ($: EngineInterface, by?: ToolCallInput): Promise<string[]> => {
   await knownQueue
-  const known = await knownRead($)
+  const sealedKnown = await knownRead($)
   const now = await personNow($)
-  // Nothing kept yet: this is the first load of a version that keeps them, and what is there is the person's
-  if (!known) {
-    if (isFirstKept) return []
-    isFirstKept = true
+  // No sealed copy, and this Mac never made one (no key of its own): the first load of a version that keeps one, and what is there
+  // is the person's
+  if (!sealedKnown && !knownSeen && !(await sealed($, 'known-has', []))) {
     await knownSet($, kept => {
-      for (const [name, text] of now) if (!kept.has(name)) kept.set(name, text)
+      kept.clear()
+      for (const name of PERSON_FILES) if (now.has(name)) kept.set(name, now.get(name) ?? null)
     })
     await log($, 'what the settings and texts hold is kept from now on')
     return []
   }
+  // No sealed copy where one was made: what this chat last knew, else (as the mod loads) shipped settings and texts, each own one
+  // moved aside and offered, so a copy taken away or rewritten never decides what is in force
+  const known = sealedKnown ?? (knownSeen ? new Map(knownSeen.files) : new Map<string, string | null>())
+  if (!sealedKnown) await log($, knownSeen ? 'the kept copy of the settings and texts was changed or taken away: made again from what this chat knew' : 'the kept copy of the settings and texts is not sealed right: each own one is offered on a card')
   const undone: string[] = []
-  const fresh: [string, string | null][] = []
   for (const [name, is] of now) {
     if (personWriting.has(name)) continue
-    // One nothing was kept of (it could not be read then): what it holds now is taken as it
-    if (!known.has(name)) {
-      fresh.push([name, is])
+    const was = known.has(name) ? (known.get(name) ?? null) : null
+    if (is === was) continue
+    // The always-allowed list holds nothing its seals do not allow: one there as the copy is first made is kept
+    if (name === 'admin-allowed.json' && !known.has(name)) {
+      known.set(name, is)
       continue
     }
-    const was = known.get(name) ?? null
-    if (is === was) continue
-    await personPut($, name, was)
+    await personPut($, name, was, is)
     undone.push(name)
     await log($, `${name} was changed outside Claudopus${by ? ' by a command' : ''}, and put back`)
     if (name !== 'admin-allowed.json') void offerUndone($, by, name, is).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
   }
-  if (fresh.length) await knownSet($, kept => fresh.forEach(([name, text]) => kept.has(name) || kept.set(name, text)))
+  for (const name of PERSON_FILES) if (now.has(name) && !known.has(name)) known.set(name, null)
+  if (!sealedKnown) {
+    for (const name of undone) known.set(name, known.get(name) ?? null)
+    await knownSet($, kept => {
+      kept.clear()
+      for (const [name, text] of known) kept.set(name, text)
+    }).catch(err => log($, `the kept copy not sealed: ${String(err)}`))
+  }
   return undone
+}
+// One of them as the mod reads it: what it is known to hold, never a change made since, which a look puts back. A file that is not
+// one of them, or a memory folder other than this chat's, is read as it is
+const personText = async ($: EngineInterface, memory: string, name: string): Promise<string> => {
+  const is = await readOr($, `${memory}/${name}`)
+  if (!dir || memory !== dir || !PERSON_FILES.includes(name) || personWriting.has(name)) return is
+  // A kept copy changed since this chat last looked (another chat's press, or anyone's write) has its seal checked first; one not
+  // sealed right counts for nothing, and what this chat last knew is read
+  const known = (await knownRead($).catch(() => undefined)) ?? knownSeen?.files
+  if (!known) {
+    void personCheck($).catch(() => undefined)
+    return is
+  }
+  if (!known.has(name)) return is
+  const was = known.get(name) ?? ''
+  if (was === is) return is
+  void personCheck($).catch(() => undefined)
+  return was
 }
 // The one of these an Edit or Write call names, if any
 const personNamed = (e: ToolCallInput) => {
@@ -6344,13 +6412,30 @@ const personNamed = (e: ToolCallInput) => {
 }
 // The ones an Edit or Write the person allowed is writing now, in this chat: not compared until it is done
 const personWriting = new Set<string>()
-// A file of these that Edit or Write changed, as the person allowed: what it holds now is the person's
-const personSeen = async ($: EngineInterface, e: ToolCallInput) => {
+// What an allowed Write or Edit leaves in a file that held `before`: undefined when that cannot be worked out
+const personMeant = (e: ToolCallInput, before: string | null | undefined): string | undefined => {
+  const input = e as { content?: unknown; old_string?: unknown; new_string?: unknown; replace_all?: unknown; edits?: unknown }
+  if (e.tool === 'Write') return typeof input.content === 'string' ? input.content : undefined
+  const edit = (text: string | undefined, one: { old_string?: unknown; new_string?: unknown; replace_all?: unknown }) => {
+    if (text === undefined || typeof one.old_string !== 'string' || typeof one.new_string !== 'string') return undefined
+    if (one.old_string === '') return text === '' ? one.new_string : undefined
+    if (!text.includes(one.old_string)) return undefined
+    return one.replace_all ? text.split(one.old_string).join(one.new_string) : text.replace(one.old_string, () => String(one.new_string))
+  }
+  if (e.tool === 'Edit') return edit(before ?? undefined, input)
+  if ((e.tool as string) === 'MultiEdit' && Array.isArray(input.edits)) return input.edits.reduce<string | undefined>((text, one) => edit(text, (one ?? {}) as never), before ?? undefined)
+  return undefined
+}
+// A file of these that Edit or Write changed, as the person allowed: what it holds now is the person's, when it is what the call
+// meant to write. Anything else (a program writing in the same moment) is left for the next look to put back and offer
+const personSeen = async ($: EngineInterface, e: ToolCallInput, before?: string | null) => {
   if (!dir || !FILE_TOOLS.includes(e.tool)) return
   const name = personNamed(e)
   if (!name) return
   const text = await personRead($, name)
-  if (text !== undefined) await personWrote($, dir, name, text)
+  if (text === undefined) return
+  if (text !== personMeant(e, before)) return void log($, `${name} after an allowed ${e.tool} is not what it wrote: left for the look to put back`)
+  await personWrote($, dir, name, text)
 }
 const PERSON_UNDONE = (names: string[]) =>
   named(`This command changed ${names.join(', ')} in {name}'s memory folder, and the change was undone: {name}'s own settings and texts are changed by work only with the Edit or Write tool, which waits for {name}'s press on the work's card. Do not try to change them another way.`)
@@ -6385,7 +6470,7 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
   await setGates($, list.some(one => one.admins?.some(g => g.id === gate.id)) ? (list.find(one => one.admins?.some(g => g.id === gate.id))?.id ?? '') : '', gates => gates.filter(one => one.id !== gate.id))
   if (said !== 'once' || !offer || !dir) return log($, `change to ${gate.host}: left undone`)
   await personWrote($, dir, offer.name, offer.text)
-  await personPut($, offer.name, offer.text)
+  await personPut($, offer.name, offer.text, null)
   await log($, `change to ${gate.host}: made again, as allowed`)
 }
 
@@ -6405,9 +6490,9 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
       {gate.kind === 'release'
         ? 'Allow: this branch is merged into main, checked and pushed, with its version and tag. Deny: nothing is released, and the work is told.'
         : gate.isUndone && gate.isOutside
-          ? 'It changed while no command of work was running: by you in an editor, or by a program a command left running. Work changes this file only with Edit or Write, which ask you first, so the change was undone. Allow: the change is made again, as shown (if you made it yourself, allow it). Deny: the file stays as it was.'
+          ? 'It changed while no command of work was running: by you in an editor, or by a program a command left running. Work changes this file only with Edit or Write, which ask you first, so the change was undone. Allow: the change is made again, as shown (if you made it yourself, allow it). Deny: the file stays as it was. Either way what it held is kept beside it as a .put-back copy.'
           : gate.isUndone
-          ? 'Work changes this file only with Edit or Write, which ask you first, so what a command wrote to it was undone. Allow: the change is made again, as it was written (if you made it yourself, allow it). Deny: the file stays as it was.'
+          ? 'Work changes this file only with Edit or Write, which ask you first, so what a command wrote to it was undone. Allow: the change is made again, as it was written (if you made it yourself, allow it). Deny: the file stays as it was. Either way what it held is kept beside it as a .put-back copy.'
           : gate.kind === 'file'
           ? 'Allow: the change is made to this file of yours. Deny: the file stays as it is, and the work is told.'
           : `Allow: it runs with admin rights${gate.isWork ? ', and this work runs its next admin commands without asking' : ''}. Deny: it does not run, and the work is told.`}
@@ -6822,6 +6907,8 @@ const chatHooks = (on: On) => {
     lastSeen = undefined
     // and reads its own copy's version again
     loadedVersion = undefined
+    // and takes nothing it knew of the person's settings and texts as sealed: the kept copy is checked again
+    knownSeen = undefined
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
@@ -8125,6 +8212,7 @@ const workHooks = (on: On) => {
       const isPersonWatched = e.tool === 'Bash' && Boolean(dir)
       const writes = FILE_TOOLS.includes(e.tool) ? personNamed(e) : ''
       if (dir) await personCheck($).catch(err => log($, `files not compared before a call: ${String(err)}`))
+      const before = writes ? await personRead($, writes).catch(() => undefined) : undefined
       if (writes) personWriting.add(writes)
       let isPersonEnded = false
       try {
@@ -8134,7 +8222,7 @@ const workHooks = (on: On) => {
           const undone = await personCheck($, e).catch(() => [] as string[])
           if (undone.length && !r.deny) r = { ...r, context: [...(r.context ?? []), PERSON_UNDONE(undone)] } as typeof r
         }
-        if (!r.deny) await personSeen($, e).catch(() => undefined)
+        if (!r.deny) await personSeen($, e, before).catch(() => undefined)
         return r
       } finally {
         if (writes) personWriting.delete(writes)

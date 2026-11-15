@@ -95,7 +95,9 @@ const lookForNew = async ($: EngineInterface) => {
 // The newer version the hourly look saw, while neither this chat nor the Mac has it yet, and the look is on
 const newOut = async ($: EngineInterface, loaded: string, installed: string) => {
   if (!dir || !loaded) return ''
-  const seen = stampOf(await readOr($, lookedPath()))?.version ?? ''
+  const said = stampOf(await readOr($, lookedPath()))?.version ?? ''
+  // Only a version number is ever shown: anything else in the file is no version
+  const seen = /^\d{1,4}(?:\.\d{1,6}){1,3}$/.test(said) ? said : ''
   if (!seen || !isNewer(seen, loaded) || (installed && !isNewer(seen, installed)) || installPress.done === seen) return ''
   return (await readConfig($, dir)).updates === false ? '' : seen
 }

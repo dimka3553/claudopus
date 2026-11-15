@@ -189,9 +189,13 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The admin gate's seals: one for each message, under the key the keychain holds as keychain:gate; "make" makes a key where
     // there is none and "new" always, as the Mac's own shell does
     if (tool === '/bin/sh' && String(rest[1]).includes('claudopus-admin-gate')) {
-      const [, , , mode, ...messages] = rest
-      if (mode === 'new' || (mode === 'make' && !files.has('keychain:gate'))) files.set('keychain:gate', `key-${(gateKeys += 1)}`)
-      const key = files.get('keychain:gate')
+      const [, , , said, ...messages] = rest
+      // The kept copy of the settings and texts has its key apart, as keychain:known
+      const item = String(said).startsWith('known-') ? 'keychain:known' : 'keychain:gate'
+      const mode = String(said).replace(/^known-/, '')
+      if (mode === 'new' || (mode === 'make' && !files.has(item))) files.set(item, `key-${(gateKeys += 1)}`)
+      const key = files.get(item)
+      if (mode === 'has') return ok('', key ? 0 : 3)
       return key ? ok(messages.map(one => `${fakeSeal(key, String(one))}\n`).join('')) : ok('', 3)
     }
     // A line added to the end of a file, as the log is written
@@ -448,14 +452,16 @@ const boxSealed = (key: string, value: string) => `${[...`${key.slice(0, 12)}|${
 const BOX_PUBLIC = `MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA${'x'.repeat(300)}IDAQAB`
 // One of the person's settings or texts as Config writes it: the file, and what Claudopus knows it holds, so no check puts it back
 const ownSet = (files: Map<string, string>, name: string, text: string) => {
-  const known = (() => {
+  const kept = (() => {
     try {
-      return JSON.parse(files.get(`${MEMORY}/admin-known.json`) ?? '{}') as Record<string, unknown>
+      return (JSON.parse(files.get(`${MEMORY}/admin-known.json`) ?? '{}') as { files?: Record<string, string | null> }).files ?? {}
     } catch {
       return {}
     }
   })()
-  files.set(`${MEMORY}/admin-known.json`, JSON.stringify({ ...known, [name]: text }))
+  const known = { ...kept, [name]: text }
+  if (!files.has('keychain:known')) files.set('keychain:known', 'key-known')
+  files.set(`${MEMORY}/admin-known.json`, JSON.stringify({ files: known, seal: fakeSeal(files.get('keychain:known') ?? '', `known\n${JSON.stringify(known)}`) }))
   files.set(`${MEMORY}/${name}`, text)
 }
 // A button of the open card by its key less the count of presses the card adds to it

@@ -13,7 +13,8 @@ async function writeOwnText($: EngineInterface, memory: string, path: string, te
 }
 // The text in force: the person's own copy when it holds anything, the shipped one otherwise
 async function inForce($: EngineInterface, root: string, memory: string, path: string) {
-  const own = memory ? await readOr($, `${memory}/${path}`) : ''
+  // What is read is what is known: a change made since is never read, and is put back
+  const own = memory ? await personText($, memory, path) : ''
   const shipped = await readOr($, `${root}/${path}`)
   // A copy the same as what shipped is no change of the person's
   // A copy made before an update can lack a place the shipped text now fills (a setting such as the models): it is stale
@@ -24,12 +25,13 @@ async function inForce($: EngineInterface, root: string, memory: string, path: s
 }
 
 async function readConfig($: EngineInterface, memory: string) {
-  return parse(await readOr($, `${memory}/config.json`))
+  return parse(await personText($, memory, 'config.json'))
 }
 // Sets one key, or with undefined puts it back to what shipped; every other key, ones this tab does not know included, is kept
 async function setConfig($: EngineInterface, memory: string, key: keyof Config, value: unknown, role?: Role) {
+  // A change is made on what is known, never on a copy changed since
   const path = `${memory}/config.json`
-  const text = await readOr($, path)
+  const text = await personText($, memory, 'config.json')
   const config = (() => {
     try {
       return JSON.parse(text || '{}') as Record<string, unknown>
@@ -59,7 +61,7 @@ async function openedInEditor($: EngineInterface, path: string) {
 // Edit: the person's own copy, made from the shipped text the first time, opened in their editor
 async function editText($: EngineInterface, root: string, memory: string, path: string) {
   const own = `${memory}/${path}`
-  if (!(await readOr($, own)).trim()) await writeOwnText($, memory, path, await readOr($, `${root}/${path}`))
+  if (!(await personText($, memory, path)).trim()) await writeOwnText($, memory, path, await readOr($, `${root}/${path}`))
   return openedInEditor($, own)
 }
 // Put back: the person's copy moves aside as .old, and the shipped text is in force again

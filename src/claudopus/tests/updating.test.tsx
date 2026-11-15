@@ -29,7 +29,7 @@ test('F-019 · the hourly look only reads the version page: a newer version is s
   expect(reloads).toEqual([])
   expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain('reloading it')
   // Turned off in Config, the look reads nothing more, and the card is gone
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ updates: false }))
+  ownSet(files, 'config.json', JSON.stringify({ updates: false }))
   await clock.advance(61 * 60_000)
   expect(fetches).toBe(1)
   expect(await until(async () => ((await panel.find({ type: 'Text', text: 'Claudopus 9.9.9 is out' })) ? undefined : true))).toBe(true)

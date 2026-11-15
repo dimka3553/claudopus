@@ -2,7 +2,7 @@
 # Tests the gate in bin/admin on a Mac: no admin command gets past it without a grant the hook sealed, however the runner is reached.
 # Everything runs under a home folder of its own, with a keychain of its own made there, so the person's keychain, settings and
 # kept passwords are never touched; no command is run as admin (each case stops at the gate, or at the password it does not have).
-#   sh mods/claudopus/bin/admin.test.sh
+#   bash mods/claudopus/bin/admin.test.sh
 set -u
 # On a Mac it runs under a keychain of its own; on Linux bin/keyring keeps its files under this test's own home
 [ "$(uname)" = Darwin ] && mac=1 || mac=

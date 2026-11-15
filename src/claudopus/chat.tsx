@@ -66,6 +66,8 @@ const chatHooks = (on: On) => {
     lastSeen = undefined
     // and reads its own copy's version again
     loadedVersion = undefined
+    // and takes nothing it knew of the person's settings and texts as sealed: the kept copy is checked again
+    knownSeen = undefined
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
