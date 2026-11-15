@@ -546,7 +546,7 @@ const askingFourth = async ($: Parameters<TestBody>[0], on: On, choices?: string
 test('Release it on an ended ask leaves its card where it was, saying the answer, and the work started again keeps its place, never the end', async ($, on) => {
   const { list, order, clock, resumed } = await askingFourth($, on, ['Release it', 'Not now'], true)
   const release = ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Release it')
-  await list.press({ key: release?.key ?? '' })
+  await answer(clock, list, release?.key ?? '')
   expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('pressed "Release it"')))).toBeDefined()
   expect(await until(async () => list.find({ type: 'Text', text: /You answered “Release it”/ } as never))).toBeDefined()
   expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5'])
