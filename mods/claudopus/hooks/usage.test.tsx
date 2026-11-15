@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { claudeOf, figuresOf, footprintOf, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, rawOfLinux, rawOfMac, secondsOfTime, usageMac, usageSvg, USAGE_AMBER, USAGE_PURPLE } from './usage'
+import { batteryOfLinux, batteryOfMac, gpuOf, leftText, claudeOf, figuresOf, footprintOf, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, rawOfLinux, rawOfMac, secondsOfTime, usageMac, usageSvg, USAGE_AMBER, USAGE_PURPLE } from './usage'
 
 const GiB = 1024 ** 3
 // A figure to six places, as two sums of tenths rarely meet exactly
@@ -166,4 +166,35 @@ test('the figures read short, a meter keeps a small part in sight, and memory pa
   expect(calm.source).not.toContain(USAGE_AMBER)
   expect(usageSvg('memory', { claude: 0.05, used: 0.95, isHigh: true }).source).toContain(USAGE_AMBER)
   expect(usageSvg('net').width).toBeLessThan(calm.width)
+})
+
+test('the battery is taken as the system says it: the Mac own battery only, a time only when one is given, a Linux laptop without a time', async () => {
+  const mac = (line: string) => `Now drawing from 'Battery Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true\n`
+  expect(batteryOfMac(mac('85%; discharging; 4:12 remaining'))).toEqual({ pct: 85, state: 'battery', left: 252 })
+  expect(batteryOfMac(mac('85%; discharging; (no estimate)'))).toEqual({ pct: 85, state: 'battery' })
+  expect(batteryOfMac(mac('62%; charging; 1:05 remaining'))).toEqual({ pct: 62, state: 'charging', left: 65 })
+  expect(batteryOfMac(mac('99%; finishing charge; 0:05 remaining'))).toEqual({ pct: 99, state: 'charging', left: 5 })
+  expect(batteryOfMac(mac('100%; charged; 0:00 remaining'))).toEqual({ pct: 100, state: 'plugged' })
+  expect(batteryOfMac(mac('80%; AC attached; not charging'))).toEqual({ pct: 80, state: 'plugged' })
+  expect(batteryOfMac(mac('0%; charging; (no estimate)'))).toEqual({ pct: 0, state: 'charging' })
+  // A desktop: no battery, and a UPS it is plugged into is not its own
+  expect(batteryOfMac("Now drawing from 'AC Power'\n")).toBeUndefined()
+  expect(batteryOfMac("Now drawing from 'AC Power'\n -CP1500PFCLCDa (id=1)\t100%; charged; 0:00 remaining present: true\n")).toBeUndefined()
+  expect(leftText(252)).toBe('4:12')
+  expect(leftText(5)).toBe('0:05')
+  const sys = (rows: Record<string, Record<string, string>>) => Object.entries(rows).flatMap(([name, f]) => Object.entries(f).map(([k, v]) => `/sys/class/power_supply/${name}/${k}:${v}`)).join('\n')
+  expect(batteryOfLinux(sys({ AC: { type: 'Mains' }, BAT0: { type: 'Battery', capacity: '57', status: 'Discharging' } }))).toEqual({ pct: 57, state: 'battery' })
+  expect(batteryOfLinux(sys({ BAT1: { type: 'Battery', capacity: '40', status: 'Charging' } }))).toEqual({ pct: 40, state: 'charging' })
+  expect(batteryOfLinux(sys({ BAT0: { type: 'Battery', capacity: '100', status: 'Full' } }))).toEqual({ pct: 100, state: 'plugged' })
+  // A server, and a wireless mouse's battery
+  expect(batteryOfLinux('')).toBeUndefined()
+  expect(batteryOfLinux(sys({ 'hidpp_battery_0': { type: 'Battery', scope: 'Device', capacity: '90', status: 'Discharging' } }))).toBeUndefined()
+})
+
+test('the graphics processor: the Mac busiest accelerator, Linux GPUs on average, none when nothing answers', async () => {
+  expect(gpuOf('"Device Utilization %"=62\n', false)).toBe(0.62)
+  expect(gpuOf('', false)).toBeUndefined()
+  expect(gpuOf('40\n80\n', true)).toBe(0.6)
+  expect(gpuOf('[N/A]\n', true)).toBeUndefined()
+  expect(gpuOf('', true)).toBeUndefined()
 })

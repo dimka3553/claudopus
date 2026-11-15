@@ -80,10 +80,11 @@ const bandHooks = (on: On) => {
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
-    return (
-      <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
+    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
+    const row = (
+      <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
         {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
-        {figures ? (e.surface === 'terminal' ? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box> : usageDrawn(ui, figures) ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box>) : null}
+        {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box>) : null}
         {/* The figures fill a phone's terminal: the hint shows until they come */}
         {isPanelAway && !figures ? (
           <Box flexShrink={0}>
@@ -91,6 +92,15 @@ const bandHooks = (on: On) => {
           </Box>
         ) : null}
       </Box>
+    )
+    // Where the figures are drawn, a pointer resting on one shows more of it in a line above, so the figures stay where they are
+    return drawn && figures ? (
+      <Box flexDirection="column">
+        {usageMoreDrawn(ui, figures)}
+        {row}
+      </Box>
+    ) : (
+      row
     )
   })
 

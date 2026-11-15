@@ -51,7 +51,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     return to.concat(ar || Array.prototype.slice.call(from));
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.stampOf = exports.isNewer = exports.isUpdateDue = exports.folderSaid = exports.checkSaid = exports.lookOnce = exports.updatedTo = exports.updateSteps = exports.updatedArt = exports.updatedLook = exports.updatedFrom = exports.UPDATED_LATE = exports.UPDATED_SAYS = exports.UPDATED_FOR = exports.isReloadDue = exports.RELOAD_AGAIN = exports.RELOAD_EVERY = exports.copyOf = exports.installedVersionOf = exports.versionOnPage = exports.scopeOf = exports.installedFrom = exports.UPDATE_AFTER = exports.UPDATE_LOOK = exports.UPDATE_EVERY = exports.VERSION_WAIT = exports.VERSION_PAGE = void 0;
+exports.stampOf = exports.isNewer = exports.isUpdateDue = exports.folderLook = exports.folderMarketplace = exports.pullFolder = exports.checkSaid = exports.lookOnce = exports.updatedTo = exports.updateSteps = exports.updatedArt = exports.updatedLook = exports.updatedFrom = exports.UPDATED_LATE = exports.UPDATED_SAYS = exports.UPDATED_FOR = exports.isReloadDue = exports.RELOAD_AGAIN = exports.RELOAD_EVERY = exports.copyOf = exports.installedVersionOf = exports.versionOnPage = exports.scopeOf = exports.installedFrom = exports.UPDATE_AFTER = exports.UPDATE_LOOK = exports.UPDATE_EVERY = exports.VERSION_WAIT = exports.VERSION_PAGE = void 0;
 // The page that says which version is current: site/version.json, made by build.mjs from plugin.json and served from main
 exports.VERSION_PAGE = 'https://www.claudopus.ai/version.json';
 // How long the page may take to answer before the look counts it as not read
@@ -178,6 +178,16 @@ var updatedArt = function (happy, blue) {
     return happy.replace('viewBox="0 0 24 24"', 'viewBox="1 -1 22 22"').replaceAll('#4EBA65', blue).replaceAll('dur="2s"', "dur=\"".concat(exports.UPDATED_FOR / 4000, "s\" repeatCount=\"4\""));
 };
 exports.updatedArt = updatedArt;
+var nameIn = function (manifest) {
+    var _a;
+    try {
+        var name_1 = (_a = JSON.parse(manifest)) === null || _a === void 0 ? void 0 : _a.name;
+        return typeof name_1 === 'string' && /^[\w.-]+$/.test(name_1) ? name_1 : '';
+    }
+    catch (_b) {
+        return '';
+    }
+};
 var versionIn = function (manifest) {
     var _a, _b;
     try {
@@ -206,93 +216,126 @@ exports.updatedTo = updatedTo;
 // One look, run by whoever holds the update lock: it reads the version page, runs the two update steps only when the page names a
 // version other than the one installed, and keeps what it learnt in update.json
 var lookOnce = function (io, at) { return __awaiter(void 0, void 0, void 0, function () {
-    var from, engine, stampPath, before, _a, now, installed, id, root, scope, have, page, current, result_1, _b, refresh, update, run, refreshed, updated, _c, to, why, result, said;
-    var _d, _e, _f, _g, _h, _j;
-    return __generator(this, function (_k) {
-        switch (_k.label) {
+    var from, engine, stampPath, before, _a, now, installed, id, root, scope, have, page, current, result_1, known, source, pulled, _b, _c, refresh, update, run, refreshed, updated, _d, to, why, result, said;
+    var _e, _f, _g, _h, _j, _k;
+    return __generator(this, function (_l) {
+        switch (_l.label) {
             case 0:
                 from = at.from, engine = at.engine, stampPath = at.stampPath;
                 _a = exports.stampOf;
                 return [4 /*yield*/, io.read(stampPath).catch(function () { return ''; })];
             case 1:
-                before = _a.apply(void 0, [_k.sent()]);
+                before = _a.apply(void 0, [_l.sent()]);
                 return [4 /*yield*/, io.now()];
             case 2:
-                now = _k.sent();
+                now = _l.sent();
                 return [4 /*yield*/, io.read("".concat(from.plugins, "/installed_plugins.json")).catch(function () { return ''; })];
             case 3:
-                installed = _k.sent();
+                installed = _l.sent();
                 id = "".concat(from.plugin, "@").concat(from.marketplace);
-                root = (0, exports.scopeOf)(installed, id, at.root) ? at.root : ((_e = (_d = (0, exports.copyOf)(installed, id, at.root, at.cwd)) === null || _d === void 0 ? void 0 : _d.installPath) !== null && _e !== void 0 ? _e : at.root);
+                root = (0, exports.scopeOf)(installed, id, at.root) ? at.root : ((_f = (_e = (0, exports.copyOf)(installed, id, at.root, at.cwd)) === null || _e === void 0 ? void 0 : _e.installPath) !== null && _f !== void 0 ? _f : at.root);
                 scope = (0, exports.scopeOf)(installed, id, root);
                 have = (0, exports.installedVersionOf)(installed, id, root, scope);
                 return [4 /*yield*/, io.page()];
             case 4:
-                page = _k.sent();
+                page = _l.sent();
                 current = page.ok ? (0, exports.versionOnPage)(page.text) : undefined;
                 if (!!current) return [3 /*break*/, 7];
                 result_1 = "version page not read: ".concat(page.ok ? 'no version on it' : page.status || page.text.slice(0, 120));
                 return [4 /*yield*/, io.write(stampPath, JSON.stringify({ at: now, version: (before === null || before === void 0 ? void 0 : before.version) || have, result: result_1 }))];
             case 5:
-                _k.sent();
+                _l.sent();
                 return [4 /*yield*/, io.log("Claudopus ".concat(result_1))];
             case 6:
-                _k.sent();
+                _l.sent();
                 return [2 /*return*/, { kind: 'failed', why: page.ok ? 'claudopus.ai named no version' : page.status ? "claudopus.ai answered ".concat(page.status) : 'claudopus.ai did not answer' }];
             case 7:
                 if (!(current === have)) return [3 /*break*/, 9];
                 return [4 /*yield*/, io.write(stampPath, JSON.stringify({ at: now, version: have, result: 'latest' }))];
             case 8:
-                _k.sent();
+                _l.sent();
                 return [2 /*return*/, { kind: 'latest', version: have }];
-            case 9: return [4 /*yield*/, io.log("Claudopus ".concat(current, " is on the version page and ").concat(have, " is installed: updating"))];
+            case 9: return [4 /*yield*/, io.log("Claudopus ".concat(current, " is on the version page and ").concat(have, " is installed: updating"))
+                // A marketplace that is a folder of the code (a git checkout) is brought up to date first, so the refresh finds the new version
+            ];
             case 10:
-                _k.sent();
-                _b = (0, exports.updateSteps)(engine, from, scope), refresh = _b[0], update = _b[1];
-                run = function (argv, timeoutMs) { return io.run(argv, timeoutMs).catch(function (err) { return ({ exitCode: -1, stdout: '', stderr: String(err) }); }); };
-                return [4 /*yield*/, run(refresh, 180000)];
+                _l.sent();
+                return [4 /*yield*/, io.read("".concat(from.plugins, "/known_marketplaces.json")).catch(function () { return ''; })];
             case 11:
-                refreshed = _k.sent();
-                if (!(refreshed.exitCode === 0)) return [3 /*break*/, 13];
-                return [4 /*yield*/, run(update, 300000)];
+                known = _l.sent();
+                source = (function () {
+                    var _a, _b;
+                    try {
+                        var one = (_b = (_a = JSON.parse(known)) === null || _a === void 0 ? void 0 : _a[from.marketplace]) === null || _b === void 0 ? void 0 : _b.source;
+                        return (one === null || one === void 0 ? void 0 : one.source) === 'directory' && typeof one.path === 'string' ? one.path : '';
+                    }
+                    catch (_c) {
+                        return '';
+                    }
+                })();
+                if (!source) return [3 /*break*/, 13];
+                return [4 /*yield*/, (0, exports.pullFolder)(io, source)];
             case 12:
-                _c = _k.sent();
+                _b = _l.sent();
                 return [3 /*break*/, 14];
             case 13:
-                _c = refreshed;
-                _k.label = 14;
+                _b = undefined;
+                _l.label = 14;
             case 14:
-                updated = _c;
+                pulled = _b;
+                if (!((pulled === null || pulled === void 0 ? void 0 : pulled.kind) === 'refused')) return [3 /*break*/, 16];
+                return [4 /*yield*/, io.log("Claudopus marketplace folder not updated: ".concat(pulled.why))];
+            case 15:
+                _l.sent();
+                _l.label = 16;
+            case 16:
+                _c = (0, exports.updateSteps)(engine, from, scope), refresh = _c[0], update = _c[1];
+                run = function (argv, timeoutMs) { return io.run(argv, timeoutMs).catch(function (err) { return ({ exitCode: -1, stdout: '', stderr: String(err) }); }); };
+                return [4 /*yield*/, run(refresh, 180000)];
+            case 17:
+                refreshed = _l.sent();
+                if (!(refreshed.exitCode === 0)) return [3 /*break*/, 19];
+                return [4 /*yield*/, run(update, 300000)];
+            case 18:
+                _d = _l.sent();
+                return [3 /*break*/, 20];
+            case 19:
+                _d = refreshed;
+                _l.label = 20;
+            case 20:
+                updated = _d;
                 to = refreshed.exitCode === 0 ? (0, exports.updatedTo)("".concat(updated.stdout, "\n").concat(updated.stderr)) : undefined;
                 why = "".concat(updated.stderr || updated.stdout).trim().slice(-200);
                 result = to ? (to.isNew ? 'updated' : 'latest') : "".concat(refreshed.exitCode === 0 ? 'not updated' : 'marketplace not refreshed', ": ").concat(why);
                 // A look that learnt nothing keeps the version the last one found, so About still says what is installed
-                return [4 /*yield*/, io.write(stampPath, JSON.stringify({ at: now, version: (_g = (_f = to === null || to === void 0 ? void 0 : to.version) !== null && _f !== void 0 ? _f : before === null || before === void 0 ? void 0 : before.version) !== null && _g !== void 0 ? _g : '', result: result }))];
-            case 15:
+                return [4 /*yield*/, io.write(stampPath, JSON.stringify({ at: now, version: (_h = (_g = to === null || to === void 0 ? void 0 : to.version) !== null && _g !== void 0 ? _g : before === null || before === void 0 ? void 0 : before.version) !== null && _h !== void 0 ? _h : '', result: result }))];
+            case 21:
                 // A look that learnt nothing keeps the version the last one found, so About still says what is installed
-                _k.sent();
-                if (!(to === null || to === void 0 ? void 0 : to.isNew)) return [3 /*break*/, 17];
+                _l.sent();
+                if (!(to === null || to === void 0 ? void 0 : to.isNew)) return [3 /*break*/, 23];
                 return [4 /*yield*/, io.log("Claudopus updated to ".concat(to.version, ": chats that start from now on load it"))];
-            case 16:
-                _k.sent();
-                return [3 /*break*/, 19];
-            case 17:
-                if (!!to) return [3 /*break*/, 19];
+            case 22:
+                _l.sent();
+                return [3 /*break*/, 25];
+            case 23:
+                if (!!to) return [3 /*break*/, 25];
                 return [4 /*yield*/, io.log("Claudopus ".concat(result))
                     // Both steps ran, yet where Claude Code installs it from still has an older version than the page (a folder of its code not brought
                     // up to date): the newest is not here, and that is said rather than "newest"
                 ];
-            case 18:
-                _k.sent();
-                _k.label = 19;
-            case 19:
+            case 24:
+                _l.sent();
+                _l.label = 25;
+            case 25:
                 // Both steps ran, yet where Claude Code installs it from still has an older version than the page (a folder of its code not brought
                 // up to date): the newest is not here, and that is said rather than "newest"
                 if (to && (0, exports.isNewer)(current, to.version))
-                    return [2 /*return*/, { kind: 'failed', version: current, why: "where Claude Code installs it from still has v".concat(to.version), next: 'Bring that up to date, then check again.' }];
+                    return [2 /*return*/, (pulled === null || pulled === void 0 ? void 0 : pulled.kind) === 'refused'
+                            ? { kind: 'failed', version: current, why: "where Claude Code installs it from still has v".concat(to.version, ": ").concat(pulled.why), next: 'Nothing in it was changed.' }
+                            : { kind: 'failed', version: current, why: "where Claude Code installs it from still has v".concat(to.version), next: 'Bring that up to date, then check again.' }];
                 if (to)
                     return [2 /*return*/, { kind: to.isNew ? 'updated' : 'latest', version: to.version }];
-                said = (_j = (_h = why.split('\n').at(-1)) === null || _h === void 0 ? void 0 : _h.trim()) !== null && _j !== void 0 ? _j : '';
+                said = (_k = (_j = why.split('\n').at(-1)) === null || _j === void 0 ? void 0 : _j.trim()) !== null && _k !== void 0 ? _k : '';
                 return [2 /*return*/, { kind: 'failed', version: current, why: "".concat(refreshed.exitCode === 0 ? 'Claude Code did not update it' : 'Claude Code could not refresh where it comes from').concat(said ? " (".concat(said.slice(0, 120), ")") : '') }];
         }
     });
@@ -301,25 +344,237 @@ exports.lookOnce = lookOnce;
 // What Config's Check for updates says once its look is over, for a chat running `loaded`: newest, downloaded and waiting for
 // /reload-plugins in this chat, or why not. A chat on this Mac also switches by itself once it is idle; one run from another Mac
 // cannot (the engine refuses a reload it was not typed in there), so there it is only typed
-var checkSaid = function (look, loaded, isTypedOnly) {
+var checkSaid = function (look, loaded, isTypedOnly, isFolder) {
     var _a;
     if (isTypedOnly === void 0) { isTypedOnly = false; }
+    if (isFolder === void 0) { isFolder = false; }
     if (look.kind === 'failed')
-        return { text: "Couldn't ".concat(look.version ? "download v".concat(look.version) : 'check', ": ").concat(look.why, ". ").concat((_a = look.next) !== null && _a !== void 0 ? _a : 'Try again later.'), isError: true };
+        return { text: "Couldn't ".concat(look.version ? "".concat(isFolder ? 'update to' : 'download', " v").concat(look.version) : 'check', ": ").concat(look.why, ". ").concat((_a = look.next) !== null && _a !== void 0 ? _a : 'Try again later.'), isError: true };
     if (loaded && (0, exports.isNewer)(look.version, loaded))
-        return { text: "v".concat(look.version, " downloaded. Type /reload-plugins to switch this chat to it").concat(isTypedOnly ? '.' : ', or it switches by itself in a moment.'), isError: false };
+        return { text: "v".concat(look.version, " ").concat(isFolder ? 'is in its folder now' : 'downloaded', ". Type /reload-plugins to switch this chat to it").concat(isTypedOnly ? '.' : ', or it switches by itself in a moment.'), isError: false };
     return { text: "You're on the newest version (v".concat(look.version, ")."), isError: false };
 };
 exports.checkSaid = checkSaid;
-// The same for a copy run from a folder of its code, which Claude Code did not install and so cannot update: only what the page says
-var folderSaid = function (current, loaded) {
-    if (!current)
-        return { text: "Couldn't check: claudopus.ai did not answer. Try again later.", isError: true };
-    if (loaded && (0, exports.isNewer)(current, loaded))
-        return { text: "v".concat(current, " is out. This copy runs from a folder of its code, so it is not downloaded here: update that folder, then type /reload-plugins."), isError: false };
-    return { text: "You're on the newest version (v".concat(loaded || current, "). This copy runs from a folder of its code, so it updates with that folder."), isError: false };
+var pullFolder = function (io, folder) { return __awaiter(void 0, void 0, void 0, function () {
+    var git, last, _a, _b, gitDir, _c, commonDir, branch, upstream, fetched, _d, head, theirs, _e, isClean, merged, said;
+    var _f, _g;
+    return __generator(this, function (_h) {
+        switch (_h.label) {
+            case 0:
+                git = function (args, timeoutMs) {
+                    if (timeoutMs === void 0) { timeoutMs = 20000; }
+                    return io
+                        .run(__spreadArray(['env', 'GIT_TERMINAL_PROMPT=0', 'GIT_ASKPASS=true', 'GIT_SSH_COMMAND=ssh -o BatchMode=yes', 'git', '-C', folder], args, true), timeoutMs)
+                        .catch(function (err) { return ({ exitCode: -1, stdout: '', stderr: String(err) }); });
+                };
+                last = function (out) { var _a, _b; return (_b = (_a = "".concat(out.stderr || out.stdout).trim().split('\n').at(-1)) === null || _a === void 0 ? void 0 : _a.trim().replace(/^(fatal|error): /, '').slice(0, 140)) !== null && _b !== void 0 ? _b : ''; };
+                return [4 /*yield*/, git(['rev-parse', '--show-toplevel'])];
+            case 1:
+                if ((_h.sent()).exitCode !== 0)
+                    return [2 /*return*/, { kind: 'refused', why: 'its folder is not a git checkout' }];
+                return [4 /*yield*/, git(['ls-files', '--error-unmatch', ':/mods/claudopus/.claude-plugin/plugin.json'])];
+            case 2:
+                if ((_h.sent()).exitCode !== 0)
+                    return [2 /*return*/, { kind: 'refused', why: "its folder is in a git checkout that isn't Claudopus's" }];
+                return [4 /*yield*/, git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'])];
+            case 3:
+                _a = (_h.sent()).stdout.trim().split('\n'), _b = _a[0], gitDir = _b === void 0 ? '' : _b, _c = _a[1], commonDir = _c === void 0 ? '' : _c;
+                if (gitDir.trim() !== commonDir.trim())
+                    return [2 /*return*/, { kind: 'refused', why: 'its folder is a git worktree, not the main checkout' }];
+                return [4 /*yield*/, git(['symbolic-ref', '-q', '--short', 'HEAD'])];
+            case 4:
+                branch = (_h.sent()).stdout.trim();
+                if (!branch)
+                    return [2 /*return*/, { kind: 'refused', why: 'its folder is on no branch' }];
+                return [4 /*yield*/, git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])];
+            case 5:
+                upstream = (_h.sent()).stdout.trim();
+                if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream))
+                    return [2 /*return*/, { kind: 'refused', why: "its folder is on ".concat(upstream ? "".concat(branch, ", following ").concat(upstream) : branch, ", and releases come out on main") }];
+                return [4 /*yield*/, git(['fetch', '--quiet'], 120000)];
+            case 6:
+                fetched = _h.sent();
+                if (fetched.exitCode !== 0)
+                    return [2 /*return*/, { kind: 'refused', why: "its folder could not fetch ".concat(upstream, " (").concat(last(fetched), ")") }];
+                return [4 /*yield*/, git(['rev-parse', 'HEAD'])];
+            case 7:
+                _e = [(_h.sent()).stdout.trim()];
+                return [4 /*yield*/, git(['rev-parse', '@{u}'])];
+            case 8:
+                _d = _e.concat([(_h.sent()).stdout.trim()]), head = _d[0], theirs = _d[1];
+                if (!head || !theirs)
+                    return [2 /*return*/, { kind: 'refused', why: "git did not say where ".concat(upstream, " is") }];
+                isClean = function () { return __awaiter(void 0, void 0, void 0, function () {
+                    var status;
+                    return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0: return [4 /*yield*/, git(['status', '--porcelain', '--untracked-files=no'])];
+                            case 1:
+                                status = _a.sent();
+                                return [2 /*return*/, status.exitCode === 0 && !status.stdout.trim()];
+                        }
+                    });
+                }); };
+                if (!(head === theirs)) return [3 /*break*/, 10];
+                _f = { kind: 'same' };
+                return [4 /*yield*/, isClean()];
+            case 9: return [2 /*return*/, (_f.isClean = _h.sent(), _f)];
+            case 10: return [4 /*yield*/, git(['merge-base', '--is-ancestor', 'HEAD', '@{u}'])];
+            case 11:
+                if ((_h.sent()).exitCode !== 0)
+                    return [2 /*return*/, { kind: 'refused', why: "its folder's main has commits of its own that ".concat(upstream, " does not have") }];
+                return [4 /*yield*/, git(['merge', '--ff-only', '--quiet', '@{u}'], 120000)];
+            case 12:
+                merged = _h.sent();
+                if (!(merged.exitCode === 0)) return [3 /*break*/, 14];
+                _g = { kind: 'pulled' };
+                return [4 /*yield*/, isClean()];
+            case 13: return [2 /*return*/, (_g.isClean = _h.sent(), _g)];
+            case 14:
+                said = "".concat(merged.stderr, "\n").concat(merged.stdout);
+                if (/would be overwritten/.test(said))
+                    return [2 /*return*/, { kind: 'refused', why: "changes in its folder that aren't committed touch files the update changes" }];
+                return [2 /*return*/, { kind: 'refused', why: "git would not update its folder (".concat(last(merged), ")") }];
+        }
+    });
+}); };
+exports.pullFolder = pullFolder;
+// The marketplace a copy run from a folder belongs to, when Claude Code knows that folder as a directory marketplace: its record
+// then follows the folder too, so /plugin and new installs agree with it
+var folderMarketplace = function (known, root) {
+    var _a;
+    try {
+        var trim_2 = function (path) {
+            if (path === void 0) { path = ''; }
+            return path.replace(/\/+$/, '');
+        };
+        var entries = Object.entries((_a = JSON.parse(known)) !== null && _a !== void 0 ? _a : {});
+        var found = entries.find(function (_a) {
+            var _b;
+            var name = _a[0], one = _a[1];
+            return /^[\w.-]+$/.test(name) && ((_b = one === null || one === void 0 ? void 0 : one.source) === null || _b === void 0 ? void 0 : _b.source) === 'directory' && one.source.path && (trim_2(root) === trim_2(one.source.path) || trim_2(root) === "".concat(trim_2(one.source.path), "/mods/claudopus"));
+        });
+        return found === null || found === void 0 ? void 0 : found[0];
+    }
+    catch (_b) {
+        return undefined;
+    }
 };
-exports.folderSaid = folderSaid;
+exports.folderMarketplace = folderMarketplace;
+// One look for a copy run from a folder of its code: the version page, then, when it names a newer version than the folder has,
+// the folder brought up to date; Claude Code's record of a directory marketplace in that folder is refreshed after it
+var folderLook = function (io, at) { return __awaiter(void 0, void 0, void 0, function () {
+    var root, stampPath, now, manifest, have, page, current, result, pulled, to, marketplace_1, _a, plugin_1, _b, installed_1, scopes, scope, _i, _c, step, out;
+    return __generator(this, function (_d) {
+        switch (_d.label) {
+            case 0:
+                root = at.root, stampPath = at.stampPath;
+                return [4 /*yield*/, io.now()];
+            case 1:
+                now = _d.sent();
+                manifest = function () { return __awaiter(void 0, void 0, void 0, function () { var _a; return __generator(this, function (_b) {
+                    switch (_b.label) {
+                        case 0:
+                            _a = versionIn;
+                            return [4 /*yield*/, io.read("".concat(root, "/.claude-plugin/plugin.json")).catch(function () { return ''; })];
+                        case 1: return [2 /*return*/, _a.apply(void 0, [_b.sent()])];
+                    }
+                }); }); };
+                return [4 /*yield*/, manifest()];
+            case 2:
+                have = _d.sent();
+                return [4 /*yield*/, io.page()];
+            case 3:
+                page = _d.sent();
+                current = page.ok ? (0, exports.versionOnPage)(page.text) : undefined;
+                if (!!current) return [3 /*break*/, 6];
+                result = "version page not read: ".concat(page.ok ? 'no version on it' : page.status || page.text.slice(0, 120));
+                return [4 /*yield*/, io.write(stampPath, JSON.stringify({ at: now, version: have, result: result }))];
+            case 4:
+                _d.sent();
+                return [4 /*yield*/, io.log("Claudopus ".concat(result))];
+            case 5:
+                _d.sent();
+                return [2 /*return*/, { kind: 'failed', why: page.ok ? 'claudopus.ai named no version' : page.status ? "claudopus.ai answered ".concat(page.status) : 'claudopus.ai did not answer' }];
+            case 6:
+                if (!(have && !(0, exports.isNewer)(current, have))) return [3 /*break*/, 8];
+                return [4 /*yield*/, io.write(stampPath, JSON.stringify({ at: now, version: have, result: 'latest' }))];
+            case 7:
+                _d.sent();
+                return [2 /*return*/, { kind: 'latest', version: have }];
+            case 8: return [4 /*yield*/, io.log("Claudopus ".concat(current, " is on the version page and its folder ").concat(root, " has ").concat(have || 'no version', ": bringing the folder up to date"))];
+            case 9:
+                _d.sent();
+                return [4 /*yield*/, (0, exports.pullFolder)(io, root)];
+            case 10:
+                pulled = _d.sent();
+                return [4 /*yield*/, manifest()];
+            case 11:
+                to = _d.sent();
+                if (!(pulled.kind === 'refused')) return [3 /*break*/, 14];
+                return [4 /*yield*/, io.write(stampPath, JSON.stringify({ at: now, version: to, result: "folder not updated: ".concat(pulled.why) }))];
+            case 12:
+                _d.sent();
+                return [4 /*yield*/, io.log("Claudopus folder not updated: ".concat(pulled.why))];
+            case 13:
+                _d.sent();
+                return [2 /*return*/, { kind: 'failed', version: current, why: pulled.why, next: 'Nothing in it was changed.' }];
+            case 14:
+                if (!(pulled.kind === 'pulled')) return [3 /*break*/, 23];
+                return [4 /*yield*/, io.log("Claudopus folder updated from ".concat(have, " to ").concat(to, ": chats that reload or start from now on load it"))
+                    // Claude Code's own record of the folder follows it, when it knows the folder as a marketplace; what it says is only logged
+                ];
+            case 15:
+                _d.sent();
+                _a = exports.folderMarketplace;
+                return [4 /*yield*/, io.read("".concat(at.plugins, "/known_marketplaces.json")).catch(function () { return ''; })];
+            case 16:
+                marketplace_1 = _a.apply(void 0, [_d.sent(), root]);
+                _b = nameIn;
+                return [4 /*yield*/, io.read("".concat(root, "/.claude-plugin/plugin.json")).catch(function () { return ''; })];
+            case 17:
+                plugin_1 = _b.apply(void 0, [_d.sent()]);
+                return [4 /*yield*/, io.read("".concat(at.plugins, "/installed_plugins.json")).catch(function () { return ''; })];
+            case 18:
+                installed_1 = _d.sent();
+                scopes = (function () {
+                    var _a, _b, _c;
+                    try {
+                        return ((_c = (_b = (_a = JSON.parse(installed_1)) === null || _a === void 0 ? void 0 : _a.plugins) === null || _b === void 0 ? void 0 : _b["".concat(plugin_1, "@").concat(marketplace_1)]) !== null && _c !== void 0 ? _c : []).map(function (one) { return one === null || one === void 0 ? void 0 : one.scope; });
+                    }
+                    catch (_d) {
+                        return [];
+                    }
+                })();
+                scope = scopes.includes('user') ? 'user' : scopes.find(function (one) { return typeof one === 'string' && /^(user|project|local)$/.test(one); });
+                if (!(marketplace_1 && plugin_1 && scope && pulled.isClean)) return [3 /*break*/, 23];
+                _i = 0, _c = (0, exports.updateSteps)(at.engine, { marketplace: marketplace_1, plugin: plugin_1 }, scope);
+                _d.label = 19;
+            case 19:
+                if (!(_i < _c.length)) return [3 /*break*/, 23];
+                step = _c[_i];
+                return [4 /*yield*/, io.run(step, 180000).catch(function (err) { return ({ exitCode: -1, stdout: '', stderr: String(err) }); })];
+            case 20:
+                out = _d.sent();
+                if (out.exitCode === 0)
+                    return [3 /*break*/, 22];
+                return [4 /*yield*/, io.log("Claudopus record of ".concat(plugin_1, "@").concat(marketplace_1, " not refreshed: ").concat("".concat(out.stderr || out.stdout).trim().slice(-160)))];
+            case 21:
+                _d.sent();
+                return [3 /*break*/, 23];
+            case 22:
+                _i++;
+                return [3 /*break*/, 19];
+            case 23: return [4 /*yield*/, io.write(stampPath, JSON.stringify({ at: now, version: to, result: pulled.kind === 'pulled' ? 'updated' : 'latest' }))];
+            case 24:
+                _d.sent();
+                if (to && (0, exports.isNewer)(current, to))
+                    return [2 /*return*/, { kind: 'failed', version: current, why: "its folder's main online still has v".concat(to), next: 'Check again in a few minutes.' }];
+                return [2 /*return*/, { kind: pulled.kind === 'pulled' ? 'updated' : 'latest', version: to || current }];
+        }
+    });
+}); };
+exports.folderLook = folderLook;
 // Whether a look is due: none yet, or the last one is older than UPDATE_EVERY (a clock moved back counts as due)
 var isUpdateDue = function (stamp, now) { return !stamp || now - stamp.at >= exports.UPDATE_EVERY || now < stamp.at; };
 exports.isUpdateDue = isUpdateDue;
