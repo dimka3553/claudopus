@@ -91,6 +91,8 @@ const chatHooks = (on: On) => {
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
     await closeUndrawn($)
     $.clock.after(3000, () => closeUndrawn($))
+    // and every tab left open is drawn, though the app asked for it while this code was away (watchTabs)
+    await watchLoaded($).catch(err => log($, `tabs not watched: ${String(err)}`))
 
     // The engine's id names this chat's files, as its transcript is named
     const id = await $.session.id()
@@ -232,6 +234,7 @@ const chatHooks = (on: On) => {
       await shareMine($).catch(err => log($, `work not shared: ${String(err)}`))
       // The hidden boxes of the admin and secret runners, drawn in the panel in every chat
       await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
+      await watchFront($).catch(err => log($, `tab in front not watched: ${String(err)}`))
       if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))

@@ -40,7 +40,7 @@ const tabHooks = (on: On) => {
         {reportsView($, uiOf($, e), kept, await $.clock.now(), line, e.props.scroll.bodyRows)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // Stats, in a pane of its own: drawn at once from what was read last, while the records are read again at most once a minute
   on('ui.render', { component: 'Pane', requestId: STATS_PANE }, async ($, e) => {
@@ -51,7 +51,7 @@ const tabHooks = (on: On) => {
         {statsView(() => $.ui.invalidate('ui.render'), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // About, in a pane of its own
   on('ui.render', { component: 'Pane', requestId: CONFIG_PANE }, async ($, e) => {
@@ -61,7 +61,7 @@ const tabHooks = (on: On) => {
         {configView(ui, await configShown($), configActs($), band, presses, dir)}
       </ui.Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   on('ui.render', { component: 'Pane', requestId: ABOUT_PANE }, async ($, e) => {
     const { Box } = uiOf($, e)
@@ -70,7 +70,7 @@ const tabHooks = (on: On) => {
         {await aboutView($, uiOf($, e), e.surface)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // The changelog, in a pane of its own
   on('ui.render', { component: 'Pane', requestId: CHANGELOG_PANE }, async ($, e) => {
@@ -80,7 +80,7 @@ const tabHooks = (on: On) => {
         {await changelogView($, uiOf($, e), e.surface)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // A picture opened large, in a chat the app runs on another Mac over ssh
   on('ui.render', { component: 'Pane', requestId: PICTURE_PANE }, async ($, e) => {
@@ -90,7 +90,7 @@ const tabHooks = (on: On) => {
         {await pictureView($, e)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
   // A report opened as a pane of its own, named after it
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
@@ -108,7 +108,70 @@ const tabHooks = (on: On) => {
         {reportShown($, uiOf($, e), r, reportText.get(r.id) || 'This result has no text.', kept, await $.clock.now(), at, picture, e.props.scroll.bodyRows)}
       </Box>
     )
-  })
+  }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
 
+
+// ---- Tabs the app would leave saying "Nothing to show yet" ----
+
+// The app asks a tab for its drawing once, as it shows it, and again only when told the drawing changed. One ask that comes back
+// empty (the chat could not be reached that moment, or the drawing failed) leaves the tab empty until then, and a tab that reads
+// nothing that changes, as Stats, About or a result, is never told. So each ask is noted, and a tab open but not asked for since it
+// opened, since this code loaded, or since it came in front, is drawn again after 2, 6, 15 and 40 seconds until it is asked for. A
+// redraw tells the app to ask every tab it shows, so it reaches one the engine has never drawn as well
+const TAB_CHECKS = [2_000, 6_000, 15_000, 40_000]
+const tabAsked = new Map<string, number>()
+const tabFails = new Map<string, number[]>()
+let tabInFront = ''
+const noteTabAsked = async ($: EngineInterface, id: string | undefined) => {
+  if (id) tabAsked.set(id, await $.clock.now())
+}
+// `since`: how long before now an ask already counts, for a tab seen in front a moment after the app asked for it
+const watchTabs = async ($: EngineInterface, ids: string[], why: string, since = 0) => {
+  if (!ids.length) return
+  const from = (await $.clock.now()) - since
+  for (const wait of TAB_CHECKS)
+    $.clock.after(wait, async () => {
+      const open = new Set((await $.ui.panes().catch(() => [])).map(pane => pane.id))
+      const empty = ids.filter(id => open.has(id) && (tabAsked.get(id) ?? 0) < from)
+      if (!empty.length) return
+      $.ui.invalidate('ui.render')
+      if (wait === TAB_CHECKS.at(-1)) await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}: drawn again`)
+    })
+}
+// As this code loads: the tab in front where the engine says which it is, else every tab open (a tab behind the others is never
+// asked for, so it costs four redraws and no more)
+const watchLoaded = async ($: EngineInterface) => {
+  const panes = await $.ui.panes().catch(() => [])
+  const shown = panes.filter(pane => pane.isShown)
+  // the tab in front is watched here, not again by the first look each second
+  tabInFront = shown[0]?.id ?? ''
+  await watchTabs($, (shown.length ? shown : panes).map(pane => pane.id), 'this code loaded')
+}
+// Each second: a tab the person brought in front
+const watchFront = async ($: EngineInterface) => {
+  const front = (await $.ui.panes().catch(() => [])).find(pane => pane.isShown)?.id ?? ''
+  if (front === tabInFront) return
+  tabInFront = front
+  if (front) await watchTabs($, [front], 'it came in front', 2_000)
+}
+// A tab whose drawing failed shows why, in place of nothing, and is asked for again in a few seconds: three times a minute at most
+const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0] & { requestId?: string }, error: { kind: string; message?: string } | undefined) => {
+  const id = e.requestId ?? ''
+  const now = await $.clock.now()
+  const fails = [...(tabFails.get(id) ?? []).filter(at => now - at < 60_000), now]
+  tabFails.set(id, fails)
+  const why = error?.kind === 'timeout' ? 'It took too long to draw.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.'
+  await log($, `tab ${id} not drawn (${error?.kind ?? 'unknown'}): ${why}`)
+  const isAgain = fails.length < 3
+  if (isAgain) await watchTabs($, [id], 'its drawing failed')
+  const { Box, Text } = uiOf($, e)
+  return (
+    <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
+      <Text bold>This tab could not be drawn</Text>
+      <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
+      <Text dimColor wrap="wrap">{isAgain ? 'Trying again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
+    </Box>
+  )
+}

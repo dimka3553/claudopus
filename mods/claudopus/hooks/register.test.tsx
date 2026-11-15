@@ -3627,6 +3627,48 @@ test('a first install starts the record of changes seen at its own version, and 
   expect(await pane.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
 })
 
+
+// "Nothing to show yet": the app asks a tab for its drawing as it shows it, and asks again only when told something changed; one
+// empty answer (the chat out of reach that moment) left Stats, About or a result empty for good, as none of them reads anything that
+// changes. A tab open and never asked for since is drawn again until it is
+test('a tab opened but not asked for its drawing is drawn again within seconds, and one asked for costs nothing more', async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: true, isPlaced: true }]
+  const { clock } = world(on, { live })
+  let redraws = 0
+  on('ui.invalidate', () => ((redraws += 1), { value: undefined }) as never)
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  await pressed(pane, 'about-open')
+  await clock.advance(500)
+  const before = redraws
+  // The app's ask for About never came: two seconds on, the mod draws again, and asks the app to
+  await clock.advance(2_000)
+  expect(redraws).toBeGreaterThan(before)
+  // Opened again and asked for at once: no redraw of its own follows
+  await pressed(pane, 'about-open')
+  await clock.advance(100)
+  await $.ui.mount({ ...LIST, requestId: 'about', props: { ...LIST.props, title: 'About', bodyColumns: 80 }, surface: 'desktop' } as never)
+  await clock.advance(500)
+  const asked = redraws
+  await clock.advance(20_000)
+  expect(redraws).toBe(asked)
+})
+
+test('a tab left open as the mod loads, after an update or a reload, is drawn again if the app does not ask for it', async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: false, isPlaced: false }, { id: 'stats', isShown: false, isPlaced: false }]
+  const { clock } = world(on, { live })
+  let redraws = 0
+  on('ui.invalidate', () => ((redraws += 1), { value: undefined }) as never)
+  await $.session.start(start)
+  await clock.advance(500)
+  const before = redraws
+  await clock.advance(2_000)
+  expect(redraws).toBeGreaterThan(before)
+  // Four times at most, while nothing asks for it: a tab behind the others is never asked for
+  await clock.advance(60_000)
+  expect(redraws - before).toBeLessThanOrEqual(4)
+})
+
 // Config: the person's own texts, settings, and models
 
 test('a copy of the principles in the memory folder is the person\'s own: every conversation carries it in place of the shipped ones', async ($, on) => {

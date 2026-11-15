@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.108 · 15 November 2026
+- A tab left saying "Nothing to show yet" (Stats, About, a result or any other Claudopus tab) now fills in on its own a few seconds later: after it opens, when you bring it to the front, and after Claudopus updates or reloads.
+- A tab that cannot be drawn says what went wrong instead of staying empty, and tries again.
+
 ## 0.2.107 · 15 November 2026
 - A workflow's card is built like every other card now: its title opens Details, Stop sits at its right end, and its facts line names the model, the agents, which round it is on of how many, and the time.
 - Under it are the bar the checker holds it to, and a row per round up to the cap, each led by its own squares: the round at work says who is at work beside moving dots, a checked round what its check found, and a round not run yet that it runs only if needed.
