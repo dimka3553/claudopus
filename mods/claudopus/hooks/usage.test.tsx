@@ -278,3 +278,85 @@ test("Claude's own part, where the Mac tells each process's: of the graphics pro
   const bare = nextKept(nextKept(undefined, macLook(look), 0, false), macLook(look), 5000, false)?.figures
   expect([bare?.gpuClaude, bare?.diskClaude, bare?.netInClaude, bare?.wattsClaude, bare?.watts]).toEqual([undefined, undefined, undefined, undefined, undefined])
 })
+
+// A look with each process's process group, as the bar now asks ps for it: the app and its chat; a script a chat left running
+// with nohup, whose shell has ended (launchd took it in, its group's leader gone), and the Python it runs; a crash reporter an app
+// left the same way; a job left running from a terminal, which leads its own group; and the whole Mac's processor and graphics
+// energy, with each process's own
+const leftLook = (o: { nj1423: number; nj9001: number; nj9100?: number; cpuNj: number; gpuNj: number; gpu932: number; gpu408: number; energyAll?: boolean }) =>
+  [
+    '@@SELF@@ 1423',
+    '@@PS@@',
+    '    1     0  20000   1:00.00     1 /sbin/launchd',
+    '  852     1 686704   0:10.00   852 /Applications/Claude.app/Contents/MacOS/Claude',
+    '  932   852 1247440   0:10.00   852 /Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)',
+    ' 1423   852 1745264   1:00.00  1423 /Users/sam/Library/Application Support/Claude/claude-code/2.1.325/x/claude.app/Contents/MacOS/claude',
+    '  408     1 200000   1:00.00   408 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer',
+    ' 9000     1  52000   0:00.00  8990 /bin/bash',
+    ' 9001  9000 400000   0:30.00  8990 /opt/homebrew/bin/python3',
+    ...(o.nj9100 !== undefined ? [' 9100  9000 100000   0:01.00  8990 /usr/local/bin/ffmpeg'] : []),
+    ' 1151     1  10000   0:00.00  1143 /Applications/Slack.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler',
+    ' 7000     1  30000   0:05.00  7000 /usr/local/bin/rsync',
+    ' 9200     1  30000   0:05.00  9190 /Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python',
+    '@@VM@@',
+    'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
+    'Anonymous pages:                             1583261.',
+    '@@SYS@@',
+    '68719476736',
+    '18',
+    '@@GPU@@',
+    '"Device Utilization %"=60',
+    '@@GPUP@@',
+    `      "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=${o.gpu932}})`,
+    '      "IOUserClientCreator" = "pid 932, Claude Helper (Renderer)"',
+    `      "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=${o.gpu408}})`,
+    '      "IOUserClientCreator" = "pid 408, WindowServer"',
+    '@@RU@@',
+    `1423 0 0 ${o.nj1423}`,
+    `9001 0 0 ${o.nj9001}`,
+    ...(o.nj9100 !== undefined ? [`9100 0 0 ${o.nj9100}`] : []),
+    '7000 0 0 5000000000',
+    `E ${o.cpuNj} ${o.gpuNj}`,
+    '',
+  ].join('\n')
+
+test('work a chat left running after its command ended is Claude\'s; an app\'s crash reporter and a terminal\'s job are not', async () => {
+  const raw = rawOfMac(leftLook({ nj1423: 0, nj9001: 0, cpuNj: 0, gpuNj: 0, gpu932: 0, gpu408: 0 }), 0)
+  // The Mac's own python3, which runs from Xcode, left running too
+  expect(new Set(raw?.claude)).toEqual(new Set(['852', '932', '1423', '9000', '9001', '9200']))
+  // A look from before the process group was asked for still reads, and takes no left work
+  const old = rawOfMac(macLook({ appCpu: '0:10.00', shellCpu: '0:00.00', otherCpu: '0:00.00', disk: '1000.00', inBytes: 0, outBytes: 0 }), 0)
+  expect(old?.claude).toContain('5000')
+  expect(usageMac(false)).toContain('ps -axo pid=,ppid=,rss=,time=,pgid=,comm=')
+})
+
+test('Claude\'s watts count every process of its work, one started between two looks from its start, never past the processors', async () => {
+  const first = nextKept(undefined, leftLook({ nj1423: 10e9, nj9001: 50e9, cpuNj: 1000e9, gpuNj: 100e9, gpu932: 1e9, gpu408: 1e9 }), 0, false)
+  // Five seconds on: the chat used 25 J, the left script 50 J, an ffmpeg it started since 10 J; the processors 150 J in all, the
+  // graphics processor 6.5 J, a fifth of its busy time Claude's renderer's and the rest the screen's drawing
+  const second = nextKept(first, leftLook({ nj1423: 35e9, nj9001: 100e9, nj9100: 10e9, cpuNj: 1150e9, gpuNj: 106.5e9, gpu932: 1.2e9, gpu408: 1.8e9 }), 5000, false)
+  const f = second?.figures
+  expect(near(f?.wattsClaude)).toBe(17)
+  expect(near(f?.wattsCpu)).toBe(30)
+  expect(near(f?.wattsGpu)).toBe(1.3)
+  // Claude's graphics power is its share of the busy time times what the graphics processor drew: an estimate
+  expect(near(f?.wattsGpuClaude)).toBe(0.26)
+  expect(near(f?.gpuClaude)).toBe(0.12)
+  expect(f?.gpuTop?.map(([name, n]) => [name, near(n)])).toEqual([['WindowServer', 0.48], ['Claude', 0.12]])
+  // Never more than all the processors drew
+  const over = nextKept(first, leftLook({ nj1423: 35e9, nj9001: 100e9, nj9100: 10e9, cpuNj: 1010e9, gpuNj: 100e9, gpu932: 1e9, gpu408: 1e9 }), 5000, false)
+  expect(near(over?.figures.wattsClaude)).toBe(2)
+  // Against a look kept by an earlier version, which held Claude's processes alone, only what was in both is counted
+  const kept = first ? { ...first, raw: { ...first.raw, energyAll: undefined, energyBy: { '1423': 10e9, '9001': 50e9 } } } : undefined
+  expect(near(nextKept(kept, leftLook({ nj1423: 35e9, nj9001: 100e9, nj9100: 10e9, cpuNj: 1150e9, gpuNj: 106.5e9, gpu932: 1.2e9, gpu408: 1.8e9 }), 5000, false)?.figures.wattsClaude)).toBe(15)
+  // A Mac with no energy counters of its own gives no whole
+  const bare = nextKept(nextKept(undefined, leftLook({ nj1423: 0, nj9001: 0, cpuNj: 0, gpuNj: 0, gpu932: 0, gpu408: 0 }).replace(/^E .*$/m, ''), 0, false), leftLook({ nj1423: 5e9, nj9001: 0, cpuNj: 0, gpuNj: 0, gpu932: 0, gpu408: 0 }).replace(/^E .*$/m, ''), 5000, false)?.figures
+  expect([bare?.wattsCpu, bare?.wattsGpu, bare?.wattsGpuClaude]).toEqual([undefined, undefined, undefined])
+  expect(near(bare?.wattsClaude)).toBe(1)
+})
+
+test('the look reads the whole processors\' and graphics processor\'s energy from IOReport, with no admin and no prompt', async () => {
+  expect(usageMac(false)).toContain('IOReportCopyChannelsInGroup')
+  expect(usageMac(false)).toContain('print("E",E["CPU Energy"],E["GPU Energy"])')
+  expect(usageMac(false)).not.toMatch(/powermetrics|sudo/)
+})

@@ -1,2 +1,0 @@
-- After you answer an ask on its card (a button such as Release it or Done, or a reply from its box), the card stays where it was at the top for a minute, saying what you answered, instead of jumping away under your pointer.
-- A piece of work started again by your answer, such as Release it on work that had ended, keeps its place among the cards instead of moving to the very bottom of the panel.

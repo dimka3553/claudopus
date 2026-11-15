@@ -107,10 +107,9 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })
 
-test('Check for updates in Config shows it is checking, then what it found; a second press meanwhile starts no second look', async ($, on) => {
-  const { files, gitRan } = world(on)
-  // The tests run the mod from a folder of its code, as its maker does: a newer version brings that folder up to date with git
-  let page = '{"version":"0.1.0"}'
+test('Check now in Config only looks: it shows it is checking, then what it found, and a second press meanwhile starts no second look; nothing is fetched or moved', async ($, on) => {
+  const { files, gitRan } = world(on, { release: { version: '0.1.2', commit: 'c'.repeat(40), tree: 'a'.repeat(40) } })
+  let page = JSON.stringify({ version: '0.1.0', tree: 'a'.repeat(40) })
   let answer: (() => void) | undefined
   let fetches = 0
   on('http.fetch', async () => {
@@ -125,40 +124,35 @@ test('Check for updates in Config shows it is checking, then what it found; a se
   }
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  expect(await config.find({ type: 'Text', text: 'This chat runs v0.1.0' })).toBeDefined()
+  expect(await until(() => config.find({ type: 'Text', text: 'This chat runs v0.1.0' }))).toBeDefined()
+  // Where it loads from, said as it is
+  expect(await until(() => config.find({ type: 'Text', text: /^It loads from the folder .*, Claudopus's own checkout on main\. Not looked yet\.$/ }))).toBeDefined()
   await pressed(config, 'config-check')
   expect(await until(() => config.find({ type: 'Text', text: 'Checking…' }))).toBeDefined()
-  // While it checks there is no button to press again
-  expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check for updates')).toBe(false)
+  expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check now')).toBe(false)
   release()
   expect(await until(() => config.find({ type: 'Text', text: /^You're on the newest version \(v0\.1\.0\)/ }))).toBeDefined()
   expect(fetches).toBe(1)
-  // The folder is newest already: git is never run
-  expect(gitRan).toEqual([])
-  // A newer release, with changes in the folder that the update would overwrite: git refuses and nothing is changed
-  page = '{"version":"0.1.2"}'
-  files.set('git:online', '0.1.2')
-  files.set('git:merge', 'error: Your local changes to the following files would be overwritten by merge:\n\ta.tsx')
+  // A newer release: Check now says so and the panel offers it; nothing was fetched, moved or installed
+  page = JSON.stringify({ version: '0.1.2', tree: 'a'.repeat(40) })
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  const kept = await until(() => config.find({ type: 'Text', text: /^Couldn't update to v0\.1\.2: changes in its folder that aren't committed/ }))
-  expect(kept?.props.color).toBe('error')
+  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is out: the panel offers it.' }))).toBeDefined()
+  expect(gitRan.filter(one => /^(fetch|merge)/.test(one) || one.includes('fetch --progress'))).toEqual([])
   expect(files.get('manifest')).toBeUndefined()
-  // Pressed again once that is sorted: the folder moves forward to it, and the box says so
-  files.delete('git:merge')
+  // An older page with no fingerprint is no release: said as a failure, in the error colour
+  page = '{"version":"0.1.3"}'
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  // With automatic updates off, as shipped, a chat switches only when /reload-plugins is typed in it
-  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it.' }))).toBeDefined()
-  expect(gitRan).toContain('merge --ff-only --quiet @{u}')
-  files.delete('git:online')
-  // No answer that reads as a version: said as a failure, in the error colour
-  page = 'oops'
-  await pressed(config, 'config-check')
-  await until(async () => answer)
-  release()
-  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check/ }))
+  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page has no fingerprint/ }))
   expect(failed?.props.color).toBe('error')
+  // How often: one choice, written as the two keys; Only when I ask is updates false
+  await config.select({ key: 'config-look-pick', value: '24' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toMatchObject({ updateEvery: 24 })
+  await config.select({ key: 'config-look-pick', value: '0' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toMatchObject({ updates: false })
+  await config.select({ key: 'config-look-pick', value: '1' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })
