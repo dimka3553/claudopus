@@ -585,3 +585,83 @@ test('answering one of two asks at the top leaves both cards where they were, so
   expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
   expect(await list.find({ type: 'Text', text: /You answered “Done”/ } as never)).toBeDefined()
 })
+
+// 15 Nov: Allow once was pressed and the amber box with its buttons stayed up to a second, until the gate's wait (a one-second
+// sleep the engine runs) read the press; only then did the green box come
+const pressedFirst = async ($: Parameters<TestBody>[0], on: On, button: 'once' | 'always' | 'deny', said: string, isRelease = false) => {
+  const w = await gated($, on)
+  if (isRelease) (w.files.set('git:top', '/repo/wt'), w.files.set('git:branch', 'fix-it'))
+  const call = w.bash('p1', isRelease ? 'hold xp1; /plug/claudopus/bin/release' : `${ADMIN} here 'chmod 644 /etc/hosts'`)
+  const base = `gate-p1-${isRelease ? 'r' : ''}0-${button}`
+  expect(await until(async () => keyed(w.list, base))).toBeDefined()
+  // Pressed, and the wait not yet let go: the drawing that follows the press shows the answer, with nothing left to press
+  await pressed(w.list, base)
+  expect(await w.list.find({ type: 'Text', text: said })).toBeDefined()
+  expect((await w.list.findAll({ type: 'Button' })).some(b => (b.key ?? '').startsWith('gate-p1-'))).toBe(false)
+  expect(await w.list.find({ type: 'Text', text: /· waits for your press$/ })).toBeUndefined()
+  w.wake()
+  if (isRelease) (await until(async () => w.holding.get('xp1; /plug/claudopus/bin/release')))?.('released')
+  await call
+}
+test("Allow once on a gate draws it answered in the press's own drawing, before the wait reads it: green, with no buttons left", ($, on) => pressedFirst($, on, 'once', 'You allowed it once · it runs now'))
+test("Always allow on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'always', 'You always allow this command · it runs now, and will not ask again'))
+test("Deny on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'deny', 'You denied it · it did not run, and the work was told'))
+test("Allow once on a release draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'once', 'You allowed it once · it releases now', true))
+
+test('two presses on a gate before its wait reads them send one answer: the first, as drawn', async ($, on) => {
+  const { list, bash, held, wake } = await gated($, on)
+  const call = bash('d1', `${ADMIN} here 'chmod 644 /etc/hosts'`)
+  expect(await held('d1')).toBeDefined()
+  // Both keys as the panel last drew them, pressed one after the other, as a double click on a drawing a moment old does
+  const once = (await keyed(list, 'gate-d1-0-once'))?.key ?? ''
+  const deny = (await keyed(list, 'gate-d1-0-deny'))?.key ?? ''
+  await list.press({ key: once })
+  expect(await list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeDefined()
+  await list.press({ key: deny }).catch(() => undefined)
+  // The second press changed nothing: the card still says what the first one did
+  expect(await list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeDefined()
+  await list.press({ key: once }).catch(() => undefined)
+  wake()
+  const r = (await call) as { deny?: string }
+  expect(r.deny).toBeUndefined()
+  expect((await list.findAll({ type: 'Text' })).filter(t => /^You (allowed|denied|always)/.test(String(t.text ?? ''))).length).toBe(1)
+  expect(await list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^You denied it/ })).toBeUndefined()
+})
+
+test('a gate allowed but not let through says so where its green box was, never a false "allowed"', async ($, on) => {
+  const w = await gated($, on)
+  const call = w.bash('f1', `${ADMIN} here 'chmod 644 /etc/hosts'`)
+  expect(await w.held('f1')).toBeDefined()
+  // The seal for the grant cannot be made, as a keychain that refuses: the command does not run
+  w.files.set('keychain:refused', '1')
+  await w.press('gate-f1-0-once')
+  const r = (await call) as { deny?: string }
+  expect(r.deny).toBeDefined()
+  expect(w.grants()).toEqual([])
+  expect(await until(async () => w.list.find({ type: 'Text', text: 'It could not be sealed · it did not run, and the work was told' }))).toBeDefined()
+  expect(await w.list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeUndefined()
+  expect(await w.list.find({ type: 'Text', text: /· allowed$/ })).toBeUndefined()
+})
+
+// Found on a second look: one Bash call with two commands to allow, the first allowed and the second refused, ran nothing yet left
+// "You allowed it once" green for the first
+test('a call refused after one of its commands was allowed says in grey that nothing in it ran, never green', SLOW, async ($, on) => {
+  const w = await gated($, on)
+  w.files.set('git:top', '/repo/wt')
+  w.files.set('git:branch', 'fix-it')
+  for (const [id, command, second] of [
+    ['m1', `${ADMIN} here 'id -u'; ${ADMIN} here 'id -g'`, 'gate-m1-1-deny'],
+    ['m2', `${ADMIN} here 'id -u'; /plug/claudopus/bin/release`, 'gate-m2-r0-deny'],
+  ] as const) {
+    const call = w.bash(id, command)
+    expect(await w.held(id)).toBeDefined()
+    await w.press(`gate-${id}-0-once`)
+    expect(await until(async () => keyed(w.list, second))).toBeDefined()
+    await w.press(second)
+    expect(((await call) as { deny?: string }).deny).toBeDefined()
+    expect(w.admins).toEqual([])
+    expect(await until(async () => w.list.find({ type: 'Text', text: 'It did not run: another part of the same command was refused, so nothing in it ran' }))).toBeDefined()
+    expect(await w.list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeUndefined()
+  }
+})

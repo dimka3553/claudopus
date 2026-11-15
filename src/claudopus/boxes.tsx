@@ -82,6 +82,9 @@ const isNoteShown = (one: DoneNote, at: number) =>
 // The calls that have ended, so a note made after its call ended (a runner sent to the background) is over from the start
 const callsEnded = new Set<string>()
 const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
+  // Drawn from the press itself: in the list before anything is awaited, shown until the clock dates it a moment later
+  doneNotes = [...doneNotes.filter(one => one.id !== note.id), { ...note, at: Infinity }]
+  drawAgain($)
   const at = await $.clock.now()
   const made = { ...note, at, ...(note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}) }
   doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), made].slice(-6)
@@ -281,6 +284,8 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled Â
   boxSent.add(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
+  // The box goes in the press's own drawing, before its request is removed
+  drawAgain($)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
   // Cancelled, nothing more comes of it: it is over at once
   if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call, endedAt: 0 } : {}), head: boxHead(one.text), said, what: '' })

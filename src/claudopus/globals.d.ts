@@ -236,7 +236,13 @@ declare global {
   export import shellsOf = M10.shellsOf
   export import treeOf = M10.treeOf
   export import waitOf = M10.waitOf
+  export import leftoversOf = M10.leftoversOf
+  export import memOf = M10.memOf
+  export import leftName = M10.leftName
+  export import PS_COLUMNS = M10.PS_COLUMNS
+  export import OpenCall = M10.OpenCall
   export import Proc = M10.Proc
+  export import Span = M10.Span
   export import Job = M10.Job
   export import JobKind = M10.JobKind
   export import TabMove = M9.TabMove

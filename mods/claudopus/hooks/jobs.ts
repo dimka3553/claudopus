@@ -22,6 +22,10 @@ export type Job = {
   isEarlier?: boolean
   isOwn?: boolean
   isEmpty?: boolean
+  // A run left going whose output goes to no file: it runs, and says nothing of how far it is
+  isUntold?: boolean
+  // The memory it and all it started hold, in words
+  mem?: string
   isNamed?: boolean
   expect?: number
   expectText?: string
@@ -481,13 +485,17 @@ export const foldJobs = (jobs: Job[]): Job[] => {
 
 // The processes on this Mac as `ps -axww -o pid=,ppid=,stat=,etime=,command=` lists them, each with when it started, from the
 // time it has run ([[dd-]hh:]mm:ss) and when they were listed
-export type Proc = { pid: string; ppid: string; stat: string; startAt: number; command: string }
+// (listed with its process group and resident memory, `ps -axww -o pid=,ppid=,pgid=,stat=,etime=,rss=,command=`, it has those too)
+export type Proc = { pid: string; ppid: string; stat: string; startAt: number; command: string; pgid?: string; rss?: number }
 const secondsOf = (etime: string) => {
   const [days, rest = ''] = etime.includes('-') ? etime.split('-') : ['0', etime]
   return Number(days) * 86400 + rest.split(':').reduce((sum, part) => sum * 60 + Number(part), 0)
 }
+export const PS_COLUMNS = 'pid=,ppid=,pgid=,stat=,etime=,rss=,command='
 export const procsOf = (text: string, now: number): Proc[] =>
   text.split('\n').flatMap(line => {
+    const full = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+((?:\d+-)?[\d:]+)\s+(\d+)\s+(.*)$/)
+    if (full) return [{ pid: full[1] ?? '', ppid: full[2] ?? '', pgid: full[3] ?? '', stat: full[4] ?? '', startAt: now - secondsOf(full[5] ?? '0') * 1000, rss: Number(full[6] ?? 0), command: full[7] ?? '' }]
     const m = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+((?:\d+-)?[\d:]+)\s+(.*)$/)
     return m ? [{ pid: m[1] ?? '', ppid: m[2] ?? '', stat: m[3] ?? '', startAt: now - secondsOf(m[4] ?? '0') * 1000, command: m[5] ?? '' }] : []
   })
@@ -543,4 +551,76 @@ export const shellsOf = (procs: Proc[], jobs: { id: string; cmd: string; at: num
   for (const pair of pairs) if (!found.has(pair.id) && !taken.has(pair.pid)) (found.set(pair.id, pair.pid), taken.add(pair.pid))
   for (const { job, words } of told) if (!found.has(job.id)) found.set(job.id, shells.some(p => !taken.has(p.pid) && words.every(word => p.command.includes(word))) ? true : null)
   return found
+}
+
+// ---- What a command leaves running, however it was started ----
+// A command's shell leads a process group of its own, and what it starts keeps that group: sent off with &, under nohup, in a shell
+// loop, by xargs -P, by a launcher that exits, in a Python pool. Once the shell has ended, what still runs in its group belongs to
+// that command; so does what it started in a session of its own while it ran (setsid, start_new_session). A command is known here
+// by the process numbers handed out while it ran, from just before it to just after it, so nothing depends on how it was written
+// (on 15 Nov a launcher started with nohup but no `echo $!` drew 8 pages at once with 56 GB and no row on its card)
+// (`until`: the latest a process it left can have started; none while a command sent to the background may still start more)
+export type Span = { id: string; from: number; to: number; at: number; endAt: number; cmd: string; until?: number }
+// A command still running: what it starts is not given to another that ended meanwhile
+export type OpenCall = { from: number; at: number }
+// Process numbers wrap round past this on macOS
+const PID_MOST = 99_999
+const inSpan = (pid: number, span: Pick<Span, 'from' | 'to'>) => (span.to >= span.from ? pid > span.from && pid < span.to : pid > span.from || (pid < span.to && pid <= PID_MOST))
+// The system's own programs, which launchd starts in sessions of their own whenever it likes, are never a command's
+const SYSTEM_PROG = /^(\/System\/|\/usr\/libexec\/|\/usr\/sbin\/|\/sbin\/|\/Library\/Apple\/|\/Applications\/|\/Library\/Application Support\/)/
+export type Left = { span: string; top: Proc; tree: Proc[] }
+// What each command left running: the topmost of each group whose shell has gone (or a session it started of its own), with all it
+// started under it; never one already followed (`known`), nor what runs under one
+// A process counts only when it started while its command ran (or, for one sent to the background, after it began): app helpers
+// orphaned long ago keep a dead leader's group, and process numbers come round again within minutes, so a number alone proves
+// nothing (a second look on 15 Nov found Claude, Telegram and Discord helpers 20 hours old claimed by a fresh command)
+export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = new Set(), open: OpenCall[] = []): Left[] => {
+  if (!spans.length) return []
+  const pids = new Set(procs.map(p => p.pid))
+  const byPid = new Map(procs.map(p => [p.pid, p]))
+  // The groups of runs already followed: the rest of a pipeline sent off with `& echo $!` is that run's
+  const knownGroups = new Set(procs.filter(p => known.has(p.pid) && p.pgid).map(p => p.pgid))
+  const isTimely = (p: Proc, s: Span) => p.startAt >= s.at - 2_000 && (s.until === undefined || p.startAt <= s.until + 2_000)
+  // One a command still running may have started waits for that command to end
+  // (numbers handed out after it, counted round the wrap)
+  const after = (n: number, from: number) => (n - from + PID_MOST + 1) % (PID_MOST + 1)
+  const isOpenOnes = (n: number, p: Proc) => open.some(o => after(n, o.from) > 0 && after(n, o.from) < 50_000 && p.startAt >= o.at - 2_000)
+  // A process under one already followed is that one's
+  const isUnderKnown = (p: Proc) => {
+    for (let at: Proc | undefined = p, n = 0; at && n < 64; at = byPid.get(at.ppid), n++) if (known.has(at.pid)) return true
+    return false
+  }
+  // The command a number was handed out under; where two ran at once, the one whose words the process holds, else the newest
+  const spanOf = (pid: number, p: Proc, isOwnSession: boolean) => {
+    const fits = spans.filter(s => inSpan(pid, s) && isTimely(p, s))
+    if (fits.length <= 1) return fits[0]
+    // A group's leader is its command's own shell, handed its number just after that command's first one: the command whose first
+    // number is nearest below is it. A session of its own goes by the words it holds first
+    const worded = isOwnSession ? fits.filter(s => fragmentsOf(s.cmd).some(word => p.command.includes(word.split('/').at(-1) ?? word))) : []
+    return (worded.length ? worded : fits).reduce((a, b) => (after(pid, b.from) < after(pid, a.from) ? b : a))
+  }
+  const out: Left[] = []
+  for (const p of procs) {
+    if (p.ppid !== '1' || !p.pgid || known.has(p.pid) || knownGroups.has(p.pgid) || isUnderKnown(p)) continue
+    const isOwnSession = p.pgid === p.pid
+    if (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid)) continue
+    const n = Number(isOwnSession ? p.pid : p.pgid)
+    if (isOpenOnes(n, p)) continue
+    const span = spanOf(n, p, isOwnSession)
+    if (span) out.push({ span: span.id, top: p, tree: treeOf(procs, p.pid) })
+  }
+  return out
+}
+// The memory a process and all it started hold, in words (`7.1 GB`); undefined where ps gave none
+export const memOf = (tree: Proc[]) => {
+  const kb = tree.reduce((sum, p) => sum + (p.rss ?? 0), 0)
+  if (!kb) return undefined
+  return kb >= 1024 * 1024 ? `${(kb / 1024 / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(kb / 1024))} MB`
+}
+// A left run's name when one command left several: its program, its script and the words after it, as `Run python fig4.py page 3`
+export const leftName = (command: string) => {
+  const words = command.trim().split(/\s+/)
+  const at = words.findIndex(word => /\.(py|sh|js|mjs|ts|rb|pl|R|jl)$/.test(word))
+  const name = (at >= 0 ? [commandName(command), ...words.slice(at + 1, at + 7)] : [commandName(command)]).join(' ').trim()
+  return `Run ${name.replace(/^Python\b/, 'python')}`.slice(0, 120)
 }
