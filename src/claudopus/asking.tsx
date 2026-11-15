@@ -133,18 +133,20 @@ const calmCard = (one: Todo) => {
 }
 const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, (await read($, reports)).length, (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates])
 const holdTimes = ($: EngineInterface) => {
+  if (!isTyping) recordEvent($, 'hold')
   const made = (typing += 1)
   isTyping = true
   $.clock.after(TYPING, () => void (typing === made && ((isTyping = false), drawAgain($))))
 }
 const freeTimes = ($: EngineInterface) => {
   const wasHeld = isTyping
+  if (wasHeld) recordEvent($, 'let-go')
   typing += 1
   isTyping = false
   if (wasHeld) drawAgain($)
 }
 // Every pane of the mod's is drawn again, from the values as they are now
-const drawFresh = async ($: EngineInterface) => $.ui.invalidate('ui.render')
+const drawFresh = async ($: EngineInterface) => (recordEvent($, 'redraw-all'), $.ui.invalidate('ui.render'))
 // What each pane showed when last drawn afresh: its shape, its content and when, so calmLook knows what has moved since
 const drawnPanes = new Map<string, { shape: string; content: string; at: number; side: string }>()
 // What the panel shows from the mod's own memory rather than its values: what the app's prompts, the admin and file gates, the boxes,
@@ -180,6 +182,7 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   if (!isMoving || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
   calmAt = now
   await writeHeldOthers($)
+  recordEvent($, 'redraw-calm')
   $.ui.invalidate('ui.render')
 }
 // Whether an element of the mod's is a box the person types into: an ask's reply box or a key box

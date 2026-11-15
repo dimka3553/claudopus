@@ -13,7 +13,7 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         key={`band-waits-${presses}`}
         plain
         hover={{ scope: 'band-waits', underline: true }}
-        onPress={() => ((presses += 1), void $.ui.scroll({ in: LIST, to: 'start', block: 'start' }).catch(() => undefined))}
+        onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
       >
         {waitsAtTop > 0 ? (
           <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 waits' : `${waitsAtTop} wait`} for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
@@ -55,7 +55,7 @@ const bandHooks = (on: On) => {
         const press = (n: number, choice: string) => {
           if (picked === n) return (bandPick = undefined), void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))
           const pick = (bandPick = { id, n })
-          $.ui.invalidate('ui.render')
+          ;(recordEvent($, 'redraw-band'), $.ui.invalidate('ui.render'))
           // Left alone, the pick is let go
           $.clock.after(BAND_PICK, () => void (bandPick === pick && ((bandPick = undefined), $.ui.invalidate('ui.render'))))
         }

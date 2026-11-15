@@ -143,7 +143,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('fs.stat', (_, e) => {
     const kind = files.has(e.path) ? 'file' : [...files.keys()].some(path => path.startsWith(`${e.path}/`)) ? 'dir' : ''
     if (!kind) throw new Error(`ENOENT ${e.path}`)
-    return { value: { kind, size: 1, mtimeMs: 0, isLink: false } as never }
+    return { value: { kind, size: 1, mtimeMs: Number(files.get(`mtime:${e.path}`) ?? 0), isLink: false } as never }
   })
   on('mcp.call', (_, e) => {
     if (e.server === 'terminal') terminals.push(e.args)
