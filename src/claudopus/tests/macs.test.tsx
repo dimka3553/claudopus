@@ -217,7 +217,7 @@ test("Details of work in a chat the app runs on another Mac shows what that chat
   expect(texts).toContain('“Can you improve the video?”')
   expect(texts).toContain('Have it checked')
   expect(texts).toContain('Rendering again for a second look.')
-  expect(texts).toContain('Its chat is shown in the panel of the chat "Video" on m4, which runs it. Stop it or move it to another model there.')
+  expect(texts).toContain('Its chat is kept by the chat "Video" on m4, which runs it. Stop it or move it to another model there.')
   await pressed(tab, `their-chat-${id}`)
   expect(await until(async () => shown.find(argv => argv[1]?.startsWith('claude://')))).toEqual(['open', 'claude://code/session_01Video'])
   await tab.unmount()

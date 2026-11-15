@@ -7,7 +7,7 @@ import type { Round } from './flows'
 import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
-import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
+import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
 import type { Answer, Off } from './shared'
 import { configView, editing, fillModels, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Models, Role } from './config'
@@ -16,7 +16,7 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isUpdateDue, loo
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSaid, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
+import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSaid, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
@@ -55,12 +55,17 @@ const PASTE_CHARS = 12_000
 const KEPT = 40
 const ENTRIES_KEPT = 200
 // How many of the to-dos not yet started an open card lists before "more"
-const NEXT_SHOWN = 3
 // What else a Details tab can unfold, kept beside its chat's numbers, far from them: the person's words whole, every to-do
 // not yet started, and those done or dropped
 const OPEN_ASK = -1_000_001
-const OPEN_NEXT = -1_000_002
 const OPEN_DONE = -1_000_003
+const OPEN_RESULT = -1_000_004
+// Under a command's row in Details, its last lines sit on a darker ground, as a terminal's
+const OUTPUT_FILL = '#0000003D'
+// How much of what work reported at its end its Details shows before Show all
+const RESULT_SHOWN = 600
+// Past this many done to-dos, Details folds them into one row
+const DONE_FOLDED = 8
 // How much of a piece of work's chat the panel draws, the newest: this many lines, and this many characters, which one drawing has room for
 const TALK_KEPT = 300
 const TALK_CHARS = 40_000
@@ -1607,7 +1612,8 @@ const titleOf = (one: Todo) => one.title || quoted(one.words, 60) || 'Background
 const openWork = ($: EngineInterface, id: string) => {
   presses += 1
   void comingTab((async () => {
-    const one = [...(await read($, todos)), ...cardsOf(await read($, others))].find(card => card.id === id)
+    const there = await read($, others)
+    const one = [...(await read($, todos)), ...cardsOf(there), ...helpersOf(there)].find(card => card.id === id)
     if (!one) return
     // A tab opened afresh starts folded; one already open keeps what was unfolded in it
     if (!(await $.ui.panes()).some(pane => pane.id === workPaneOf(id))) (folds.delete(id), pictureIn.delete(workPaneOf(id)))
@@ -3586,6 +3592,79 @@ const loadWork = async ($: EngineInterface, id: string) => {
   if (isChanged) redraw($)
 }
 
+// Another chat's work keeps its chat in that chat's transcript on this Mac, which the engine gives this chat no rows of: it is read
+// from its file, the end of it, in the same rows. A chat on another Mac is not read: its Details says where it is
+const THEIR_TAIL = 800_000
+const SAFE_ID = /^[A-Za-z0-9_-]{1,80}$/
+// A transcript's lines as the engine's rows: what the work was told, what it wrote, each tool step with what came back
+const rowsOfTranscript = (text: string): SessionMessage[] => {
+  const rows: SessionMessage[] = []
+  const uses = new Map<string, ToolUseSummary>()
+  const textOf = (content: unknown) =>
+    typeof content === 'string' ? content : Array.isArray(content) ? content.flatMap(block => (block && typeof block === 'object' && (block as { type?: unknown }).type === 'text' && typeof (block as { text?: unknown }).text === 'string' ? [(block as { text: string }).text] : [])).join('\n') : ''
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('{')) continue
+    let entry: { type?: unknown; isMeta?: unknown; message?: { content?: unknown } }
+    try {
+      entry = JSON.parse(line) as typeof entry
+    } catch {
+      continue
+    }
+    const content = entry.message?.content
+    if (entry.type === 'assistant') {
+      const toolUses = (Array.isArray(content) ? content : []).flatMap((block): ToolUseSummary[] => {
+        const b = block as { type?: unknown; id?: unknown; name?: unknown; input?: unknown }
+        if (b?.type !== 'tool_use' || typeof b.id !== 'string' || typeof b.name !== 'string') return []
+        const use: ToolUseSummary = { tool_use_id: b.id, tool: b.name, input: b.input && typeof b.input === 'object' ? (b.input as Record<string, unknown>) : {} }
+        uses.set(b.id, use)
+        return [use]
+      })
+      rows.push({ role: 'assistant', text: textOf(content), toolUses } as SessionMessage)
+    } else if (entry.type === 'user' && entry.isMeta !== true) {
+      // What came back to a tool step goes with that step; the rest is what the work was told
+      for (const block of Array.isArray(content) ? content : []) {
+        const b = block as { type?: unknown; tool_use_id?: unknown; content?: unknown; is_error?: unknown }
+        const use = b?.type === 'tool_result' && typeof b.tool_use_id === 'string' ? uses.get(b.tool_use_id) : undefined
+        if (use) Object.assign(use, { text: textOf(b.content), ...(b.is_error === true ? { isError: true } : {}) })
+      }
+      const said = textOf(content)
+      if (said) rows.push({ role: 'user', text: said, toolUses: [] } as unknown as SessionMessage)
+    }
+  }
+  return rows
+}
+const loadTheirs = async ($: EngineInterface, one: Todo) => {
+  const c = one.chat
+  const id = one.id
+  if (!c || c.host || !SAFE_ID.test(c.id) || !SAFE_ID.test(c.agent ?? '') || loading.has(id)) return
+  loading.add(id)
+  let isChanged = false
+  try {
+    // Read again when it has made a step, said where it is, or ended: not as its context grows
+    const key = [one.steps ?? 0, one.entries.at(-1)?.text ?? '', one.status, one.items.length, one.endedAt].join(':')
+    const now = await $.clock.now()
+    const was = talks.get(id)
+    if (was?.key === key && (was.lines || now - (was.at ?? 0) < RETRY_READ)) return
+    const home = (await $.env.get('HOME')) ?? ''
+    // Its folder named as the engine names its projects, and failing that any project that holds that chat
+    const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-')
+    const name = `${c.id}/subagents/agent-${c.agent}.jsonl`
+    const r = await $.process
+      .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', `${home}/.claude/projects`, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
+      .catch(() => undefined)
+    const rows = r?.exitCode === 0 ? rowsOfTranscript(r.stdout) : undefined
+    talks.set(id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
+    isChanged = true
+  } catch (err) {
+    if (!talks.has(id)) talks.set(id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) })
+    isChanged = true
+    await log($, `chat of ${id} not read: ${String(err)}`).catch(() => undefined)
+  } finally {
+    loading.delete(id)
+  }
+  if (isChanged) redraw($)
+}
+
 // The pictures an ask is about, drawn small on its card under what it is about, so the person decides there without waiting for
 // the chat to send them (14 Nov: a card asked to pick one of four designs, and the designs came only later, in the chat). Each
 // small copy is smaller than a chat's: a card's pictures are drawn in the list, beside every other card, and the list is one drawing
@@ -4933,6 +5012,8 @@ const liveDir = () => `${dir}/${LIVE_DIR}`
 // What this chat last wrote to its file and when: written again when it changes or its beat is due, with work or without, so the
 // panels of other Macs list it as open. It is removed as the chat ends
 let sharedSign = ''
+// The same without how its jobs and helpers move, which alone writes the file at most every LOOK_EVERY
+let sharedCore = ''
 let sharedAt = 0
 const ownLive = (id: string) => `${liveDir()}/${id}.json`
 // Set as the session ends, so a beat due after it does not write the file again
@@ -4969,14 +5050,31 @@ const shareMine = async ($: EngineInterface) => {
     linkReadAt = now
     myLink = await readLink($, id).catch(() => myLink)
   }
-  const cards = shareable(await read($, todos), now)
+  const list = await read($, todos)
+  // Each card and helper carries how its jobs stand, as this chat reads them, so another chat's Details shows them as this one does
+  const withSeen = (one: Todo): Todo => {
+    const seen = Object.fromEntries(
+      [...(one.bg ?? []), ...(one.detached ?? [])].flatMap(job => {
+        const s = jobLog.get(job.id)
+        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}) }]] : []
+      }),
+    )
+    return Object.keys(seen).length ? { ...one, seenJobs: seen } : one
+  }
+  const cards = shareable(list, now).map(withSeen)
+  const helpers = shareableHelpers(list, cards).map(withSeen)
+  const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}`).join('|')).join(' ')
   const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
   const prompts: Prompt[] = waiting.map(shareOf)
   // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open
   const answeredNow: Prompt[] = answeredShown(now).map(shareOf)
-  const sign = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
+  // Helpers are signed by what their Details shows, not by the context they hold, which moves at every step
+  const helpersSign = JSON.stringify(helpers.map(one => [one.id, one.status, one.items, one.entries.at(-1)?.text ?? '']))
+  const core = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
+  const sign = `${core}\n${helpersSign}\n${jobsSign}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
-  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(prompts.length ? { prompts } : {}), ...(answeredNow.length ? { answeredPrompts: answeredNow } : {}), ...(myLink ? { link: myLink } : {}) }
+  if (core === sharedCore && now - sharedAt < LOOK_EVERY) return
+  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(helpers.length ? { helpers } : {}), ...(prompts.length ? { prompts } : {}), ...(answeredNow.length ? { answeredPrompts: answeredNow } : {}), ...(myLink ? { link: myLink } : {}) }
   // Ended work is written apart, under `ended`: a chat still running a version from before ended work was shared reads `cards` only,
   // and would show what is there as running for good
   const isLive = (one: Todo) => one.status === 'working' || Boolean(one.ask)
@@ -4986,6 +5084,7 @@ const shareMine = async ($: EngineInterface) => {
   if (text === undefined) return void log($, "this chat's file not shared: it could not be checked for kept keys")
   await $.fs.write(ownLive(id), text)
   sharedSign = sign
+  sharedCore = core
   sharedAt = now
 }
 // This chat's file goes as its session ends, and when it starts (a file a crash or a reload left behind): the others drop its cards
@@ -7612,7 +7711,7 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -7633,8 +7732,8 @@ const callFiles = new Map<string, { file: string; at: number }>()
 const jobFiles = new Map<string, string>()
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
-const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false): Job => {
-  const seen = jobLog.get(id)
+const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen): Job => {
+  const seen = jobLog.get(id) ?? theirs
   const wait = isWatch ? undefined : waitOf(cmd)
   const said = describedOf(what)
   const kind: JobKind = isWatch ? 'watch' : (said.kind ?? (wait ? 'wait' : jobKindOf(cmd, what)))
@@ -7644,8 +7743,8 @@ const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = fals
 // The jobs a card has running: what it sent to the background, and a command it has waited on a while; jobs alike are one
 const jobsOf = (one: Todo, at: number): Job[] =>
   foldJobs([
-    ...(one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch)),
-    ...(one.detached ?? []).map(d => jobOf(d.id, d.what, d.cmd, d.at)),
+    ...(one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id])),
+    ...(one.detached ?? []).map(d => jobOf(d.id, d.what, d.cmd, d.at, false, one.seenJobs?.[d.id])),
     ...(one.status === 'working' && one.running?.cmd && !isWaitOnly(one.running.cmd) && at - one.running.at >= RUNNING_SHOWN
       ? [jobOf(`call-${one.id}`, one.running.label ?? '', one.running.cmd, one.running.at)]
       : []),
@@ -7818,8 +7917,8 @@ const lookJobs = async ($: EngineInterface) => {
     const wait = waits.find(w => w.id === id)
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
-    const next: Seen = { ...seen, ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
+    const next: Seen = { ...seen, tail: tailOf(text), ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true
@@ -9269,6 +9368,8 @@ const panelHooks = (on: On) => {
     // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
     for (const one of cardsOf(otherChats)) if (one.ask?.replied && actingOn.get(`${one.id}:${one.ask.at}`) === one.ask.replied.text) actingOn.delete(`${one.id}:${one.ask.at}`)
     const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
+    // Their helpers, which only a Details tab lists
+    const helpersThere = helpersOf(otherChats)
     const chat = await read($, me)
     const at = await $.clock.now()
     // Prompts answered here and in other chats, for a minute after their call ended
@@ -10018,7 +10119,7 @@ const panelHooks = (on: On) => {
 
     // The work this Details tab is for, if it is one; a workflow's tab folds each of its agents' chats apart
     const flowOpen = flowShown ? pickedOf(flowShown) : undefined
-    const workId = paneId === LIST ? '' : flowShown ? `${flowShown.id}:${flowOpen?.id ?? ''}` : ([...all, ...elsewhere].find(one => workPaneOf(one.id) === paneId)?.id ?? '')
+    const workId = paneId === LIST ? '' : flowShown ? `${flowShown.id}:${flowOpen?.id ?? ''}` : ([...all, ...elsewhere, ...helpersThere].find(one => workPaneOf(one.id) === paneId)?.id ?? '')
     // What is unfolded in this tab: runs of tool steps and long messages by number, and the parts named by OPEN_ASK and the rest
     const open = folds.get(workId) ?? []
     const fold = (at: number) => {
@@ -10081,66 +10182,88 @@ const panelHooks = (on: On) => {
       )
     }
 
-    // The to-dos: the one being done first, bright, with the dots and where the work says it is; the next few under it, dim; what
-    // is done or dropped folded into one quiet count. Orange is the header's alone
+    // The to-dos, every one in the order the work listed them: done ticked, the one being done bright with the dots and where the
+    // work says it is under it, the rest dim, dropped struck through. Many done fold into one row that opens them. Orange is the
+    // header's alone
     const todoPart = (one: Todo) => {
       const isWorking = one.status === 'working'
-      const doing = one.items.filter(item => item.state === 'doing')
-      const waiting = one.items.filter(item => item.state === 'open')
-      const done = one.items.filter(item => item.state === 'done')
-      const dropped = one.items.filter(item => item.state === 'dropped')
-      const kept = one.items.length - dropped.length
+      const done = one.items.filter(item => item.state === 'done').length
+      const kept = one.items.filter(item => item.state !== 'dropped').length
       const where = isWorking ? now(one) : ''
-      const shownNext = open.includes(OPEN_NEXT) ? waiting : waiting.slice(0, NEXT_SHOWN)
-      const settled = [done.length ? `${done.length} done` : '', dropped.length ? `${dropped.length} dropped` : ''].filter(Boolean).join(' · ')
+      const hasDoing = one.items.some(item => item.state === 'doing')
+      const isFolded = done > DONE_FOLDED && !open.includes(OPEN_DONE)
       if (!one.items.length && !where) return null
+      let isWhereSaid = false
       return part(
         'part-todos',
         'To-dos',
-        kept ? `${done.length} of ${kept} done` : '',
-        <Box flexDirection="column" gap={1}>
-          {doing.length || where ? (
-            <Box key="doing" flexDirection="column">
-              <Box flexDirection="column" minWidth={0} flexGrow={1} flexShrink={1}>
-                {doing.length ? (
-                  doing.map((item, i) => row(`doing-${i}`, isWorking ? live(`live-doing-${i}`) : <Text dimColor>○</Text>, item, i === 0 && where ? cut(where, room) : ''))
-                ) : (
-                  <Box flexDirection="row" alignItems="flex-start" gap={1}>
-                    {live('live-where')}
-                    <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                      <Text wrap="wrap">{cut(where, room)}</Text>
-                    </Box>
-                  </Box>
-                )}
+        kept ? `${done} of ${kept} done` : '',
+        <Box flexDirection="column">
+          {done > DONE_FOLDED ? opener(OPEN_DONE, isFolded ? `${done} done` : 'Fold the done') : null}
+          {one.items.map((item, i) => {
+            if (item.state === 'done' && isFolded) return null
+            if (item.state === 'doing') {
+              const under = !isWhereSaid && where ? cut(where, room) : ''
+              isWhereSaid = true
+              return row(`todo-${i}`, isWorking ? live(`live-doing-${i}`) : <Text dimColor>○</Text>, item, under)
+            }
+            const mark = item.state === 'done' ? <Text color="success" dimColor>✓</Text> : <Text dimColor>{item.state === 'dropped' ? '✕' : '○'}</Text>
+            return row(`todo-${i}`, mark, item)
+          })}
+          {!hasDoing && where ? (
+            <Box key="where" flexDirection="row" alignItems="flex-start" gap={1}>
+              {live('live-where')}
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                <Text wrap="wrap">{cut(where, room)}</Text>
               </Box>
-            </Box>
-          ) : null}
-          {waiting.length ? (
-            <Box key="next" flexDirection="column">
-              <Text dimColor>Next</Text>
-              {shownNext.map((item, i) => row(`next-${i}`, <Text dimColor>○</Text>, item))}
-              {waiting.length > NEXT_SHOWN ? opener(OPEN_NEXT, open.includes(OPEN_NEXT) ? 'Fewer' : `${waiting.length - NEXT_SHOWN} more`) : null}
-            </Box>
-          ) : null}
-          {settled ? (
-            <Box key="settled" flexDirection="column">
-              {opener(OPEN_DONE, settled)}
-              {open.includes(OPEN_DONE)
-                ? [...done, ...dropped].map((item, i) =>
-                    row(`settled-${i}`, <Text color={item.state === 'done' ? 'success' : undefined} dimColor>{item.state === 'done' ? '✓' : '✕'}</Text>, item),
-                  )
-                : null}
             </Box>
           ) : null}
         </Box>,
       )
     }
-
     // In Details: what the work has running, then every helper it started, and theirs, at work or ended, each with what it has
     // running under it, as the same tree as on its card, every job shown; each helper opens its own Details, which shows its own
+    // Under a helper at work, the step it is on and where it says it is; under a job, the last lines its output ends with, as a
+    // terminal shows them. Both sit where the row's name starts; one that ended has nothing under it
+    const underTwig = (t: Twig) => {
+      const pad = t.depth * 2 + 4
+      if (t.job) {
+        // the line its row already says is not said again
+        const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).filter(line => line.trim() !== (t.job?.latest ?? '').trim()).slice(-OUTPUT_LINES)
+        if (!tail.length) return null
+        return (
+          <Box key={`tail-${t.job.id}`} flexDirection="row" paddingLeft={pad} flexShrink={0}>
+            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={OUTPUT_FILL}>
+              {tail.map((line, n) => (
+                <Text key={`tail-${t.job?.id}-${n}`} dimColor wrap="truncate-end">
+                  {line}
+                </Text>
+              ))}
+            </Box>
+          </Box>
+        )
+      }
+      const kid = t.one
+      if (!kid || kid.status !== 'working') return null
+      const kept = kid.items.filter(item => item.state !== 'dropped')
+      const doing = kept.findIndex(item => item.state === 'doing')
+      const lines = [doing >= 0 ? `Step ${doing + 1} of ${kept.length} · ${kept[doing]?.text ?? ''}` : '', now(kid)].filter(Boolean)
+      if (!lines.length) return null
+      return (
+        <Box key={`under-${kid.id}`} flexDirection="column" paddingLeft={pad} flexShrink={0}>
+          {lines.map((line, n) => (
+            <Text key={`under-${kid.id}-${n}`} dimColor wrap="truncate-end">
+              {line}
+            </Text>
+          ))}
+        </Box>
+      )
+    }
     const helpersPart = (one: Todo) => {
-      const under = underOf(all, one.id)
-      const branches = [...jobBranches(one, true), ...withJobs(branchesOf(all, one.id, () => true), true)]
+      // Another chat's work has its helpers from that chat's file
+      const list = one.chat ? helpersThere : all
+      const under = underOf(list, one.id)
+      const branches = [...jobBranches(one, true), ...withJobs(branchesOf(list, one.id, () => true), true)]
       const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid, at).reduce((sum, job) => sum + (job.count ?? 1), 0), 0)
       if (!under.length && !jobs) return null
       const running = under.filter(kid => kid.status === 'working').length
@@ -10151,7 +10274,7 @@ const panelHooks = (on: On) => {
         'part-helpers',
         !jobs ? 'Helpers' : under.length ? 'Helpers and jobs' : 'Running',
         side,
-        <Box flexDirection="column">{twigsOf(branches).map(t => (t.job ? jobRow(t, 'details') : twigRow(t, 'details')))}</Box>,
+        <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
       )
     }
 
@@ -10259,21 +10382,32 @@ const panelHooks = (on: On) => {
       )
     }
 
-    // Another chat's work: its own chat is in that chat's panel, which one press opens wherever the app can open that chat (a chat of
-    // the app on this Mac, or one Remote Control serves); elsewhere it says where to go. Nothing of that chat is read from here
-    const theirChat = (one: Todo, c: NonNullable<Todo['chat']>) => {
-      const id = one.id
-      const s = otherChats.find(one => one.chat === c.id && one.host === c.host)
-      const canOpen = Boolean(s && pressOf(s))
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text dimColor wrap="wrap">{`Its chat is shown in the panel of the chat "${chatName(c)}"${c.host ? ` on ${macName(c.host)}` : ''}, which runs it.${one.status === 'working' ? ' Stop it or move it to another model there.' : ''}`}</Text>
-          {s && canOpen ? (
-            <Box flexDirection="row">
-              <Button key={`their-chat-${id}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, s))} />
-            </Box>
-          ) : null}
-        </Box>
+    // Another chat's work whose chat cannot be read here (a chat on another Mac, or one its file no longer holds): where it is. Its
+    // head has the press that opens that chat
+    const theirChat = (one: Todo, c: NonNullable<Todo['chat']>) => (
+      <Text dimColor wrap="wrap">{`Its chat is kept by the chat "${chatName(c)}"${c.host ? ` on ${macName(c.host)}` : ''}, which runs it.${one.status === 'working' ? ' Stop it or move it to another model there.' : ''}`}</Text>
+    )
+    // The press on another chat's name that opens it, wherever the app can open that chat (a chat of the app on this Mac, or one Remote
+    // Control serves)
+    const openTheirs = (one: Todo, c: NonNullable<Todo['chat']>) => {
+      const s = otherChats.find(other => other.chat === c.id && other.host === c.host)
+      return s && pressOf(s) ? <Button key={`their-chat-${one.id}-${presses}`} label="Open that chat ↗" plain onPress={() => void ((presses += 1), openChat($, s))} /> : null
+    }
+
+    // What the work reported as it ended, the first of it, whole on a press
+    const resultPart = (one: Todo) => {
+      if (one.status === 'working' || !one.answer.trim()) return null
+      const whole = one.answer.trim()
+      const short = cut(whole, RESULT_SHOWN)
+      const isLong = short !== whole
+      return part(
+        'part-result',
+        'Result',
+        '',
+        <Box flexDirection="column">
+          <Markdown text={isLong && !open.includes(OPEN_RESULT) ? short : whole} />
+          {isLong ? opener(OPEN_RESULT, open.includes(OPEN_RESULT) ? 'Show less' : 'Show all') : null}
+        </Box>,
       )
     }
 
@@ -10281,7 +10415,7 @@ const panelHooks = (on: On) => {
     // buttons sit at the top, above a chat of any length
     const big = (one: Todo, lines: Line[] | undefined) => {
       const showing = lines ? newest(lines).length : 0
-      const parent = one.parentId ? all.find(card => card.id === one.parentId) : undefined
+      const parent = one.parentId ? [...all, ...elsewhere, ...helpersThere].find(card => card.id === one.parentId) : undefined
       return (
         <Box key={`todo-${one.id}`} flexDirection="column" gap={1} flexGrow={1}>
           <Box key="part-head" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
@@ -10296,7 +10430,12 @@ const panelHooks = (on: On) => {
                   <Button key={`open-parent-${one.id}-${presses}`} label={`↑ A helper of: ${cut(titleOf(parent), Math.max(20, room - 16))}`} plain dimColor hover={{ scope: `parent-${one.id}`, underline: true }} onPress={() => openWork($, parent.id)} />
                 </Box>
               ) : null}
-              {one.chat ? <Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat, selfName()) ? `, ${chatSide(one.chat, selfName())}` : ''}`}</Text> : null}
+              {one.chat ? (
+                <Box flexDirection="row" flexWrap="wrap" alignItems="flex-start" gap={1}>
+                  <Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat, selfName()) ? `, ${chatSide(one.chat, selfName())}` : ''}`}</Text>
+                  {openTheirs(one, one.chat)}
+                </Box>
+              ) : null}
               {(one.status === 'working' && !one.chat) || left(one) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
@@ -10327,10 +10466,11 @@ const panelHooks = (on: On) => {
               <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
             </Box>
           ) : null}
+          {resultPart(one)}
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
-          {one.chat
+          {one.chat && !lines && (talks.has(one.id) || one.chat.host)
             ? part('part-chat', 'Its chat', '', theirChat(one, one.chat))
             : part('part-chat', 'Its chat', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading its chat…</Text>)}
         </Box>
@@ -10588,11 +10728,12 @@ const panelHooks = (on: On) => {
     }
 
     // A Details tab stays, even once its work has ended, until it is closed; work no longer kept says so
-    const alone = [...all, ...elsewhere].find(one => one.id === workId)
+    const alone = [...all, ...elsewhere, ...helpersThere].find(one => one.id === workId)
     if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This work has ended, or its chat is closed. Its chat keeps it.' : 'This work is no longer kept.'}</Text>
     // Its chat and pictures are read outside the drawing, which draws at once from what was read last: a long chat takes seconds to
     // read, and a drawing that waits on it is never shown
-    if (alone && !alone.chat) void loadWork($, alone.id).catch(() => undefined)
+    // Another chat's is read from that chat's own file, on this Mac
+    if (alone) void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(() => undefined)
     const talked = alone ? talks.get(alone.id) : undefined
     // The reports kept, in every chat: on this pane only the button that opens their own
     const kept = await read($, reports)

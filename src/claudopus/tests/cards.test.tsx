@@ -121,17 +121,9 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await tab.find({ type: 'Text', text: /^Check the left ear/ }))?.props.dimColor).toBe(true)
   expect((await tab.find({ type: 'Text', text: /^The nostril is closed/ }))?.props.dimColor).toBe(true)
   expect(await tab.find({ type: 'Text', text: /^Now:$/ })).toBeUndefined()
-  // The next three are listed, the rest behind "more"
-  expect(await tab.find({ type: 'Text', text: /^Later step 2$/ })).toBeDefined()
-  expect(await tab.find({ type: 'Text', text: /^Later step 3$/ })).toBeUndefined()
-  await pressed(tab, 'fold--1000002')
+  // Every to-do is listed in the order the work listed them: done ticked, dropped struck through, the rest dim
   expect(await tab.find({ type: 'Text', text: /^Later step 4$/ })).toBeDefined()
-  expect(await tab.find({ type: 'Text', text: /^Fit the/ })).toBeUndefined()
-  expect((await keyed(tab, 'fold--1000003'))?.props.label).toBe('▸ 1 done · 1 dropped')
-  // A pressed button comes back under a new key: the app keeps the button that holds the focus in view, and pulled the view back to it
-  const before = (await keyed(tab, 'fold--1000003'))?.key
-  await pressed(tab, 'fold--1000003')
-  expect((await keyed(tab, 'fold--1000003'))?.key).not.toBe(before)
+  expect(await keyed(tab, 'fold--1000003')).toBeUndefined()
   expect((await tab.find({ type: 'Text', text: /^Fit the/ }))?.props.dimColor).toBe(true)
   expect((await tab.find({ type: 'Text', text: /^Try the/ }))?.props.strikethrough).toBe(true)
   // The list behind it is as it was
@@ -739,7 +731,6 @@ test("Details opens as a tab of its own, named after the work, in front; pressed
   // The pressed button comes back under a new key, so the list is not held where it was
   expect(await pane.find({ type: 'Button', key: 'open-a1-0' })).toBeUndefined()
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
-  await pressed(tab, 'fold--1000002')
   expect(await tab.find({ type: 'Text', text: /^Step 5$/ })).toBeDefined()
   // Pressed again with its tab open: the same tab comes forward, nothing is closed, and it stays unfolded
   await pressed(pane, 'open-a1')

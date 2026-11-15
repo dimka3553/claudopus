@@ -96,6 +96,9 @@ export type Todo = {
   // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
   // in its own words, and since when, with the command itself. Dropped as it ends or is stopped
   bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string }[]
+  // In another chat's file only: how each of its jobs stands as that chat last read it (its latest line, how far, its last lines),
+  // by the job's id, so its Details shows them as that chat's own does
+  seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[] }>
   // What it started detached (with nohup or setsid, its output to a log): its own words for it, since when, the command, the log
   // it writes and its process, while that runs. Kept past its end, as such a job outlives it
   detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string }[]
@@ -121,7 +124,7 @@ export type Todo = {
 
 // What one chat shares with the panels of the others, in ~/.claude/claudopus/live/<chat id>.json: its running work, and when it last
 // said so. `host` is the Mac it was fetched from, empty for this one
-export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; prompts?: Prompt[]; answeredPrompts?: Prompt[]; link?: Link }
+export type Shared = { chat: string; title: string; folder: string; host: string; at: number; cards: Todo[]; helpers?: Todo[]; prompts?: Prompt[]; answeredPrompts?: Prompt[]; link?: Link }
 // What opens a chat in the Claude app: its Remote Control id (session_…), which opens it from any Mac signed in to the same account,
 // and the app's own id for it (local_…), which opens it only on the Mac it runs on
 export type Link = { bridge: string; app: string }
