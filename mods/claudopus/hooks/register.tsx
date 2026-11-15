@@ -9221,7 +9221,7 @@ const usageWords = (f: UsageFigures) => ({
   cpu: f.cpu === undefined ? '' : `Processor: ${pctText(f.cpu)}% busy, Claude ${pctText(f.cpuClaude ?? 0)}% of the whole`,
   disk: f.disk === undefined ? '' : `Disk: ${rateText(f.disk).join(' ')} read and written`,
   net: f.net === undefined ? '' : `Network: ${rateText(f.net).join(' ')} in and out`,
-  gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy`,
+  gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy${f.gpuClaude !== undefined ? `, Claude ${pctText(f.gpuClaude)}% of the whole` : ''}`,
   battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
 })
 const batteryWords = (b: UsageBattery) =>
@@ -9247,22 +9247,40 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
     gpu: f.gpu === undefined ? undefined : {
       title: 'Graphics processor',
       value: `${pctText(f.gpu)}% busy`,
-      rows: f.gpuMem === undefined ? [] : [['Its memory in use', f.gpuMemTotal ? `${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB` : `${gbText(f.gpuMem)} GB`]],
+      rows: [
+        ...(f.gpuClaude !== undefined ? [['Claude and what it started', `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
+        ...(f.gpuMem !== undefined ? [['Graphics memory in use', f.gpuMemTotal ? `${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB` : `${gbText(f.gpuMem)} GB`] as [string, string]] : []),
+      ],
     },
     battery: !b ? undefined : {
       title: 'Battery',
       value: `${b.pct}%`,
       note: b.state === 'battery' ? (b.left ? `On battery, about ${leftText(b.left)} left` : 'On battery, the time left is still being estimated') : b.state === 'charging' ? (b.left ? `Charging, about ${leftText(b.left)} to full` : 'Charging, the time to full is still being estimated') : b.state === 'unknown' ? 'The system does not say whether it charges' : b.pct >= 100 ? 'Fully charged, on power' : 'On power, not charging',
-      rows: [],
+      // The strain on it: what the whole Mac draws, and what Claude's processors draw of that (the Mac counts no process's graphics
+      // or screen power)
+      rows: [
+        ...(f.watts !== undefined ? [['The Mac is drawing', `${wattText(f.watts)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [["Claude's processor use", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+      ],
     },
-    disk: f.disk === undefined ? undefined : { title: 'Disk', value: rateText(f.disk).join(' '), note: 'Read and written together', rows: f.disks?.length ? [['Disks', f.disks.join(', ')]] : [] },
+    disk: f.disk === undefined ? undefined : {
+      title: 'Disk',
+      value: rateText(f.disk).join(' '),
+      note: 'Reading and writing together',
+      rows: f.diskClaude !== undefined ? [['Claude and what it started', rateText(f.diskClaude).join(' ')]] : [],
+    },
     net: f.net === undefined ? undefined : {
       title: 'Network',
       value: rateText(f.net).join(' '),
-      rows: [...(f.netIn !== undefined && f.netOut !== undefined ? [['In', rateText(f.netIn).join(' ')], ['Out', rateText(f.netOut).join(' ')]] as [string, string][] : []), ...(f.ports?.length ? [['Connections', f.ports.join(', ')]] as [string, string][] : [])],
+      rows: [
+        ...(f.netIn !== undefined && f.netOut !== undefined ? [['Download', rateText(f.netIn).join(' ')], ['Upload', rateText(f.netOut).join(' ')]] as [string, string][] : []),
+        ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [['Claude downloading', rateText(f.netInClaude).join(' ')], ['Claude uploading', rateText(f.netOutClaude).join(' ')]] as [string, string][] : []),
+      ],
     },
   }
 }
+// Watts, whole from ten up, a tenth below
+const wattText = (w: number) => (w >= 10 ? `${Math.round(w)}` : `${Math.round(w * 10) / 10}`)
 // The card, in the bar's own column above the figures: drawn hidden, and shown while the pointer rests on its figure through the
 // figure's hover group. The app's lifted hover cards (an absolute Box under a keyed one) were tried and left cards open after the
 // pointer had gone on to the next figure; a group is lit and put out by the pointer itself, so one card shows at a time
@@ -9315,7 +9333,7 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
   return [
     one('memory', cards.memory, usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),
     f.cpu === undefined ? null : one('cpu', cards.cpu, usageSvg('cpu', { claude: f.cpuClaude ?? 0, used: f.cpu }), words.cpu, pctText(f.cpu), '%'),
-    f.gpu === undefined ? null : one('gpu', cards.gpu, usageSvg('gpu', { claude: 0, used: f.gpu }), words.gpu, pctText(f.gpu), '%'),
+    f.gpu === undefined ? null : one('gpu', cards.gpu, usageSvg('gpu', { claude: f.gpuClaude ?? 0, used: f.gpu }), words.gpu, pctText(f.gpu), '%'),
     f.battery ? one('battery', cards.battery, batterySvg(f.battery), words.battery, `${f.battery.pct}`, `%${batteryAfter(f.battery)}`, isBatteryLow(f.battery) ? USAGE_AMBER : undefined) : null,
     f.disk === undefined ? null : one('disk', cards.disk, usageSvg('disk'), words.disk, rateText(f.disk)[0], ` ${rateText(f.disk)[1]}`),
     f.net === undefined ? null : one('net', cards.net, usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
@@ -9356,7 +9374,7 @@ const usageText = (ui: Ui, f: UsageFigures, room = Infinity) => {
       <Text color={amber}>{` ${gbText(f.memUsed)}`}</Text>
       <Text color={amber} dimColor={!amber}>G</Text>
       {f.cpu === undefined ? null : [<Text key="c" dimColor>{' cpu'}</Text>, ...meter(f.cpuClaude ?? 0, f.cpu), <Text key="cv">{` ${pctText(f.cpu)}`}</Text>, <Text key="cu" dimColor>%</Text>]}
-      {f.gpu === undefined || !shown.gpu ? null : [<Text key="g" dimColor>{' gpu'}</Text>, ...meter(0, f.gpu), <Text key="gv">{` ${pctText(f.gpu)}`}</Text>, <Text key="gu" dimColor>%</Text>]}
+      {f.gpu === undefined || !shown.gpu ? null : [<Text key="g" dimColor>{' gpu'}</Text>, ...meter(f.gpuClaude ?? 0, f.gpu), <Text key="gv">{` ${pctText(f.gpu)}`}</Text>, <Text key="gu" dimColor>%</Text>]}
       {f.battery ? batteryText(ui, f.battery) : null}
       {f.disk === undefined || !shown.disk ? null : [<Text key="d" dimColor>{' disk '}</Text>, <Text key="dv">{rateText(f.disk)[0]}</Text>, <Text key="du" dimColor>{rateText(f.disk)[1].replace('B/s', '/s')}</Text>]}
       {f.net === undefined || !shown.net ? null : [<Text key="n" dimColor>{' net '}</Text>, <Text key="nv">{rateText(f.net)[0]}</Text>, <Text key="nu" dimColor>{rateText(f.net)[1].replace('B/s', '/s')}</Text>]}

@@ -41,7 +41,7 @@ const macLook = (o: { appCpu: string; shellCpu: string; otherCpu: string; disk: 
   ].join('\n')
 
 test('a Mac is read as Activity Monitor reads it: memory used, Claude the app with its chats and all they started', async () => {
-  expect(usageMac(false)).not.toContain('top')
+  expect(usageMac(false)).not.toContain('top -l')
   expect(usageMac(true)).toContain('top -l 1 -stats pid,mem')
   expect(near(secondsOfTime('29:03.86'))).toBe(1743.86)
   expect(secondsOfTime('1-00:00:01')).toBe(86401)
@@ -212,4 +212,46 @@ test('programs are named as a person knows them: the app, Claude Code\'s engine 
   expect(appOf('/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper')).toBe('Claude')
   expect(appOf('/usr/bin/python3')).toBe('python3')
   expect(appOf('/opt/tool/1.2.3')).toBe('1.2.3')
+})
+
+test("Claude's own part, where the Mac tells each process's: of the graphics processor, the disk, the network, and the power its processors draw", async () => {
+  // The renderer (932, under the app) draws with the graphics processor; Safari too. A process of another user gives no rusage
+  const own = (o: { gpu932: number; gpu700: number; in932: number; out932: number; in700: number; disk1423: number; disk700: number; nj1423: number; load: number }) =>
+    [
+      '@@GPU@@',
+      '"Device Utilization %"=50',
+      '@@POWER@@',
+      `"SystemLoad"=${o.load}`,
+      '@@GPUP@@',
+      `      "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=${o.gpu932 - 100},"lastSubmittedTime"=1},{"API"="Metal","accumulatedGPUTime"=100})`,
+      '      "IOUserClientCreator" = "pid 932, Claude Helper (Renderer)"',
+      '      "AppUsage" = ()',
+      '      "IOUserClientCreator" = "pid 852, Claude"',
+      `      "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=${o.gpu700}})`,
+      '      "IOUserClientCreator" = "pid 700, Safari"',
+      '@@NETP@@',
+      ',bytes_in,bytes_out,',
+      `Claude Helper (Renderer).932,${o.in932},${o.out932},`,
+      `Safari.700,${o.in700},0,`,
+      '@@RU@@',
+      `1423 ${o.disk1423} 0 ${o.nj1423}`,
+      `700 ${o.disk700} 0 1`,
+      '',
+    ].join('\n')
+  const look = { appCpu: '0:10.00', shellCpu: '0:00.00', otherCpu: '0:00.00', disk: '1000.00', inBytes: 0, outBytes: 0 }
+  const first = nextKept(undefined, `${macLook(look)}${own({ gpu932: 1e9, gpu700: 1e9, in932: 0, out932: 0, in700: 0, disk1423: 0, disk700: 0, nj1423: 0, load: 98316 })}`, 0, false)
+  const second = nextKept(first, `${macLook(look)}${own({ gpu932: 2e9, gpu700: 4e9, in932: 5e6, out932: 1e6, in700: 9e6, disk1423: 10e6, disk700: 50e6, nj1423: 38e9, load: 98316 })}`, 5000, false)
+  const f = second?.figures
+  // Of all clients' graphics time Claude's renderer had a quarter, of a device half busy
+  expect(near(f?.gpuClaude)).toBe(0.125)
+  // Claude's own speeds, a second: only its processes, not Safari's
+  expect(f?.diskClaude).toBe(2e6)
+  expect(f?.netInClaude).toBe(1e6)
+  expect(f?.netOutClaude).toBe(2e5)
+  // 38 joules over five seconds is 7.6 W of the 98 W the Mac draws
+  expect(near(f?.wattsClaude)).toBe(7.6)
+  expect(near(f?.watts)).toBe(98.316)
+  // A Mac that tells none of it shows none
+  const bare = nextKept(nextKept(undefined, macLook(look), 0, false), macLook(look), 5000, false)?.figures
+  expect([bare?.gpuClaude, bare?.diskClaude, bare?.netInClaude, bare?.wattsClaude, bare?.watts]).toEqual([undefined, undefined, undefined, undefined, undefined])
 })

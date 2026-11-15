@@ -1,1 +1,3 @@
-- In the desktop app, resting the pointer on a figure above the prompt now opens a card with its detail: who uses the most memory and processor, Claude's part, graphics memory, network in and out, and the battery in words; the figure takes a faint fill while it shows
+- In the desktop app, resting the pointer on a figure above the prompt now really shows its card, one at a time, gone as the pointer leaves: who uses the most memory and processor, the battery in words, network download and upload
+- The cards show Claude's own part of the graphics processor, the disk and the network, and the strain on the battery: what the Mac draws and what Claude's processors draw, in watts
+- The bar above the prompt redraws only when new figures come, not every second

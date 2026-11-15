@@ -159,10 +159,10 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
   const cards: Record<string, string[]> = {
     memory: ['Memory', '29 of 64 GB', 'Claude and what it started', '3.3 GB', 'Using the most', 'Safari', '0.4 GB'],
     cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
-    gpu: ['Graphics processor', '37% busy', 'Its memory in use', '1.2 GB'],
+    gpu: ['Graphics processor', '37% busy', 'Graphics memory in use', '1.2 GB'],
     battery: ['Battery', '85%', 'On battery, about 4:12 left'],
-    disk: ['Disk', '63 MB/s', 'Read and written together', 'Disks', 'disk0'],
-    net: ['Network', '1 MB/s', 'In', 'Out', 'Connections', 'en0'],
+    disk: ['Disk', '63 MB/s', 'Reading and writing together'],
+    net: ['Network', '1 MB/s', 'Download', 'Upload'],
   }
   // The drawn tree as the surface gets it: each element's props, its hover, its children
   type El = { type?: string; props?: Record<string, unknown> & { key?: string; children?: unknown }; hover?: Record<string, unknown>; children?: unknown }
