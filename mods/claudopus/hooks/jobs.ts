@@ -310,8 +310,23 @@ export const progressOf = (lines: string[]): Progress => {
   return {}
 }
 
-// The engine's own last line on the output of a background command that has ended
-export const isOutputEnded = (text: string) => /\[exited with code [^\]\n]*\]\s*$/.test(text)
+// The engine's own last line on the output of a background command or watch that has ended: `[exited with code N]` as it exits,
+// `[killed]` as the engine kills it (a watch at its time limit, or one stopped)
+export type RunEnd = { how: 'finished' | 'failed' | 'killed'; code?: string }
+export const endOf = (text: string): RunEnd | undefined => {
+  const exit = text.match(/\[exited with code ([^\]\n]*)\]\s*$/)
+  if (exit) return exit[1]?.trim() === '0' ? { how: 'finished' } : { how: 'failed', code: (exit[1] ?? '').trim() }
+  return /(^|\n)\[killed\]\s*$/.test(text) ? { how: 'killed' } : undefined
+}
+export const isOutputEnded = (text: string) => Boolean(endOf(text))
+// How long a watch runs before the engine ends it, as the engine said when it started it ("expires in 30m"), in ms
+export const expiresIn = (said: string) => {
+  const m = said.match(/expires in ((?:\d+(?:\.\d+)?\s?(?:h|m|s)\s*){1,3})/i)
+  const seconds = m ? secondsIn((m[1] ?? '').trim()) : undefined
+  return seconds ? seconds * 1000 : undefined
+}
+// The seconds a run's time left says, as leftText wrote it (`1h 05m left`, `55s left`)
+export const leftSeconds = (left: string | undefined) => (left ? secondsIn(left.replace(/\s*left$/, '').trim()) : undefined)
 
 // The end of a job's output as its latest line: colours and cursor moves taken out, a line a progress bar rewrites read as it
 // stands last, with the last percent in it and any port it named

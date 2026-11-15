@@ -426,7 +426,12 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
     if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
-    if (e.tool === 'Monitor') return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: 0, persistent: true } } as never
+    if (e.tool === 'Monitor') {
+      // as the engine answers: a watch not kept for good ends at its time limit, at most 30 minutes
+      const w = e as { timeout_ms?: number; persistent?: boolean | string }
+      const forGood = w.persistent === undefined || w.persistent === true || w.persistent === 'true'
+      return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: forGood ? 0 : Math.min(w.timeout_ms ?? 300_000, 1_800_000), persistent: forGood } } as never
+    }
     if (e.tool === 'Workflow') return { result: { status: 'async_launched', taskId: 'wt1', runId: 'wf_1', taskType: 'local_workflow', workflowName: 'rounds', transcriptDir: '/t/wf_1', scriptPath: '/t/wf_1.js' } } as never
     return { result: 'ran' } as never
   })
@@ -2275,7 +2280,9 @@ test('every run under a card says how it stands: a command held open shows its p
   // The download held open: how much of how much, its percent, speed and time left, as curl printed them, and nothing of when
   // Named in the work's own form: its kind already said, how long it should take beside its time, in amber well past it
   expect(shown).toContain('Download the CT scans')
-  expect(shown).toContain('9m 00s of ~3m')
+  // past it, the run's own time left makes a fresh expectation, never the old figure as if it held
+  expect(shown).toContain('9m 00s of ~9m 55s')
+  expect(shown.some(text => /of ~3m/.test(text))).toBe(false)
   expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
@@ -2297,6 +2304,77 @@ test('every run under a card says how it stands: a command held open shows its p
   await list.unmount()
   held.get('dl')?.('')
   await call
+})
+
+test('only runs really running are listed: a watch the engine killed at its time limit, a command that failed and one that finished leave at once, counted on the closing row and told apart in Details; 15 Nov three "[killed]" watches stayed with their clocks running', SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const born = now
+  const TASKS = '/tmp/claude-501/x/s1/tasks'
+  const MIN = 60_000
+  // The 15 Nov card: two alike watches set 30 minutes, one more, and the wait that was really still going
+  const outputs: Record<string, () => string> = {
+    [`${TASKS}/mon-m1.output`]: () => (now - born >= 30 * MIN ? '\n[killed]\n' : ''),
+    [`${TASKS}/mon-m2.output`]: () => (now - born >= 30 * MIN ? '\n[killed]\n' : ''),
+    [`${TASKS}/bg-w1.output`]: () => '',
+    [`${TASKS}/bg-f1.output`]: () => (now - born >= 3 * MIN ? 'Traceback: boom\n\n[exited with code 1]\n' : ''),
+    [`${TASKS}/bg-k1.output`]: () => (now - born >= 2 * MIN ? 'all good\n\n[exited with code 0]\n' : ''),
+    // one past its time that prints how long it has left, and one past its time that does not
+    [`${TASKS}/bg-p1.output`]: () => 'progress: 3/6 steps fitting eta 4m\n',
+    [`${TASKS}/bg-p2.output`]: () => 'drawing frames\n',
+  }
+  const { clock } = world(on, { jobs: { output: file => outputs[file]?.() ?? '', wroteAt: () => now - 2_000 } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'save the videos', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Save the videos', prompt: 'go' } as never)
+  const watch = (id: string) => $.tool.call({ tool: 'Monitor', tool_use_id: id, agentId: 'a1', command: 'until grep -q "pass 1 done" /s/screen.log; do sleep 20; done', description: 'Wait for first screening pass (about 35 min)', timeout_ms: 3_000_000, persistent: false } as never)
+  await watch('m1')
+  await watch('m2')
+  const bg = (id: string, command: string, description: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command, description, run_in_background: true } as never)
+  await bg('w1', 'until grep -q "pass 1 done" /s/screen.log; do sleep 20; done; tail -2 /s/screen.log', 'Wait for the details screening to finish (about 55 min)')
+  await bg('f1', 'python3 fetch.py', 'Run the fetch of the list')
+  await bg('k1', 'python3 tidy.py', 'Run the tidy up')
+  await bg('p1', 'python3 fit.py', 'Run the fit (about 20 min)')
+  await bg('p2', 'python3 frames.py', 'Run the drawing of frames (about 20 min)')
+  const texts = async (surface = 'terminal') => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface } as never)
+    const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
+    await list.unmount()
+    return all
+  }
+  for (let n = 0; n < 10; n++) await advance(MIN)
+  // Before the limit both watches run, as one row of two
+  expect((await texts()).some(text => /^Wait for first screening pass ×2$/.test(text))).toBe(true)
+  for (let n = 0; n < 39; n++) await advance(MIN)
+  const shown = (await until(async () => {
+    const all = await texts()
+    return all.some(text => /^4 runs ended/.test(text)) ? all : undefined
+  })) ?? []
+  // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
+  expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
+  expect(shown.some(text => /screening pass ×2|Run the fetch|Run the tidy/.test(text))).toBe(false)
+  // The closing row counts them and says, in words, how many did not finish well
+  expect(shown).toContain('4 runs ended · 1 failed, 2 timed out')
+  // The wait still running stays, within its time
+  expect(shown).toContain('Wait for the details screening to finish')
+  expect(shown).toContain('49m 00s of ~55m')
+  // Past its time: a fresh expectation from the time left it prints; or else plainly past it, never the old figure as if it held
+  expect(shown).toContain('49m 00s of ~53m')
+  expect(shown).toContain('49m 00s · past ~20m')
+  expect(shown.some(text => /of ~20m/.test(text))).toBe(false)
+  // Details names each ended run with how it ended
+  const pane = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
+  const details = (await pane.findAll({ type: 'Text' })).map(one => one.text)
+  await pane.unmount()
+  expect(details).toContain('Runs ended')
+  expect(details.filter(text => text === 'Wait for first screening pass').length).toBe(2)
+  expect(details.filter(text => /^timed out after (29|30)m \d\ds · /.test(text)).length).toBe(2)
+  expect(details.some(text => /^failed \(exit code 1\) after \dm \d\ds · /.test(text))).toBe(true)
+  expect(details.some(text => /^finished after \dm \d\ds · /.test(text))).toBe(true)
+  // Later the wait passes its time too, with nothing printed: it says so
+  for (let n = 0; n < 8; n++) await advance(MIN)
+  expect((await texts()).some(text => /^57m 00s · past ~55m$/.test(text))).toBe(true)
 })
 
 test("a run's second line starts under its name, with the tree's lines carried down beside it: not the last, the last, a run under a helper, a narrow panel, on a desktop and in a terminal; 15 Nov the app dropped the lines and the line started left of the tree", SLOW, async ($, on) => {

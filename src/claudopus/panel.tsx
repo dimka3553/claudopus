@@ -517,6 +517,24 @@ const panelHooks = (on: On) => {
     // speed and time left as the run printed them, or worked out from its percent where it says none; then paused, a wait's target,
     // a watch's last event, nothing printed since it began, or quiet for minutes (in amber). A run that prints says nothing of when:
     // its line is read every few seconds, so what it says is now
+    // a run whose own progress line gives its percent but no time left has one worked out from how long it has run, marked as a
+    // guess: only the work's own line, which counts the whole run (a tool's bar starts again at each epoch, package or phase),
+    // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
+    const guessLeft = (job: Job, ran: number) => {
+      const share = Number.parseFloat(job.pct ?? '') / 100
+      return !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
+    }
+    // Its time, and how long it said it should take. Once past that, the figure it said no longer holds: where the run says how
+    // long it has left as it prints now (or its percent gives one), the time so far and that left make a fresh expectation;
+    // otherwise its row says plainly that it is past the time it was expected to take, in amber. Nothing is made up
+    const jobTime = (job: Job, ran: number) => {
+      if (!job.expectText || !job.expect) return { time: took(ran), isPast: false }
+      if (ran <= job.expect) return { time: `${took(ran)} of ~${job.expectText}`, isPast: false }
+      const isFresh = !job.isPaused && Boolean(job.wroteAt) && at - (job.wroteAt ?? 0) < 60_000
+      const left = isFresh ? leftSeconds(job.left ?? guessLeft(job, ran)) : undefined
+      const fresh = left ? timeLeftText(ran / 1000 + left)?.replace(/ left$/, '') : undefined
+      return fresh ? { time: `${took(ran)} of ~${fresh}`, isPast: false } : { time: `${took(ran)} · past ~${job.expectText}`, isPast: true }
+    }
     const jobStand = (job: Job, width: number) => {
       const pct = job.pct ? [job.pct] : []
       const quiet = job.wroteAt ? at - job.wroteAt : 0
@@ -535,11 +553,7 @@ const panelHooks = (on: On) => {
       const warn = isWarn && Boolean(state)
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
       const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
-      // a run whose own progress line gives its percent but no time left has one worked out from how long it has run, marked as a
-      // guess: only the work's own line, which counts the whole run (a tool's bar starts again at each epoch, package or phase),
-      // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
-      const share = Number.parseFloat(job.pct ?? '') / 100
-      const guess = !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
+      const guess = guessLeft(job, ran)
       const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
@@ -556,10 +570,8 @@ const panelHooks = (on: On) => {
       if (!job) return null
       const key = `${scope}-job-${job.id}`
       const width = perRow - 4 - t.depth * 2
-      // its time, and how long it said it should take: in amber once well past that
       const ran = at - job.at
-      const isLong = Boolean(job.expect && ran > (job.expect ?? 0) * 1.5)
-      const time = job.expectText ? `${took(ran)} of ~${job.expectText}` : took(ran)
+      const { time, isPast: isLong } = jobTime(job, ran)
       const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
       const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -632,16 +644,21 @@ const panelHooks = (on: On) => {
     // In a small card: what it has running, then the helpers at work now or just ended, and any that one of those runs under; the
     // rest are one closing row, laid out as the others, that says how many have ended and opens the card's Details, where every
     // helper is listed. A helper that ended with a job still running stays for it
+    // The runs that ended under a card: its own and its helpers', oldest first
+    const endedRunsOf = (one: Todo, list = all) => [one, ...underOf(list, one.id)].flatMap(kid => kid.endedRuns ?? []).sort((a, b) => a.endedAt - b.endedAt)
+    // Runs that ended leave the tree at once; the closing row counts them with the helpers that ended, and says how many of them
+    // failed, were killed or ran out of time, so nothing goes without a trace
     const treeUnder = (one: Todo) => {
       const under = underOf(all, one.id)
       const own = jobBranches(one)
-      if (!under.length && !own.length) return []
+      const runs = endedRunsOf(one)
+      if (!under.length && !own.length && !runs.length) return []
       const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid, at).length > 0))]
       const twigs = twigsOf(branches, true)
       const rest = under.length - twigs.filter(t => !t.job).length
-      if (!rest) return twigsOf(branches).map(rowOf)
+      if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, `${rest} ${rest === 1 ? 'helper' : 'helpers'} ended`, true, '', () => openWork($, one.id))]
+      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs), true, '', () => openWork($, one.id))]
     }
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----
@@ -991,6 +1008,31 @@ const panelHooks = (on: On) => {
         <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
       )
     }
+    // In Details, under what runs: every run that has ended, the newest first, each with how it ended in plain words, how long it
+    // ran and when it ended; one that failed, was killed or ran out of time in amber
+    const endedRunsPart = (one: Todo) => {
+      const runs = endedRunsOf(one, one.chat ? helpersThere : all).reverse()
+      if (!runs.length) return null
+      const isBad = (run: (typeof runs)[number]) => run.how === 'failed' || run.how === 'killed' || run.how === 'timed out'
+      const bad = runs.filter(isBad).length
+      return part(
+        'part-ended-runs',
+        'Runs ended',
+        `${runs.length} ${runs.length === 1 ? 'run' : 'runs'}${bad ? ` · ${bad} did not finish` : ''}`,
+        <Box flexDirection="column">
+          {runs.map(run => (
+            <Box key={`ended-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A run'}</Text>
+              </Box>
+              <Box flexShrink={0}>
+                <Text dimColor={!isBad(run)} color={isBad(run) ? NEEDS : undefined}>{`${endedWord(run)} after ${took(run.endedAt - run.at)} · ${shortAgo(at - run.endedAt)} ago`}</Text>
+              </Box>
+            </Box>
+          ))}
+        </Box>,
+      )
+    }
 
     // The work's own chat, drawn as the app draws a chat, the oldest first: what it was told in a filled block, what it wrote as
     // text, and each run of tool steps folded into one quiet row that opens on a press. A long message to it is folded too
@@ -1184,6 +1226,7 @@ const panelHooks = (on: On) => {
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
+          {endedRunsPart(one)}
           {one.chat && !lines && (talks.has(one.id) || one.chat.host)
             ? part('part-chat', 'Its chat', '', theirChat(one, one.chat))
             : part('part-chat', 'Its chat', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading its chat…</Text>)}

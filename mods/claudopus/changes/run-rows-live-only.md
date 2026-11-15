@@ -1,0 +1,4 @@
+- Under a card, only runs that are really running are listed: a watch the engine killed or timed out, and a wait or command that ended, leave the list at once, so no clock counts on for something that stopped.
+- The closing row counts the runs that ended beside the helpers, such as "3 runs ended · 3 timed out", and Details lists each with how it ended in plain words: finished, failed with its exit code, killed, timed out or stopped by the work.
+- A run past the time the work said it would take no longer shows that old figure as if it held: it shows a fresh expectation from the time left the run prints (or its percent), or else says plainly that it is past its expected time.
+- Work is told to give a new expected time when its own estimate turns out wrong, and to stop its waits and watches once it no longer needs them.
