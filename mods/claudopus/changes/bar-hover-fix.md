@@ -1,0 +1,1 @@
+- In the desktop app, resting the pointer on a figure above the prompt now really shows its line of more detail, and the figure takes a faint fill while it does

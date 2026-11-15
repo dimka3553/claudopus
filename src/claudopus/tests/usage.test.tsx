@@ -165,11 +165,26 @@ test('a pointer resting on a figure shows more of it in a line above: who uses t
     net: 'Network 1 MB/s · in 1 MB/s, out 0 MB/s · en0',
   }
   const boxes = await desk.findAll({ type: 'Box' })
+  // The hover of the drawn Box with this key, as the surface gets it
+  const drawn: unknown = await desk.drawn()
+  const hoverOf = (node: unknown, key: string): Record<string, unknown> | undefined => {
+    if (!node || typeof node !== 'object') return undefined
+    if (Array.isArray(node)) return node.map(n => hoverOf(n, key)).find(Boolean)
+    const el = node as { props?: { key?: string; children?: unknown }; hover?: Record<string, unknown>; children?: unknown }
+    if (el.props?.key === key) return el.hover ?? {}
+    return hoverOf(el.props?.children, key) ?? hoverOf(el.children, key)
+  }
   for (const [key, text] of Object.entries(more)) {
     // Hidden until the pointer rests on its own figure (the test kit does not show the hover itself)
     const line = boxes.find(b => b.props.key === `usage-more-${key}`)
     expect(line?.props.display).toBe('none')
     expect(line?.text).toBe(text)
+    // Shown by the figure's own hover group, and the desktop app wires a member to the pointer only when its hover changes a style:
+    // a hover that is a scope alone lights nothing
+    expect(hoverOf(drawn, `usage-more-${key}`)).toEqual({ scope: `usage-${key}`, display: 'flex' })
+    const figure = hoverOf(drawn, `usage-${key}`)
+    expect(figure?.scope).toBe(`usage-${key}`)
+    expect(Object.keys(figure ?? {}).filter(k => k !== 'scope').length).toBeGreaterThan(0)
   }
   // Above the figures, so they stay where they are when it shows
   const band = boxes.find(b => b.props.flexDirection === 'column' && b.text.endsWith('1 MB/s'))

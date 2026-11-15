@@ -9255,7 +9255,9 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
   const isHigh = isMemoryHigh(f)
   const words = usageWords(f)
   const one = (key: string, svg: { source: string; width: number; height: number }, alt: string, value: string, unit: string, color?: string) => (
-    <Box key={key} flexDirection="row" flexShrink={0} alignItems="center" hover={{ scope: key }}>
+    // The desktop app lights a hover group only from a member whose hover changes how it looks: a bare scope is never wired to the
+    // pointer. So the figure takes a faint fill while the pointer rests on it, and that lights the line of more above
+    <Box key={key} flexDirection="row" flexShrink={0} alignItems="center" hover={{ scope: key, backgroundColor: FILL }}>
       <Svg key={`${key}-${svg.source.length}-${hashOf(svg.source)}`} source={svg.source} alt={alt} width={svg.width} height={svg.height} />
       <Text color={color} wrap="truncate-end">
         {value}
