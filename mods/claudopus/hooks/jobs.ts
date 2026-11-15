@@ -58,8 +58,19 @@ export const DOWNLOAD_CMD =
 // What kind a job is, from its command, or else its own words for itself
 // A download is one whose own program fetches (curl, wget, rsync...), not one that names such a tool as a word to another
 // (`vercel curl` reads a page): on 15 Nov "Reload page and check function logs" was called a download for that
+// A curl or wget that only reads a page to check it (curl -s ... | grep, wget --spider, wget -O -) is no download: only one that
+// keeps what it fetches in a file is (on 15 Nov "Wait for deploy and verify the live pages", a loop of curl -s, was called one).
+// Work that says it waits, checks or tests is never a download, whatever it runs
+const CHECKS = /^(wait|poll|check|verify|test|watch|confirm|reload|ping|probe|look)\b/i
+const isFetching = (step: string) => {
+  const head = step.replace(/^[^\s/]*\//, '/').replace(/^\/\S*\//, '')
+  if (head.search(DOWNLOAD_CMD) !== 0) return false
+  if (/^curl\b/.test(head)) return /\s(-[a-zA-Z]*[oO]\b|-[a-zA-Z]*[oO]\S|--output\b|--remote-name|--output-dir\b)|\s>>?\s*[^&\s]/.test(head)
+  if (/^wget\b/.test(head)) return !/\s--spider\b|\s-[a-zA-Z]*O\s*-(\s|$)|\s-qO-/.test(head)
+  return true
+}
 export const jobKindOf = (cmd: string, label: string): JobKind =>
-  SERVER_CMD.test(cmd) || /\bserver\b/i.test(label) ? 'server' : stepsOf(cmd).some(step => step.replace(/^[^\s/]*\//, '/').replace(/^\/\S*\//, '').search(DOWNLOAD_CMD) === 0) || /\bdownload/i.test(label) ? 'download' : 'script'
+  SERVER_CMD.test(cmd) || /\bserver\b/i.test(label) ? 'server' : !CHECKS.test(label.trim()) && (stepsOf(cmd).some(isFetching) || /\bdownload/i.test(label)) ? 'download' : 'script'
 // Each step of a shell line with what only sets it up taken off its head (a variable, env, nohup, time, sudo, exec), never a `cd`
 const SETUP = /^(?:(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)|env|nohup|setsid|exec|sudo|command|(?:\/usr\/bin\/)?time(?:\s+-\w+)*|timeout\s+\S+|caffeinate(?:\s+-\w+)*)\s+)+/
 const stepsOf = (cmd: string) =>

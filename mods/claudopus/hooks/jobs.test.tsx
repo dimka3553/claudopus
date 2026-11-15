@@ -222,3 +222,15 @@ test('a command held open is found by its own shell however few its words; times
   expect(labelOf('', '"/Applications/Some App/bin/tool" --go')).toBe('tool')
   expect(jobKindOf('azcopy copy ./scans https://acct.blob.core.windows.net/c --recursive', 'Send the scans to Azure')).toBe('download')
 })
+
+test('a wait or check that reads pages with curl is no download: the 15 Nov "Download · Wait for deploy and verify the live pages"', async () => {
+  const deploy = `for i in $(seq 1 50); do n=$(curl -s --max-time 30 "https://example.com/support/terms?v=$i" | grep -c 'Governors'); [ "$n" -gt 0 ] && break; sleep 10; done; for p in terms privacy; do printf "$p %s\\n" $(curl -s "https://example.com/support/$p" | tee /tmp/p.html | grep -o 'Governors' | wc -l); done`
+  expect(jobKindOf(deploy, 'Wait for deploy and verify the live pages')).toBe('script')
+  expect(jobKindOf('curl -s https://example.com/health | grep ok', 'Look at the site')).toBe('script')
+  expect(jobKindOf('wget --spider https://example.com/a.zip', 'See the file is there')).toBe('script')
+  expect(jobKindOf('curl -sL https://example.com/a.zip -o a.zip', 'Get the archive')).toBe('download')
+  expect(jobKindOf('curl -L https://example.com/a.zip > a.zip', 'Get the archive')).toBe('download')
+  expect(jobKindOf('curl -LO https://example.com/a.zip', 'Get the archive')).toBe('download')
+  expect(jobKindOf('wget https://example.com/a.zip', 'Get the archive')).toBe('download')
+  expect(jobKindOf('python3 check.py', 'Check the download finished')).toBe('script')
+})
