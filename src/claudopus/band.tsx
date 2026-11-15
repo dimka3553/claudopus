@@ -1,23 +1,7 @@
 // Above the prompt: the small octopus while work runs, and how Claude uses this computer
 
-// The answer picked above the prompt by its number, and how long the pick waits for the same number again
-let bandPick: { id: string; n: number } | undefined
+// How long an answer picked above the prompt by its number waits for the same number again
 const BAND_PICK = 6000
-// Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
-// Pressed, it takes the list back to its top; nothing else moves the list
-const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
-  waitsAtTop > 0 && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced) ? (
-    <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden">
-      <ui.Button
-        key={`band-waits-${presses}`}
-        plain
-        hover={{ scope: 'band-waits', underline: true }}
-        onPress={() => ((presses += 1), void $.ui.scroll({ in: LIST, to: 'start', block: 'start' }).catch(() => undefined))}
-      >
-        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 waits' : `${waitsAtTop} wait`} for you at the top of the panel`}</ui.Text>
-      </ui.Button>
-    </ui.Box>
-  ) : null
 // The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
@@ -32,63 +16,11 @@ const bandHooks = (on: On) => {
     const happy = isHappy(cards, await $.clock.now())
     if (happy) await read($, tick)
     const ui = uiOf($, e)
-    const { Box, Button, Text } = ui
+    const { Box, Text } = ui
 
-    // In the terminal the panel is out of the keys' reach until ctrl+x Tab, and a narrow one seats no panel until it is asked for:
-    // there what needs the person is said here, this chat's own (another chat's ask is answered in its chat), under the name of the work that asks, whole, with its answers
-    // numbered. A bare digit typed in an empty prompt presses a band's Button, so the person answers from where they already are.
-    // A message may begin with a digit too, so one press only picks the answer and says so; the same digit again sends it
-    if (e.surface === 'terminal') {
-      // What waits on the person comes before an ask whose work is acting on their reply, which is drawn in the work's purple
-      const asking = [...cards.filter(one => !one.parentId && one.ask)].sort((a, b) => Number(needsPerson(b)) - Number(needsPerson(a)))
-      const [first] = asking
-      const ask = first?.ask
-      if (first && ask) {
-        const answers = (ask.choices?.length ? ask.choices : DEFAULT_ANSWERS).slice(0, 9)
-        const id = `${first.id}:${ask.at}`
-        const picked = bandPick?.id === id ? bandPick.n : -1
-        const press = (n: number, choice: string) => {
-          if (picked === n) return (bandPick = undefined), void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))
-          const pick = (bandPick = { id, n })
-          $.ui.invalidate('ui.render')
-          // Left alone, the pick is let go
-          $.clock.after(BAND_PICK, () => void (bandPick === pick && ((bandPick = undefined), $.ui.invalidate('ui.render'))))
-        }
-        return (
-          <Box flexDirection="column">
-            {await waitMarker($, ui, e.surface)}
-            <Box flexDirection="row" gap={1}>
-              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus at work on your reply', $, { surface: e.surface, requestId: e.requestId })}
-              <Box flexShrink={1} minWidth={0}>
-                <Text wrap="wrap">
-                  <Text dimColor>{`${titleOf(first)}: `}</Text>
-                  <Text color={needsPerson(first) ? NEEDS : LIVE} bold>{cut(oneLine(ask.text), Math.max(80, e.props.bodyColumns * 3))}</Text>
-                </Text>
-              </Box>
-            </Box>
-            {/* Acted on after the person's reply in words: that reply, and nothing to press */}
-            {isActingOnReply(first) ? (
-              <Text key="band-ask-replied" dimColor wrap="truncate-end">{`    ${sentLine(first, await $.clock.now()) || `✓ You replied “${cut(ask.replied?.text ?? '', 60)}”`}`}</Text>
-            ) : (
-              <Box flexDirection="column">
-                {/* The chat's notice with what it is about went only to the chat that started the work */}
-                {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{cards.includes(first) ? '    What it is about is in the chat above and on its card' : '    What it is about is on its card'}</Text> : null}
-                {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
-                <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
-                  {answers.map((choice, n) => (
-                    <Button key={`band-ask-${first.id}-${ask.at}-${n}`} label={choice} plain hotkey={String(n + 1)} onPress={() => press(n, choice)} />
-                  ))}
-                  <Text dimColor={picked < 0} color={picked < 0 ? undefined : needsPerson(first) ? NEEDS : LIVE}>
-                    {picked >= 0 ? `Press ${picked + 1} again to answer “${answers[picked] ?? ''}”` : `press its number twice in the empty prompt${asking.filter(needsPerson).length > Number(needsPerson(first)) ? ` · ${asking.filter(needsPerson).length - Number(needsPerson(first))} more waiting` : ''} · /claudopus to reply in words`}
-                  </Text>
-                </Box>
-              </Box>
-            )}
-          </Box>
-        )
-      }
-    }
-    if (!working.length && !happy) return (await waitMarker($, ui, e.surface)) ?? next(e)
+    // What waits on the person, each with its answers, above the figures: the same as at the top of the panel, answered the same way
+    const waits = await barWaitsDrawn($, ui, e)
+    if (!working.length && !happy) return waits ?? next(e)
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
@@ -98,7 +30,6 @@ const bandHooks = (on: On) => {
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
-    const marker = await waitMarker($, ui, e.surface)
     const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
     const row = (
       <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
@@ -113,9 +44,9 @@ const bandHooks = (on: On) => {
       </Box>
     )
     // Where the figures are drawn, a pointer resting on one shows its card above them; the bar grows upward, so the figures stay put
-    return (drawn && figures) || marker ? (
+    return (drawn && figures) || waits ? (
       <Box flexDirection="column">
-        {marker}
+        {waits}
         {drawn && figures ? usageCardsDrawn(ui, figures) : null}
         {row}
       </Box>

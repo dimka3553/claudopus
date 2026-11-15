@@ -456,26 +456,25 @@ test('a gate answered on its card says what was allowed in that same card, outli
   void call2.catch(() => undefined)
 })
 
-test('scrolled down a long list, the line above the prompt says how many wait at the top, and pressed takes the list there; at the top it says nothing', async ($, on) => {
+test('what waits in other chats is in the line above the prompt itself, scrolled or not, with no line pointing at the top of the panel', async ($, on) => {
   const { files, clock } = world(on, { panes: ['claudopus'] })
   await $.session.start(start)
   const at = 1_700_000_000_000
   files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }))
   await clock.advance(5000)
-  const MARK = '↑ 2 wait for you at the top of the panel'
   for (const surface of ['desktop', 'terminal']) {
-    const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface } as never)
-    expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
-    const band = await $.ui.mount({ ...BAND, surface } as never)
-    expect(await until(async () => band.find({ type: 'Text', text: MARK }))).toBeDefined()
-    await band.unmount()
-    await down.unmount()
-    const top = await $.ui.mount({ ...LIST, surface } as never)
-    expect(await until(async () => top.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
-    const still = await $.ui.mount({ ...BAND, surface } as never)
-    expect(await still.find({ type: 'Text', text: MARK })).toBeUndefined()
-    await still.unmount()
-    await top.unmount()
+    for (const offset of [40, 0]) {
+      const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset, bodyRows: 20 } }, surface } as never)
+      expect(await until(async () => list.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
+      const band = await $.ui.mount({ ...BAND, surface } as never)
+      const rows = async () => (await band.findAll({ type: 'Box' })).map(b => b.key ?? '').filter(key => /^bar-there-[^]*-w[56]$/.test(key))
+      expect(await until(async () => ((await rows()).length === 2 ? rows() : undefined))).toEqual([expect.stringMatching(/-w6$/), expect.stringMatching(/-w5$/)])
+      expect(await band.find({ type: 'Text', text: /at the top of the panel$/ })).toBeUndefined()
+      // Answered only in its own chat: nothing here answers it
+      expect((await band.findAll({ type: 'Button' })).some(b => (b.key ?? '').includes('-answer-'))).toBe(false)
+      await band.unmount()
+      await list.unmount()
+    }
   }
 })
 
