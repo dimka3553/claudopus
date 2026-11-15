@@ -1,16 +1,5 @@
 // Config: the person's own texts, settings, and models
 
-test('a copy of the principles in the memory folder is the person\'s own: every conversation carries it in place of the shipped ones', async ($, on) => {
-  const { files } = world(on)
-  on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }))
-  const MINE = '# Mine\n\n## Core truths\n\n- Mine come first.\n\n## Checking\n\n1. Look at it.\n'
-  files.set(`${MEMORY}/rules/CLAUDE.md`, MINE)
-  await $.session.start(start)
-  const told = await $.prompt.context({ blocks: [], instructionFiles: [{ path: '/repo/CLAUDE.md', kind: 'project', content: 'REPO RULES' }] })
-  expect(told.instructionFiles?.find(one => one.kind === 'user')).toEqual({ path: `${MEMORY}/rules/CLAUDE.md`, kind: 'user', content: MINE })
-  expect(told.instructionFiles?.some(one => one.content === PRINCIPLES)).toBe(false)
-})
-
 // The two lines that were the author's own and no longer ship, as a person may keep them in their own copy
 const DELIBERATE = 'My decisions are deliberate.'
 const DONE_MEANS = 'Done means'

@@ -593,13 +593,15 @@ const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
 // nothing is downloaded, installed or reloaded until that press, and a lock dated ahead of the clock holds none of it
 
 const UPD_NOW = 1_700_000_000_000
+// The hourly look's test lives through 84 minutes of the mod's one-second loop: about 6 s alone, past 20 s on a busy machine
+const LONGEST = { timeoutMs: 60_000 }
 const reloadsOf = (on: On) => {
   const reloads: string[] = []
   on('command.run', { command: 'reload-plugins' } as never, () => (reloads.push('reload-plugins'), { value: { text: 'Reloaded' } }) as never)
   return reloads
 }
 
-test('F-019 · the hourly look only reads the version page: a newer version is shown with Install, and nothing is downloaded, installed or reloaded', SLOW, async ($, on) => {
+test('F-019 · the hourly look only reads the version page: a newer version is shown with Install, and nothing is downloaded, installed or reloaded', LONGEST, async ($, on) => {
   const { files, clock, gitRan } = world(on)
   const reloads = reloadsOf(on)
   let fetches = 0

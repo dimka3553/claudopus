@@ -593,8 +593,6 @@ const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
 // the runners hold (F-006, F-008, F-009, F-017, F-018) are tested in mods/claudopus/bin/admin.test.sh too, on a real keychain or keyring
 
 const SEC_NOW = 1_700_000_000_000
-// Whether a call is still held after a moment: a held call never answers in that time
-const isHeldStill = async (call: Promise<unknown>) => (await Promise.race([call.then(() => 'answered'), new Promise(done => setTimeout(() => done('held'), 300))])) === 'held'
 
 test("F-001 · an admin command in the chat's own thread is refused before it is held: nothing asks, and no grant is left behind", async ($, on) => {
   const { list, grants, admins } = await gated($, on)

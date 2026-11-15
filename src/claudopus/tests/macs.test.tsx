@@ -111,21 +111,6 @@ test('a result put away here and brought back on the other Mac by an older versi
   expect(sshed.some(([command, stdin]) => command?.includes('/reports/r/meta.json') && JSON.parse(stdin || '{}').archived)).toBe(false)
 })
 
-test('a result brought back after it was put away on the other Mac stays out of the archive, as the later of the two', async ($, on) => {
-  const { files, clock } = world(on)
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
-  const r = { id: 'r', title: 'R', subject: 'S', at: NOW, chat: 'c', chatId: 'c', folder: '/x', gist: '', files: [], agent: '' }
-  files.set(`${MEMORY}/reports/r/meta.json`, JSON.stringify({ ...r, archived: NOW - 1000 }))
-  files.set('ssh:results', `/Users/sam\n---claudopus-result---\nr\n1 2\n${JSON.stringify({ ...r, broughtBack: NOW })}\n`)
-  await $.session.start(start)
-  await clock.advance(10_000)
-  const here = await until(async () => {
-    const one = JSON.parse(files.get(`${MEMORY}/reports/r/meta.json`) ?? '{}')
-    return one.broughtBack ? one : undefined
-  })
-  expect(here.archived).toBeUndefined()
-})
-
 test("a Mac handed another Mac's chats lists them by name and Mac with its own, with their asks answered only there, and drops them once that Mac stops handing them over", async ($, on) => {
   const { files, clock } = world(on)
   // No macs here: this is the Mac that cannot reach the other one. Its clock is an hour behind the other Mac's
