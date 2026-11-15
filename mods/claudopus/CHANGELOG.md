@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.107 · 15 November 2026
+- A workflow's card is built like every other card now: its title opens Details, Stop sits at its right end, and its facts line names the model, the agents, which round it is on of how many, and the time.
+- Under it are the bar the checker holds it to, and a row per round up to the cap, each led by its own squares: the round at work says who is at work beside moving dots, a checked round what its check found, and a round not run yet that it runs only if needed.
+- Once it ends, its last line says how: passed in round 2 of 3, or not passed after 3 of 3 rounds.
+
 ## 0.2.106 · 15 November 2026
 - The line above the prompt shows how Claude uses the computer while work runs, in place of one piece of work's step: memory in use, how busy the processor is, and the disk's and the network's speed. In the two small meters Claude's part (the app, its chats and everything they started) is purple and the rest grey; memory turns amber past 90%. The terminal shows the same line in words. It is looked at every 5 seconds, once for all open chats.
 

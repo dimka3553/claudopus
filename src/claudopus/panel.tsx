@@ -603,7 +603,6 @@ const panelHooks = (on: On) => {
     const endedFlows = flowList.filter(f => f.status !== 'working' && !isLingering(f, at))
     const flowShown = paneId.startsWith(FLOW_PANE) ? flowList.find(f => flowPaneOf(f.id) === paneId) : undefined
     const flowTokens = (f: Flow) => f.agents.reduce((sum, one) => sum + (one.tokens ?? 0), 0)
-    const boldRow = Math.max(20, Math.floor(perRow * 0.88))
     const agentsWord = (n: number) => `${n} ${n === 1 ? 'agent' : 'agents'}`
     // Where it stands, as Claude's own view of a workflow says it: "Workflow", how many agents it has started, its tokens and time,
     // in as many of those words as the row holds
@@ -650,66 +649,134 @@ const panelHooks = (on: On) => {
       if (f.status === 'failed') return 'Error'
       return round?.pass === true ? 'Passed' : round?.pass === false ? 'Not passed' : 'Ended'
     }
-    // The last round the checker has judged, in a few words: its verdict's mark, its number and what the checker found, or that it passed
-    const outcomeRow = (f: Flow, rounds: Round[], most: number) => {
-      const r = rounds.filter(one => !one.isOpen && (one.pass !== undefined || one.why)).at(-1)
-      if (!r) return <Text dimColor>{fitWords(f.status === 'working' ? 'No round checked yet' : 'No round was checked', most)}</Text>
-      // The round's number goes first when the row holds it; the squares above say which round it was when it does not
-      const why = (r.why || (r.pass ? 'passed' : r.pass === false ? 'failed' : 'ended')).replace(/[.。]+$/, '')
-      const whole = `Round ${r.n}: ${why}`
+    // The small card, built as every other card is: its title, which opens its Details, with Stop at the far end of that row; where
+    // it stands; the bar it is held to; then a row per round up to the cap, each led by its own squares, one per step, and saying
+    // what came of it: the round at work has the moving dots and who is at work, a checked round what its check found, a round not
+    // run yet that it runs only if needed. Once it ended, how it ended takes the place of the moving dots
+    const flowModel = (f: Flow) => modelName(f.agents.find(one => one.model)?.model ?? f.phases.find(one => one.model)?.model ?? '')
+    // As a card's facts line: every part, cut at its end on a narrow panel as a card's is
+    const flowFacts = (f: Flow, rounds: Round[]) => {
+      const time = took((f.endedAt || at) - f.startedAt)
+      const round = rounds.length && f.cap ? `round ${rounds.length} of ${f.cap}` : rounds.length ? `round ${rounds.length}` : ''
+      return [stood[f.status], flowModel(f), agentsWord(f.agents.length), round, time].filter(Boolean).join(' · ')
+    }
+    // Who is at work in a round, in plain words: the rounds script's maker and checker by name, any other stage by its own
+    const atWork = (f: Flow, r: Round) => {
+      const one = [...r.agents].reverse().find(agent => agent.status === 'working')
+      const phase = one?.phase || stageOf(f)
+      if (!one) return 'between steps'
+      if (phase === 'Make') return r.n === 1 ? 'Maker building it' : 'Maker fixing what the check found'
+      if (phase === 'Check') return 'Checker testing it against the bar'
+      return doing(phase || 'Working')
+    }
+    const flowDots = (key: string) =>
+      'Svg' in table && e.surface !== 'terminal' ? (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={dots(FLOW, LINE)} alt="Being done now" width={22} height={LINE} isInteractive />
+        </Box>
+      ) : e.surface === 'terminal' ? (
+        (termDots(table, $, paneId, key, FLOW) ?? <Text key={key} color={FLOW}>▸</Text>)
+      ) : (
+        <Text key={key} color={FLOW}>▸</Text>
+      )
+    const roundRow = (f: Flow, rounds: Round[], n: number, isPassed: boolean) => {
+      const r = rounds[n - 1]
+      const key = `flow-round-${f.id}-${n}`
+      const label = (color: string | undefined, isDim = false) => (
+        <Box key={`${key}-label`} flexShrink={0}>
+          <Text color={color} dimColor={isDim}>{`Round ${n}`}</Text>
+        </Box>
+      )
+      const row = (parts: unknown[]) => (
+        <Box key={key} flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
+          {squaresRow(f, r ? [r] : [], `${key}-squares`, n)}
+          {parts as never}
+        </Box>
+      )
+      if (!r && n === 1 && f.status === 'working') return row([label(FLOW), flowDots(`${key}-dots`), <Text key={`${key}-why`} color={FLOW} wrap="truncate-end">Starting</Text>])
+      if (!r) return row([label(undefined, true), <Text key={`${key}-why`} dimColor wrap="truncate-end">{isPassed ? 'not needed' : f.status === 'working' ? 'if needed' : 'not run'}</Text>])
+      if (r.isOpen)
+        return row([
+          label(FLOW),
+          f.status === 'working' ? flowDots(`${key}-dots`) : null,
+          <Box key={`${key}-what`} flexShrink={1} minWidth={0}>
+            <Text color={FLOW} wrap="truncate-end">{atWork(f, r)}</Text>
+          </Box>,
+        ])
+      const cutShort = r.pass === undefined && !r.why && r.agents.some(one => one.status !== 'done')
+      const why = (r.why || (r.pass ? 'passed' : r.pass === false ? 'failed' : cutShort ? (f.status === 'failed' ? 'stopped by an error' : 'stopped') : 'ended')).replace(/[.。]+$/, '')
+      const found = r.pass === false && r.findings.length ? `${r.findings.length} found · ` : ''
+      return row([
+        label(r.pass ? DONE : undefined),
+        <Box key={`${key}-why`} flexShrink={1} minWidth={0}>
+          <Text dimColor wrap="truncate-end">{r.pass ? `passed · ${why}` : `${found}${why}`}</Text>
+        </Box>,
+      ])
+    }
+    // Whether a run passed: its last round's verdict, else what the run itself returned
+    const flowPassed = (f: Flow, rounds: Round[]) => {
+      const pass = rounds.at(-1)?.pass
+      if (pass !== undefined) return pass
+      if (/"passed"\s*:\s*false|\bnot passed\b/i.test(f.result)) return false
+      if (/"passed"\s*:\s*true|\bpassed\b/i.test(f.result)) return true
+      return undefined
+    }
+    // How it ended, as its last line; a stopped run's facts line already says it was stopped
+    const flowEnd = (f: Flow, rounds: Round[]) => {
+      if (f.status !== 'done') return null
+      const n = rounds.length
+      const pass = flowPassed(f, rounds)
+      const of = f.cap ? ` of ${f.cap}` : ''
+      const said = pass === true ? `✓ Passed in round ${n}${of}` : pass === false ? `Not passed after ${n}${of} ${(f.cap ?? n) === 1 ? 'round' : 'rounds'}` : '✓ Finished'
       return (
-        <Box flexDirection="row" gap={1}>
-          <Text color={r.pass ? DONE : r.pass === false ? 'error' : undefined} dimColor={r.pass === undefined}>
-            {r.pass ? '✓' : r.pass === false ? '✕' : '·'}
-          </Text>
-          <Text dimColor>{whole.length <= most - 2 ? whole : fitWords(why, most - 2)}</Text>
+        <Box key={`flow-end-${f.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" paddingLeft={lead}>
+          {pass === false ? <Text color="error">✕</Text> : null}
+          <Text color={pass === false ? undefined : DONE} wrap="truncate-end">{said}</Text>
         </Box>
       )
     }
-
-    // The small card, the height of every other card: its title and where it stands; the squares with the step being run beside
-    // them, and the last round checked; Details, Stop and the round against the cap. Every line written to fit its row, never cut
     const flowSmall = (f: Flow) => {
       const rounds = roundsOf(f)
-      const word = stateWord(f, rounds)
-      const groups = squaresOf(f, rounds)
-      const squaresLetters = Math.ceil(squaresWidth(groups.length ? groups : [['waiting']]) / 7.5) + 2
+      const count = Math.max(rounds.length, f.cap ?? 0)
+      const isPassed = f.status === 'done' && flowPassed(f, rounds) === true
+      const scope = `flow-${f.id}`
       return (
         <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-          {/* Blue while it runs, green only when its last round passed */}
-          {f.status === 'working' || (f.status === 'done' && rounds.at(-1)?.pass !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE} /> : <Box width={1} flexShrink={0} />}
+          {/* Blue while it runs, green only when it finished and its last round did not fail */}
+          {f.status === 'working' || (f.status === 'done' && flowPassed(f, rounds) !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE} /> : <Box width={1} flexShrink={0} />}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-            <Box flexDirection="column" paddingLeft={lead}>
-              <Box height={1} overflow="hidden">
-                <Text bold>{fitWords(f.title, boldRow)}</Text>
-              </Box>
-              <Box height={1} overflow="hidden">
-                <Text dimColor>{flowGlance(f, perRow)}</Text>
-              </Box>
-            </Box>
-            <Box flexDirection="column" paddingLeft={lead}>
-              <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-                {squaresRow(f, rounds, `flow-squares-${f.id}`)}
-                <Text color={f.status === 'working' ? FLOW : word === 'Passed' ? DONE : undefined} dimColor={f.status !== 'working' && word !== 'Passed'}>
-                  {fitWords(word, Math.max(6, perRow - squaresLetters))}
-                </Text>
-              </Box>
-              <Box height={1} overflow="hidden">
-                {outcomeRow(f, rounds, perRow)}
-              </Box>
-            </Box>
-            <Box flexDirection="row" alignItems="center" gap={1} paddingLeft={lead}>
-              <Button key={`flow-open-${f.id}-${presses}`} label="Details" onPress={() => openFlow($, f.id)} />
-              {f.status === 'working' && f.session === flowMine ? <Button key={`flow-stop-${f.id}`} label="Stop" onPress={() => void stopFlow($, f.id)} /> : null}
-              <Box flexGrow={1} />
-              {roundsLabel(f, rounds) ? (
-                <Box flexShrink={0}>
-                  <Text color={f.status === 'working' ? FLOW : undefined} dimColor={f.status !== 'working'}>
-                    {roundsLabel(f, rounds)}
-                  </Text>
+            <Box flexDirection="column">
+              <Box flexDirection="row" gap={1} height={1} overflow="hidden">
+                <Box flexShrink={1} minWidth={0} height={1} overflow="hidden">
+                  <Button key={`flow-open-${f.id}-${presses}`} plain hover={{ scope, underline: true }} onPress={() => openFlow($, f.id)}>
+                    <Text bold wrap="truncate-end">{f.title}</Text>
+                  </Button>
                 </Box>
-              ) : null}
+                <Box flexGrow={1} />
+                {f.status === 'working' && f.session === flowMine ? (
+                  <Box flexShrink={0}>
+                    <Button key={`flow-stop-${f.id}`} label="Stop" plain dimColor hover={{ scope: `flow-stop-${f.id}`, underline: true }} onPress={() => void stopFlow($, f.id)} />
+                  </Box>
+                ) : null}
+              </Box>
+              <Box paddingLeft={lead}>
+                <Text dimColor wrap="truncate-end">{flowFacts(f, rounds)}</Text>
+              </Box>
             </Box>
+            {f.bar ? (
+              <Box flexDirection="row" gap={1} height={2} overflow="hidden" paddingLeft={lead}>
+                <Box flexShrink={0}>
+                  <Text dimColor>Bar ·</Text>
+                </Box>
+                <Box flexShrink={1} minWidth={0}>
+                  <Text dimColor wrap="wrap">{cut(f.bar, Math.max(20, room - 12))}</Text>
+                </Box>
+              </Box>
+            ) : null}
+            <Box flexDirection="column" paddingLeft={lead}>
+              {Array.from({ length: Math.max(1, count) }, (_, i) => roundRow(f, rounds, i + 1, isPassed))}
+            </Box>
+            {flowEnd(f, rounds)}
           </Box>
         </Box>
       )

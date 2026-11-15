@@ -217,8 +217,8 @@ const termOctopus = (ui: Ui, key: string, art: keyof typeof ART, size: number, a
 
 // A card's three dots, a brighter one passing along them as the app's pulse does; still once the work is not at work
 const DOT_FRAMES = ['●•·', '•●•', '·•●', '•·•']
-const termDots = (ui: Ui, $: EngineInterface, requestId: string, key: string) =>
-  liveRaster(ui, $, requestId, key, DOT_FRAMES.map(one => glyphCells(one, colorOf(LIVE))), 300, Infinity, Date.now() % 1200)
+const termDots = (ui: Ui, $: EngineInterface, requestId: string, key: string, color = LIVE) =>
+  liveRaster(ui, $, requestId, key, DOT_FRAMES.map(one => glyphCells(one, colorOf(color))), 300, Infinity, Date.now() % 1200)
 // A helper at work: its dot with a ring that grows out of it and fades
 const RING_FRAMES = ['●', '◉', '◎', '○']
 const termRing = (ui: Ui, $: EngineInterface, requestId: string, key: string) =>
