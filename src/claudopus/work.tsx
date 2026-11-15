@@ -73,7 +73,7 @@ const touchesKeyring = (e: { tool: string }) => {
   }
   if (!['Read', 'Grep', 'Glob', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return false
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
-  const roots = [keyringRoot, `${home}/.local/share/claudopus/keyring`].filter(Boolean).map(one => one.toLowerCase())
+  const roots = [keyringRoot, keyringOldRoot, `${home}/.local/share/claudopus/keyring`].filter(Boolean).map(one => one.toLowerCase())
   const isSearch = e.tool === 'Grep' || e.tool === 'Glob'
   if (isSearch && [input.pattern, input.glob].some(one => typeof one === 'string' && KEYRING_WORD.test(` ${one} `))) return true
   return [input.file_path, input.notebook_path, input.path, input.pattern, input.glob].some(one => {
@@ -96,10 +96,21 @@ const workHooks = (on: On) => {
       if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool, e as never).catch(err => log($, `call not followed: ${String(err)}`))
       if (isWatched) callStarted(e.tool_use_id, await $.clock.now())
       let r: Awaited<ReturnType<typeof raw>> | undefined
+      // What a command does to the person's own files is looked at as it ends: a change is put back, and the work is told
+      const isPersonWatched = e.tool === 'Bash' && Boolean(dir)
+      if (isPersonWatched) await personBegin($).catch(err => log($, `files not read before a command: ${String(err)}`))
+      let isPersonEnded = false
       try {
         r = await raw(call)
+        if (isPersonWatched) {
+          isPersonEnded = true
+          const undone = await personEnd($, e).catch(() => [] as string[])
+          if (undone.length && !r.deny) r = { ...r, context: [...(r.context ?? []), PERSON_UNDONE(undone)] } as typeof r
+        }
+        if (!r.deny) await personSeen($, e).catch(() => undefined)
         return r
       } finally {
+        if (isPersonWatched && !isPersonEnded) await personEnd($, e).catch(() => undefined)
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
@@ -337,10 +348,13 @@ const workHooks = (on: On) => {
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-    // A step the app sends to an older model (it moves work there after its safeguards flag a message) is left where the app sent it,
-    // even for work the person moved to a model of their own, and the card says which model it runs on now. A step sent to Haiku (the
-    // model some kinds of helper start on, which the person never wants) goes to Sonnet, or to the model the person picked
-    const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !/haiku/i.test(e.model)
+    // A step the app sends to an older model or to Haiku (it moves work there after its safeguards flag a message) is left where the
+    // app sent it, even for work the person moved to a model of their own, and the card says which model it runs on now. Only a
+    // helper whose own kind started it on Haiku (as Explore is), which the person never wants, has its Haiku steps go to Sonnet, or to
+    // the model the person picked: a step of it on Haiku is where it started, not where the app moved it
+    const own = id !== undefined ? startedOn.get(id) : undefined
+    const isOwnHaiku = /haiku/i.test(e.model) && /haiku/i.test(own ?? '')
+    const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnHaiku
     const instead = id !== undefined && !isOff && !isMovedByApp && !chosen ? rightModel(e.model) : undefined
     if (id !== undefined && (isMovedByApp || instead) && !sentElsewhere.has(`${id} ${e.model}`)) {
       sentElsewhere.add(`${id} ${e.model}`)
@@ -378,6 +392,7 @@ const workHooks = (on: On) => {
     // An agent a workflow's script starts belongs to its run's blue card, not a card of its own
     if (e.workflow) {
       const r = await next(e)
+      if (r.agentId && r.model) startedOn.set(r.agentId, r.model)
       if (r.agentId && dir) await flowSpawned($, e.workflow.runId, r.agentId, modelName(r.model ?? '') ? r.model : e.model || r.model || '', e.description ?? '').catch(err => log($, `workflow agent not kept: ${String(err)}`))
       return r
     }
@@ -393,6 +408,7 @@ const workHooks = (on: On) => {
     const isBackground = isHelperSpawn(e)
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
+    if (r.agentId && r.model) startedOn.set(r.agentId, r.model)
     if (!dir || !r.agentId) return r
     const id = r.agentId
     endedByHandback.delete(id)

@@ -8,12 +8,19 @@
 #   keyring list SERVICE               the accounts kept under SERVICE, one a line, never their values
 #
 # On a Mac each is the keychain's own `security` command, as the runners used before. Linux has no keychain a runner can use
-# without a desktop signed in, so there each value is a file of its own under $XDG_DATA_HOME/claudopus/keyring (by default
-# ~/.local/share/claudopus/keyring), the folders 700 and the files 600: as on a Mac, any program running as this user can read it.
+# without a desktop signed in, so there each value is a file of its own under ~/.local/share/claudopus/keyring (never
+# under $XDG_DATA_HOME, which the caller sets), the folders 700 and the files 600: as on a Mac, any program running as this user can read it.
 # A value only travels through pipes, never a command line.
 case $- in *p*) ;; *) exec /bin/bash -p "$0" "$@" ;; esac
 set -u
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
+# The home folder is the one the user database names for this user, never $HOME, which whoever runs this can set to a folder of
+# their own; security finds the keychain under it too
+own_home=$(/usr/bin/perl -e 'print((getpwuid($<))[7] // "")' 2>/dev/null)
+[ -n "$own_home" ] || own_home=$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)
+[ -n "$own_home" ] && [ -d "$own_home" ] || { echo "keyring: this user has no home folder" >&2; exit 1; }
+HOME=$own_home
+export HOME
 what=${1:-} service=${2:-} account=${3:-}
 usage() { echo "usage: keyring get|has|delete SERVICE ACCOUNT | set SERVICE ACCOUNT LABEL | list SERVICE" >&2; exit 2; }
 # Names are plain: a service or account never climbs out of its folder
@@ -46,8 +53,8 @@ if [ "$(uname -s)" = Darwin ]; then
 fi
 
 umask 077
-data=${XDG_DATA_HOME:-$HOME/.local/share}
-[ "${data#/}" != "$data" ] || data=$HOME/.local/share
+# Always under the home folder: XDG_DATA_HOME is the caller's to set, so it is not read
+data=$own_home/.local/share
 root=$data/claudopus/keyring
 file=$root/$service/$account
 case $what in

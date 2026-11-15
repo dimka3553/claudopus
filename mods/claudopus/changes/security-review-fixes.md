@@ -6,6 +6,9 @@
 - A password or key box shows only in the chat whose command asked for it, and only while that command waits.
 - No admin password is kept any more, and Config's Admin password setting is gone: every admin command asks for it, in macOS's own box (which now names the command) on this Mac, or in the panel's box over SSH, on Linux and from another device, sealed there for that one command. Passwords an earlier version kept are removed.
 - Admin commands run with the system's own PATH, never the one the caller set, and kept keys are hidden in what commands print.
-- Work the app moves to an older model now stays on it, and its card says so; a step sent to Haiku still runs on Sonnet.
+- Work the app moves to an older model or to Haiku now stays there, and its card says so; only a helper whose own kind starts it on Haiku (as Explore does) runs on Sonnet.
 - Your other Macs no longer get the commands and texts work runs or sends: the text an ask gives you to paste, a prompt's command, a running or background command, or what an admin, file or release press is for.
 - A message passed on to work is marked as your own words only when the chat passes it on whole.
+- A command that changes your settings, principles, chat's rules, work rules or always-allowed admin commands, by any path, has the change undone as it ends; its card shows what it wrote, and Allow makes it again. A change you make to those files by hand while work runs a command is undone the same way: press Allow on the card to keep it.
+- The admin, secret, release and key runners find their files in your own home folder as your user records name it, whatever HOME a command sets; on Linux kept keys always stay in your home folder whatever XDG_DATA_HOME says, and ones an earlier version kept under XDG_DATA_HOME are moved there as Claudopus loads.
+- The guide now says releases rely on your repository's own rules on GitHub as the wall: Claudopus's press guards its own way of releasing, and work running as you can still push main another way.

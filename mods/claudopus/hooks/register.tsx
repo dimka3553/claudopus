@@ -255,6 +255,8 @@ const rightModel = (id: string): string | undefined => {
   const isOlder = major > 99 || major < topMajor || (major === topMajor && minor < topMinor)
   return isOlder ? INSTEAD[family] : undefined
 }
+// The model each agent started on, as the engine resolved it: a step on Haiku of one that started there is its own kind's, not the app's move
+const startedOn = new Map<string, string>()
 // The work and helpers whose steps the app sent to such a model, each said in the log once
 const sentElsewhere = new Set<string>()
 // What an Agent call is answered when it names such a model
@@ -341,14 +343,17 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
 // Linux desktop session the person sees (DISPLAY or WAYLAND_DISPLAY): without one, as in a terminal over SSH, nothing opens a window
 let isLinux = false
 let hasDesktop = true
-// Where bin/keyring keeps its files on Linux, as it finds it: $XDG_DATA_HOME, when it is a full path, else ~/.local/share
+// Where bin/keyring keeps its files on Linux, ~/.local/share/claudopus/keyring (never under $XDG_DATA_HOME, which a caller sets),
+// and where earlier versions kept them when XDG_DATA_HOME was set, guarded the same (the mod moves them home as it loads)
 let keyringRoot = ''
+let keyringOldRoot = ''
 const knowSystem = async ($: EngineInterface) => {
   const r = await $.process.run(['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined)
   isLinux = r?.exitCode === 0 && r.stdout.trim() === 'Linux'
   hasDesktop = !isLinux || Boolean((await $.env.get('DISPLAY')) || (await $.env.get('WAYLAND_DISPLAY')))
   const data = (await $.env.get('XDG_DATA_HOME')) ?? ''
-  keyringRoot = `${data.startsWith('/') ? data : `${(await $.env.get('HOME')) ?? ''}/.local/share`}/claudopus/keyring`
+  keyringRoot = `${(await $.env.get('HOME')) ?? ''}/.local/share/claudopus/keyring`
+  keyringOldRoot = data.startsWith('/') ? `${data}/claudopus/keyring` : ''
 }
 // How this computer is named in what the person reads
 const thisMac = () => (isLinux ? 'this machine' : 'this Mac')
@@ -665,6 +670,7 @@ Last, one line "title: <title>". Repeat the current title if it still names what
 // The person's own copy of one of the three texts the mod ships (TEXTS in ./config), each written at its own fixed place in the
 // memory folder; the Config tab is the only writer, and nothing else is written there
 async function writeOwnText($: EngineInterface, memory: string, path: string, text: string) {
+  personWrote(memory, path, text)
   if (path === 'rules/CLAUDE.md') return $.fs.write(`${memory}/rules/CLAUDE.md`, text)
   if (path === 'roles/chat.md') return $.fs.write(`${memory}/roles/chat.md`, text)
   if (path === 'roles/work.md') return $.fs.write(`${memory}/roles/work.md`, text)
@@ -706,6 +712,7 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
     else delete config.models
   } else if (value === undefined) delete config[key]
   else config[key] = value
+  personWrote(memory, 'config.json', `${JSON.stringify(config, null, 2)}\n`)
   await $.fs.write(`${memory}/config.json`, `${JSON.stringify(config, null, 2)}\n`)
 }
 
@@ -725,6 +732,7 @@ async function putBack($: EngineInterface, memory: string, path: string) {
   const own = `${memory}/${path}`
   // Each copy put back is kept under a name of its own, so a second Reset never loses the first
   const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
+  personWrote(memory, path, null)
   const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   return r.exitCode === 0 ? '' : r.stderr || 'not put back'
 }
@@ -5749,7 +5757,7 @@ const NO_GATE_TOUCH = () =>
 
 // What a gate asks, in words, by its kind
 const gateWhat = (gate: Gate) =>
-  gate.kind === 'release' ? `Wants to release ${gate.host} to its main branch` : gate.kind === 'file' ? `Wants to change ${gate.host}` : `Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
+  gate.isUndone ? `A command changed ${gate.host}, and it was put back` : gate.kind === 'release' ? `Wants to release ${gate.host} to its main branch` : gate.kind === 'file' ? `Wants to change ${gate.host}` : `Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
 
 // The admin commands a Bash command runs, as the shell splits it: bin/admin by any spelling of its path, after what runs a
 // command it is handed, and inside a shell's -c or an eval. What the shell would build (a variable, a substitution) is read as
@@ -5801,9 +5809,8 @@ if [ -x /usr/bin/security ]; then
   key() { /usr/bin/security find-generic-password -s ${GATE_SERVICE} -a seal -w 2>/dev/null; }
   keep() { printf 'add-generic-password -U -s "${GATE_SERVICE}" -a "seal" -l "Claudopus admin gate" -w "%s"\\n' "$1" | /usr/bin/security -i >/dev/null 2>&1; }
 else
-  # Linux: where bin/keyring keeps it, a file only this user reads
-  d=\${XDG_DATA_HOME:-$HOME/.local/share}
-  case $d in /*) ;; *) d=$HOME/.local/share ;; esac
+  # Linux: where bin/keyring keeps it, a file only this user reads, under the home folder (never XDG_DATA_HOME)
+  d=$HOME/.local/share
   f=$d/claudopus/keyring/${GATE_SERVICE}
   key() { [ -f "$f/seal" ] && cat "$f/seal" 2>/dev/null; }
   keep() { (umask 077; mkdir -p "$f" && chmod 700 "$d/claudopus" "$d/claudopus/keyring" "$f" && printf '%s' "$1" >"$f/.seal.new" && mv -f "$f/.seal.new" "$f/seal"); }
@@ -5856,7 +5863,9 @@ const readAllowed = async ($: EngineInterface): Promise<Allowed[]> => {
 const writeAllowed = ($: EngineInterface, list: Allowed[]) => {
   const kept: Record<string, { command: string; seal: string; at: number }[]> = {}
   for (const { host, command, seal, at } of list) (kept[host] ??= []).push({ command, seal, at })
-  return $.fs.write(allowedPath(), `${JSON.stringify(kept, null, 2)}\n`)
+  const text = `${JSON.stringify(kept, null, 2)}\n`
+  personWrote(dir, 'admin-allowed.json', text)
+  return $.fs.write(allowedPath(), text)
 }
 // Read once for each state of the file: the Config tab draws the list often
 let allowedRead = { key: '', valid: [] as Allowed[], unsealed: 0 }
@@ -5897,7 +5906,7 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
 }
 // No admin password is kept: every one an earlier version kept leaves the keychain (on Linux, bin/keyring's folder) as the mod
 // loads, with the "Let macOS ask" mark kept beside the gate's key and config.json's adminPassword, which no longer choose anything
-const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else d=${XDG_DATA_HOME:-$HOME/.local/share}; case $d in /*) ;; *) d=$HOME/.local/share ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
+const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else d=$HOME/.local/share; o=${XDG_DATA_HOME:-}; case $o in /*) [ "$o" != "$d" ] && [ -d "$o/claudopus/keyring" ] && [ ! -e "$d/claudopus/keyring" ] && mkdir -p "$d/claudopus" && chmod 700 "$d/claudopus" && mv "$o/claudopus/keyring" "$d/claudopus/keyring" ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
 let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
   if (isKeptForgotten || !dir) return
@@ -5991,6 +6000,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
 const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
   presses += 1
   const id = gate.id
+  if (gate.isUndone) return void answerUndone($, gate, said).then(() => redraw($)).catch(err => log($, `undone change not answered: ${String(err)}`))
   if (gateHeld.has(id)) {
     gateSaid.set(id, said)
     void noteDone($, {
@@ -6139,6 +6149,115 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
   return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
 }
 
+// What a command did to them: a command can write the person's own settings and texts, and the commands always allowed, in ways no
+// reading of its text finds (a path built from variables, a program's own code), so each Bash call is also judged by what it did.
+// Every one of these files is read as the first call of a run of calls begins, and again as each call ends: one that changed is put
+// back as it was, whatever changed it, and the work is told. The mod's own writes in that time (a press in Config, an Edit or Write the
+// person allowed) are what it is put back to. A change to the settings or texts is shown on the work's card, where Allow makes it
+// again, as a change the person made by hand while work ran a command is undone too. What this does not catch: a process a command
+// left running that writes after its call ended, and a change made by Config in another chat while a call ran here, which is undone
+// and asked about here
+const PERSON_FILES = ['config.json', 'rules/CLAUDE.md', 'roles/chat.md', 'roles/work.md', 'admin-allowed.json']
+let personBase: Map<string, string | null> | undefined
+let personCalls = 0
+// A file's text, null when there is none, undefined when it could not be read (then it is left alone)
+const personRead = async ($: EngineInterface, name: string): Promise<string | null | undefined> => {
+  const path = `${dir}/${name}`
+  const isThere = await $.fs.exists(path).catch(() => undefined)
+  if (isThere === undefined) return undefined
+  return isThere ? $.fs.read(path).catch(() => undefined) : null
+}
+const personNow = async ($: EngineInterface) => {
+  const now = new Map<string, string | null>()
+  for (const name of PERSON_FILES) {
+    const text = await personRead($, name)
+    if (text !== undefined) now.set(name, text)
+  }
+  return now
+}
+// The mod wrote one of them itself: that is what it holds now
+const personWrote = (memory: string, name: string, text: string | null) => {
+  if (memory === dir && personBase && PERSON_FILES.includes(name)) personBase.set(name, text)
+}
+const personPut = async ($: EngineInterface, name: string, text: string | null) => {
+  // Taken away first, so a link put in its place is replaced, never written through
+  await $.process.run(['rm', '-f', `${dir}/${name}`], { timeoutMs: 10_000 }).catch(() => undefined)
+  if (text !== null) await $.fs.write(`${dir}/${name}`, text)
+}
+const personBegin = async ($: EngineInterface) => {
+  if (!dir) return
+  personCalls += 1
+  if (!personBase) personBase = await personNow($)
+}
+// As a call ends: what it changed, put back
+const personEnd = async ($: EngineInterface, e: ToolCallInput): Promise<string[]> => {
+  const base = personBase
+  const undone: string[] = []
+  try {
+    if (!base || !dir) return []
+    const now = await personNow($)
+    for (const [name, was] of base) {
+      if (!now.has(name) || now.get(name) === was) continue
+      const is = now.get(name) ?? null
+      await personPut($, name, was)
+      undone.push(name)
+      await log($, `${name} was changed by a command, and put back`)
+      if (name !== 'admin-allowed.json') void offerUndone($, e, name, is).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
+    }
+    for (const name of PERSON_FILES) {
+      if (base.has(name) || !now.has(name) || now.get(name) === null) continue
+      // One there was none of as the run began
+      await personPut($, name, null)
+      undone.push(name)
+      await log($, `${name} was made by a command, and taken away`)
+      if (name !== 'admin-allowed.json') void offerUndone($, e, name, now.get(name) ?? null).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
+    }
+    return undone
+  } finally {
+    personCalls = Math.max(0, personCalls - 1)
+    if (!personCalls) personBase = undefined
+  }
+}
+// A file of these that Edit or Write changed, as the person allowed: what it holds now is the person's
+const personSeen = async ($: EngineInterface, e: ToolCallInput) => {
+  if (!dir || !personBase || !FILE_TOOLS.includes(e.tool)) return
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const full = pathOf(String((e as { file_path?: unknown; notebook_path?: unknown }).file_path ?? (e as { notebook_path?: unknown }).notebook_path ?? ''), home, cwd || home)
+  const name = PERSON_FILES.find(one => full.toLowerCase() === `${dir}/${one}`.toLowerCase())
+  if (!name) return
+  const text = await personRead($, name)
+  if (text !== undefined) personWrote(dir, name, text)
+}
+const PERSON_UNDONE = (names: string[]) =>
+  named(`This command changed ${names.join(', ')} in {name}'s memory folder, and the change was undone: {name}'s own settings and texts are changed by work only with the Edit or Write tool, which waits for {name}'s press on the work's card. Do not try to change them another way.`)
+// The change undone, on the card of the work whose command made it: Allow makes it again
+const offerUndone = async ($: EngineInterface, e: ToolCallInput, name: string, text: string | null) => {
+  const list = await read($, todos)
+  const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
+  const card = list.find(one => one.id === top)
+  const what = name === 'config.json' ? 'your Claudopus settings (config.json)' : name.startsWith('rules/') ? `your rules (${name})` : `your role text (${name})`
+  const id = `${e.tool_use_id}-u-${name.replace(/[^A-Za-z0-9]/g, '')}`
+  // Nothing waits on it: the card offers it until pressed, and the press itself makes the change again
+  undoneOffers.set(id, { name, text })
+  gateHeld.add(id)
+  const at = await $.clock.now()
+  await setGates($, card ? top : '', gates => [...gates.filter(one => one.id !== id), { id, kind: 'file', isUndone: true, host: what, command: cut(text ?? '(the file taken away)', 2000), at, ...(e.agentId ? { from: e.agentId } : {}) }])
+  await openList($).catch(() => undefined)
+  $.ui.log(`A command ${card ? `of the work "${titleOf(card)}" ` : ''}changed ${what}, and it was put back · Press Allow once ${card ? 'on its card' : 'at the top'} in the Claudopus panel to make the change again, or Deny.`)
+}
+const undoneOffers = new Map<string, { name: string; text: string | null }>()
+const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
+  const offer = undoneOffers.get(gate.id)
+  undoneOffers.delete(gate.id)
+  gateHeld.delete(gate.id)
+  const list = await read($, todos)
+  await setGates($, list.some(one => one.admins?.some(g => g.id === gate.id)) ? (list.find(one => one.admins?.some(g => g.id === gate.id))?.id ?? '') : '', gates => gates.filter(one => one.id !== gate.id))
+  if (said !== 'once' || !offer || !dir) return log($, `change to ${gate.host}: left undone`)
+  personWrote(dir, offer.name, offer.text)
+  await personPut($, offer.name, offer.text)
+  await log($, `change to ${gate.host}: made again, as allowed`)
+}
+
 // On the card: what it wants to run, whole, and the three presses. Another chat's panel shows it with no buttons: only the chat
 // that holds the call allows it
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
@@ -6154,7 +6273,9 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
     <ui.Text wrap="wrap">
       {gate.kind === 'release'
         ? 'Allow: this branch is merged into main, checked and pushed, with its version and tag. Deny: nothing is released, and the work is told.'
-        : gate.kind === 'file'
+        : gate.isUndone
+          ? 'Work changes this file only with Edit or Write, which ask you first, so what a command wrote to it was undone. Allow: the change is made again, as it was written (if you made it yourself, allow it). Deny: the file stays as it was.'
+          : gate.kind === 'file'
           ? 'Allow: the change is made to this file of yours. Deny: the file stays as it is, and the work is told.'
           : `Allow: it runs with admin rights${gate.isWork ? ', and this work runs its next admin commands without asking' : ''}. Deny: it does not run, and the work is told.`}
     </ui.Text>
@@ -7839,7 +7960,7 @@ const touchesKeyring = (e: { tool: string }) => {
   }
   if (!['Read', 'Grep', 'Glob', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)) return false
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
-  const roots = [keyringRoot, `${home}/.local/share/claudopus/keyring`].filter(Boolean).map(one => one.toLowerCase())
+  const roots = [keyringRoot, keyringOldRoot, `${home}/.local/share/claudopus/keyring`].filter(Boolean).map(one => one.toLowerCase())
   const isSearch = e.tool === 'Grep' || e.tool === 'Glob'
   if (isSearch && [input.pattern, input.glob].some(one => typeof one === 'string' && KEYRING_WORD.test(` ${one} `))) return true
   return [input.file_path, input.notebook_path, input.path, input.pattern, input.glob].some(one => {
@@ -7862,10 +7983,21 @@ const workHooks = (on: On) => {
       if (isWatched) await callBegun($, e.tool_use_id, e.agentId ?? '', e.tool, e as never).catch(err => log($, `call not followed: ${String(err)}`))
       if (isWatched) callStarted(e.tool_use_id, await $.clock.now())
       let r: Awaited<ReturnType<typeof raw>> | undefined
+      // What a command does to the person's own files is looked at as it ends: a change is put back, and the work is told
+      const isPersonWatched = e.tool === 'Bash' && Boolean(dir)
+      if (isPersonWatched) await personBegin($).catch(err => log($, `files not read before a command: ${String(err)}`))
+      let isPersonEnded = false
       try {
         r = await raw(call)
+        if (isPersonWatched) {
+          isPersonEnded = true
+          const undone = await personEnd($, e).catch(() => [] as string[])
+          if (undone.length && !r.deny) r = { ...r, context: [...(r.context ?? []), PERSON_UNDONE(undone)] } as typeof r
+        }
+        if (!r.deny) await personSeen($, e).catch(() => undefined)
         return r
       } finally {
+        if (isPersonWatched && !isPersonEnded) await personEnd($, e).catch(() => undefined)
         if (isWatched) await callEnded($, e.tool_use_id, e.agentId ?? '', e.tool, r as never).catch(err => log($, `call end not followed: ${String(err)}`))
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
@@ -8103,10 +8235,13 @@ const workHooks = (on: On) => {
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-    // A step the app sends to an older model (it moves work there after its safeguards flag a message) is left where the app sent it,
-    // even for work the person moved to a model of their own, and the card says which model it runs on now. A step sent to Haiku (the
-    // model some kinds of helper start on, which the person never wants) goes to Sonnet, or to the model the person picked
-    const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !/haiku/i.test(e.model)
+    // A step the app sends to an older model or to Haiku (it moves work there after its safeguards flag a message) is left where the
+    // app sent it, even for work the person moved to a model of their own, and the card says which model it runs on now. Only a
+    // helper whose own kind started it on Haiku (as Explore is), which the person never wants, has its Haiku steps go to Sonnet, or to
+    // the model the person picked: a step of it on Haiku is where it started, not where the app moved it
+    const own = id !== undefined ? startedOn.get(id) : undefined
+    const isOwnHaiku = /haiku/i.test(e.model) && /haiku/i.test(own ?? '')
+    const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnHaiku
     const instead = id !== undefined && !isOff && !isMovedByApp && !chosen ? rightModel(e.model) : undefined
     if (id !== undefined && (isMovedByApp || instead) && !sentElsewhere.has(`${id} ${e.model}`)) {
       sentElsewhere.add(`${id} ${e.model}`)
@@ -8144,6 +8279,7 @@ const workHooks = (on: On) => {
     // An agent a workflow's script starts belongs to its run's blue card, not a card of its own
     if (e.workflow) {
       const r = await next(e)
+      if (r.agentId && r.model) startedOn.set(r.agentId, r.model)
       if (r.agentId && dir) await flowSpawned($, e.workflow.runId, r.agentId, modelName(r.model ?? '') ? r.model : e.model || r.model || '', e.description ?? '').catch(err => log($, `workflow agent not kept: ${String(err)}`))
       return r
     }
@@ -8159,6 +8295,7 @@ const workHooks = (on: On) => {
     const isBackground = isHelperSpawn(e)
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
+    if (r.agentId && r.model) startedOn.set(r.agentId, r.model)
     if (!dir || !r.agentId) return r
     const id = r.agentId
     endedByHandback.delete(id)

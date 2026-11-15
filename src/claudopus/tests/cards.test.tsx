@@ -580,8 +580,8 @@ test("a card's title, its line of facts and every line under them start at one l
   await expectOneEdge(4)
 })
 
-test('work the app moves to an older model stays on it and its card says so; a helper it starts on Haiku runs on Sonnet', async ($, on) => {
-  const { stepped, files } = world(on, { model: 'claude-fable-5-2' })
+test('work the app moves to an older model or to Haiku stays on it and its card says so; a helper whose own kind starts on Haiku runs on Sonnet', async ($, on) => {
+  const { stepped, files } = world(on, { model: 'claude-fable-5-2', startedOn: { 'Look it up': 'claude-haiku-5-5' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
@@ -629,10 +629,14 @@ test('work the app moves to an older model stays on it and its card says so; a h
   expect(stepped.at(-1)).toBe('claude-opus-4-8')
   expect(await line()).toContain('moved to Opus 4.8 by the app')
 
-  // An agent a workflow's script started has no card of its own: Haiku is moved all the same, and the log says so
+  // F-003: a step of work that started on another model, which the app sends to Haiku, stays there too, and the card says so
+  await step(7, 'claude-haiku-5-5')
+  expect(stepped.at(-1)).toBe('claude-haiku-5-5')
+  expect(await line()).toContain('moved to Haiku 5.5 by the app')
+  // An agent whose start the mod did not see (a workflow's, before this copy loaded) is left where the app sent it, Haiku too
   await step(0, 'claude-haiku-5-5', 'w1')
-  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
-  expect(files.get(`${MEMORY}/log.md`)).toContain('work w1 was sent to Haiku 5.5 by the app: its steps go to Sonnet 5.5')
+  expect(stepped.at(-1)).toBe('claude-haiku-5-5')
+  expect(files.get(`${MEMORY}/log.md`)).toContain('work w1 was sent to Haiku 5.5 by the app: its steps stay there')
 })
 
 test('work that answers from an older model all the same says so on its card', async ($, on) => {

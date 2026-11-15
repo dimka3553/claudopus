@@ -15,6 +15,18 @@ export HOME=$tmp/home
 memory=$HOME/.claude/claudopus
 mkdir -p "$memory/admin-grants"
 unset XDG_DATA_HOME
+# The runners take their home folder from the user database, never $HOME: the cases below run copies of them that take this test's
+# home instead, so the person's own is never touched. The shipped runners, which take the person's, are run only where they must
+# refuse (a forged key and grant under another home)
+shipped=$here
+src=$here/../../../src
+mkdir -p "$tmp/bin" && cp -p "$here"/* "$tmp/bin/" || exit 1
+for f in admin release secret keyring; do
+  sed 's|^own_home=$(/usr/bin/perl .*$|own_home=$HOME|' "$here/$f" >"$tmp/bin/$f" && chmod +x "$tmp/bin/$f"
+  ! cmp -s "$here/$f" "$tmp/bin/$f" || { echo "admin.test.sh: $f takes its home folder some other way now"; exit 1; }
+done
+here=$tmp/bin
+admin=$here/admin
 if [ -n "$mac" ]; then
   mkdir -p "$HOME/Library/Keychains" "$HOME/Library/Preferences"
   keychain=$HOME/Library/Keychains/login.keychain-db
@@ -27,7 +39,7 @@ hook_seal=$(node -e '
   const text = require("fs").readFileSync(process.argv[1], "utf8")
   const GATE_SERVICE = /const GATE_SERVICE = \x27([^\x27]+)\x27/.exec(text)[1]
   process.stdout.write(eval(/const SEAL = (`[\s\S]*?`)\n/.exec(text)[1]))
-' "$here/../../../src/claudopus/gate.tsx") && [ -n "$hook_seal" ] || { echo "admin.test.sh: the hook's seal script was not read from src/claudopus/gate.tsx"; exit 1; }
+' "$src/claudopus/gate.tsx") && [ -n "$hook_seal" ] || { echo "admin.test.sh: the hook's seal script was not read from src/claudopus/gate.tsx"; exit 1; }
 seal() {
   if [ -n "${2:-}" ]; then printf '%s\n%s' "$2" "$1" | perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m, $k)'; else /bin/sh -c "$hook_seal" sh make "$1"; fi
 }
@@ -148,7 +160,7 @@ if "$here/keyring" has claudopus-admin here; then echo "NOT OK $n - the kept adm
 config '{}'
 # What the panel types is sealed by the hook's own openssl line (read out of src/claudopus/boxes.tsx) to a key made as the runner
 # makes it, and opened as the runner opens it: this machine's openssl takes every option both use
-seal_for=$(node -e 'const t = require("fs").readFileSync(process.argv[1], "utf8"); process.stdout.write(eval(/const SEAL_FOR = (\x27[^\n]*\x27)\n/.exec(t)[1]))' "$here/../../../src/claudopus/boxes.tsx")
+seal_for=$(node -e 'const t = require("fs").readFileSync(process.argv[1], "utf8"); process.stdout.write(eval(/const SEAL_FOR = (\x27[^\n]*\x27)\n/.exec(t)[1]))' "$src/claudopus/boxes.tsx")
 private=$(openssl genrsa 2048 2>/dev/null)
 public=$(printf '%s\n' "$private" | openssl rsa -pubout -outform DER 2>/dev/null | openssl base64 -A)
 sealed_value=$(printf '%s' 'pw "with" \quotes' | /bin/bash -c "$seal_for" sh "$public")
@@ -210,6 +222,16 @@ done
 (cd "$r/work" && echo three >file && git commit -q -am three)
 # Outside Claude Code with no terminal, as a run detached or over ssh: still refused
 expect 'outside Claude Code with no terminal and no grant: refused' 6 "$RELEASE_REFUSED" -- env -u CLAUDECODE bash -c 'cd "$1" && "$2" </dev/null' sh "$r/work" "$here/release"
+# F-017: a key and a grant made under a home folder of the caller's own count for nothing: the shipped runner reads the person's
+# own home, whatever HOME says, and XDG_DATA_HOME is never read
+release_grant rel4 release-grant three
+(cd "$r/work" && git checkout -q -b three 2>/dev/null; git commit -q --allow-empty -m forged)
+expect 'the shipped release, with a valid grant and key under another HOME: refused' 6 "$RELEASE_REFUSED" -- env HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" bash -c 'cd "$1" && "$2" </dev/null' sh "$r/work" "$shipped/release"
+config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nnever')")\"}"
+expect 'the shipped admin, with a valid never-ask seal under another HOME: refused' 6 "$REFUSED" -- env HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" "$shipped/admin" here 'id -u'
+config '{}'
+rm -f "$memory"/admin-grants/*
+(cd "$r/work" && git checkout -q fix-it)
 # A person at their own terminal outside Claude Code: asked there, and a no releases nothing, a yes releases
 at_terminal() {
   env -u CLAUDECODE python3 -c '

@@ -23,6 +23,13 @@
 set -uo pipefail
 say() { echo "release: $*" >&2; }
 die() { say "$1"; exit "${2:-1}"; }
+# The home folder is the one the user database names for this user, never $HOME, which whoever runs this can set to a folder of
+# their own (with a key and grants made there)
+own_home=$(/usr/bin/perl -e 'print((getpwuid($<))[7] // "")' 2>/dev/null)
+[ -n "$own_home" ] || own_home=$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)
+[ -n "$own_home" ] && [ -d "$own_home" ] || die "this user has no home folder"
+HOME=$own_home
+export HOME
 
 top=$(git rev-parse --show-toplevel 2>/dev/null) || die "not in a git repo"
 common=$(cd "$top" && cd "$(git rev-parse --git-common-dir)" && pwd)

@@ -13,7 +13,15 @@ mkdir -p "$HOME"
 unset XDG_DATA_HOME DISPLAY WAYLAND_DISPLAY
 failed=0
 ok() { if eval "$2"; then echo "ok - $1"; else echo "NOT OK - $1"; failed=1; fi; }
+# The runners take their home folder from the user database, never $HOME: these cases run copies that take this test's home
+shipped=$here
+mkdir -p "$tmp/bin" && cp -p "$here"/* "$tmp/bin/" || exit 1
+for f in secret keyring; do sed 's|^own_home=$(/usr/bin/perl .*$|own_home=$HOME|' "$here/$f" >"$tmp/bin/$f" && chmod +x "$tmp/bin/$f"; done
+here=$tmp/bin
 k=$here/keyring
+# The shipped store is under the person's own home, whatever HOME and XDG_DATA_HOME say: what is kept under another is never read
+mkdir -p "$HOME/x/claudopus/keyring/test-forged" && printf 'forged' >"$HOME/x/claudopus/keyring/test-forged/one" && chmod -R go-rwx "$HOME/x"
+ok 'the shipped store ignores HOME and XDG_DATA_HOME' '! XDG_DATA_HOME=$HOME/x "$shipped/keyring" get test-forged one >/dev/null'
 store=$HOME/.local/share/claudopus/keyring
 
 ok 'nothing kept: get ends 1' '! "$k" get test-service one >/dev/null'

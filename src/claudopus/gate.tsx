@@ -38,7 +38,7 @@ const NO_GATE_TOUCH = () =>
 
 // What a gate asks, in words, by its kind
 const gateWhat = (gate: Gate) =>
-  gate.kind === 'release' ? `Wants to release ${gate.host} to its main branch` : gate.kind === 'file' ? `Wants to change ${gate.host}` : `Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
+  gate.isUndone ? `A command changed ${gate.host}, and it was put back` : gate.kind === 'release' ? `Wants to release ${gate.host} to its main branch` : gate.kind === 'file' ? `Wants to change ${gate.host}` : `Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
 
 // The admin commands a Bash command runs, as the shell splits it: bin/admin by any spelling of its path, after what runs a
 // command it is handed, and inside a shell's -c or an eval. What the shell would build (a variable, a substitution) is read as
@@ -90,9 +90,8 @@ if [ -x /usr/bin/security ]; then
   key() { /usr/bin/security find-generic-password -s ${GATE_SERVICE} -a seal -w 2>/dev/null; }
   keep() { printf 'add-generic-password -U -s "${GATE_SERVICE}" -a "seal" -l "Claudopus admin gate" -w "%s"\\n' "$1" | /usr/bin/security -i >/dev/null 2>&1; }
 else
-  # Linux: where bin/keyring keeps it, a file only this user reads
-  d=\${XDG_DATA_HOME:-$HOME/.local/share}
-  case $d in /*) ;; *) d=$HOME/.local/share ;; esac
+  # Linux: where bin/keyring keeps it, a file only this user reads, under the home folder (never XDG_DATA_HOME)
+  d=$HOME/.local/share
   f=$d/claudopus/keyring/${GATE_SERVICE}
   key() { [ -f "$f/seal" ] && cat "$f/seal" 2>/dev/null; }
   keep() { (umask 077; mkdir -p "$f" && chmod 700 "$d/claudopus" "$d/claudopus/keyring" "$f" && printf '%s' "$1" >"$f/.seal.new" && mv -f "$f/.seal.new" "$f/seal"); }
@@ -145,7 +144,9 @@ const readAllowed = async ($: EngineInterface): Promise<Allowed[]> => {
 const writeAllowed = ($: EngineInterface, list: Allowed[]) => {
   const kept: Record<string, { command: string; seal: string; at: number }[]> = {}
   for (const { host, command, seal, at } of list) (kept[host] ??= []).push({ command, seal, at })
-  return $.fs.write(allowedPath(), `${JSON.stringify(kept, null, 2)}\n`)
+  const text = `${JSON.stringify(kept, null, 2)}\n`
+  personWrote(dir, 'admin-allowed.json', text)
+  return $.fs.write(allowedPath(), text)
 }
 // Read once for each state of the file: the Config tab draws the list often
 let allowedRead = { key: '', valid: [] as Allowed[], unsealed: 0 }
@@ -186,7 +187,7 @@ const regate = async ($: EngineInterface, change: { mode?: 'each' | 'work' | 'ne
 }
 // No admin password is kept: every one an earlier version kept leaves the keychain (on Linux, bin/keyring's folder) as the mod
 // loads, with the "Let macOS ask" mark kept beside the gate's key and config.json's adminPassword, which no longer choose anything
-const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else d=${XDG_DATA_HOME:-$HOME/.local/share}; case $d in /*) ;; *) d=$HOME/.local/share ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
+const FORGET_KEPT = 'if [ -x /usr/bin/security ]; then n=0; while [ $n -lt 50 ] && /usr/bin/security delete-generic-password -s claudopus-admin >/dev/null 2>&1; do n=$((n + 1)); done; /usr/bin/security delete-generic-password -s claudopus-admin-gate -a password >/dev/null 2>&1; else d=$HOME/.local/share; o=${XDG_DATA_HOME:-}; case $o in /*) [ "$o" != "$d" ] && [ -d "$o/claudopus/keyring" ] && [ ! -e "$d/claudopus/keyring" ] && mkdir -p "$d/claudopus" && chmod 700 "$d/claudopus" && mv "$o/claudopus/keyring" "$d/claudopus/keyring" ;; esac; rm -rf "$d/claudopus/keyring/claudopus-admin"; rm -f "$d/claudopus/keyring/claudopus-admin-gate/password"; fi; exit 0'
 let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
   if (isKeptForgotten || !dir) return
@@ -280,6 +281,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
 const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
   presses += 1
   const id = gate.id
+  if (gate.isUndone) return void answerUndone($, gate, said).then(() => redraw($)).catch(err => log($, `undone change not answered: ${String(err)}`))
   if (gateHeld.has(id)) {
     gateSaid.set(id, said)
     void noteDone($, {
@@ -428,6 +430,115 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
   return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
 }
 
+// What a command did to them: a command can write the person's own settings and texts, and the commands always allowed, in ways no
+// reading of its text finds (a path built from variables, a program's own code), so each Bash call is also judged by what it did.
+// Every one of these files is read as the first call of a run of calls begins, and again as each call ends: one that changed is put
+// back as it was, whatever changed it, and the work is told. The mod's own writes in that time (a press in Config, an Edit or Write the
+// person allowed) are what it is put back to. A change to the settings or texts is shown on the work's card, where Allow makes it
+// again, as a change the person made by hand while work ran a command is undone too. What this does not catch: a process a command
+// left running that writes after its call ended, and a change made by Config in another chat while a call ran here, which is undone
+// and asked about here
+const PERSON_FILES = ['config.json', 'rules/CLAUDE.md', 'roles/chat.md', 'roles/work.md', 'admin-allowed.json']
+let personBase: Map<string, string | null> | undefined
+let personCalls = 0
+// A file's text, null when there is none, undefined when it could not be read (then it is left alone)
+const personRead = async ($: EngineInterface, name: string): Promise<string | null | undefined> => {
+  const path = `${dir}/${name}`
+  const isThere = await $.fs.exists(path).catch(() => undefined)
+  if (isThere === undefined) return undefined
+  return isThere ? $.fs.read(path).catch(() => undefined) : null
+}
+const personNow = async ($: EngineInterface) => {
+  const now = new Map<string, string | null>()
+  for (const name of PERSON_FILES) {
+    const text = await personRead($, name)
+    if (text !== undefined) now.set(name, text)
+  }
+  return now
+}
+// The mod wrote one of them itself: that is what it holds now
+const personWrote = (memory: string, name: string, text: string | null) => {
+  if (memory === dir && personBase && PERSON_FILES.includes(name)) personBase.set(name, text)
+}
+const personPut = async ($: EngineInterface, name: string, text: string | null) => {
+  // Taken away first, so a link put in its place is replaced, never written through
+  await $.process.run(['rm', '-f', `${dir}/${name}`], { timeoutMs: 10_000 }).catch(() => undefined)
+  if (text !== null) await $.fs.write(`${dir}/${name}`, text)
+}
+const personBegin = async ($: EngineInterface) => {
+  if (!dir) return
+  personCalls += 1
+  if (!personBase) personBase = await personNow($)
+}
+// As a call ends: what it changed, put back
+const personEnd = async ($: EngineInterface, e: ToolCallInput): Promise<string[]> => {
+  const base = personBase
+  const undone: string[] = []
+  try {
+    if (!base || !dir) return []
+    const now = await personNow($)
+    for (const [name, was] of base) {
+      if (!now.has(name) || now.get(name) === was) continue
+      const is = now.get(name) ?? null
+      await personPut($, name, was)
+      undone.push(name)
+      await log($, `${name} was changed by a command, and put back`)
+      if (name !== 'admin-allowed.json') void offerUndone($, e, name, is).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
+    }
+    for (const name of PERSON_FILES) {
+      if (base.has(name) || !now.has(name) || now.get(name) === null) continue
+      // One there was none of as the run began
+      await personPut($, name, null)
+      undone.push(name)
+      await log($, `${name} was made by a command, and taken away`)
+      if (name !== 'admin-allowed.json') void offerUndone($, e, name, now.get(name) ?? null).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
+    }
+    return undone
+  } finally {
+    personCalls = Math.max(0, personCalls - 1)
+    if (!personCalls) personBase = undefined
+  }
+}
+// A file of these that Edit or Write changed, as the person allowed: what it holds now is the person's
+const personSeen = async ($: EngineInterface, e: ToolCallInput) => {
+  if (!dir || !personBase || !FILE_TOOLS.includes(e.tool)) return
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const full = pathOf(String((e as { file_path?: unknown; notebook_path?: unknown }).file_path ?? (e as { notebook_path?: unknown }).notebook_path ?? ''), home, cwd || home)
+  const name = PERSON_FILES.find(one => full.toLowerCase() === `${dir}/${one}`.toLowerCase())
+  if (!name) return
+  const text = await personRead($, name)
+  if (text !== undefined) personWrote(dir, name, text)
+}
+const PERSON_UNDONE = (names: string[]) =>
+  named(`This command changed ${names.join(', ')} in {name}'s memory folder, and the change was undone: {name}'s own settings and texts are changed by work only with the Edit or Write tool, which waits for {name}'s press on the work's card. Do not try to change them another way.`)
+// The change undone, on the card of the work whose command made it: Allow makes it again
+const offerUndone = async ($: EngineInterface, e: ToolCallInput, name: string, text: string | null) => {
+  const list = await read($, todos)
+  const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
+  const card = list.find(one => one.id === top)
+  const what = name === 'config.json' ? 'your Claudopus settings (config.json)' : name.startsWith('rules/') ? `your rules (${name})` : `your role text (${name})`
+  const id = `${e.tool_use_id}-u-${name.replace(/[^A-Za-z0-9]/g, '')}`
+  // Nothing waits on it: the card offers it until pressed, and the press itself makes the change again
+  undoneOffers.set(id, { name, text })
+  gateHeld.add(id)
+  const at = await $.clock.now()
+  await setGates($, card ? top : '', gates => [...gates.filter(one => one.id !== id), { id, kind: 'file', isUndone: true, host: what, command: cut(text ?? '(the file taken away)', 2000), at, ...(e.agentId ? { from: e.agentId } : {}) }])
+  await openList($).catch(() => undefined)
+  $.ui.log(`A command ${card ? `of the work "${titleOf(card)}" ` : ''}changed ${what}, and it was put back · Press Allow once ${card ? 'on its card' : 'at the top'} in the Claudopus panel to make the change again, or Deny.`)
+}
+const undoneOffers = new Map<string, { name: string; text: string | null }>()
+const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
+  const offer = undoneOffers.get(gate.id)
+  undoneOffers.delete(gate.id)
+  gateHeld.delete(gate.id)
+  const list = await read($, todos)
+  await setGates($, list.some(one => one.admins?.some(g => g.id === gate.id)) ? (list.find(one => one.admins?.some(g => g.id === gate.id))?.id ?? '') : '', gates => gates.filter(one => one.id !== gate.id))
+  if (said !== 'once' || !offer || !dir) return log($, `change to ${gate.host}: left undone`)
+  personWrote(dir, offer.name, offer.text)
+  await personPut($, offer.name, offer.text)
+  await log($, `change to ${gate.host}: made again, as allowed`)
+}
+
 // On the card: what it wants to run, whole, and the three presses. Another chat's panel shows it with no buttons: only the chat
 // that holds the call allows it
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
@@ -443,7 +554,9 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
     <ui.Text wrap="wrap">
       {gate.kind === 'release'
         ? 'Allow: this branch is merged into main, checked and pushed, with its version and tag. Deny: nothing is released, and the work is told.'
-        : gate.kind === 'file'
+        : gate.isUndone
+          ? 'Work changes this file only with Edit or Write, which ask you first, so what a command wrote to it was undone. Allow: the change is made again, as it was written (if you made it yourself, allow it). Deny: the file stays as it was.'
+          : gate.kind === 'file'
           ? 'Allow: the change is made to this file of yours. Deny: the file stays as it is, and the work is told.'
           : `Allow: it runs with admin rights${gate.isWork ? ', and this work runs its next admin commands without asking' : ''}. Deny: it does not run, and the work is told.`}
     </ui.Text>
