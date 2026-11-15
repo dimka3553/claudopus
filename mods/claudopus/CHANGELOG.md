@@ -2,6 +2,27 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.134 · 15 November 2026
+- A press on Allow once, Always allow, Deny or an ask's buttons shows its answer at once: the amber box and its buttons go in the same moment, where before they stayed up to a second until the waiting command noticed the press.
+- If what you allowed then does not come about (its command had stopped waiting, or could not be sealed), the box says so in grey instead of staying green; an answer to an ask that could not be written says "Not sent" and brings its buttons back, in the place its card had.
+- A second press before the first is taken sends nothing more.
+- A command with two things to allow, one allowed and the other refused, now says in grey that nothing in it ran, where before the first stayed green.
+- A script a piece of work leaves running shows under its card however it was started (a launcher's children, a shell loop with &, nohup without its process number, xargs, a pool, a background command whose shell ended): with what it is for, its progress where it writes to a file, or "running, no progress given", and the memory it holds; it leaves the card as it ends.
+- Work whose context was compacted, or that started before the work rules changed, is handed the current rules again at its next step.
+- Work is told to add up the memory of heavy or parallel runs on this Mac and keep within the person's limit, sending heavy work where their rules say.
+- A run's memory figure moving no longer draws the panel afresh: it is brought up to date with the next drawing, so the panel holds still under the pointer.
+
+## 0.2.133 · 15 November 2026
+- After Update (or Install) there is no Reload button: the header says beside the version that the new one is ready and to type /reload-plugins.
+
+## 0.2.132 · 15 November 2026
+- In the desktop app, a figure's card above the prompt now floats over the chat, just above its figure: showing it no longer pushes the chat up or makes it spring back, and the row of figures stays in view, so you can move straight to the next one.
+- Only the card under the pointer shows: moving along the figures or the bar updating no longer leaves an earlier card up over the next.
+- The cards are just their rows: the long explanation under the battery card and the graphics card's "Time at work" line are gone.
+
+## 0.2.131 · 15 November 2026
+- A chat run from Claudopus's own checkout now updates with one press, Update, then Reload: it fetches the release, checks it against what the release published and moves forward only if that holds, never over uncommitted changes. The box no longer talks about the folder; Config still says where the chat loads from.
+
 ## 0.2.130 · 15 November 2026
 - Work that finishes comes to the top of the panel at once, right under anything that waits for you, outlined in green for its two seconds, then goes under Finished as before; several finishing together stack there newest first, each for its own two seconds
 - Scrolled down the panel, the line above the prompt says which work just finished at the top, in green, for those two seconds

@@ -154,6 +154,7 @@ declare global {
   export import ConfigShown = M6.ConfigShown
   export import Models = M6.Models
   export import Role = M6.Role
+  export import Fail = M7.Fail
   export import LookIo = M7.LookIo
   export import Notice = M7.Notice
   export import Published = M7.Published
@@ -238,7 +239,13 @@ declare global {
   export import shellsOf = M11.shellsOf
   export import treeOf = M11.treeOf
   export import waitOf = M11.waitOf
+  export import leftoversOf = M11.leftoversOf
+  export import memOf = M11.memOf
+  export import leftName = M11.leftName
+  export import PS_COLUMNS = M11.PS_COLUMNS
+  export import OpenCall = M11.OpenCall
   export import Proc = M11.Proc
+  export import Span = M11.Span
   export import Job = M11.Job
   export import JobKind = M11.JobKind
   export import TabMove = M9.TabMove

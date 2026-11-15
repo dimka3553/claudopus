@@ -131,3 +131,27 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })
+
+test('work whose context was compacted is handed its rules again at its next step, once; work started before the rules changed is handed the new ones', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'draw the eyes', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'draw them' } as never)
+  // Started with the rules: nothing more at its steps
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))).not.toContain('These are the rules now')
+  await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: [{ role: 'user', text: 'one', toolUses: [] }] } as never)
+  const told = await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))
+  expect(told).toContain('Your context was compacted')
+  expect(told).toContain('What follows is told to every piece of work')
+  expect(told).toContain('Keep it true as you work')
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))).not.toContain('These are the rules now')
+  // The rules change under it, saved in Config: the new text reaches it
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  await pressed(config, 'config-text-work-edit')
+  await config.input({ key: 'config-text-work-input', text: '- Every run says how far it is.' })
+  expect(files.get(`${MEMORY}/roles/work.md`)).toBe('- Every run says how far it is.\n')
+  await config.unmount()
+  const changed = await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))
+  expect(changed).toContain('have changed since you started')
+  expect(changed).toContain('Every run says how far it is.')
+})

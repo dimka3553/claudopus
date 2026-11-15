@@ -53,7 +53,7 @@ const prompts: string[] = []
 // own, or uncommitted changes the move would overwrite
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -241,8 +241,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const asked = rest.slice(4, 4 + n).map(String)
       const pids = [...String(rest[1]).matchAll(/for p in ([\d ]*); do kill/g)].flatMap(m => (m[1] ?? '').trim().split(/\s+/).filter(Boolean))
       const ps = String(rest[1]).includes('@@PS@@') && options.jobs.ps ? `@@PS@@\n${options.jobs.ps()}\n` : ''
-      return ok(`${asked.map(file => `\n@@JOB@@ ${Math.floor((options.jobs?.wroteAt(file) ?? 0) / 1000)} ${file}\n${options.jobs?.output(file) ?? ''}`).join('')}\n@@ALIVE@@${pids.map(p => ` ${p}`).join('')}\n${ps}`)
+      return ok(`${asked.map(file => `\n@@JOB@@ ${Math.floor((options.jobs?.wroteAt(file) ?? 0) / 1000)} ${file}\n${options.jobs?.output(file) ?? ''}`).join('')}\n@@ALIVE@@${pids.filter(p => options.jobs?.alive?.(p) ?? true).map(p => ` ${p}`).join('')}\n${ps}`)
     }
+    // The newest process number, as a shell started now gets it, and the processes as a command that has just ended leaves them
+    if (options.jobs?.pid && tool === 'sh' && String(rest[1]).includes('# pid now')) return ok(`${options.jobs.pid()}\n`)
+    if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@LEFT@@')) return ok(`@@LEFT@@\n${options.jobs.ps()}\n`)
     if (options.jobs?.fd && tool === 'sh' && String(rest[1]).includes('/proc/$p/fd/1')) return ok(options.jobs.fd())
     // The engine's tasks folder, where the test reads jobs
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('"$1"/tasks')) return ok('/tmp/claude-501/x/s1/tasks\n')
@@ -826,7 +829,7 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
     cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
     gpu: ['Graphics processor', '37% busy', 'Graphics memory in use', '1.2 GB'],
     battery: ['Battery', '85%', 'On battery, 4:12 left as the system estimates it'],
-    disk: ['Disk', '63 MB/s', 'Reading and writing together'],
+    disk: ['Disk, read and write', '63 MB/s'],
     net: ['Network', '1 MB/s', 'Download', 'Upload'],
   }
   // The drawn tree as the surface gets it: each element's props, its hover, its children
@@ -840,31 +843,65 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
     return el.props?.key === key ? el : kids(el).map(k => find(k, key)).find(Boolean)
   }
   const textOf = (node: unknown): string[] => (typeof node === 'string' ? [node] : !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(textOf) : kids(node as El).flatMap(textOf))
-  for (const [key, parts] of Object.entries(cards)) {
-    const figure = find(drawn, `usage-${key}`)
-    // The figure lights its group and a faint fill under a resting pointer: a group member whose hover changes nothing is never wired
-    // to the pointer by the desktop app
-    expect(figure?.hover?.scope).toBe(`usage-${key}`)
-    expect(Object.keys(figure?.hover ?? {}).sort()).toEqual(['backgroundColor', 'scope'])
-    // Its card waits hidden in the bar's column above the figures and shows while the group is lit, so one shows at a time and goes
-    // as the pointer leaves; not an absolute Box, which the app lifts as a card of its own that stayed open
-    const card = find(drawn, `usage-${key}-card`)
-    expect(card?.props?.display).toBe('none')
-    expect(card?.props?.position).toBeUndefined()
-    expect(card?.hover).toEqual({ scope: `usage-${key}`, display: 'flex' })
-    for (const part of parts) expect(textOf(card)).toContain(part)
-  }
-  // Above the figures, so they stay where they are when one shows
   const parentOf = (node: unknown, key: string): El | undefined => {
     if (!node || typeof node !== 'object') return undefined
     if (Array.isArray(node)) return node.map(n => parentOf(n, key)).find(Boolean)
     const el = node as El
     return kids(el).some(k => k.props?.key === key) ? el : kids(el).map(k => parentOf(k, key)).find(Boolean)
   }
-  const column = parentOf(drawn, 'band-row')
-  expect(column?.props?.flexDirection).toBe('column')
-  expect(kids(column ?? {}).at(-1)?.props?.key).toBe('band-row')
-  expect(kids(column ?? {}).filter(k => k.props?.key?.endsWith('-card')).length).toBe(6)
+  for (const [key, parts] of Object.entries(cards)) {
+    const figure = find(drawn, `usage-${key}`)
+    // The figure lights its group and a faint fill under a resting pointer: a group member whose hover changes nothing is never wired
+    // to the pointer by the desktop app
+    expect(figure?.hover?.scope).toBe(`usage-${key}`)
+    expect(Object.keys(figure?.hover ?? {}).sort()).toEqual(['backgroundColor', 'scope'])
+    // Its part of the card waits hidden and shows while the group is lit, so one figure's part shows at a time and goes as the
+    // pointer leaves
+    const card = find(drawn, `usage-${key}-card`)
+    expect(card?.props?.display).toBe('none')
+    expect(card?.hover).toEqual({ scope: `usage-${key}`, display: 'flex' })
+    for (const part of parts) expect(textOf(card)).toContain(part)
+    // The card floats over the chat, taking no room, so nothing in the chat or the bar moves when it shows: an absolute Box drawn
+    // hidden in the figure's keyed Box and shown by its hover, with no key or group of its own, which the desktop app lifts above
+    // the figure as its own card, kept in the window
+    const lifted = parentOf(drawn, `usage-${key}-card`)
+    expect(lifted?.props?.position).toBe('absolute')
+    expect(lifted?.props?.display).toBe('none')
+    expect(lifted?.props?.key).toBeUndefined()
+    expect(lifted?.hover).toEqual({ display: 'flex' })
+    expect(kids(figure ?? {})).toContain(lifted)
+  }
+  // Nothing in the bar's own flow but its row: no card above the figures to push the chat up or the figures out of the bar
+  const inFlow = (node: unknown): El[] =>
+    !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(inFlow) : (node as El).props?.position === 'absolute' ? [] : [node as El, ...kids(node as El).flatMap(inFlow)]
+  expect(inFlow(drawn).filter(k => k.props?.key?.endsWith('-card'))).toEqual([])
+  await desk.unmount()
+})
+
+test('each drawing of the bar moves the figures past the places they had, so the app shows again no card the pointer has left', async ($, on) => {
+  let n = 0
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  // The hidden keyed Boxes before the figures, there in every other drawing: more than the figures and their cards hold, so no
+  // figure's card takes a place a card had in the drawing before
+  const spacers = async () => (JSON.stringify(await desk.drawn()).match(/"key":"usage-spacer-\d+"/g) ?? []).length
+  const keyed = async () => (JSON.stringify(await desk.drawn()).match(/"key":"usage-(?!spacer)[^"]*"/g) ?? []).length
+  const first = await spacers()
+  expect(await keyed()).toBeLessThan(120)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  expect(await until(async () => ((await spacers()) !== first ? true : undefined))).toBe(true)
+  expect([first, await spacers()].sort((a, b) => a - b)).toEqual([0, 120])
+  // and a drawing for anything else, here more work under the bar, with the same figures
+  const before = await spacers()
+  await $.agent.spawn({ ...spawn, prompt: 'fix the ears' } as never)
+  expect(await until(async () => ((await spacers()) !== before ? true : undefined))).toBe(true)
   await desk.unmount()
 })
 
@@ -908,7 +945,7 @@ test('in a phone-narrow terminal the word for a charge the system calls full whi
   await desk.unmount()
 })
 
-test('the battery card says what the Mac draws, the processors and graphics each, Claude\'s part of each, and what Claude covers', async ($, on) => {
+test('the battery card says what the Mac draws, the processors and graphics each, and Claude\'s part of each, with no paragraph under them', async ($, on) => {
   let n = 0
   // Each look: Claude's renderer a quarter of the graphics time, Safari the rest; Claude's chat 20 J a look, the
   // processors 40 J, the graphics processor 5 J
@@ -938,8 +975,10 @@ test('the battery card says what the Mac draws, the processors and graphics each
   for (const text of ['The whole Mac draws', '80 W', 'Processors, every program', "Claude's own processes", 'Graphics, every program', 'Claude of that, estimated'])
     expect(await desk.find({ type: 'Text', text })).toBeDefined()
   expect(await desk.find({ type: 'Text', text: "Claude's processors draw" })).toBeUndefined()
-  expect(await desk.find({ type: 'Text', text: /^Claude: the app, its chats and all their work\. Part of what the processors draw is no program's, and work that ends within seconds is missed\. The screen, memory and storage count only in the whole, which the Mac updates about once a minute\.$/ })).toBeDefined()
-  // The graphics card: busy is time at work, what it draws, and who uses it most
-  for (const text of ['Time at work, at any speed', 'Drawing', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
+  // The cards are their rows alone: no paragraph under them on what the figures cover, and no line on what busy means
+  expect(await desk.find({ type: 'Text', text: /^Claude: the app/ })).toBeUndefined()
+  expect(await desk.find({ type: 'Text', text: 'Time at work, at any speed' })).toBeUndefined()
+  // The graphics card: what it draws, and who uses it most
+  for (const text of ['Drawing', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
   await desk.unmount()
 })

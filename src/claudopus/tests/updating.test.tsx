@@ -1,6 +1,7 @@
-// F-019 and F-020 of the security review, and the update's three steps: a look only reads the version page and the panel says a
-// newer version is out; nothing is fetched, installed or reloaded until a press, each step its own; a download that is not what the
-// release published is thrown away and can never be installed; each step stands through a reload; a lock dated ahead holds nothing
+// F-019 and F-020 of the security review, and the update's steps: a look only reads the version page and the panel says a newer
+// version is out; nothing is fetched, moved or reloaded until a press (a chat run from Claudopus's own checkout has two, Update and
+// Reload); a download that is not what the release published is thrown away and never moves anything; uncommitted work is never
+// overwritten; each step stands through a reload; a lock dated ahead holds nothing
 
 const UPD_NOW = 1_700_000_000_000
 const TREE = 'a'.repeat(40)
@@ -31,7 +32,7 @@ const later = async (clock: { advance: (ms: number) => Promise<unknown> }, ms: n
 }
 const changing = (ran: string[]) => ran.filter(one => /^(fetch|merge|reset|checkout|pull|update-ref)\b/.test(one) || one.includes('fetch --progress'))
 
-test('F-019 · the look only reads the version page: the panel says a newer version is out, with Download, and nothing is fetched, installed or reloaded, whatever config.json says', SLOW, async ($, on) => {
+test('F-019 · the look only reads the version page: the panel says a newer version is out, with Update, and nothing is fetched, installed or reloaded, whatever config.json says', SLOW, async ($, on) => {
   const { files, clock, gitRan } = world(on, { release: RELEASE })
   const reloads = reloadsOf(on)
   const fetches = pageOn(on, () => pageText())
@@ -44,7 +45,7 @@ test('F-019 · the look only reads the version page: the panel says a newer vers
   await shownIn(panel, 'Claudopus 0.1.2 is out')
   expect(await panel.find({ type: 'Text', text: '· 2 versions since v0.1.0' })).toBeDefined()
   await shownIn(panel, 'The bar shows the battery · and 3 more changes')
-  expect(await keyed(panel, 'update-download')).toBeDefined()
+  expect((await keyed(panel, 'update-download'))?.props.label).toBe('Update')
   expect(await keyed(panel, 'update-install')).toBeUndefined()
   // Another look once the last is over an hour old, and through all of them nothing was fetched or moved, nothing installed or reloaded
   const aged = async () => files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
@@ -63,7 +64,7 @@ test('F-019 · the look only reads the version page: the panel says a newer vers
   expect(fetches()).toBe(before)
 })
 
-test('Download fetches the release and checks it against what the release published: one that does not match is thrown away and cannot be installed', SLOW, async ($, on) => {
+test('Update fetches the release and checks it against what the release published: one that does not match is thrown away and moves nothing', SLOW, async ($, on) => {
   const { files, clock, gitRan } = world(on, { release: { ...RELEASE, got: 'b'.repeat(40) } })
   const reloads = reloadsOf(on)
   pageOn(on, () => pageText())
@@ -72,7 +73,7 @@ test('Download fetches the release and checks it against what the release publis
   const panel = await $.ui.mount(listAt())
   await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
   await pressed(panel, 'update-download')
-  await shownIn(panel, "Couldn't fetch Claudopus 0.1.2")
+  await shownIn(panel, "Couldn't update Claudopus 0.1.2")
   await shownIn(panel, "What came down isn't what the release published, so it was thrown away. Nothing was changed: this chat still runs v0.1.0.")
   expect(await keyed(panel, 'update-install')).toBeUndefined()
   expect(gitRan).toContain('update-ref -d refs/claudopus/update')
@@ -89,7 +90,7 @@ test('Download fetches the release and checks it against what the release publis
   expect(reloads).toEqual([])
 })
 
-test('Download, Install and Reload are each their own press: the folder moves only at Install, the chat reloads only at Reload', SLOW, async ($, on) => {
+test('Update is one press for a chat run from its checkout: the fetch, its check, then a fast-forward; then the header says, beside the version, to type /reload-plugins, and nothing reloads the chat', SLOW, async ($, on) => {
   const { files, clock, gitRan } = world(on, { release: RELEASE })
   const reloads = reloadsOf(on)
   pageOn(on, () => pageText())
@@ -97,38 +98,71 @@ test('Download, Install and Reload are each their own press: the folder moves on
   await clock.advance(3 * 60_000)
   const panel = await $.ui.mount(listAt())
   await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
+  expect(changing(gitRan)).toEqual([])
   await pressed(panel, 'update-download')
-  await shownIn(panel, 'Claudopus 0.1.2 fetched')
-  await shownIn(panel, /^Checked against the release\. Move forward takes .* from v0\.1\.0 to v0\.1\.2, fast-forward only\.$/)
-  expect(JSON.parse(files.get(`${MEMORY}/update-steps.json`) ?? '{}')).toMatchObject({ version: '0.1.2', stage: 'downloaded', commit: COMMIT, tree: TREE })
-  // Downloaded, nothing the chat runs has moved
-  expect(gitRan.some(one => one.startsWith('merge '))).toBe(false)
-  expect(files.get('manifest')).toBeUndefined()
-  files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
-  await later(clock, 16 * 60_000)
-  expect(gitRan.some(one => one.startsWith('merge '))).toBe(false)
-  await pressed(panel, 'update-install')
-  await shownIn(panel, 'Claudopus 0.1.2 is in the folder')
-  expect(gitRan).toContain(`merge --ff-only --quiet ${COMMIT}`)
+  await shownIn(panel, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
+  // One press: fetched, checked against the release's tree, and only then moved forward, fast-forward only
+  const fetched = gitRan.findIndex(one => one.includes('fetch'))
+  const checked = gitRan.findIndex(one => one.includes(`${COMMIT}:mods/claudopus`))
+  const merged = gitRan.indexOf(`merge --ff-only --quiet ${COMMIT}`)
+  expect(fetched >= 0 && checked > fetched && merged > checked).toBe(true)
+  expect(gitRan.some(one => /^(reset|checkout|pull)\b/.test(one))).toBe(false)
   expect(JSON.parse(files.get('manifest') ?? '{}').version).toBe('0.1.2')
-  await shownIn(panel, /^This chat still runs v0\.1\.0\. Every chat run from/)
+  expect(JSON.parse(files.get(`${MEMORY}/update-steps.json`) ?? '{}')).toMatchObject({ version: '0.1.2', stage: 'installed', commit: COMMIT, tree: TREE })
+  expect(await keyed(panel, 'update-install')).toBeUndefined()
+  expect(await panel.find({ type: 'Text', text: /folder|Fetch|Move forward/ })).toBeUndefined()
+  // No box and no press is left: only the line beside the version, and the chat is never reloaded for the person
+  expect(await panel.find({ type: 'Text', text: /^Claudopus 0\.1\.2/ })).toBeUndefined()
+  expect((await panel.findAll({ type: 'Button' })).some(one => /^update-/.test(one.key ?? ''))).toBe(false)
+  await later(clock, 16 * 60_000)
   expect(reloads).toEqual([])
-  await pressed(panel, 'update-reload')
-  expect(await until(async () => reloads.length || undefined)).toBe(1)
-  const mark = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/reloads/`))?.[1]
-  expect(JSON.parse(mark ?? '{}')).toMatchObject({ version: '0.1.2', from: '0.1.0' })
 })
 
-test('each step stands through a reload: a chat that loads finds the download waiting for Install, a step cut short said as stopped, and a copy newer than it runs offered its Reload', SLOW, async ($, on) => {
-  const { files, clock } = world(on, { release: RELEASE })
+// Update never overwrites uncommitted work nor moves a main with commits of its own: it says why it could not move forward, and nothing moves
+const STAYS: { name: string; release: Release; said: string; isNewerAfterFetch?: boolean; title?: string }[] = [
+  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your uncommitted changes touch files this version changes: commit them or set them aside, then try again. Nothing was changed: this chat still runs v0.1.0.' },
+  { name: 'a newer version out between its fetch and its move', release: RELEASE, isNewerAfterFetch: true, title: 'Claudopus 0.1.3 is out', said: 'The bar shows the battery · and 3 more changes' },
+  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Main has commits of its own that this version doesn't have, so it can't move forward. Nothing was changed: this chat still runs v0.1.0." },
+]
+for (const one of STAYS)
+  test(`Update with ${one.name}: it says why it could not move forward, and nothing is overwritten or moved`, SLOW, async ($, on) => {
+    const { files, clock, gitRan } = world(on, { release: one.release })
+    const reloads = reloadsOf(on)
+    // The move reads the version page again: one naming a newer version by then moves nothing
+    pageOn(on, () => (one.isNewerAfterFetch && gitRan.some(ran => ran.includes('fetch')) ? pageText('0.1.3') : pageText()))
+    await $.session.start(start)
+    await clock.advance(3 * 60_000)
+    const panel = await $.ui.mount(listAt())
+    await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
+    await pressed(panel, 'update-download')
+    // Said why, or the newer version offered in its place
+    await shownIn(panel, one.title ?? "Couldn't update Claudopus 0.1.2")
+    await shownIn(panel, one.said)
+    // A merge is tried only where git itself refuses to overwrite: a fast-forward that stops before touching a changed file
+    expect(gitRan.some(ran => ran.startsWith('merge '))).toBe(Boolean(one.release.overwrite))
+    expect(gitRan.some(ran => /^(reset|checkout|pull|stash)\b/.test(ran) || ran.includes('--force') || ran.includes('--hard'))).toBe(false)
+    expect(files.get('manifest')).toBeUndefined()
+    expect(await keyed(panel, 'update-reload')).toBeUndefined()
+    expect(await keyed(panel, one.title ? 'update-download' : 'update-again')).toBeDefined()
+    expect(reloads).toEqual([])
+  })
+
+test('each step stands through a reload: a chat that loads finds the download waiting for Update, a step cut short said as stopped, and a copy newer than it runs told to type /reload-plugins', SLOW, async ($, on) => {
+  const { files, clock, gitRan } = world(on, { release: RELEASE })
   pageOn(on, () => pageText())
   files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: UPD_NOW, version: '0.1.2', result: 'seen' }))
   files.set(`${MEMORY}/update-steps.json`, JSON.stringify({ version: '0.1.2', stage: 'downloaded', commit: COMMIT, tree: TREE, at: UPD_NOW - 5 * 3_600_000 }))
   files.set('git:ref', COMMIT)
   await $.session.start(start)
   const panel = await $.ui.mount(listAt())
-  await shownIn(panel, 'Claudopus 0.1.2 fetched')
-  expect(await keyed(panel, 'update-install')).toBeDefined()
+  // Fetched by a copy before Update was one press, or planted: offered as any version out, with what is new, and nothing moves until
+  // its Update is pressed
+  await shownIn(panel, 'Claudopus 0.1.2 is out')
+  await shownIn(panel, 'The bar shows the battery · and 3 more changes')
+  expect((await keyed(panel, 'update-install'))?.props.label).toBe('Update')
+  await later(clock, 16 * 60_000)
+  expect(gitRan.some(one => one.startsWith('merge '))).toBe(false)
+  expect(files.get('manifest')).toBeUndefined()
   // A download whose chat closed mid-way
   files.set(`${MEMORY}/update-steps.json`, JSON.stringify({ version: '0.1.2', stage: 'downloading', at: UPD_NOW - 10 * 60_000, pct: 40 }))
   await panel.unmount()
@@ -139,7 +173,7 @@ test('each step stands through a reload: a chat that loads finds the download wa
   files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.2' }))
   await stopped.unmount()
   const behind = await $.ui.mount(listAt())
-  expect(await until(() => keyed(behind, 'update-reload'))).toBeDefined()
+  await shownIn(behind, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
 })
 
 test('a steps file that says a download was checked, with no such download in the repo, is not believed: the panel offers the download again', SLOW, async ($, on) => {
@@ -150,7 +184,6 @@ test('a steps file that says a download was checked, with no such download in th
   await $.session.start(start)
   const panel = await $.ui.mount(listAt())
   await shownIn(panel, 'Claudopus 0.1.2 is out')
-  expect(await panel.find({ type: 'Text', text: 'Claudopus 0.1.2 fetched' })).toBeUndefined()
   expect(await keyed(panel, 'update-install')).toBeUndefined()
 })
 
@@ -204,7 +237,7 @@ test('F-019 · a chat run from another Mac moves at Install but is not sent a re
   await clock.advance(3 * 60_000)
   files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.2' }))
   const panel = await $.ui.mount(listAt())
-  await shownIn(panel, 'This chat still runs v0.1.0. Type /reload-plugins in this chat to switch it.')
+  await shownIn(panel, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
   expect(await keyed(panel, 'update-reload')).toBeUndefined()
   expect(reloads).toEqual([])
 })
