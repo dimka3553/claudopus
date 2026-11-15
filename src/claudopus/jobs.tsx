@@ -5,7 +5,7 @@
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; isOwn?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; isOwn?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -21,8 +21,8 @@ let tasksOf = ''
 let tasksMissedAt = 0
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
-const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false): Job => {
-  const seen = jobLog.get(id)
+const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen): Job => {
+  const seen = jobLog.get(id) ?? theirs
   const wait = isWatch ? undefined : waitOf(cmd)
   const kind: JobKind = isWatch ? 'watch' : wait ? 'wait' : jobKindOf(cmd, what)
   return { id, label: labelOf(what || cmd, cmd), cmd, kind, at, ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
@@ -30,8 +30,8 @@ const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = fals
 // The jobs a card has running: what it sent to the background, and a command it has waited on a while; jobs alike are one
 const jobsOf = (one: Todo, at: number): Job[] =>
   foldJobs([
-    ...(one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch)),
-    ...(one.detached ?? []).map(d => jobOf(d.id, d.what, d.cmd, d.at)),
+    ...(one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id])),
+    ...(one.detached ?? []).map(d => jobOf(d.id, d.what, d.cmd, d.at, false, one.seenJobs?.[d.id])),
     ...(one.status === 'working' && one.running?.cmd && !isWaitOnly(one.running.cmd) && at - one.running.at >= RUNNING_SHOWN
       ? [jobOf(`call-${one.id}`, one.running.label ?? '', one.running.cmd, one.running.at)]
       : []),
@@ -173,8 +173,8 @@ const lookJobs = async ($: EngineInterface) => {
     const wait = waits.find(w => w.id === id)
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
-    const next: Seen = { ...seen, ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
+    const next: Seen = { ...seen, tail: tailOf(text), ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true

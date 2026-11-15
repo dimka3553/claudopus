@@ -334,3 +334,63 @@ test("a chat of this Mac with work opens by the app's own id when it has no Remo
   expect(shown.at(-1)).toEqual(['open', 'claude://code/continue?session=local_here-1'])
   await list.unmount()
 })
+
+test("Details of another chat's work on this Mac is as deep as this chat's own: every to-do, its helpers with the step each is on, its commands' last lines, and its chat read from that chat's own file", async ($, on) => {
+  const { files, clock, opened } = world(on)
+  await $.session.start(start)
+  const at = NOW
+  const card = { id: 'b1', parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: 'Fix the M4 install path', words: 'fix the install path', items: [{ text: 'Find where it installs', state: 'done' }, { text: 'Fix the path', state: 'doing' }, { text: 'Run it again', state: 'open' }, { text: 'Check the app', state: 'open' }], entries: [{ at, kind: 'note', text: 'HOME is empty over ssh.' }], answer: '', startedAt: at - 60_000, endedAt: 0, status: 'working', bg: [{ id: 'bx1', what: 'Update the plugin', at: at - 20_000, cmd: 'claude plugin update claudopus' }], seenJobs: { bx1: { latest: 'Fetching the mod', tail: ['Updating marketplace claudopus', 'Fetching the mod'] } } }
+  const helper = { id: 'h1', parentId: 'b1', isFork: false, tokens: 0, title: "Check the M4's plugin folder", words: '', items: [{ text: 'List the caches', state: 'doing' }, { text: 'Report back', state: 'open' }], entries: [{ at, kind: 'note', text: 'Listing the caches.' }], answer: '', startedAt: at - 30_000, endedAt: 0, status: 'working' }
+  files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ chat: 'chat-b', title: 'M4 setup', folder: '/repo/claudopus', host: '', at, cards: [card], helpers: [helper] }))
+  const line = (one: object) => JSON.stringify(one)
+  files.set(
+    `${HOME}/.claude/projects/-repo-claudopus/chat-b/subagents/agent-b1.jsonl`,
+    [
+      line({ type: 'user', message: { role: 'user', content: 'fix the install path' } }),
+      line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The install puts the mod under the wrong folder.' }, { type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'ls', description: 'List the plugins' } }] } }),
+      line({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: 'cache' }] } }),
+    ].join('\n'),
+  )
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Fix the M4 install path' }))).toBeDefined()
+  // Its helper is no card of its own in the list
+  expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === "Check the M4's plugin folder" && !(b.key ?? '').includes('details'))).toBe(false)
+  const id = (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('open-r-'))?.key?.replace(/^open-/, '').replace(/-\d+$/, '') ?? ''
+  const tab = await $.ui.mount({ ...LIST, requestId: `work-${id}`, surface: 'desktop' } as never)
+  // Its chat is read from that chat's file, as its own chat's Details reads it
+  const said = async () => (await tab.findAll({ type: 'Markdown' })).find(m => String(m.props.text).startsWith('The install puts'))
+  expect(await until(said)).toBeDefined()
+  const texts = (await tab.findAll({ type: 'Text' })).map(t => t.text)
+  // Every to-do, in its order
+  for (const item of ['Find where it installs', 'Fix the path', 'Run it again', 'Check the app']) expect(texts).toContain(item)
+  expect(texts).toContain('HOME is empty over ssh.')
+  // Its helper on its tree, with the step it is on and where it is under it
+  expect((await tab.findAll({ type: 'Button' })).some(b => String(b.props.label).startsWith("Check the M4's plugin"))).toBe(true)
+  expect(texts).toContain('Step 1 of 2 · List the caches')
+  expect(texts).toContain('Listing the caches.')
+  // Its command's last lines, as that chat read them
+  expect(texts).toContain('Updating marketplace claudopus')
+  expect(texts).toContain('Fetching the mod')
+  // The chat's name, and no line in place of its chat
+  expect(texts.some(t => t?.startsWith('From the chat "M4 setup"'))).toBe(true)
+  expect(texts.some(t => t?.startsWith('Its chat is kept by'))).toBe(false)
+  // The helper opens its own Details, of that chat too
+  const helperKey = (await tab.findAll({ type: 'Button' })).find(b => String(b.props.label).startsWith("Check the M4's plugin"))?.key ?? ''
+  await pressed(tab, helperKey.replace(/-\d+$/, ''))
+  expect(await until(async () => opened.find(one => one.startsWith('work-r-') && one.endsWith('-h1')))).toBeDefined()
+  await tab.unmount()
+  await list.unmount()
+})
+
+test("this chat's file carries the helpers of the work it shares, apart from its cards, and how each command stands", async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await $.agent.spawn({ ...spawn, agentId: 'a2', description: 'Read the scan', prompt: 'read', parentAgentId: 'a1' } as never)
+  await clock.advance(25_000)
+  const mine = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}') as { cards?: { id: string }[]; helpers?: { id: string; parentId: string; title: string; words: string }[] }
+  expect(mine.cards?.map(one => one.id)).toEqual(['a1'])
+  expect(mine.helpers?.map(one => [one.id, one.parentId, one.title, one.words])).toEqual([['a2', 'a1', 'Read the scan', '']])
+})

@@ -1,0 +1,4 @@
+- Details lists every to-do in its order, done ones ticked, in place of the next three and a count.
+- In Details, each helper at work shows the step it is on and where it says it is, and each running command shows the last lines of its output, under its row.
+- Finished work's Details shows what it reported at its end near the top, as its Result.
+- Work of another chat opens its Details with the same depth as this chat's own: its helpers, its commands and their last lines, and its chat, read from that chat on this Mac. A press beside the chat's name opens that chat.

@@ -36,6 +36,11 @@ const NEXT_SHOWN = 3
 const OPEN_ASK = -1_000_001
 const OPEN_NEXT = -1_000_002
 const OPEN_DONE = -1_000_003
+const OPEN_RESULT = -1_000_004
+// How much of what work reported at its end its Details shows before Show all
+const RESULT_SHOWN = 600
+// Past this many done to-dos, Details folds them into one row
+const DONE_FOLDED = 8
 // How much of a piece of work's chat the panel draws, the newest: this many lines, and this many characters, which one drawing has room for
 const TALK_KEPT = 300
 const TALK_CHARS = 40_000

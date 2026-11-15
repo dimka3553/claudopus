@@ -6,6 +6,8 @@ export type JobKind = 'server' | 'download' | 'script' | 'watch' | 'wait'
 // for a wait, what it waits for and how that stands
 export type Job = {
   id: string
+  // The last few lines its output ends with, as a terminal shows them; shown under its row in Details
+  tail?: string[]
   label: string
   cmd: string
   kind: JobKind
@@ -239,6 +241,18 @@ export const isOutputEnded = (text: string) => /\[exited with code [^\]\n]*\]\s*
 
 // The end of a job's output as its latest line: colours and cursor moves taken out, a line a progress bar rewrites read as it
 // stands last, with the last percent in it and any port it named
+// The last few lines an output ends with, as a terminal would show them: a line a progress bar rewrote with returns is its last
+// state, colours and blank lines are dropped, each line is cut to a row
+export const OUTPUT_LINES = 4
+export const tailOf = (text: string, most = OUTPUT_LINES) =>
+  text
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    .split('\n')
+    .map(line => (line.split('\r').filter(part => part.trim()).at(-1) ?? '').replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ').trimEnd())
+    .filter(line => line.trim())
+    .slice(-most)
+    .map(line => line.slice(0, 200))
 export const latestOf = (text: string) => {
   const clean = text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b\][^\x07]*\x07/g, '')
   const lines = clean

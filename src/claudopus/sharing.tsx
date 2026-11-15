@@ -44,14 +44,27 @@ const shareMine = async ($: EngineInterface) => {
     linkReadAt = now
     myLink = await readLink($, id).catch(() => myLink)
   }
-  const cards = shareable(await read($, todos), now)
+  const list = await read($, todos)
+  // Each card and helper carries how its jobs stand, as this chat reads them, so another chat's Details shows them as this one does
+  const withSeen = (one: Todo): Todo => {
+    const seen = Object.fromEntries(
+      [...(one.bg ?? []), ...(one.detached ?? [])].flatMap(job => {
+        const s = jobLog.get(job.id)
+        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}) }]] : []
+      }),
+    )
+    return Object.keys(seen).length ? { ...one, seenJobs: seen } : one
+  }
+  const cards = shareable(list, now).map(withSeen)
+  const helpers = shareableHelpers(list, cards).map(withSeen)
+  const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}`).join('|')).join(' ')
   const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
   const prompts: Prompt[] = waiting.map(shareOf)
   // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open
   const answeredNow: Prompt[] = answeredShown(now).map(shareOf)
-  const sign = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
+  const sign = `${title}\n${JSON.stringify(myLink ?? null)}\n${signOf(cards)}\n${signOf(helpers)}\n${jobsSign}\n${prompts.map(one => one.id).join(' ')}\n${answeredNow.map(one => `${one.id}:${one.answered}:${one.isRunning ? 1 : 0}`).join(' ')}`
   if (sign === sharedSign && now - sharedAt < BEAT) return
-  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(prompts.length ? { prompts } : {}), ...(answeredNow.length ? { answeredPrompts: answeredNow } : {}), ...(myLink ? { link: myLink } : {}) }
+  const s: Shared = { chat: id, title, folder: cwd, host: '', at: now, cards, ...(helpers.length ? { helpers } : {}), ...(prompts.length ? { prompts } : {}), ...(answeredNow.length ? { answeredPrompts: answeredNow } : {}), ...(myLink ? { link: myLink } : {}) }
   // Ended work is written apart, under `ended`: a chat still running a version from before ended work was shared reads `cards` only,
   // and would show what is there as running for good
   const isLive = (one: Todo) => one.status === 'working' || Boolean(one.ask)
