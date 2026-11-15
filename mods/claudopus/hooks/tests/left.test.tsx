@@ -689,6 +689,27 @@ const leftTexts = async ($: Parameters<NonNullable<Parameters<typeof test>[2]>>[
   await list.unmount()
   return all
 }
+// How often the panel is drawn afresh, counted from the test's start (the engine takes hooks only before the session starts)
+const countDraws = (on: On) => {
+  const drawn = { count: 0 }
+  on('ui.invalidate', (_, e, next) => ((drawn.count += 1), next(e)))
+  return drawn
+}
+// Whether the panel is drawn afresh no more often over a minute in which the runs' memory moves by 200 MB at each look of the
+// processes than over a minute in which it holds still
+const panelDrawsWhile = async (drawn: { count: number }, advance: (ms: number) => Promise<void>, procs: { list: string[] }) => {
+  const minute = async (isMoving: boolean) => {
+    const from = drawn.count
+    for (let n = 0; n < 4; n++) {
+      if (isMoving) procs.list = procs.list.map(line => line.replace(/ S (\S+) (\d+) /, (_, etime, kb) => ` S ${etime} ${Number(kb) + 200_000} `))
+      await advance(15_000)
+    }
+    return drawn.count - from
+  }
+  const still = await minute(false)
+  const moving = await minute(true)
+  return moving <= still
+}
 const leftStart = async ($: Parameters<NonNullable<Parameters<typeof test>[2]>>[0]) => {
   await $.session.start(start)
   await $.prompt.submit({ text: 'draw the pages', wait: false, origin: composer })
@@ -759,6 +780,7 @@ test('a launcher started with nohup but no echo $! is a run under the card in th
 
 test('xargs -P sending its output nowhere is a run that says it runs and gives no progress, with its memory', SLOW, async ($, on) => {
   const procs = { list: [] as string[], logs: {} as Record<string, string> }
+  const drawn = countDraws(on)
   const { advance } = leftWorld(on, procs)
   await leftStart($)
   procs.list.push(psLine(5060, 1, 5050, 'xargs -P 8 -n 1 /u/bin/python draw.py', 1_000), ...[0, 1, 2].map(k => psLine(5070 + k, 5060, 5050, `/u/bin/python draw.py ${k}`, 2_000_000)))
@@ -771,6 +793,9 @@ test('xargs -P sending its output nowhere is a run that says it runs and gives n
   })
   expect(shown?.some(text => text.startsWith('Run every drawing eight at a time'))).toBe(true)
   expect(shown?.some(text => text.includes('5.7 GB'))).toBe(true)
+  // Its memory moving at each look of the processes draws the panel afresh no more than when it holds still: it is shown
+  // at the next drawing, so the panel keeps still under the pointer
+  expect(await panelDrawsWhile(drawn, advance, procs)).toBe(true)
 })
 
 test('a Python pool left running is one run with its workers\' memory added up', SLOW, async ($, on) => {

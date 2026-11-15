@@ -8801,8 +8801,12 @@ const lookJobs = async ($: EngineInterface) => {
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
     const next: Seen = { ...seen, ...memSeen(job?.pid), tail: tailOf(text), ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.mem === next.mem && was?.tail?.join('\n') === next.tail?.join('\n')
-    if (isSame) continue
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
+    // Memory alone moving (a MB or so at each look) is kept for the next drawing, never a reason to draw the panel afresh under the pointer
+    if (isSame) {
+      if (was?.mem !== next.mem) jobLog.set(id, next)
+      continue
+    }
     jobLog.set(id, next)
     isChanged = true
     const owner = job?.owner
@@ -8813,7 +8817,10 @@ const lookJobs = async ($: EngineInterface) => {
     if (!('isUntold' in o && o.isUntold) || gone.includes(o.id)) continue
     const was = jobLog.get(o.id)
     const next: Seen = { latest: '', isUntold: true, ...memSeen(o.pid), ...(states.has(o.id) ? { isPaused: states.get(o.id) } : {}) }
-    if (was?.isUntold && was.mem === next.mem && was.isPaused === next.isPaused) continue
+    if (was?.isUntold && was.isPaused === next.isPaused) {
+      if (was.mem !== next.mem) jobLog.set(o.id, next)
+      continue
+    }
     jobLog.set(o.id, next)
     isChanged = true
   }
