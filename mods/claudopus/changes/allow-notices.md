@@ -1,4 +1,0 @@
-- Asks for your press (a release, an admin command, a change to your settings, a change put back, a password or key, Claude Code's own permission asks) are outlined boxes that name the kind of ask at the top, so they are no longer taken for one more piece of work.
-- What you pressed is now one quiet line with a tick or a cross, not a card, and it goes as soon as what it reports has finished, rather than staying a minute.
-- A release names its branch and the repo, with the folder shortened to one line.
-- A release whose output went to a log asked you twice, the first time for a branch called ">", which the release then refused: it now asks once, for its own branch.
