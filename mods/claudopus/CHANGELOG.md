@@ -2,6 +2,22 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.130 · 15 November 2026
+- Work that finishes comes to the top of the panel at once, right under anything that waits for you, outlined in green for its two seconds, then goes under Finished as before; several finishing together stack there newest first, each for its own two seconds
+- Scrolled down the panel, the line above the prompt says which work just finished at the top, in green, for those two seconds
+- Work that finished but left something running stays at the top after its moment, with its Stop it, instead of going back among the running cards
+- Work that was stopped or stopped by an error is not brought up: it pauses in its place as before, and an error now shows in red, on its edge too
+
+## 0.2.129 · 15 November 2026
+- Work is told to add a test only when no test already covers what it changes, to show each new test fails without the change, and to remove tests a change makes redundant.
+
+## 0.2.128 · 15 November 2026
+- The panel and Details are no longer rebuilt every second while work runs. The app rebuilt the whole panel each time Claudopus wrote anything it shows, even when nothing changed, and Claudopus wrote its running times every second and the same list of work every few seconds. So whatever was under the pointer lost its hover look, and a click could land on a button that had just been replaced.
+- Now the panel is drawn again only when something it shows has changed. Running times and command output move every ten seconds, and not at all while you're using the panel (for fifteen seconds after you scroll it, click in it or type in it). A new ask, an admin command, work starting or finishing, and anything you press still show at once.
+- With nothing running, the panel isn't drawn again at all, so buttons like "Back to the panel" on the update screen keep working on the first click.
+- Other chats' work no longer redraws your panel each time those chats report in. Only what you'd see changing does.
+- While an update downloads, its figures move every two seconds at most, and not while you're using the panel, so its other buttons stay pressable.
+
 ## 0.2.127 · 15 November 2026
 - A release now waits for GitHub's own checks on the exact version it is about to put out, and goes out only once they pass; a failed or unfinished check stops it and says which.
 - Tests that failed at random on GitHub's slower machines are steady again.

@@ -2,6 +2,22 @@
 
 // How long an answer picked above the prompt by its number waits for the same number again
 const BAND_PICK = 6000
+// Above the prompt, which never scrolls: once the list is scrolled away from its top, work that just finished, in its moment at the
+// top, is pointed at in green. Pressed, it takes the list back to its top; nothing else moves the list. What waits on the person
+// is not pointed at: it is in the bar itself, with its answers (waits)
+const finishMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
+  finishedAtTop.length > 0 && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced) ? (
+    <ui.Box key="band-finished" flexDirection="row" flexShrink={0} height={1} overflow="hidden">
+      <ui.Button
+        key={`band-finished-${presses}`}
+        plain
+        hover={{ scope: 'band-finished', underline: true }}
+        onPress={() => ((presses += 1), void $.ui.scroll({ in: LIST, to: 'start', block: 'start' }).catch(() => undefined))}
+      >
+        <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}, at the top of the panel`}</ui.Text>
+      </ui.Button>
+    </ui.Box>
+  ) : null
 // The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
@@ -19,7 +35,14 @@ const bandHooks = (on: On) => {
     const { Box, Text } = ui
 
     // What waits on the person, each with its answers, above the figures: the same as at the top of the panel, answered the same way
-    const waits = await barWaitsDrawn($, ui, e)
+    const rows = await barWaitsDrawn($, ui, e)
+    const marker = await finishMarker($, ui, e.surface)
+    const waits = rows || marker ? (
+      <Box key="band-top" flexDirection="column">
+        {rows}
+        {marker}
+      </Box>
+    ) : null
     if (!working.length && !happy) return waits ?? next(e)
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)

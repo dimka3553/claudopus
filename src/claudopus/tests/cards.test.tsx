@@ -786,7 +786,7 @@ test('the stop button of a to-do stops its work', async ($, on) => {
   await pane.unmount()
 })
 
-test('work that ends pauses in its place for two seconds: two at once, one ended while the panel was closed, one that reports twice', async ($, on) => {
+test('work that finishes comes to the top for two seconds: two at once, one ended while the panel was closed, one that reports twice', async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
@@ -797,11 +797,12 @@ test('work that ends pauses in its place for two seconds: two at once, one ended
   const titles = async () => (await pane.findAll({ type: 'Text' })).filter(one => one.props.bold && /nose|ears|eyes/.test(one.text)).map(one => one.text)
   const fold = async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))?.props.label
 
-  // Two that end at once both stay green in their places, the one still working between them; neither is under Finished yet
+  // Two that end together both go to the top, green, the newer first, over the one still working; neither is under Finished yet
   await clock.advance(400)
   await end('a1', 't1')
+  await clock.advance(100)
   await end('a3', 't3')
-  expect(await titles()).toEqual(['Fix the nose', 'Check the ears', 'Draw the eyes'])
+  expect(await titles()).toEqual(['Draw the eyes', 'Fix the nose', 'Check the ears'])
   expect(await pane.findAll({ type: 'Text', text: '✓ Finished' })).toHaveLength(2)
   expect((await pane.find({ type: 'Text', text: /^Working on/ }))?.text).toBe('Working on 1 thing')
   expect(await fold()).toBeUndefined()
@@ -1118,8 +1119,7 @@ test('every run under a card says how it stands: a command held open shows its p
   const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Download the CT scans (about 3 min)' } as never)
   // The mod takes as the command held open only a shell started within 20 s of when the call began, as its hook saw it: the clock
   // moves only once the call is running, else on a slow machine (GitHub's) the hook ran a few steps late and no shell matched
-  for (let tries = 0; tries < 2000 && !held.has('dl'); tries += 1) await new Promise<void>(resolve => setTimeout(() => resolve(), 5))
-  expect(held.has('dl')).toBe(true)
+  expect(await until(async () => held.has('dl') || undefined)).toBe(true)
   // Five minutes, past the 1.5 times its three minutes where it turns amber, in steps of 5 s: the stand-in ps ages the shell from
   // `now`, which runs a step ahead of the clock while a step's timers fire. No longer: each second the clock moves runs the
   // panel's every-second look, and on GitHub's Mac nine minutes took past the time the kit lets a held call run, which ended it

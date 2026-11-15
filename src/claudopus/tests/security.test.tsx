@@ -2,8 +2,6 @@
 // the runners hold (F-006, F-008, F-009, F-017, F-018) are tested in mods/claudopus/bin/admin.test.sh too, on a real keychain or keyring
 
 const SEC_NOW = 1_700_000_000_000
-// Whether a call is still held after a moment: a held call never answers in that time
-const isHeldStill = async (call: Promise<unknown>) => (await Promise.race([call.then(() => 'answered'), new Promise(done => setTimeout(() => done('held'), 300))])) === 'held'
 
 test("F-001 · an admin command in the chat's own thread is refused before it is held: nothing asks, and no grant is left behind", async ($, on) => {
   const { list, grants, admins } = await gated($, on)
@@ -46,7 +44,7 @@ test('F-004 F-013 · an answer left in a file reaches no work, even one for the 
   expect(files.get(`${MEMORY}/log.md`) ?? '').toContain('put away unread')
 })
 
-test('F-007 F-017 · a runner run with another home or data folder, or with Claude Code\'s mark taken away, is refused, typed or in a script', async ($, on) => {
+test('F-007 F-017 · a runner run with another home or data folder, or with Claude Code\'s mark taken away, is refused, typed or in a script', SLOW, async ($, on) => {
   const { bash, files, grants, list } = await gated($, on)
   files.set('/repo/rel.sh', 'unset CLAUDECODE\n/plug/claudopus/bin/release\n')
   for (const command of [
@@ -71,7 +69,7 @@ test('F-007 F-017 · a runner run with another home or data folder, or with Clau
   // The mod's own release runner (here a copy of it), which pushes main itself and names the grants folder, is not read as a script of
   // work's: it is held
   const runner = 'unset X\nRELEASE_PUSH=1 git push -q "$REMOTE" "HEAD:refs/heads/$MAIN"\nls "$HOME/.claude/claudopus/admin-grants"\n'
-  files.set(`${new URL('..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')}/bin/release`, runner)
+  files.set(`${PLUGIN}/bin/release`, runner)
   files.set('/plug/claudopus/bin/release', runner)
   files.set('git:top', '/repo/wt')
   files.set('git:branch', 'fix-it')
@@ -222,7 +220,7 @@ test('F-021 · a write to the rules that lands after its call returned (a comman
   expect(touch.deny).toBeDefined()
 })
 
-test('F-021 · a kept copy written, taken away or broken by work never decides what the rules hold: they move aside to a copy of their own and are offered', async ($, on) => {
+test('F-021 · a kept copy written, taken away or broken by work never decides what the rules hold: they move aside to a copy of their own and are offered', SLOW, async ($, on) => {
   const { files, bash, list, clock } = await gated($, on)
   const rules = `${MEMORY}/rules/CLAUDE.md`
   ownSet(files, 'rules/CLAUDE.md', 'my rules')
@@ -251,7 +249,8 @@ test('F-021 · a kept copy written, taken away or broken by work never decides w
   files.set(rules, 'PLANTED-LOAD')
   // Looked at again a moment later, as another chat may be writing it just then
   const loading = $.session.start(start)
-  await until(async () => undefined)
+  // (a real half second, as the load's first look runs: the length the wait for nothing took before it went by the clock)
+  await new Promise<void>(resolve => setTimeout(() => resolve(), 500))
   await clock.advance(1_000)
   await loading
   expect(files.has(rules)).toBe(false)

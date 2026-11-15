@@ -1,18 +1,20 @@
 #!/usr/bin/env node
-// Joins the parts in this folder into the one hooks module the mod loads, mods/claudopus/hooks/register.tsx, and the parts in
-// tests/ into mods/claudopus/hooks/register.test.tsx. Anthropic's plugin directory lets the engine ($) and `on` pass only to
+// Joins the parts in this folder into the one hooks module the mod loads, mods/claudopus/hooks/register.tsx, and each part in
+// tests/, after tests/world.tsx, into mods/claudopus/hooks/tests/<part>. Anthropic's plugin directory lets the engine ($) and `on` pass only to
 // functions in the same file, so the mod ships one file; the parts are kept apart by job for reading and editing. Each part is a
 // script with no imports or exports: all of them are one scope, as in the joined file, and globals.d.ts (made here from
 // imports.tsx) gives them what the joined file imports. `node src/claudopus/build.mjs` writes the files; `--check` only says
 // whether they are up to date, and fails when they are not
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const hooks = join(here, '../../mods/claudopus/hooks')
+// Where each area's joined tests go
+const TESTS_OUT = join(hooks, 'tests')
 
 // The parts in the order they are joined: a part that uses another's value while the module loads comes after it
 const PARTS = [
@@ -65,9 +67,9 @@ const globalsOf = (lines, toPart) => {
   ].join('\n')
 }
 
-const joined = (dir, parts, out) => {
+const joined = (dir, parts, out, listed = parts) => {
   // A part left off the list would be left out of the joined file
-  const unlisted = readdirSync(dir).filter(name => name.endsWith('.tsx') && name !== 'imports.tsx' && !parts.includes(name))
+  const unlisted = readdirSync(dir).filter(name => name.endsWith('.tsx') && name !== 'imports.tsx' && !listed.includes(name))
   if (unlisted.length) throw new Error(`build.mjs: add ${unlisted.join(', ')} to the list of parts, in its place`)
   const lines = importsOf(join(dir, 'imports.tsx'))
   const bodies = parts.map(name => read(join(dir, name)).replace(/\n+$/, ''))
@@ -206,7 +208,11 @@ const versionPage = () => {
 const files = [
   [join(hooks, 'register.tsx'), joined(here, PARTS, 'It is the hooks module hooks.json names.')],
   [join(here, 'globals.d.ts'), globalsOf(importsOf(join(here, 'imports.tsx')), m => (m.startsWith('./') ? `../../mods/claudopus/hooks/${m.slice(2)}` : m === '../types' ? '../../mods/claudopus/types' : m))],
-  [join(hooks, 'register.test.tsx'), joined(join(here, 'tests'), TEST_PARTS, "Its tests run with the engine's plugin test.")],
+  // Each area's tests are a file of their own, world.tsx's set-up joined before them, so the engine's plugin test runs them side by side
+  ...TEST_PARTS.filter(name => name !== 'world.tsx').map(name => [
+    join(TESTS_OUT, name),
+    joined(join(here, 'tests'), ['world.tsx', name], "Its tests run with the engine's plugin test.", TEST_PARTS).replace(/^(import .* from )'\.\/([^']+)'$/gm, "$1'../$2'"),
+  ]),
   [join(here, 'tests/globals.d.ts'), globalsOf(importsOf(join(here, 'tests/imports.tsx')), m => (m.startsWith('./') ? `../../../mods/claudopus/hooks/${m.slice(2)}` : m))],
   // The page claudopus.ai serves with the current version, which every install reads to know when to update: made from plugin.json,
   // so it moves with each release pushed to main
@@ -217,6 +223,13 @@ const files = [
 
 const isCheck = process.argv.includes('--check')
 const stale = []
+// The one joined test file of before, and an area's file whose part is gone, are stale: the build removes them
+const leftover = [join(hooks, 'register.test.tsx'), ...(existsSync(TESTS_OUT) ? readdirSync(TESTS_OUT).filter(name => !TEST_PARTS.includes(name)).map(name => join(TESTS_OUT, name)) : [])].filter(path => existsSync(path))
+for (const path of leftover) {
+  stale.push(path)
+  if (!isCheck) rmSync(path)
+}
+if (!isCheck) mkdirSync(TESTS_OUT, { recursive: true })
 for (const [path, made] of files) {
   const text = typeof made === 'function' ? made() : made
   let now = ''

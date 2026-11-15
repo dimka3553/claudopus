@@ -2,23 +2,6 @@
 
 // ---- Every chat's work in every panel ----
 
-const NOW = 1_700_000_000_000
-// This chat's own work as its file shares it with the other chats
-const read$todos = async (files: Map<string, string>) => (JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').cards?.find((one: { id: string }) => one.id === 'a1') ?? {}) as { ask?: { text: string } }
-// Another chat's file as that chat writes it: one piece of work that asks for a go-ahead, and one that runs
-const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
-  JSON.stringify({
-    chat,
-    title,
-    folder: '/repo/billing',
-    host: '',
-    at,
-    cards: [
-      { id: 'b1', parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: 'Send the invoices', words: 'send them', items: [{ text: 'Draft the mail', state: 'done' }], entries: [{ at, kind: 'note', text: 'I drafted the mail.' }], answer: '', ask: { text: 'May I send 12 invoices?', choices: ['Send', 'Not now'], from: 'b1', at }, startedAt: at - 60_000, endedAt: 0, status: 'working' },
-      { id: 'b2', parentId: '', isFork: false, tokens: 0, title: 'Check the totals', words: 'check', items: [], entries: [{ at, kind: 'note', text: 'Adding up March.' }], answer: '', startedAt: at - 30_000, endedAt: 0, status: 'working' },
-    ],
-  })
-
 test("the panel shows every open chat's running work under that chat's name, this chat's first; a chat gone silent shows none", async ($, on) => {
   const { files, clock } = world(on)
   await $.session.start(start)
