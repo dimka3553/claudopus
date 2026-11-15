@@ -114,10 +114,17 @@ const recorderHooks = (on: On) => {
     return next(e)
   })
   // Every site's focus moves, the panel's and the rest (a press that takes the focus out of the panel), and what came of each
-  on('ui.focus', async ($, e, next) => {
+  // (by site kind: the panel's own hook in commands.tsx is the one without a matcher, and the engine allows one)
+  on('ui.focus', { component: 'Pane' }, async ($, e, next) => {
     if (!(await isRecording($))) return next(e)
     const r = await next(e)
-    await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element), deny: (r as { deny?: unknown })?.deny !== undefined })
+    await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element), deny: r.deny !== undefined })
+    return r
+  })
+  on('ui.focus', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!(await isRecording($))) return next(e)
+    const r = await next(e)
+    await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element), deny: r.deny !== undefined })
     return r
   })
   // Typing as a count by box: the value is never read
