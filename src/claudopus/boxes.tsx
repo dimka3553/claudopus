@@ -75,9 +75,9 @@ const DONE_SHOWN = 60_000
 const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
   const at = await $.clock.now()
   doneNotes = [...doneNotes.filter(one => one.id !== note.id && at - one.at < DONE_SHOWN), { ...note, at }].slice(-6)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   // Drawn again as its minute ends, so it goes with nothing else to redraw the panel
-  $.clock.after(DONE_SHOWN + 100, () => $.ui.invalidate('ui.render'))
+  $.clock.after(DONE_SHOWN + 100, () => drawAgain($))
 }
 const doneNotesPart = (ui: Ui, at: number) =>
   doneNotes
@@ -179,7 +179,7 @@ const lookBoxes = async ($: EngineInterface) => {
   for (const id of [...boxTries.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 
 // A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
@@ -198,7 +198,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     boxSaid.set(id, refused)
     boxPresses += 1
     boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
-    return void $.ui.invalidate('ui.render')
+    return void drawAgain($)
   }
   const request = `${boxesDir()}/${id}.json`
   // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
@@ -210,7 +210,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     boxSaid.set(id, 'It could not be sealed for the command that asked, so it was not sent.')
     boxPresses += 1
     boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
-    return void $.ui.invalidate('ui.render')
+    return void drawAgain($)
   }
   const escaped = sent.replace(/[\\"]/g, '\\$&')
   const r = isLinux
@@ -235,7 +235,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
@@ -244,7 +244,7 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled �
   boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
   if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said, what: '' })
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 
 const boxesPart = ($: EngineInterface, ui: Ui) => {

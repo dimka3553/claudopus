@@ -216,6 +216,31 @@ test('while the person types into an ask the panel holds its drawing whole, as o
   }
 })
 
+test('with work running and nobody typing, the panel is drawn again at once for anything new, but for its running times alone only every ten seconds, so a button under the pointer keeps its hover and takes its click', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I go on?', choices: ['Approve', 'Not now'] } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const texts = async () => JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  await clock.advance(1000)
+  const before = await texts()
+  await clock.advance(3000)
+  expect(await texts()).toBe(before)
+  // The work writes a line: drawn at once
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'I am looking at the left ear.' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'I am looking at the left ear.' }))).toBeDefined()
+  // and its time moves again within ten seconds
+  const after = await texts()
+  await clock.advance(11_000)
+  expect(await until(async () => ((await texts()) !== after ? true : undefined))).toBe(true)
+  // A press shows what it did at once
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key ?? '' })
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'May I go on?' })) ? undefined : true))).toBe(true)
+  await list.unmount()
+})
+
 test('a key box keeps what is typed in it without drawing it back, and holds the panel while it is typed into', async ($, on) => {
   const { clock, files } = world(on)
   await $.session.start(start)
@@ -330,6 +355,10 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   expect(await list.find({ type: 'Text', text: ASK })).toBeDefined()
   expect(await labels()).toContain('Release it')
   expect((await list.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(true)
+  // and its box is a new one, empty: the surface would put the sent words back into a box it found again by its old key
+  const back = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  expect(back?.key).not.toBe(box?.key)
+  expect(back?.props.value).toBe('')
   expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
   expect(resumed.filter(line => line.startsWith('a1: '))).toHaveLength(1)
   // More words from the person keep it open still; Release it settles it, and the card finishes once the work has acted on it

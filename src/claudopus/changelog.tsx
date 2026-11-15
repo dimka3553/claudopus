@@ -91,7 +91,7 @@ let screenSounded = ''
 const closeScreen = async ($: EngineInterface, version: string) => {
   presses += 1
   if (!isNewer(seenIn(await readOr($, seenPath())), version)) await writeSeen($, version)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 // The screen, over the panel: the blue happy octopus jumping, the version moved to, the changes of every version after the one seen
 // last, and the way back. Nothing in a copy a newer load of this chat replaced, nor for a version whose changes were seen
