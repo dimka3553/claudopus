@@ -5,7 +5,7 @@
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; isOwn?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -19,13 +19,20 @@ const shellMissed = new Map<string, number>()
 let tasksDir = ''
 let tasksOf = ''
 let tasksMissedAt = 0
+// The output a command held open writes while it runs, by its row's id: the engine writes it to a file of its own in the tasks
+// folder and names it only once the command ends or goes to the background, so it is found as the file its shell writes to
+const callFiles = new Map<string, { file: string; at: number }>()
+// The file each row's output was last read from, by its id, so a press on the row can show it whole
+const jobFiles = new Map<string, string>()
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen): Job => {
   const seen = jobLog.get(id) ?? theirs
   const wait = isWatch ? undefined : waitOf(cmd)
-  const kind: JobKind = isWatch ? 'watch' : wait ? 'wait' : jobKindOf(cmd, what)
-  return { id, label: labelOf(what || cmd, cmd), cmd, kind, at, ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
+  const said = describedOf(what)
+  const kind: JobKind = isWatch ? 'watch' : (said.kind ?? (wait ? 'wait' : jobKindOf(cmd, what)))
+  const label = labelOf(said.text || cmd, cmd)
+  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(said.expect ? { expect: said.expect, expectText: said.expectText } : {}), ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
 }
 // The jobs a card has running: what it sent to the background, and a command it has waited on a while; jobs alike are one
 const jobsOf = (one: Todo, at: number): Job[] =>
@@ -43,6 +50,8 @@ const jobsOf = (one: Todo, at: number): Job[] =>
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
+  // Its own words alone when they say its kind already (Download the CT scans, Wait for the deploy)
+  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
   // A wait leads with what it waits for, its own words after
   const label = job.kind === 'wait' ? (job.waitsFor ?? job.label.replace(/^wait(s|ing)?\s+/i, '')) : job.label
   return `${kind} · ${label}`
@@ -89,14 +98,39 @@ const lookJobs = async ($: EngineInterface) => {
   if (now - jobsLookedAt < JOB_LOOK) return
   jobsLookedAt = now
   const list = await read($, todos)
+  // Held open: a command a card has waited on long enough to be a row of its own
+  const held = list.flatMap(one => (one.status === 'working' && one.running?.cmd && now - one.running.at >= RUNNING_SHOWN ? [{ owner: one.id, id: `call-${one.id}`, cmd: one.running.cmd, at: one.running.at }] : []))
+  // A row's command that changed (another held call of the same card ran longest) starts afresh
+  for (const [id, was] of callFiles) if (!held.some(h => h.id === id && h.at === was.at)) (callFiles.delete(id), jobLog.delete(id))
   const owned = [
-    ...list.flatMap(one => (one.bg ?? []).filter(b => !b.isWatch).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
+    // A watch's output is its events, read as any other
+    ...list.flatMap(one => (one.bg ?? []).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
     ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid }))),
+    ...held.flatMap(h => (callFiles.get(h.id) ? [{ owner: h.owner, id: h.id, file: callFiles.get(h.id)?.file ?? '', pid: undefined as string | undefined }] : [])),
   ]
-  for (const id of jobLog.keys()) if (!owned.some(o => o.id === id)) jobLog.delete(id)
+  for (const id of jobLog.keys()) if (!owned.some(o => o.id === id) && !held.some(h => h.id === id)) jobLog.delete(id)
   for (const owner of jobNews.keys()) if (!owned.some(o => o.owner === owner)) jobNews.delete(owner)
   for (const id of shellMissed.keys()) if (!owned.some(o => o.id === id)) shellMissed.delete(id)
-  if (!owned.length) return
+  // A held-open command's shell, once the processes have been listed, and the file it writes to: only one in a tasks folder
+  const unfound = held.filter(h => !callFiles.has(h.id))
+  if (unfound.length && jobProcs.length) {
+    const pids = unfound.flatMap(h => {
+      const pid = heldShellOf(jobProcs, h.cmd, h.at)
+      return pid ? [{ id: h.id, pid, at: h.at }] : []
+    })
+    if (pids.length) {
+      const fd = await $.process
+        .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...pids.map(p => p.pid)], { timeoutMs: 5000 })
+        .catch(() => undefined)
+      for (const line of fd?.stdout.split('\n') ?? []) {
+        const [pid = '', ...path] = line.split(' ')
+        const file = path.join(' ').trim()
+        const one = pids.find(p => p.pid === pid)
+        if (one && /\/tasks\/[\w-]+\.output$/.test(file)) callFiles.set(one.id, { file, at: one.at })
+      }
+    }
+  }
+  if (!owned.length && !unfound.length) return
   const sid = await $.session.id().catch(() => '')
   if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
   if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
@@ -105,6 +139,8 @@ const lookJobs = async ($: EngineInterface) => {
   }
   const asked = owned.filter(o => o.file || tasksDir)
   const files = asked.map(o => o.file || `${tasksDir}/${o.id}.output`)
+  jobFiles.clear()
+  asked.forEach((o, n) => jobFiles.set(o.id, files[n] ?? ''))
   // The files the waits poll, to tell whether what they wait for still moves
   const waits = list.flatMap(one => [...(one.bg ?? []).filter(b => !b.isWatch), ...(one.detached ?? [])].flatMap(j => {
     const wait = waitOf(j.cmd ?? '')
@@ -168,13 +204,15 @@ const lookJobs = async ($: EngineInterface) => {
     const text = (parts[n + 1] ?? '').split('\n@@AT@@ ')[0] ?? ''
     if (!job?.pid && isOutputEnded(text)) ended.push(id)
     const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
-    const seen = latestOf(text)
+    // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote (on
+    // 15 Nov such rows read "updated 9m ago" for runs that sent all they printed elsewhere)
+    const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }
     const was = jobLog.get(id)
     const wait = waits.find(w => w.id === id)
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
     const next: Seen = { ...seen, tail: tailOf(text), ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true
@@ -204,4 +242,24 @@ const isLike = (command: string, pattern: string) => {
   } catch {
     return command.includes(pattern)
   }
+}
+
+// A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
+// it goes on; on this Mac only, as the window is this Mac's
+const canOpenJob = (job: Job) => Boolean(jobFiles.get(job.id)) && !isRunFromAfar && !isLinux
+const openJobOutput = async ($: EngineInterface, job: Job) => {
+  const file = jobFiles.get(job.id)
+  // A press moves the buttons' keys, so the panel does not keep pulling back to this row
+  presses += 1
+  $.ui.invalidate('ui.render')
+  if (!file || !canOpenJob(job)) return
+  const at = await $.clock.now()
+  const base = `${dir}/terminal`
+  const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
+  const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file)
+  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'Its output is not there (yet): this window shows it once it is written.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
+  await $.fs.write(`${home}/output.command`, script)
+  const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
+  if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
 }

@@ -153,12 +153,12 @@ const lookInDue = async ($: EngineInterface) => {
   await lookInOnHelpers($)
 }
 
-// What a card with helpers running says under its line: how many, when they were looked in on, and how many have gone quiet
+// What a card with helpers running says under its line: only how many have gone quiet, as those at work are rows on its tree
 const lookedInLine = (one: Todo, at: number) => {
   const l = one.lookedIn
-  if (!l || one.status !== 'working' || !l.running) return ''
-  const ago = at - l.at < 60_000 ? 'just now' : `${took(at - l.at)} ago`
-  return `${l.running === 1 ? '1 helper' : `${l.running} helpers`} running, looked in on ${ago}${l.quiet ? `: ${l.quiet} quiet for ${HELPER_QUIET / 60_000}+ min, the work was told` : ''}`
+  // Helpers at work are rows on its tree already; only one gone quiet is said, as the work was told of it
+  if (!l || one.status !== 'working' || !l.running || !l.quiet) return ''
+  return `${l.quiet === 1 ? '1 helper' : `${l.quiet} helpers`} quiet for ${HELPER_QUIET / 60_000}+ min, the work was told`
 }
 
 const stepHooks = (on: On) => {

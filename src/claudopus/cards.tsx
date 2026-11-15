@@ -138,6 +138,14 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'c
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`
 }
 
+// The same tree's lines carried down past a row, for a second line of its own: the levels above that go on, and its own line when
+// rows under the same parent follow
+const railSvg = (t: Twig, line: number) => {
+  const x = (level: number) => level * TWIG_STEP + 9
+  const paths = [...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])), ...(t.isLast ? [] : [`M${x(t.rails.length)} 0V${line}`])]
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('') || 'M0 0'}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/></svg>`
+}
+
 // Work the chat's own record was already looked through for
 const helpersChecked = new Set<string>()
 // The engine's own list is the truth: work it runs is listed, and work that failed or was stopped ends no turn
