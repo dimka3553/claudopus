@@ -259,6 +259,11 @@ expect "a person's own release at a terminal, answered yes: released" 0 'release
 n=$((n + 1))
 [ "$(git -C "$r/origin.git" show main:file)" = three ] && echo "ok $n - main has the person's release" || { echo "NOT OK $n - main does not have the person's release"; failed=1; }
 
+# Main's own checks are read and run even where the .release names only some of the settings (15 Nov: a read that ended on a name
+# the file left out took none of them, so CHECK went unrun; GitHub's runner hid it, as it sets GITHUB_WORKFLOW itself)
+(cd "$r/work" && git fetch -q origin && git checkout -q -B main origin/main && printf 'CHECK=false\n' >.release && git commit -q -am "checks fail" && RELEASE_PUSH=1 git push -q origin main && git checkout -q -b red-check && echo red >file && git commit -q -am red) || { echo "NOT OK - the repo for a failing check was not set up"; failed=1; }
+release_grant rel-red release-grant red-check
+expect "main's own check fails: refused" 3 'the checks failed on main with red-check' -- release
 # GitHub's checks: with GITHUB_CHECKS in main's .release, main's own workflow is started on the very commit main is to become, and
 # main moves only once every job of that run passed. This test's gh keeps the commit it was asked to check, lists run 77 for it as
 # main's dispatch (and whatever $r/runs.extra adds, its SHA put in), through jq with the release's own filter; it answers 77's jobs
