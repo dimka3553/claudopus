@@ -266,11 +266,12 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled Â
   $.ui.invalidate('ui.render')
 }
 
-const boxesPart = ($: EngineInterface, ui: Ui) => {
-  if (!boxes.length || !('Input' in ui)) return null
-  // This chat's own requests first, the first of them with the keys, so a value typed for the notice it told goes to its own box
+// Each box with when it was asked, so the panel puts it among what waits on the person, the newest first
+const boxRows = ($: EngineInterface, ui: Ui) => {
+  if (!boxes.length || !('Input' in ui)) return []
+  // This chat's own first request holds the keys, so a value typed for the notice it told goes to its own box, wherever it is drawn
   const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
-  return shown.map((one, n) => (
+  return shown.map((one, n) => ({ at: one.at, node: (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
       <ui.Text dimColor wrap="truncate-end">{`${one.key ? 'Admin password' : 'Key'} Â· waits for you to type it`}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
@@ -292,5 +293,5 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
         <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain onPress={() => void cancelBox($, one.id)} />
       </ui.Box>
     </ui.Box>
-  ))
+  ) }))
 }

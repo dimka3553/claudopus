@@ -1,0 +1,4 @@
+- Everything that waits for your press is at the top of the panel, right under its header, the newest first: admin commands, releases, changes to your files, put-back changes, password and key boxes and Claude Code's own permission prompts, every chat's. The cards of work that asked you something come next, the newest first, then all other work in the order it began.
+- A work whose notice went to the top says so on its card ("↑ Admin command waits at the top of the panel"), and the notice names the work and, for another chat's, that chat.
+- Scrolled down a long panel, the line above the prompt says how many things wait at the top; pressing it takes the panel back there. Nothing else moves the panel.
+- In the terminal, an ask that comes in above the one you are typing in no longer takes the keys from it.

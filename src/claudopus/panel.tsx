@@ -11,7 +11,23 @@ const backAsked = async ($: EngineInterface, id: string) => {
   await $.ui.close({ id: LIST }).catch(() => undefined)
   await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS, focus: true })
 }
+// The ask whose reply box holds the terminal's keys in the list: kept on it while it waits, so an ask that comes in above it never
+// takes the keys from what the person is typing
+let keysAsk = ''
+// Where the list's window starts, as the person or a press last moved it: above the prompt says what waits at the top once it is
+// out of sight (waitMarker)
+let listOffset = 0
+// How many things wait on the person at the top of the list, as last drawn
+let waitsAtTop = 0
 const panelHooks = (on: On) => {
+
+  // The list's window, followed as it moves, never moved here
+  on('ui.scroll', { requestId: LIST }, ($, e, next) => {
+    const was = listOffset
+    listOffset = Math.max(0, e.offset)
+    if ((was > 0) !== (listOffset > 0)) $.ui.invalidate('ui.render')
+    return next(e)
+  })
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
   // tab of the mod's but the panel has a first row whose Close, pressed or keyed x, closes it and hands the keys back to the panel
@@ -269,7 +285,7 @@ const panelHooks = (on: On) => {
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
-                autoFocus={e.surface === 'terminal' && !askFocused ? ((askFocused = true), true) : undefined}
+                autoFocus={e.surface === 'terminal' && !askFocused && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={drafts.get(one.id) ?? ''}
                 submitLabel="send"
@@ -352,7 +368,7 @@ const panelHooks = (on: On) => {
             ) : null}
             {one.admins?.length ? (
               <Box key={`gate-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
-                {adminBlock($, table, one, `gates-${one.id}`)}
+                {gatePointer(table, one, `gates-${one.id}`)}
               </Box>
             ) : null}
             {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
@@ -1203,6 +1219,8 @@ const panelHooks = (on: On) => {
         <Box flexDirection="column">
           <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waits for your answer' : 'asked in another chat'}`}</Text>
           <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+          {/* At the top, away from its chat's name: which chat it is */}
+          {c ? <Text key={`prompt-${key}-chat`} dimColor wrap="truncate-end">{`In the chat “${chatName(c)}”${c.host ? ` on ${macName(c.host)}` : ''}`}</Text> : null}
           <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
         </Box>
         <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
@@ -1456,7 +1474,36 @@ const panelHooks = (on: On) => {
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     // A password or key box stays above it: the runner waits on it
-    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{doneNotesPart(ui, at)}{screen}</Box>
+    // Everything that waits on the person, every chat's, together at the top under the header and the newest first: the notices
+    // (password and key boxes, gates, Claude Code's own prompts), then the cards of work that asked. Each stays until answered, and
+    // then leaves the top; a card goes back to its own place among the rest, which keep their order
+    const fromWork = (one: Todo) => (one.chat ? `The work “${titleOf(one)}” · in the chat “${chatName(one.chat)}”` : `The work “${titleOf(one)}”`)
+    const notices = [
+      ...boxRows($, ui),
+      ...looseGates.map(gate => ({ at: gate.at, node: gateRow($, ui, gate, `gate-${gate.id}`, false) })),
+      ...own.flatMap(one => (one.admins ?? []).map(gate => ({ at: gate.at, node: gateRow($, ui, gate, `gate-${gate.id}`, false, fromWork(one)) }))),
+      ...elsewhere.flatMap(one => (one.admins ?? []).map(gate => ({ at: gate.at, node: gateRow($, ui, gate, `gate-${one.chat?.host}-${one.chat?.id}-${gate.id}`, true, fromWork(one)) }))),
+      ...waiting.map(p => ({ at: p.at, node: promptCard(p, `this-${p.id}`, answerHere(p)) })),
+      ...otherChats.flatMap(c => {
+        const url = pressOf(c)
+        return (c.prompts ?? []).map(p => ({ at: p.at, node: promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', c) }))
+      }),
+    ]
+      .sort((a, b) => b.at - a.at)
+      .map(one => one.node)
+    const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
+    const askingHere = shownWork.filter(isAsking)
+    const askingThere = listedChats.flatMap(c => shownOf(c).filter(isAsking))
+    const askCards = [...askingHere, ...askingThere].sort((a, b) => (b.ask?.at ?? 0) - (a.ask?.at ?? 0))
+    const restHere = shownWork.filter(one => !isAsking(one))
+    // The terminal's keys stay with the ask they were on while it waits
+    if (keysAsk && !askingHere.some(one => one.id === keysAsk)) keysAsk = ''
+    if (paneId === LIST && !alone) {
+      listOffset = Math.max(0, e.props.scroll.offset)
+      const count = notices.length + askCards.length
+      if (count !== waitsAtTop) ((waitsAtTop = count), $.ui.invalidate('ui.render'))
+    }
+    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{notices}{doneNotesPart(ui, at)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
     // A newer version the hourly look saw: its card under the header's lines, with Install
     const outCard = alone ? null : newOutCard($, ui, await newOut($, versions.version, versions.installed).catch(() => ''))
@@ -1507,29 +1554,24 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
         ) : null}
-        {!alone ? boxesPart($, ui) : null}
-        {!alone ? gatesPart($, ui) : null}
+        {!alone ? notices : null}
+        {!alone ? askCards.map(one => small(one)) : null}
         {!alone ? doneNotesPart(ui, at) : null}
         {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
           ? big(alone, talked?.lines)
           : [
-              // This chat's work first, named as this chat's once another chat's is shown; work that needs the person's hands comes first
-              // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
-              ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-              ...waiting.map(p => promptCard(p, `this-${p.id}`, answerHere(p))),
+              // This chat's work first, named as this chat's once another chat's is shown, in the order it began; what waits on the
+              // person is above, at the top. Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
+              ...(listedChats.length && (restHere.length || shownFlows.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...promptsAnswered.map(p => answeredCard(p, `this-${p.id}`)),
-              ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
-              // Then each other chat under its name, those that wait on the person first
+              ...[...restHere.map(one => ({ at: one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              // Then each other chat under its name, with what is left of it once its asks are at the top
               ...listedChats.flatMap(c => {
-                const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
-                // Open that chat whenever its link opens here: a chat of this Mac, or one of another Mac with Remote Control on
-                // In a chat another Mac's app runs here, that Mac opens it
-                const url = pressOf(c)
-                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', c))
+                const cards = shownOf(c).filter(one => !isAsking(one)).sort((a, b) => a.startedAt - b.startedAt)
                 const answered = answeredOf(c.answeredPrompts).map(p => answeredCard(p, `${c.host}-${c.chat}-${p.id}`, c))
-                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...answered, ...cards.map(one => small(one))]
+                return cards.length || answered.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...answered, ...cards.map(one => small(one))] : []
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}

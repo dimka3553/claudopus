@@ -349,7 +349,7 @@ test("another chat's panel shows an admin command that waits, with no button: on
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'softwareupdate -i -a' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Allow or deny it on its card in its own chat.' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Allow or deny it at the top of the panel in its own chat.' })).toBeDefined()
   expect((await list.findAll({ type: 'Button' })).some(one => ['Allow once', 'Always allow this command', 'Deny'].includes(String(one.props.label)))).toBe(false)
 })
 
@@ -389,4 +389,87 @@ test('a press is answered by a line, not a card: an ask is an outlined box, what
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'You allowed it once · it runs now' })) ? undefined : true))).toBe(true)
   // It had no fill or purple edge of its own, as a piece of work has
   expect(await edges()).toBe(withNote)
+})
+
+// A long list of another chat's running work, two of whose cards wait on a gate and one on an ask: what the 15 Nov panel drew below
+// the fold, where the person had to scroll to find Allow once
+const longList = (at: number, gates: Record<string, number>, asks: Record<string, number> = {}) =>
+  JSON.stringify({
+    chat: 'chat-b', title: 'Billing page', folder: '/repo/billing', host: '', at,
+    cards: ['one', 'two', 'three', 'four', 'five', 'six'].map((name, n) => ({
+      id: `w${n + 1}`, parentId: '', isFork: false, tokens: 0, title: `Card ${name}`, words: name, items: [], entries: [], answer: '', startedAt: at - 600_000 + n * 60_000, endedAt: 0, status: 'working',
+      ...(gates[`w${n + 1}`] ? { admins: [{ id: `g${n + 1}`, host: 'here', command: `run step ${name}`, at: gates[`w${n + 1}`] }] } : {}),
+      ...(asks[`w${n + 1}`] ? { ask: { text: `Which way for ${name}?`, at: asks[`w${n + 1}`], choices: ['Left', 'Right'] } } : {}),
+    })),
+  })
+const textOrder = async (pane: { findAll: (q: { type: string }) => Promise<{ text?: unknown }[]> }) => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+
+test('every gate that waits is drawn at the top, above every work card, the newest first, then the cards that asked; answered, it leaves the top and nothing else moves', async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  const at = 1_700_000_000_000
+  files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }, { w4: at - 1500 }))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
+  const texts = await textOrder(list)
+  const first = (text: string) => texts.indexOf(text)
+  // The newest gate first, then the older, then the card that asked, and only then the rest of the work in the order it began
+  expect(first('run step six')).toBeGreaterThan(-1)
+  expect(first('run step six')).toBeLessThan(first('run step five'))
+  expect(first('run step five')).toBeLessThan(first('Which way for four?'))
+  expect(first('Which way for four?')).toBeLessThan(first('Card one'))
+  // Away from its card, the gate names its work and chat; the card says where its gate is
+  expect(texts).toContain('The work “Card six” · in the chat “Billing page”')
+  expect(texts.filter(one => one === '↑ Admin command asked at the top of the panel').length).toBe(2)
+  const rest = (all: string[]) => all.filter(one => /^Card (one|two|three|five|six)$/.test(one))
+  expect(rest(texts)).toEqual(['Card one', 'Card two', 'Card three', 'Card five', 'Card six'])
+  // The newer gate is answered (in its own chat): it leaves the top, and the cards keep their order
+  files.set(`${MEMORY}/live/chat-b.json`, longList(at + 6000, { w5: at - 2000 }, { w4: at - 1500 }))
+  await clock.advance(5000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'run step six' })) ? undefined : true))).toBe(true)
+  const after = await textOrder(list)
+  expect(after.indexOf('run step five')).toBeLessThan(after.indexOf('Which way for four?'))
+  expect(rest(after)).toEqual(rest(texts))
+})
+
+test('scrolled down a long list, the line above the prompt says how many wait at the top, and pressed takes the list there; at the top it says nothing', async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  const at = 1_700_000_000_000
+  files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }))
+  await clock.advance(5000)
+  const MARK = '↑ 2 wait for you at the top of the panel'
+  for (const surface of ['desktop', 'terminal']) {
+    const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface } as never)
+    expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
+    const band = await $.ui.mount({ ...BAND, surface } as never)
+    expect(await until(async () => band.find({ type: 'Text', text: MARK }))).toBeDefined()
+    await band.unmount()
+    await down.unmount()
+    const top = await $.ui.mount({ ...LIST, surface } as never)
+    expect(await until(async () => top.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
+    const still = await $.ui.mount({ ...BAND, surface } as never)
+    expect(await still.find({ type: 'Text', text: MARK })).toBeUndefined()
+    await still.unmount()
+    await top.unmount()
+  }
+})
+
+test("in the terminal, an ask that comes in above the one being typed in never takes the keys from it; the newest ask is drawn first", async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two things', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  const focused = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => one.props.autoFocus).map(one => (one.key ?? '').split('-reply')[0])
+  expect(await until(async () => ((await focused()).length ? focused() : undefined))).toEqual([expect.stringContaining('a1')])
+  await clock.advance(2000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which ear first?', choices: ['Left', 'Right'] } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Which ear first?' }))).toBeDefined()
+  const texts = await textOrder(list)
+  expect(texts.indexOf('Which ear first?')).toBeLessThan(texts.indexOf('May I delete the old repo?'))
+  expect(await focused()).toEqual([expect.stringContaining('a1')])
 })
