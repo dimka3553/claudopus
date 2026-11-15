@@ -124,9 +124,8 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
       ],
     },
     disk: f.disk === undefined ? undefined : {
-      title: 'Disk',
+      title: 'Disk, read and write',
       value: rateText(f.disk).join(' '),
-      note: 'Reading and writing together',
       rows: f.diskClaude !== undefined ? [['Claude and what it runs', rateFine(Math.min(f.diskClaude, f.disk))]] : [],
     },
     net: f.net === undefined ? undefined : {

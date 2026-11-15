@@ -826,7 +826,7 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
     cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
     gpu: ['Graphics processor', '37% busy', 'Graphics memory in use', '1.2 GB'],
     battery: ['Battery', '85%', 'On battery, 4:12 left as the system estimates it'],
-    disk: ['Disk', '63 MB/s', 'Reading and writing together'],
+    disk: ['Disk, read and write', '63 MB/s'],
     net: ['Network', '1 MB/s', 'Download', 'Upload'],
   }
   // The drawn tree as the surface gets it: each element's props, its hover, its children
