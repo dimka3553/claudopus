@@ -592,8 +592,8 @@ const panelHooks = (on: On) => {
           {head}
           <Box key={`stand-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
             {jobRails(t, `rails-${key}`)}
-            {/* (on a desktop by the step a plain Button pads a run's name with, so the two start in one column) */}
-            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={lead}>
+            {/* (on a desktop by the step a plain Button pads a run's name with, where its name is one, so the two start in one column) */}
+            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={canOpenJob(job) ? lead : 0}>
               {pctAt >= 0 && job.pct ? (
                 <Box flexDirection="row" flexShrink={0}>
                   {pctAt > 0 ? <Text dimColor>{stand.slice(0, pctAt)}</Text> : null}
