@@ -1126,33 +1126,33 @@ const panelHooks = (on: On) => {
     }
     // Only this chat's own prompt, while this chat holds it: another chat's is answered in that chat, as no file may answer one
     const isHeldHere = (p: Prompt, c?: Shared) => Boolean(!c && p.isHeld && promptHeld.has(p.id))
+    // Drawn as Claude Code draws its permission asks, as the admin gate's are: an outlined box with the kind of ask at its top, never
+    // a filled card with an edge as work's cards are
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
-      <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
-        <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <Box flexDirection="column">
-            <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
-            <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
-          </Box>
-          <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
-          {p.detail ? (
-            <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
-              <Text mono wrap="wrap">{p.detail}</Text>
-            </Box>
-          ) : null}
-          {p.yes || p.no ? (
-            <Box flexDirection="column">
-              {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
-              {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
-            </Box>
-          ) : null}
-          {isHeldHere(p, c) ? promptButtons(p, key) : <Text dimColor wrap="wrap">{where}</Text>}
-          {c && pressOf(c) && !isHeldHere(p, c) ? (
-            <Box flexDirection="row">
-              <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
-            </Box>
-          ) : null}
+      <Box key={`prompt-${key}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+        <Box flexDirection="column">
+          <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waits for your answer' : 'asked in another chat'}`}</Text>
+          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+          <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
         </Box>
+        <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
+        {p.detail ? (
+          <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
+            <Text mono wrap="wrap">{p.detail}</Text>
+          </Box>
+        ) : null}
+        {p.yes || p.no ? (
+          <Box flexDirection="column">
+            {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
+            {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
+          </Box>
+        ) : null}
+        {isHeldHere(p, c) ? promptButtons(p, key) : <Text dimColor wrap="wrap">{where}</Text>}
+        {c && pressOf(c) && !isHeldHere(p, c) ? (
+          <Box flexDirection="row">
+            <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
+          </Box>
+        ) : null}
       </Box>
     )
     // Where a prompt is answered: in this chat, the box Claude Code shows at its bottom
@@ -1167,16 +1167,9 @@ const panelHooks = (on: On) => {
       if (p.isCut) return 'You allowed it · it was stopped before it finished'
       return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
     }
-    const answeredCard = (p: Prompt, key: string, c?: Shared) => (
-      <Box key={`answered-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <Box width={1} flexShrink={0} backgroundColor={p.isRunning ? LIVE : FILL} />
-        <Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
-          <Text wrap="wrap" color={p.isRunning ? LIVE : undefined} bold={p.isRunning}>{saidOf(p)}</Text>
-          <Text dimColor wrap="wrap">{p.text}</Text>
-        </Box>
-      </Box>
-    )
+    // Once answered it is a line of what was done, as the gate's notes are: no box, fill or edge
+    const answeredCard = (p: Prompt, key: string, c?: Shared) =>
+      reportLine(table, `answered-${key}`, p.answered !== 'no' && p.answered !== 'stopped' && !p.isCut, saidOf(p), [p.title || (c ? 'That chat itself' : 'This chat itself'), p.text])
 
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
     // the Claude app when pressed, where its link opens here

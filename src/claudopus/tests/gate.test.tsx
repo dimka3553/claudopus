@@ -119,7 +119,7 @@ test('Deny refuses the call with a line that says the person refused it, and not
   expect(grants()).toEqual([])
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on m4' })).toBeUndefined()
   expect(await until(async () => list.find({ type: 'Text', text: 'You denied it · it did not run, and the work was told' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'An admin command on m4' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Admin command on m4 · rm -rf /Library/Caches/x' })).toBeDefined()
 })
 
 test('no way to the runner gets past the press: another spelling, a shell, a helper, and two commands in one call each wait', async ($, on) => {
