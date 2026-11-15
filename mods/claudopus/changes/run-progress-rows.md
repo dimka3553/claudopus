@@ -1,0 +1,6 @@
+- Every run on a card says how it stands: a command held open shows its progress too, a watch its last event, and one that has printed nothing says "nothing printed in 9m" instead of "updated 9m ago".
+- A run's row shows the time left when the run says it (curl, wget, rsync, tqdm, pip, or `eta` on a `progress:` line), beside how much of how much, its percent and speed.
+- A run quiet for three minutes says "quiet for 4m" in amber, so quiet is told apart from working.
+- A row is named by the work's own words for it, or by what it runs (python rc.py), never by the head of a shell line; a download is only a command whose own program downloads, and a wait led by `cd <folder>;` is known as a wait.
+- Work is told to give each command a description of what it does, to make any command longer than a minute print progress the card reads, and to say on its card what a long command is and how long it should take.
+- A card no longer says "1 helper running, looked in on just now": helpers at work are rows on its tree; only one gone quiet is said.

@@ -39,7 +39,7 @@ const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my pri
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: () => string; wroteAt: () => number }; usage?: (script: string) => string } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -208,13 +208,17 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (tool === 'sh' && String(rest[1]).startsWith('echo "@@SELF@@')) return ok(options.usage?.(String(rest[1])) ?? '')
     // The jobs' outputs as the panel reads them in one go, where the test gives them: each output it asks for ends in what the test
     // says, last written when it says, and every detached process it names still runs
+    // (and, where the test gives them, the processes and the file each held-open command's shell writes to)
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('@@JOB@@')) {
       const n = Number(rest[3] ?? 0)
       const asked = rest.slice(4, 4 + n).map(String)
       const pids = [...String(rest[1]).matchAll(/for p in ([\d ]*); do kill/g)].flatMap(m => (m[1] ?? '').trim().split(/\s+/).filter(Boolean))
-      const at = Math.floor(options.jobs.wroteAt() / 1000)
-      return ok(`${asked.map(file => `\n@@JOB@@ ${at} ${file}\n${options.jobs?.output() ?? ''}`).join('')}\n@@ALIVE@@${pids.map(p => ` ${p}`).join('')}\n`)
+      const ps = String(rest[1]).includes('@@PS@@') && options.jobs.ps ? `@@PS@@\n${options.jobs.ps()}\n` : ''
+      return ok(`${asked.map(file => `\n@@JOB@@ ${Math.floor((options.jobs?.wroteAt(file) ?? 0) / 1000)} ${file}\n${options.jobs?.output(file) ?? ''}`).join('')}\n@@ALIVE@@${pids.map(p => ` ${p}`).join('')}\n${ps}`)
     }
+    if (options.jobs?.fd && tool === 'sh' && String(rest[1]).includes('/proc/$p/fd/1')) return ok(options.jobs.fd())
+    // The engine's tasks folder, where the test reads jobs
+    if (options.jobs && tool === 'sh' && String(rest[1]).includes('"$1"/tasks')) return ok('/tmp/claude-501/x/s1/tasks\n')
     // What sips says of a picture, where the test gives it
     const sipsSaid = tool === 'sips' ? options.sips?.([...e.argv]) : undefined
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -1909,13 +1913,13 @@ test('a long run shows how far it is from what it prints: how much of how much, 
     await list.unmount()
     return all
   }
-  // How much of how much and its speed lead the side, its percent in blue, then when it last wrote and its time
-  expect(await until(async () => ((await texts()).includes('460 MB of 1 GB · 10.5 MB/s · ') || undefined))).toBe(true)
+  // How much of how much leads the side, its percent in blue, its speed and the time left curl gives, then when it last printed
+  expect(await until(async () => ((await texts()).includes('460 MB of 1 GB · ') || undefined))).toBe(true)
   const shown = await texts()
   expect(shown).toContain('45%')
-  expect(shown.some(text => /^ · updated \d+s ago · /.test(text))).toBe(true)
+  expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · (printed )?\d+s ago · /.test(text))).toBe(true)
   // In a narrower panel its speed gives way first
-  expect(await texts(100)).toContain('460 MB of 1 GB · ')
+  expect((await texts(100)).some(text => /^460 MB(\/| of )1 GB · $/.test(text))).toBe(true)
   // The work's own line, as its scripts are told to print it
   output = 'loading\nprogress: 3/6 steps fitting\nframe 12 done\n'
   wroteAt = now
@@ -1924,7 +1928,7 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   // Quiet for long, in words
   wroteAt = now - 15 * 60_000
   await advance(20_000)
-  expect(await until(async () => ((await texts()).some(text => /no new output for 1[5-9]m|quiet 1[5-9]m/.test(text)) || undefined))).toBe(true)
+  expect(await until(async () => ((await texts()).some(text => /quiet (for )?1[5-9]m/.test(text)) || undefined))).toBe(true)
 })
 
 test('a run whose output cannot be found says so after a minute, so a blank row is never taken for one that moves', async ($, on) => {
@@ -1940,6 +1944,61 @@ test('a run whose output cannot be found says so after a minute, so a blank row 
   expect(shown.some(text => /^Download · Fetch the CT scans/.test(text))).toBe(true)
   expect(shown.some(text => /^output not found · 1m 1\ds$/.test(text))).toBe(true)
   await list.unmount()
+})
+
+test('every run under a card says how it stands: a command held open shows its progress, one that printed nothing says so, a watch its last event; 15 Nov rows said only "updated 9m ago"', SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  let heldAt = 0
+  const TASKS = '/tmp/claude-501/x/s1/tasks'
+  const meter = '  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n\r 45 1024M   45  460M    0     0  10.2M      0  0:01:40  0:00:45  0:00:55 10.5M'
+  const outputs: Record<string, () => string> = { [`${TASKS}/bg-r1.output`]: () => '', [`${TASKS}/mon-m1.output`]: () => 'series arrived\nwrote vsd-02.png\n', [`${TASKS}/bheld.output`]: () => meter }
+  const wrote: Record<string, () => number> = { [`${TASKS}/bg-r1.output`]: () => 1_700_000_000_000, [`${TASKS}/mon-m1.output`]: () => now - 30_000, [`${TASKS}/bheld.output`]: () => now - 2_000 }
+  const etime = () => {
+    const s = Math.max(1, Math.floor((now - heldAt) / 1000))
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+  }
+  const { clock, held } = world(on, {
+    jobs: {
+      output: file => outputs[file]?.() ?? '',
+      wroteAt: file => wrote[file]?.() ?? 0,
+      ps: () => (heldAt ? `  4242   900 S    ${etime()} /bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'hold curl --location --output scans.zip https://example.com/scans.zip' < /dev/null` : ''),
+      fd: () => `4242 ${TASKS}/bheld.output\n`,
+    },
+  })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'redraw and fetch', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Redraw and fetch', prompt: 'go' } as never)
+  // A script that sends all it prints to files of its own, a watch, and a download held open, the work's own words for each
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a1', command: 'bash /s/round3b_figs.sh', description: 'Redraw all pictures', run_in_background: true } as never)
+  await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'tail -n0 -F sheet.log', description: 'Azure jobs finishing' } as never)
+  heldAt = now
+  const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'hold curl --location --output scans.zip https://example.com/scans.zip', description: 'Download the CT scans' } as never)
+  for (let n = 0; n < 27; n++) await advance(20_000)
+  const texts = async () => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
+    const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
+    await list.unmount()
+    return all
+  }
+  const shown = await until(async () => {
+    const all = await texts()
+    return all.includes('460 MB of 1 GB · ') ? all : undefined
+  })
+  // The download held open: how much of how much, its percent, speed and time left, as curl printed them
+  expect(shown.some(text => /^Download · Download the CT scans/.test(text))).toBe(true)
+  expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · (printed )?2s ago · 9m/.test(text))).toBe(true)
+  // The script that printed nothing says so and for how long, never that it was updated
+  expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
+  expect(shown.some(text => /^nothing printed in 9m · 9m/.test(text))).toBe(true)
+  expect(shown.some(text => /updated/.test(text))).toBe(false)
+  // The watch, its last event and when it came
+  expect(shown.some(text => /^Watch · Azure jobs finishing/.test(text))).toBe(true)
+  expect(shown.some(text => /wrote vsd-02.png/.test(text))).toBe(true)
+  expect(shown.some(text => /^last event 30s ago · 9m/.test(text))).toBe(true)
+  held.get('curl --location --output scans.zip https://example.com/scans.zip')?.('')
+  await call
 })
 
 // Finished work: the happy green octopus and its pause
@@ -6833,7 +6892,7 @@ test('work that tries to end while a helper of its runs is held back, and lets g
   expect((await stop()).block).toBeUndefined()
 })
 
-test('a helper quiet for five minutes is named to its work once, and the card says its helpers were looked in on', SLOW, async ($, on) => {
+test('a helper quiet for five minutes is named to its work once, and the card says so only then: a helper at work is a row of its own', SLOW, async ($, on) => {
   const { clock, appended } = world(on)
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -6841,10 +6900,10 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
   await $.agent.spawn({ ...spawn, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' } as never)
   await clock.advance(70_000)
-  expect((await pane.find({ type: 'Text', text: /^1 helper running, looked in on/ }))?.text).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /looked in on|helper running/ })).toBeUndefined()
   await clock.advance(5 * 60_000)
   expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1)
-  expect((await pane.find({ type: 'Text', text: /1 quiet for 5\+ min/ }))?.text).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, the work was told$/ }))?.text).toBeDefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })

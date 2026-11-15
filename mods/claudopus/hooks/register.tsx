@@ -7031,7 +7031,7 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; isOwn?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -7045,6 +7045,9 @@ const shellMissed = new Map<string, number>()
 let tasksDir = ''
 let tasksOf = ''
 let tasksMissedAt = 0
+// The output a command held open writes while it runs, by its row's id: the engine writes it to a file of its own in the tasks
+// folder and names it only once the command ends or goes to the background, so it is found as the file its shell writes to
+const callFiles = new Map<string, string>()
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false): Job => {
@@ -7115,14 +7118,36 @@ const lookJobs = async ($: EngineInterface) => {
   if (now - jobsLookedAt < JOB_LOOK) return
   jobsLookedAt = now
   const list = await read($, todos)
+  // Held open: a command a card has waited on long enough to be a row of its own
+  const held = list.flatMap(one => (one.status === 'working' && one.running?.cmd && now - one.running.at >= RUNNING_SHOWN ? [{ owner: one.id, id: `call-${one.id}`, cmd: one.running.cmd, at: one.running.at }] : []))
+  for (const id of callFiles.keys()) if (!held.some(h => h.id === id)) callFiles.delete(id)
   const owned = [
-    ...list.flatMap(one => (one.bg ?? []).filter(b => !b.isWatch).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
+    // A watch's output is its events, read as any other
+    ...list.flatMap(one => (one.bg ?? []).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
     ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid }))),
+    ...held.flatMap(h => (callFiles.get(h.id) ? [{ owner: h.owner, id: h.id, file: callFiles.get(h.id) ?? '', pid: undefined as string | undefined }] : [])),
   ]
-  for (const id of jobLog.keys()) if (!owned.some(o => o.id === id)) jobLog.delete(id)
+  for (const id of jobLog.keys()) if (!owned.some(o => o.id === id) && !held.some(h => h.id === id)) jobLog.delete(id)
   for (const owner of jobNews.keys()) if (!owned.some(o => o.owner === owner)) jobNews.delete(owner)
   for (const id of shellMissed.keys()) if (!owned.some(o => o.id === id)) shellMissed.delete(id)
-  if (!owned.length) return
+  // A held-open command's shell, once the processes have been listed, and the file it writes to: only one in a tasks folder
+  const unfound = held.filter(h => !callFiles.has(h.id))
+  if (unfound.length && jobProcs.length) {
+    const shells = shellsOf(jobProcs, unfound)
+    const pids = unfound.flatMap(h => (typeof shells.get(h.id) === 'string' ? [{ id: h.id, pid: String(shells.get(h.id)) }] : []))
+    if (pids.length) {
+      const fd = await $.process
+        .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...pids.map(p => p.pid)], { timeoutMs: 5000 })
+        .catch(() => undefined)
+      for (const line of fd?.stdout.split('\n') ?? []) {
+        const [pid = '', ...path] = line.split(' ')
+        const file = path.join(' ').trim()
+        const id = pids.find(p => p.pid === pid)?.id
+        if (id && /\/tasks\/[\w-]+\.output$/.test(file)) callFiles.set(id, file)
+      }
+    }
+  }
+  if (!owned.length && !unfound.length) return
   const sid = await $.session.id().catch(() => '')
   if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
   if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
@@ -7194,13 +7219,15 @@ const lookJobs = async ($: EngineInterface) => {
     const text = (parts[n + 1] ?? '').split('\n@@AT@@ ')[0] ?? ''
     if (!job?.pid && isOutputEnded(text)) ended.push(id)
     const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
-    const seen = latestOf(text)
+    // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote (on
+    // 15 Nov such rows read "updated 9m ago" for runs that sent all they printed elsewhere)
+    const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }
     const was = jobLog.get(id)
     const wait = waits.find(w => w.id === id)
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
     const next: Seen = { ...seen, ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true
@@ -7390,9 +7417,9 @@ const lookInDue = async ($: EngineInterface) => {
 // What a card with helpers running says under its line: how many, when they were looked in on, and how many have gone quiet
 const lookedInLine = (one: Todo, at: number) => {
   const l = one.lookedIn
-  if (!l || one.status !== 'working' || !l.running) return ''
-  const ago = at - l.at < 60_000 ? 'just now' : `${took(at - l.at)} ago`
-  return `${l.running === 1 ? '1 helper' : `${l.running} helpers`} running, looked in on ${ago}${l.quiet ? `: ${l.quiet} quiet for ${HELPER_QUIET / 60_000}+ min, the work was told` : ''}`
+  // Helpers at work are rows on its tree already; only one gone quiet is said, as the work was told of it
+  if (!l || one.status !== 'working' || !l.running || !l.quiet) return ''
+  return `${l.quiet === 1 ? '1 helper' : `${l.quiet} helpers`} quiet for ${HELPER_QUIET / 60_000}+ min, the work was told`
 }
 
 const stepHooks = (on: On) => {
@@ -8794,7 +8821,7 @@ const panelHooks = (on: On) => {
                 <Text dimColor wrap="wrap">{waitLine(one, at, jobsOf(one, at).length > 0)}</Text>
               </Box>
             ) : null}
-            {/* Its helpers running: how many, when they were last looked in on, and how many have gone quiet */}
+            {/* Its helpers gone quiet, in amber: those at work are rows on its tree */}
             {lookedInLine(one, at) && !one.chat ? (
               <Box key={`looked-${one.id}`} paddingLeft={lead}>
                 <Text dimColor={!one.lookedIn?.quiet} color={one.lookedIn?.quiet ? NEEDS : undefined} wrap="wrap">{lookedInLine(one, at)}</Text>
@@ -8913,7 +8940,7 @@ const panelHooks = (on: On) => {
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
         </Box>
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
@@ -8927,29 +8954,33 @@ const panelHooks = (on: On) => {
       const time = took(at - job.at)
       const pct = job.pct ? [job.pct] : []
       const quiet = job.wroteAt ? at - job.wroteAt : 0
-      const [state, isWarn] =
-        job.isPaused ? ['paused', true]
-        : job.kind === 'wait' ? (job.target ? [job.target, true] : ['waiting', false])
-        : job.wroteAt && quiet >= JOB_QUIET ? [`no new output for ${shortAgo(quiet)}`, true]
-        : job.wroteAt ? [`updated ${shortAgo(quiet)} ago`, false]
-        // A job whose output cannot be found says so, so a blank row is never taken for one that moves (a command held open has no
-        // output to read until it ends)
-        : !job.id.startsWith('call-') && !job.id.startsWith('more-') && job.kind !== 'watch' && at - job.at >= JOB_UNREAD ? ['output not found', true]
-        : ['', false]
-      const short = state.replace(/^no new output for /, 'quiet ').replace(/^output not found$/, 'no output').replace(/^updated (.*) ago$/, '$1 ago').replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still ')
-      const warn = Boolean(isWarn) && Boolean(state)
-      // A run that says how far it is puts how much of how much first, before its name: in full, then as done/total, its speed
-      // only where there is room, and it keeps whether it moves before its time; its name keeps what is left, 12 columns at least
+      const ran = at - job.at
+      // How it stands, in full and short: paused; a wait's own target; a watch's last event; nothing printed since it began; quiet
+      // for minutes (in amber); or when it last printed. Quiet is told apart from working in words, never by a clock alone
+      const [state, short, isWarn]: [string, string, boolean] =
+        job.isPaused ? ['paused', 'paused', true]
+        : job.kind === 'wait' ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
+        : job.kind === 'watch' ? (job.wroteAt && !job.isEmpty ? [`last event ${shortAgo(quiet)} ago`, `event ${shortAgo(quiet)} ago`, false] : job.id.startsWith('more-') ? ['', '', false] : ['no event yet', 'no event', false])
+        : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
+        : job.wroteAt && quiet >= JOB_QUIET ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
+        : job.wroteAt ? [`printed ${shortAgo(quiet)} ago`, `${shortAgo(quiet)} ago`, false]
+        // A job whose output cannot be found says so, so a blank row is never taken for one that moves
+        : !job.id.startsWith('call-') && !job.id.startsWith('more-') && at - job.at >= JOB_UNREAD ? ['output not found', 'no output', true]
+        : ['', '', false]
+      const warn = isWarn && Boolean(state)
+      const left = job.left && !warn ? [job.left] : []
+      // its speed only while it prints: a speed a minute old is no longer how fast it goes
+      const rate = job.rate && !warn && job.wroteAt && quiet < 60_000 ? [job.rate] : []
+      // A run that says how far it is puts how much of how much first, then its percent, speed and time left as it said them, then
+      // whether it moves and its time; its name keeps what is left, 12 columns at least
       if (job.done && job.kind !== 'wait') {
         const full = job.total ? `${job.done} of ${job.total}` : job.done
         const compact = job.total ? `${job.done}/${job.total}` : job.done
-        // its speed only while it writes: a speed a minute old is no longer how fast it goes
-        const rate = job.rate && !warn && job.wroteAt && quiet < 60_000 ? [job.rate] : []
-        // the side takes about half the row, so the name stays readable; a third when the latest line is not the progress, so it shows
-        const most = job.isEarlier ? Math.max(12, Math.floor(width / 3)) : Math.max(12, Math.floor(width / 2) + 4, Math.min(width - 13, 26))
-        return { text: firstFit([[full, ...rate, ...pct, state, time], [full, ...pct, state, time], [full, ...pct, short, time], [compact, ...pct, short, time], [full, ...pct, short], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
+        // the side takes up to six tenths of the row, so the name stays readable; a third when the latest line is not the progress, so it shows
+        const most = job.isEarlier ? Math.max(12, Math.floor(width / 3)) : Math.max(12, Math.floor(width * 0.6), Math.min(width - 13, 26))
+        return { text: firstFit([[full, ...pct, ...rate, ...left, state, time], [full, ...pct, ...rate, ...left, short, time], [compact, ...pct, ...rate, ...left, short, time], [full, ...pct, ...left, state, time], [full, ...pct, ...left, short, time], [compact, ...pct, ...left, short, time], [full, ...pct, short, time], [compact, ...pct, short, time], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
       }
-      const text = firstFit([[...pct, state, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
+      const text = firstFit([[...pct, ...rate, ...left, state, time], [...pct, ...left, state, time], [...pct, ...left, short, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
       return { text, isWarn: warn }
     }
     const jobRow = (t: Twig, scope: string) => {

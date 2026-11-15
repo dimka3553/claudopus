@@ -366,7 +366,7 @@ const panelHooks = (on: On) => {
                 <Text dimColor wrap="wrap">{waitLine(one, at, jobsOf(one, at).length > 0)}</Text>
               </Box>
             ) : null}
-            {/* Its helpers running: how many, when they were last looked in on, and how many have gone quiet */}
+            {/* Its helpers gone quiet, in amber: those at work are rows on its tree */}
             {lookedInLine(one, at) && !one.chat ? (
               <Box key={`looked-${one.id}`} paddingLeft={lead}>
                 <Text dimColor={!one.lookedIn?.quiet} color={one.lookedIn?.quiet ? NEEDS : undefined} wrap="wrap">{lookedInLine(one, at)}</Text>
@@ -485,7 +485,7 @@ const panelHooks = (on: On) => {
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
         </Box>
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
@@ -499,29 +499,33 @@ const panelHooks = (on: On) => {
       const time = took(at - job.at)
       const pct = job.pct ? [job.pct] : []
       const quiet = job.wroteAt ? at - job.wroteAt : 0
-      const [state, isWarn] =
-        job.isPaused ? ['paused', true]
-        : job.kind === 'wait' ? (job.target ? [job.target, true] : ['waiting', false])
-        : job.wroteAt && quiet >= JOB_QUIET ? [`no new output for ${shortAgo(quiet)}`, true]
-        : job.wroteAt ? [`updated ${shortAgo(quiet)} ago`, false]
-        // A job whose output cannot be found says so, so a blank row is never taken for one that moves (a command held open has no
-        // output to read until it ends)
-        : !job.id.startsWith('call-') && !job.id.startsWith('more-') && job.kind !== 'watch' && at - job.at >= JOB_UNREAD ? ['output not found', true]
-        : ['', false]
-      const short = state.replace(/^no new output for /, 'quiet ').replace(/^output not found$/, 'no output').replace(/^updated (.*) ago$/, '$1 ago').replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still ')
-      const warn = Boolean(isWarn) && Boolean(state)
-      // A run that says how far it is puts how much of how much first, before its name: in full, then as done/total, its speed
-      // only where there is room, and it keeps whether it moves before its time; its name keeps what is left, 12 columns at least
+      const ran = at - job.at
+      // How it stands, in full and short: paused; a wait's own target; a watch's last event; nothing printed since it began; quiet
+      // for minutes (in amber); or when it last printed. Quiet is told apart from working in words, never by a clock alone
+      const [state, short, isWarn]: [string, string, boolean] =
+        job.isPaused ? ['paused', 'paused', true]
+        : job.kind === 'wait' ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
+        : job.kind === 'watch' ? (job.wroteAt && !job.isEmpty ? [`last event ${shortAgo(quiet)} ago`, `event ${shortAgo(quiet)} ago`, false] : job.id.startsWith('more-') ? ['', '', false] : ['no event yet', 'no event', false])
+        : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
+        : job.wroteAt && quiet >= JOB_QUIET ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
+        : job.wroteAt ? [`printed ${shortAgo(quiet)} ago`, `${shortAgo(quiet)} ago`, false]
+        // A job whose output cannot be found says so, so a blank row is never taken for one that moves
+        : !job.id.startsWith('call-') && !job.id.startsWith('more-') && at - job.at >= JOB_UNREAD ? ['output not found', 'no output', true]
+        : ['', '', false]
+      const warn = isWarn && Boolean(state)
+      const left = job.left && !warn ? [job.left] : []
+      // its speed only while it prints: a speed a minute old is no longer how fast it goes
+      const rate = job.rate && !warn && job.wroteAt && quiet < 60_000 ? [job.rate] : []
+      // A run that says how far it is puts how much of how much first, then its percent, speed and time left as it said them, then
+      // whether it moves and its time; its name keeps what is left, 12 columns at least
       if (job.done && job.kind !== 'wait') {
         const full = job.total ? `${job.done} of ${job.total}` : job.done
         const compact = job.total ? `${job.done}/${job.total}` : job.done
-        // its speed only while it writes: a speed a minute old is no longer how fast it goes
-        const rate = job.rate && !warn && job.wroteAt && quiet < 60_000 ? [job.rate] : []
-        // the side takes about half the row, so the name stays readable; a third when the latest line is not the progress, so it shows
-        const most = job.isEarlier ? Math.max(12, Math.floor(width / 3)) : Math.max(12, Math.floor(width / 2) + 4, Math.min(width - 13, 26))
-        return { text: firstFit([[full, ...rate, ...pct, state, time], [full, ...pct, state, time], [full, ...pct, short, time], [compact, ...pct, short, time], [full, ...pct, short], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
+        // the side takes up to six tenths of the row, so the name stays readable; a third when the latest line is not the progress, so it shows
+        const most = job.isEarlier ? Math.max(12, Math.floor(width / 3)) : Math.max(12, Math.floor(width * 0.6), Math.min(width - 13, 26))
+        return { text: firstFit([[full, ...pct, ...rate, ...left, state, time], [full, ...pct, ...rate, ...left, short, time], [compact, ...pct, ...rate, ...left, short, time], [full, ...pct, ...left, state, time], [full, ...pct, ...left, short, time], [compact, ...pct, ...left, short, time], [full, ...pct, short, time], [compact, ...pct, short, time], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
       }
-      const text = firstFit([[...pct, state, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
+      const text = firstFit([[...pct, ...rate, ...left, state, time], [...pct, ...left, state, time], [...pct, ...left, short, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
       return { text, isWarn: warn }
     }
     const jobRow = (t: Twig, scope: string) => {

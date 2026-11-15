@@ -16,8 +16,10 @@ export type Job = {
   done?: string
   total?: string
   rate?: string
+  left?: string
   isEarlier?: boolean
   isOwn?: boolean
+  isEmpty?: boolean
   wroteAt?: number
   isPaused?: boolean
   count?: number
@@ -41,8 +43,9 @@ export const JOB_WORD: Record<JobKind, string> = { server: 'Server running', dow
 export const JOB_HEAD: Record<JobKind, string> = { server: 'Server', download: 'Download', script: 'Command', watch: 'Watch', wait: 'Wait' }
 // Its mark on the tree, drawn: a square, a diamond, a down arrow, an open diamond, never a helper's round dot
 export const JOB_SHAPE: Record<JobKind, 'square' | 'diamond' | 'down' | 'open'> = { server: 'diamond', download: 'down', script: 'square', watch: 'open', wait: 'open' }
-// A job whose output has not changed for this long says so on its row
-export const JOB_QUIET = 10 * 60_000
+// A job whose output has not changed for this long says, in amber, that it has gone quiet, and one that has printed nothing at all
+// says so: work is told to print progress at least every half minute, so a few minutes of nothing is worth a look
+export const JOB_QUIET = 3 * 60_000
 // A job whose output has not been found this long after it started says so on its row
 export const JOB_UNREAD = 60_000
 
@@ -52,8 +55,18 @@ export const DOWNLOAD_CMD =
   /\b(curl|wget|aria2c|huggingface-cli download|hf download|git clone|git lfs (pull|fetch)|rsync|scp|gsutil (-m )?cp|aws s3 (cp|sync)|pip3? install|uv (pip )?(install|sync)|npm (i|install|ci)|pnpm (i|install)|yarn install|brew install|docker pull|yt-dlp)\b/i
 
 // What kind a job is, from its command, or else its own words for itself
+// A download is one whose own program fetches (curl, wget, rsync...), not one that names such a tool as a word to another
+// (`vercel curl` reads a page): on 15 Nov "Reload page and check function logs" was called a download for that
 export const jobKindOf = (cmd: string, label: string): JobKind =>
-  SERVER_CMD.test(cmd) || /\bserver\b/i.test(label) ? 'server' : DOWNLOAD_CMD.test(cmd) || /\bdownload/i.test(label) ? 'download' : 'script'
+  SERVER_CMD.test(cmd) || /\bserver\b/i.test(label) ? 'server' : stepsOf(cmd).some(step => step.replace(/^[^\s/]*\//, '/').replace(/^\/\S*\//, '').search(DOWNLOAD_CMD) === 0) || /\bdownload/i.test(label) ? 'download' : 'script'
+// Each step of a shell line with what only sets it up taken off its head (a variable, env, nohup, time, sudo, exec), never a `cd`
+const SETUP = /^(?:(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)|env|nohup|setsid|exec|sudo|command|(?:\/usr\/bin\/)?time(?:\s+-\w+)*|timeout\s+\S+|caffeinate(?:\s+-\w+)*)\s+)+/
+const stepsOf = (cmd: string) =>
+  cmd
+    .replace(/"(\\.|[^"\\])*"|'[^']*'/g, m => m.replace(/[;&|\n]/g, ' '))
+    .split(/\s*(?:&&|\|\||;|\||\n|(?<![>&])&(?![>&]))\s*/)
+    .map(step => step.trim().replace(/^\(+\s*/, '').replace(SETUP, '').trim())
+    .filter(Boolean)
 
 // The port a server listens on, from its command or what it wrote
 export const portOf = (text: string) =>
@@ -81,7 +94,30 @@ const pctOf = (line: string) => {
 // and how fast it goes when it says. Read from the progress shapes tools print (curl, wget, rsync, az and azcopy, aws, gsutil,
 // pip, git, docker, tqdm and the like) and the line work's own scripts are told to print: `progress: 3/6 steps fitting`,
 // `progress: 4.2/10 GB uploading`, `progress: 45%`
-export type Progress = { pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; isOwn?: boolean }
+export type Progress = { pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean }
+// How long a run says it has left, as it says it (eta 55s, eta 0:00:55, [01:18<01:28], 3m left, curl's Time Left), in words: never
+// worked out by the mod
+const secondsIn = (text: string) => {
+  if (/^\d+(:\d\d){1,2}$/.test(text)) return text.split(':').reduce((sum, part) => sum * 60 + Number(part), 0)
+  const parts = [...text.matchAll(/(\d+(?:\.\d+)?)\s?(d|h|m(?:in)?|s)/gi)]
+  return parts.length ? parts.reduce((sum, m) => sum + Number(m[1]) * ({ d: 86400, h: 3600, m: 60, s: 1 }[(m[2] ?? 's').charAt(0).toLowerCase()] ?? 1), 0) : undefined
+}
+const leftText = (seconds: number | undefined) => {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined
+  const all = Math.round(seconds)
+  const text = all < 60 ? `${all}s` : all < 600 ? `${Math.floor(all / 60)}m ${String(all % 60).padStart(2, '0')}s` : all < 3600 ? `${Math.round(all / 60)}m` : `${Math.floor(all / 3600)}h ${String(Math.round(all / 60) % 60).padStart(2, '0')}m`
+  return `${text} left`
+}
+const TIME = String.raw`(\d+(?::\d\d){1,2}|(?:\d+(?:\.\d+)?\s?(?:d|h|min|m|s)\b\s*){1,3})`
+const leftOf = (line: string) => {
+  const m =
+    line.match(new RegExp(String.raw`\beta:?\s*${TIME}`, 'i')) ??
+    line.match(new RegExp(String.raw`\b${TIME}\s*(?:left|remaining|to go)\b`, 'i')) ??
+    line.match(/<(\d+(?::\d\d){1,2})[,\]]/) ??
+    line.match(/^\s*\d[\d,]*\s+\d{1,3}%\s+[\d.]+[kKMGT]?B\/s\s+(\d+:\d\d:\d\d)/) ??
+    line.match(/^\s*\d+K\s+[.\s]+\s\d{1,3}%\s+[\d.]+[KMG]\s+((?:\d+[hms])+)\s*$/)
+  return m ? leftText(secondsIn((m[1] ?? '').trim())) : undefined
+}
 // A size as written in bytes, with the base its unit counts in: KiB, MiB and a bare K, M or G as curl and wget print count in 1024s,
 // kB, MB and GB in 1000s; undefined when it is no size
 type Size = { bytes: number; base: number }
@@ -149,12 +185,12 @@ const lineProgress = (line: string): Progress | undefined => {
     }
   }
   // curl's meter: % Total % Received % Xferd Average-speeds Times Current-speed, sizes in 1024s
-  const curl = line.match(/^\s*(\d{1,3})\s+(\d[\d.]*[kMGTP]?)\s+(\d{1,3})\s+(\d[\d.]*[kMGTP]?)\s+\d{1,3}\s+\d[\d.]*[kMGTP]?\s+\d[\d.]*[kMGTP]?\s+\d[\d.]*[kMGTP]?\s+[-\d:]+\s+[-\d:]+\s+[-\d:]+\s+(\d[\d.]*[kMGTP]?)\s*$/)
+  const curl = line.match(/^\s*(\d{1,3})\s+(\d[\d.]*[kMGTP]?)\s+(\d{1,3})\s+(\d[\d.]*[kMGTP]?)\s+\d{1,3}\s+\d[\d.]*[kMGTP]?\s+\d[\d.]*[kMGTP]?\s+\d[\d.]*[kMGTP]?\s+[-\d:]+\s+[-\d:]+\s+([-\d:]+)\s+(\d[\d.]*[kMGTP]?)\s*$/)
   if (curl) {
-    const [, , total = '', pct = '', done = '', speed = ''] = curl
+    const [, , total = '', pct = '', done = '', timeLeft = '', speed = ''] = curl
     const of = (text: string) => sizeOf(text.replace(/[kMGTP]$/, ''), text.match(/[kMGTP]$/)?.[0] ?? '') ?? { bytes: 0, base: 1024 }
     const t = of(total)
-    return { done: sizeText(of(done)), ...(t.bytes > 0 ? { total: sizeText(t), pct: `${pct}%` } : {}), rate: `${sizeText(of(speed))}/s` }
+    return { done: sizeText(of(done)), ...(t.bytes > 0 ? { total: sizeText(t), pct: `${pct}%`, left: /\d/.test(timeLeft) ? leftText(secondsIn(timeLeft)) : undefined } : {}), rate: `${sizeText(of(speed))}/s` }
   }
   // azcopy: 45.2 %, 10 Done, 0 Failed, 90 Pending, 0 Skipped, 100 Total, 2-sec Throughput (Mb/s): 85.3
   const azcopy = line.match(/^\s*(\d+(?:\.\d+)?)\s?%,\s*(\d+) Done,.*?(\d+) Total\b(?:.*Throughput \(Mb\/s\):\s*([\d.]+))?/)
@@ -224,12 +260,13 @@ export const progressOf = (lines: string[]): Progress => {
   const found = lineProgress(last)
   if (found && (found.pct || found.done)) {
     const length = (found as { wget?: boolean }).wget && !found.total ? lines.map(l => l.match(/^Length:\s*(\d+)/)?.[1]).filter(Boolean).at(-1) : undefined
-    return tidy(length && Number(length) > 0 ? { ...found, total: sizeText({ bytes: Number(length), base: 1024 }) } : found)
+    const left = found.left ?? (found.pct === '100%' ? undefined : leftOf(last))
+    return tidy({ ...(length && Number(length) > 0 ? { ...found, total: sizeText({ bytes: Number(length), base: 1024 }) } : found), left })
   }
   for (const line of lines.slice(0, -1).reverse()) {
     if (ownOf(line) === undefined) continue
     const own = lineProgress(line)
-    if (own && (own.pct || own.done)) return tidy({ ...own, rate: undefined, isEarlier: true })
+    if (own && (own.pct || own.done)) return tidy({ ...own, rate: undefined, left: undefined, isEarlier: true })
   }
   return {}
 }
@@ -289,10 +326,29 @@ export const isPid = (pid: string) => /^[1-9]\d{1,6}$/.test(pid)
 // A call that only waits (a sleep, a wait) is no job of its own
 export const isWaitOnly = (cmd: string) => /^\s*(sleep\s|wait\b|python3? -c ['"]import time; ?time\.sleep)/.test(cmd)
 // A job's own words, without the command some descriptions repeat after a colon
+// A job the work gave no words to is named by what it runs, in a few words (bash round3b_figs.sh, python rc.py), never by the head
+// of its shell line: on 15 Nov a row read "cd /private/tmp/claude-501/-Users ..."
 export const labelOf = (what: string, cmd: string) => {
+  const isCommand = !what || (cmd.trim() && cmd.replace(/\s+/g, ' ').trim().startsWith(what.replace(/\s+/g, ' ').trim().slice(0, 40)))
+  if (isCommand) return commandName(cmd) || what
   const head = what.split(': ')[0] ?? what
   const first = cmd.trim().split(/\s+/).find(word => !/^(cd|&&|nohup|setsid)$/.test(word) && !word.startsWith('/')) ?? ''
   return head !== what && first && what.slice(head.length + 2).startsWith(first.slice(0, 6)) ? head : what
+}
+
+// What a shell line runs, in a few words: its first step that does more than move or set up, as its program and the file or word
+// it works on, each without its folders
+const LEAD = /^(cd|pushd|popd|export|source|\.|mkdir|set|unset|umask|ulimit|echo|printf|true|sleep|wait|clear)\b/
+export const commandName = (cmd: string) => {
+  const step = stepsOf(cmd).find(one => !LEAD.test(one) && !/^[A-Za-z_]\w*=/.test(one)) ?? ''
+  const words = step.split(/\s+/).map(word => word.replace(/^["']|["']$/g, ''))
+  const program = (words[0] ?? '').split('/').filter(Boolean).at(-1) ?? ''
+  if (!program) return ''
+  const isRunner = /^(python\d?(\.\d+)?|node|bash|sh|zsh|ruby|perl|deno|bun|uv|npx|Rscript|julia|ssh)$/.test(program)
+  // A runner says what it runs; any other program what it works on first
+  const arg = words.slice(1).find(word => word && !word.startsWith('-') && !/^[<>|&]/.test(word) && !/^\d+>/.test(word) && (!isRunner || !/^(run|exec|-m)$/.test(word)))
+  const short = (arg ?? '').split('/').filter(Boolean).at(-1) ?? ''
+  return `${program}${short && short.length <= 40 ? ` ${short}` : ''}`
 }
 
 // A command that only waits for something, polling until it is so: what it waits for, in a few words, and what can be looked at to
@@ -303,8 +359,9 @@ const unquoted = (text: string) => text.replace(/"(\\.|[^"\\])*"|'[^']*'/g, '""'
 const LIGHT = /^(date|tail|head|grep|rg|ls|cat|echo|printf|cut|wc|stat|du|sort|uniq|awk|sed|jq|true|cd|uptime|pwd)\b/
 const nameOf = (path: string) => path.replace(/^["']|["']$/g, '').split('/').filter(Boolean).at(-1) ?? path
 export const waitOf = (cmd: string): Wait | undefined => {
-  const cd = cmd.match(/^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&/)?.[1]?.replace(/^["']|["']$/g, '')
-  const body = cmd.replace(/^\s*cd\s+("[^"]+"|'[^']+'|\S+)\s*&&\s*/, '').replace(/^\s*end=\$\(\([^;]*\)\);\s*/, '')
+  // A leading cd, joined with && or ; (on 15 Nov a wait led by `cd <folder>;` was not known as one)
+  const cd = cmd.match(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;]+)\s*(?:&&|;)/)?.[1]?.replace(/^["']|["']$/g, '')
+  const body = cmd.replace(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;]+)\s*(?:&&|;)\s*/, '').replace(/^\s*end=\$\(\([^;]*\)\);\s*/, '')
   const loop = body.match(/^\s*(until|while)\s+(.+?);\s*do\s+sleep\s+[\d.]+\s*;?\s*done\s*(.*)$/s)
   if (!loop) return undefined
   const [, word, cond = '', after = ''] = loop

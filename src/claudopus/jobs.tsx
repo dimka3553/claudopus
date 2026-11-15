@@ -5,7 +5,7 @@
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; isOwn?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -19,6 +19,9 @@ const shellMissed = new Map<string, number>()
 let tasksDir = ''
 let tasksOf = ''
 let tasksMissedAt = 0
+// The output a command held open writes while it runs, by its row's id: the engine writes it to a file of its own in the tasks
+// folder and names it only once the command ends or goes to the background, so it is found as the file its shell writes to
+const callFiles = new Map<string, string>()
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false): Job => {
@@ -89,14 +92,36 @@ const lookJobs = async ($: EngineInterface) => {
   if (now - jobsLookedAt < JOB_LOOK) return
   jobsLookedAt = now
   const list = await read($, todos)
+  // Held open: a command a card has waited on long enough to be a row of its own
+  const held = list.flatMap(one => (one.status === 'working' && one.running?.cmd && now - one.running.at >= RUNNING_SHOWN ? [{ owner: one.id, id: `call-${one.id}`, cmd: one.running.cmd, at: one.running.at }] : []))
+  for (const id of callFiles.keys()) if (!held.some(h => h.id === id)) callFiles.delete(id)
   const owned = [
-    ...list.flatMap(one => (one.bg ?? []).filter(b => !b.isWatch).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
+    // A watch's output is its events, read as any other
+    ...list.flatMap(one => (one.bg ?? []).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
     ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid }))),
+    ...held.flatMap(h => (callFiles.get(h.id) ? [{ owner: h.owner, id: h.id, file: callFiles.get(h.id) ?? '', pid: undefined as string | undefined }] : [])),
   ]
-  for (const id of jobLog.keys()) if (!owned.some(o => o.id === id)) jobLog.delete(id)
+  for (const id of jobLog.keys()) if (!owned.some(o => o.id === id) && !held.some(h => h.id === id)) jobLog.delete(id)
   for (const owner of jobNews.keys()) if (!owned.some(o => o.owner === owner)) jobNews.delete(owner)
   for (const id of shellMissed.keys()) if (!owned.some(o => o.id === id)) shellMissed.delete(id)
-  if (!owned.length) return
+  // A held-open command's shell, once the processes have been listed, and the file it writes to: only one in a tasks folder
+  const unfound = held.filter(h => !callFiles.has(h.id))
+  if (unfound.length && jobProcs.length) {
+    const shells = shellsOf(jobProcs, unfound)
+    const pids = unfound.flatMap(h => (typeof shells.get(h.id) === 'string' ? [{ id: h.id, pid: String(shells.get(h.id)) }] : []))
+    if (pids.length) {
+      const fd = await $.process
+        .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...pids.map(p => p.pid)], { timeoutMs: 5000 })
+        .catch(() => undefined)
+      for (const line of fd?.stdout.split('\n') ?? []) {
+        const [pid = '', ...path] = line.split(' ')
+        const file = path.join(' ').trim()
+        const id = pids.find(p => p.pid === pid)?.id
+        if (id && /\/tasks\/[\w-]+\.output$/.test(file)) callFiles.set(id, file)
+      }
+    }
+  }
+  if (!owned.length && !unfound.length) return
   const sid = await $.session.id().catch(() => '')
   if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
   if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
@@ -168,13 +193,15 @@ const lookJobs = async ($: EngineInterface) => {
     const text = (parts[n + 1] ?? '').split('\n@@AT@@ ')[0] ?? ''
     if (!job?.pid && isOutputEnded(text)) ended.push(id)
     const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
-    const seen = latestOf(text)
+    // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote (on
+    // 15 Nov such rows read "updated 9m ago" for runs that sent all they printed elsewhere)
+    const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }
     const was = jobLog.get(id)
     const wait = waits.find(w => w.id === id)
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
     const next: Seen = { ...seen, ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true

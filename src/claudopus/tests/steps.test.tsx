@@ -108,7 +108,7 @@ test('work that tries to end while a helper of its runs is held back, and lets g
   expect((await stop()).block).toBeUndefined()
 })
 
-test('a helper quiet for five minutes is named to its work once, and the card says its helpers were looked in on', SLOW, async ($, on) => {
+test('a helper quiet for five minutes is named to its work once, and the card says so only then: a helper at work is a row of its own', SLOW, async ($, on) => {
   const { clock, appended } = world(on)
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -116,10 +116,10 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
   await $.agent.spawn({ ...spawn, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' } as never)
   await clock.advance(70_000)
-  expect((await pane.find({ type: 'Text', text: /^1 helper running, looked in on/ }))?.text).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /looked in on|helper running/ })).toBeUndefined()
   await clock.advance(5 * 60_000)
   expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1)
-  expect((await pane.find({ type: 'Text', text: /1 quiet for 5\+ min/ }))?.text).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, the work was told$/ }))?.text).toBeDefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })

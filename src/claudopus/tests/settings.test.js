@@ -1,0 +1,408 @@
+// Config: the person's own texts, settings, and models
+var __assign = (this && this.__assign) || function () {
+    __assign = Object.assign || function(t) {
+        for (var s, i = 1, n = arguments.length; i < n; i++) {
+            s = arguments[i];
+            for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p))
+                t[p] = s[p];
+        }
+        return t;
+    };
+    return __assign.apply(this, arguments);
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __generator = (this && this.__generator) || function (thisArg, body) {
+    var _ = { label: 0, sent: function() { if (t[0] & 1) throw t[1]; return t[1]; }, trys: [], ops: [] }, f, y, t, g = Object.create((typeof Iterator === "function" ? Iterator : Object).prototype);
+    return g.next = verb(0), g["throw"] = verb(1), g["return"] = verb(2), typeof Symbol === "function" && (g[Symbol.iterator] = function() { return this; }), g;
+    function verb(n) { return function (v) { return step([n, v]); }; }
+    function step(op) {
+        if (f) throw new TypeError("Generator is already executing.");
+        while (g && (g = 0, op[0] && (_ = 0)), _) try {
+            if (f = 1, y && (t = op[0] & 2 ? y["return"] : op[0] ? y["throw"] || ((t = y["return"]) && t.call(y), 0) : y.next) && !(t = t.call(y, op[1])).done) return t;
+            if (y = 0, t) op = [op[0] & 2, t.value];
+            switch (op[0]) {
+                case 0: case 1: t = op; break;
+                case 4: _.label++; return { value: op[1], done: false };
+                case 5: _.label++; y = op[1]; op = [0]; continue;
+                case 7: op = _.ops.pop(); _.trys.pop(); continue;
+                default:
+                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) { _ = 0; continue; }
+                    if (op[0] === 3 && (!t || (op[1] > t[0] && op[1] < t[3]))) { _.label = op[1]; break; }
+                    if (op[0] === 6 && _.label < t[1]) { _.label = t[1]; t = op; break; }
+                    if (t && _.label < t[2]) { _.label = t[2]; _.ops.push(op); break; }
+                    if (t[2]) _.ops.pop();
+                    _.trys.pop(); continue;
+            }
+            op = body.call(thisArg, _);
+        } catch (e) { op = [6, e]; y = 0; } finally { f = t = 0; }
+        if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
+    }
+};
+var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
+    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
+        if (ar || !(i in from)) {
+            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
+            ar[i] = from[i];
+        }
+    }
+    return to.concat(ar || Array.prototype.slice.call(from));
+};
+var _this = this;
+test('a copy of the principles in the memory folder is the person\'s own: every conversation carries it in place of the shipped ones', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var files, MINE, told;
+    var _a, _b;
+    return __generator(this, function (_c) {
+        switch (_c.label) {
+            case 0:
+                files = world(on).files;
+                on('prompt.context', function (_, e) { return ({ blocks: e.blocks, instructionFiles: e.instructionFiles }); });
+                MINE = '# Mine\n\n## Core truths\n\n- Mine come first.\n\n## Checking\n\n1. Look at it.\n';
+                files.set("".concat(MEMORY, "/rules/CLAUDE.md"), MINE);
+                return [4 /*yield*/, $.session.start(start)];
+            case 1:
+                _c.sent();
+                return [4 /*yield*/, $.prompt.context({ blocks: [], instructionFiles: [{ path: '/repo/CLAUDE.md', kind: 'project', content: 'REPO RULES' }] })];
+            case 2:
+                told = _c.sent();
+                expect((_a = told.instructionFiles) === null || _a === void 0 ? void 0 : _a.find(function (one) { return one.kind === 'user'; })).toEqual({ path: "".concat(MEMORY, "/rules/CLAUDE.md"), kind: 'user', content: MINE });
+                expect((_b = told.instructionFiles) === null || _b === void 0 ? void 0 : _b.some(function (one) { return one.content === PRINCIPLES; })).toBe(false);
+                return [2 /*return*/];
+        }
+    });
+}); });
+// The two lines that were the author's own and no longer ship, as a person may keep them in their own copy
+var DELIBERATE = 'My decisions are deliberate.';
+var DONE_MEANS = 'Done means';
+test('a new install with no copy of its own carries the shipped principles, which leave out the author\'s "decisions are deliberate" and "done means" lines', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var files, told, ours;
+    var _a, _b, _c;
+    return __generator(this, function (_d) {
+        switch (_d.label) {
+            case 0:
+                files = world(on, { isNew: true, shipped: true }).files;
+                on('prompt.context', function (_, e) { return ({ blocks: e.blocks, instructionFiles: e.instructionFiles }); });
+                return [4 /*yield*/, $.session.start(start)];
+            case 1:
+                _d.sent();
+                expect(files.has("".concat(MEMORY, "/rules/CLAUDE.md"))).toBe(false);
+                return [4 /*yield*/, $.prompt.context({ blocks: [], instructionFiles: [] })];
+            case 2:
+                told = _d.sent();
+                ours = (_c = (_b = (_a = told.instructionFiles) === null || _a === void 0 ? void 0 : _a.find(function (one) { return one.kind === 'user'; })) === null || _b === void 0 ? void 0 : _b.content) !== null && _c !== void 0 ? _c : '';
+                expect(ours).toBe(SHIPPED_PRINCIPLES);
+                expect(ours).toContain('# How I work with Claude');
+                expect(ours).toContain('My words are the spec.');
+                expect(ours).not.toContain(DELIBERATE);
+                expect(ours).not.toContain(DONE_MEANS);
+                expect(ours).not.toContain('A concern is raised');
+                return [2 /*return*/];
+        }
+    });
+}); });
+test('a person\'s own copy that keeps both lines carries both, in their words, in place of the shipped principles', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var files, MINE, told, ours;
+    var _a, _b, _c, _d;
+    return __generator(this, function (_e) {
+        switch (_e.label) {
+            case 0:
+                files = world(on, { shipped: true }).files;
+                on('prompt.context', function (_, e) { return ({ blocks: e.blocks, instructionFiles: e.instructionFiles }); });
+                MINE = '# How I work with Claude\n\n## Principles\n\n1. My decisions are deliberate. No risk, legal or ethics commentary unless it blocks the task; then one line, once.\n2. Done means committed and pushed, or deployed.\n';
+                files.set("".concat(MEMORY, "/rules/CLAUDE.md"), MINE);
+                return [4 /*yield*/, $.session.start(start)];
+            case 1:
+                _e.sent();
+                return [4 /*yield*/, $.prompt.context({ blocks: [], instructionFiles: [] })];
+            case 2:
+                told = _e.sent();
+                ours = (_c = (_b = (_a = told.instructionFiles) === null || _a === void 0 ? void 0 : _a.find(function (one) { return one.kind === 'user'; })) === null || _b === void 0 ? void 0 : _b.content) !== null && _c !== void 0 ? _c : '';
+                expect(ours).toBe(MINE);
+                expect(ours).toContain(DELIBERATE);
+                expect(ours).toContain(DONE_MEANS);
+                expect((_d = told.instructionFiles) === null || _d === void 0 ? void 0 : _d.some(function (one) { return one.content === SHIPPED_PRINCIPLES; })).toBe(false);
+                // Nothing the mod does writes over it
+                expect(files.get("".concat(MEMORY, "/rules/CLAUDE.md"))).toBe(MINE);
+                return [2 /*return*/];
+        }
+    });
+}); });
+test('Config lists each thing a person can set with what is in force, edits a text as their own copy, changes a setting and puts each back', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, files, shown, tabs, list, _b, config, _i, _c, name_1, _d, _e, _f, _g, _h, _j;
+    var _this = this;
+    var _k, _l, _m, _o, _p, _q, _r;
+    return __generator(this, function (_s) {
+        switch (_s.label) {
+            case 0:
+                _a = world(on), files = _a.files, shown = _a.shown, tabs = _a.tabs;
+                files.set("".concat(MEMORY, "/config.json"), JSON.stringify({ name: 'Sam', other: 1 }));
+                return [4 /*yield*/, $.session.start(start)];
+            case 1:
+                _s.sent();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { props: __assign(__assign({}, LIST.props), { bodyColumns: 80 }), surface: 'desktop' }))];
+            case 2:
+                list = _s.sent();
+                return [4 /*yield*/, pressed(list, 'config-open')];
+            case 3:
+                _s.sent();
+                _b = expect;
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, tabs.find(function (tab) { return tab === 'config: Config'; })];
+                    }); }); })];
+            case 4:
+                _b.apply(void 0, [_s.sent()]).toBe('config: Config');
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'config', props: __assign(__assign({}, LIST.props), { title: 'Config', bodyColumns: 70 }), surface: 'desktop' }))];
+            case 5:
+                config = _s.sent();
+                _i = 0, _c = ['Principles', "The chat's rules", 'Work rules', 'Your name', 'Background work', 'Sound', 'Notifications', 'Automatic updates', 'Most work', 'Long legwork', 'Heavy work'];
+                _s.label = 6;
+            case 6:
+                if (!(_i < _c.length)) return [3 /*break*/, 9];
+                name_1 = _c[_i];
+                _d = expect;
+                return [4 /*yield*/, config.find({ type: 'Text', text: name_1 })];
+            case 7:
+                _d.apply(void 0, [_s.sent()]).toBeDefined();
+                _s.label = 8;
+            case 8:
+                _i++;
+                return [3 /*break*/, 6];
+            case 9:
+                // Only what differs from what shipped has a Reset: here the name
+                _e = expect;
+                return [4 /*yield*/, config.findAll({ type: 'Button' })];
+            case 10:
+                // Only what differs from what shipped has a Reset: here the name
+                _e.apply(void 0, [(_s.sent()).filter(function (one) { return one.props.label === 'Reset'; }).length]).toBe(1);
+                // Open file makes the person's own copy from the shipped text and opens it in their editor
+                return [4 /*yield*/, pressed(config, 'config-text-principles-open')];
+            case 11:
+                // Open file makes the person's own copy from the shipped text and opens it in their editor
+                _s.sent();
+                expect(files.get("".concat(MEMORY, "/rules/CLAUDE.md"))).toBe(PRINCIPLES);
+                expect(shown.at(-1)).toEqual(['open', '-t', "".concat(MEMORY, "/rules/CLAUDE.md")]);
+                // A copy still the same as what shipped is no change of theirs
+                _f = expect;
+                return [4 /*yield*/, config.findAll({ type: 'Text', text: /As shipped\.$/ })];
+            case 12:
+                // A copy still the same as what shipped is no change of theirs
+                _f.apply(void 0, [(_s.sent()).length]).toBe(3);
+                // Edit opens the text in the tab; Save makes it the person's own
+                return [4 /*yield*/, pressed(config, 'config-text-work-edit')];
+            case 13:
+                // Edit opens the text in the tab; Save makes it the person's own
+                _s.sent();
+                return [4 /*yield*/, config.input({ key: 'config-text-work-input', text: 'MY WORK RULES' })];
+            case 14:
+                _s.sent();
+                expect(files.get("".concat(MEMORY, "/roles/work.md"))).toBe('MY WORK RULES\n');
+                _g = expect;
+                return [4 /*yield*/, config.find({ type: 'Input', key: 'config-text-work-input' })];
+            case 15:
+                _g.apply(void 0, [_s.sent()]).toBeUndefined();
+                // Without the places the shipped rules fill, it is said to lack what an update added
+                _h = expect;
+                return [4 /*yield*/, config.find({ type: 'Text', text: /Edited by you, before an update added parts yours lacks/ })];
+            case 16:
+                // Without the places the shipped rules fill, it is said to lack what an update added
+                _h.apply(void 0, [_s.sent()]).toBeDefined();
+                // Reset moves it aside, and the shipped text is in force again
+                return [4 /*yield*/, pressed(config, 'config-text-work-back')];
+            case 17:
+                // Reset moves it aside, and the shipped text is in force again
+                _s.sent();
+                expect(files.has("".concat(MEMORY, "/roles/work.md"))).toBe(false);
+                expect((_k = __spreadArray([], files.entries(), true).find(function (_a) {
+                    var path = _a[0];
+                    return /\/roles\/work\.md\.\d{8}-\d{6}\.old$/.test(path);
+                })) === null || _k === void 0 ? void 0 : _k[1]).toBe('MY WORK RULES\n');
+                _j = expect;
+                return [4 /*yield*/, config.findAll({ type: 'Text', text: /As shipped\.$/ })];
+            case 18:
+                _j.apply(void 0, [(_s.sent()).length]).toBe(3);
+                // A setting is written to config.json, every other key kept; Reset takes the key out
+                return [4 /*yield*/, pressed(config, 'config-sound-off')];
+            case 19:
+                // A setting is written to config.json, every other key kept; Reset takes the key out
+                _s.sent();
+                expect(JSON.parse((_l = files.get("".concat(MEMORY, "/config.json"))) !== null && _l !== void 0 ? _l : '{}')).toEqual({ name: 'Sam', other: 1, sound: false });
+                return [4 /*yield*/, pressed(config, 'config-sound-back')];
+            case 20:
+                _s.sent();
+                expect(JSON.parse((_m = files.get("".concat(MEMORY, "/config.json"))) !== null && _m !== void 0 ? _m : '{}')).toEqual({ name: 'Sam', other: 1 });
+                // Automatic updates are on as shipped; Off writes updates: false, and On takes the key out again
+                return [4 /*yield*/, pressed(config, 'config-updates-off')];
+            case 21:
+                // Automatic updates are on as shipped; Off writes updates: false, and On takes the key out again
+                _s.sent();
+                expect(JSON.parse((_o = files.get("".concat(MEMORY, "/config.json"))) !== null && _o !== void 0 ? _o : '{}')).toEqual({ name: 'Sam', other: 1, updates: false });
+                return [4 /*yield*/, pressed(config, 'config-updates-on')];
+            case 22:
+                _s.sent();
+                expect(JSON.parse((_p = files.get("".concat(MEMORY, "/config.json"))) !== null && _p !== void 0 ? _p : '{}')).toEqual({ name: 'Sam', other: 1 });
+                return [4 /*yield*/, config.input({ key: 'config-name-input', text: 'Alex' })];
+            case 23:
+                _s.sent();
+                expect(JSON.parse((_q = files.get("".concat(MEMORY, "/config.json"))) !== null && _q !== void 0 ? _q : '{}').name).toBe('Alex');
+                return [4 /*yield*/, pressed(config, 'config-name-back')];
+            case 24:
+                _s.sent();
+                expect(JSON.parse((_r = files.get("".concat(MEMORY, "/config.json"))) !== null && _r !== void 0 ? _r : '{}').name).toBeUndefined();
+                return [2 /*return*/];
+        }
+    });
+}); });
+test('the model each kind of work runs on comes from Config, and the chat\'s and work\'s rules name it', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var files, config, told;
+    var _a, _b, _c;
+    return __generator(this, function (_d) {
+        switch (_d.label) {
+            case 0:
+                files = world(on, { chatRole: 'CHAT ROLE\n- {models}' }).files;
+                return [4 /*yield*/, $.session.start(start)];
+            case 1:
+                _d.sent();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'config', props: __assign(__assign({}, LIST.props), { title: 'Config', bodyColumns: 70 }), surface: 'desktop' }))];
+            case 2:
+                config = _d.sent();
+                return [4 /*yield*/, config.select({ key: 'config-model-legwork-pick', value: 'opus' })];
+            case 3:
+                _d.sent();
+                expect(JSON.parse((_a = files.get("".concat(MEMORY, "/config.json"))) !== null && _a !== void 0 ? _a : '{}')).toEqual({ models: { legwork: 'opus' } });
+                return [4 /*yield*/, $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })];
+            case 4:
+                told = (_d.sent());
+                expect(((_b = told.context) !== null && _b !== void 0 ? _b : []).join('\n')).toContain('Long legwork such as indexing runs on Opus 5.5, `model: "opus"`.');
+                return [4 /*yield*/, $.agent.spawn(__assign(__assign({}, spawn), { prompt: 'index the photos' }))];
+            case 5:
+                _d.sent();
+                expect(prompts[0]).not.toContain('{helpers}');
+                expect(prompts[0]).not.toContain('{checker}');
+                // Picking what shipped takes the key out again
+                return [4 /*yield*/, config.select({ key: 'config-model-legwork-pick', value: 'sonnet' })];
+            case 6:
+                // Picking what shipped takes the key out again
+                _d.sent();
+                expect(JSON.parse((_c = files.get("".concat(MEMORY, "/config.json"))) !== null && _c !== void 0 ? _c : '{}')).toEqual({});
+                return [2 /*return*/];
+        }
+    });
+}); });
+test('Check for updates in Config shows it is checking, then what it found; a second press meanwhile starts no second look', function ($, on) { return __awaiter(_this, void 0, void 0, function () {
+    var _a, files, gitRan, page, answer, fetches, release, config, _b, _c, _d, _e, kept, _f, failed;
+    var _this = this;
+    return __generator(this, function (_g) {
+        switch (_g.label) {
+            case 0:
+                _a = world(on), files = _a.files, gitRan = _a.gitRan;
+                page = '{"version":"0.1.0"}';
+                fetches = 0;
+                on('http.fetch', function () { return __awaiter(_this, void 0, void 0, function () {
+                    return __generator(this, function (_a) {
+                        switch (_a.label) {
+                            case 0:
+                                fetches += 1;
+                                return [4 /*yield*/, new Promise(function (done) { return (answer = done); })];
+                            case 1:
+                                _a.sent();
+                                return [2 /*return*/, { value: { status: 200, ok: true, headers: {}, text: page } }];
+                        }
+                    });
+                }); });
+                release = function () {
+                    var one = answer;
+                    answer = undefined;
+                    one === null || one === void 0 ? void 0 : one();
+                };
+                return [4 /*yield*/, $.session.start(start)];
+            case 1:
+                _g.sent();
+                return [4 /*yield*/, $.ui.mount(__assign(__assign({}, LIST), { requestId: 'config', props: __assign(__assign({}, LIST.props), { title: 'Config', bodyColumns: 70 }), surface: 'desktop' }))];
+            case 2:
+                config = _g.sent();
+                _b = expect;
+                return [4 /*yield*/, config.find({ type: 'Text', text: 'This chat runs v0.1.0' })];
+            case 3:
+                _b.apply(void 0, [_g.sent()]).toBeDefined();
+                return [4 /*yield*/, pressed(config, 'config-check')];
+            case 4:
+                _g.sent();
+                _c = expect;
+                return [4 /*yield*/, until(function () { return config.find({ type: 'Text', text: 'Checking…' }); })];
+            case 5:
+                _c.apply(void 0, [_g.sent()]).toBeDefined();
+                // While it checks there is no button to press again
+                _d = expect;
+                return [4 /*yield*/, config.findAll({ type: 'Button' })];
+            case 6:
+                // While it checks there is no button to press again
+                _d.apply(void 0, [(_g.sent()).some(function (one) { return one.props.label === 'Check for updates'; })]).toBe(false);
+                release();
+                _e = expect;
+                return [4 /*yield*/, until(function () { return config.find({ type: 'Text', text: /^You're on the newest version \(v0\.1\.0\)/ }); })];
+            case 7:
+                _e.apply(void 0, [_g.sent()]).toBeDefined();
+                expect(fetches).toBe(1);
+                // The folder is newest already: git is never run
+                expect(gitRan).toEqual([]);
+                // A newer release, with changes in the folder that the update would overwrite: git refuses and nothing is changed
+                page = '{"version":"0.1.2"}';
+                files.set('git:online', '0.1.2');
+                files.set('git:merge', 'error: Your local changes to the following files would be overwritten by merge:\n\ta.tsx');
+                return [4 /*yield*/, pressed(config, 'config-check')];
+            case 8:
+                _g.sent();
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, answer];
+                    }); }); })];
+            case 9:
+                _g.sent();
+                release();
+                return [4 /*yield*/, until(function () { return config.find({ type: 'Text', text: /^Couldn't update to v0\.1\.2: changes in its folder that aren't committed/ }); })];
+            case 10:
+                kept = _g.sent();
+                expect(kept === null || kept === void 0 ? void 0 : kept.props.color).toBe('error');
+                expect(files.get('manifest')).toBeUndefined();
+                // Pressed again once that is sorted: the folder moves forward to it, and the box says so
+                files.delete('git:merge');
+                return [4 /*yield*/, pressed(config, 'config-check')];
+            case 11:
+                _g.sent();
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, answer];
+                    }); }); })];
+            case 12:
+                _g.sent();
+                release();
+                _f = expect;
+                return [4 /*yield*/, until(function () { return config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it, or it switches by itself in a moment.' }); })];
+            case 13:
+                _f.apply(void 0, [_g.sent()]).toBeDefined();
+                expect(gitRan).toContain('merge --ff-only --quiet @{u}');
+                files.delete('git:online');
+                // No answer that reads as a version: said as a failure, in the error colour
+                page = 'oops';
+                return [4 /*yield*/, pressed(config, 'config-check')];
+            case 14:
+                _g.sent();
+                return [4 /*yield*/, until(function () { return __awaiter(_this, void 0, void 0, function () { return __generator(this, function (_a) {
+                        return [2 /*return*/, answer];
+                    }); }); })];
+            case 15:
+                _g.sent();
+                release();
+                return [4 /*yield*/, until(function () { return config.find({ type: 'Text', text: /^Couldn't check/ }); })];
+            case 16:
+                failed = _g.sent();
+                expect(failed === null || failed === void 0 ? void 0 : failed.props.color).toBe('error');
+                return [2 /*return*/];
+        }
+    });
+}); });
