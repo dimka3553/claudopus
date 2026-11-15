@@ -20,7 +20,7 @@ import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, le
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
-import { batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
+import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept } from './usage'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
@@ -5786,7 +5786,8 @@ let boxes: Asked[] = []
 // what happens now, so nothing that needed them just vanishes
 // A note tied to the call the press let go (`call`) goes once that call ends, never before DONE_LEAST so it can be read, and at
 // most DONE_LONGEST while it runs; one with no call is shown DONE_SHOWN
-type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number }
+// `card`: the work whose card held the gate; the note is drawn in that card, not at the top
+type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number; card?: string }
 let doneNotes: DoneNote[] = []
 const DONE_SHOWN = 60_000
 const DONE_LEAST = 15_000
@@ -5826,7 +5827,23 @@ const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, lines: str
   </ui.Box>
 )
 const doneNotesPart = (ui: Ui, at: number) =>
-  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
+  doneNotes.filter(one => !one.card && isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
+// What was done with a gate on a work's card, in that card where the amber box was: the same outlined box, green once allowed, grey
+// once refused, saying what was allowed, until its note goes
+const cardNotesOf = (card: string, at: number) => doneNotes.filter(one => one.card === card && isNoteShown(one, at))
+const cardNotesPart = (ui: Ui, card: string, at: number) =>
+  cardNotesOf(card, at).map(one => (
+    <ui.Box key={`done-${one.id}`} flexDirection="column" borderStyle="round" borderColor={one.isOn ? DONE : '#808080'} paddingX={1} flexShrink={0}>
+      <ui.Text wrap="truncate-end" dimColor>{`${one.head} · ${one.isOn ? 'allowed' : 'refused'}`}</ui.Text>
+      <ui.Box flexDirection="row" gap={1}>
+        <ui.Text color={one.isOn ? DONE : undefined} dimColor={!one.isOn}>{one.isOn ? '✓' : '✕'}</ui.Text>
+        <ui.Box flexShrink={1} minWidth={0}>
+          <ui.Text wrap="wrap" color={one.isOn ? DONE : undefined} bold={one.isOn}>{one.said}</ui.Text>
+        </ui.Box>
+      </ui.Box>
+      {one.what ? <ui.Text key={`done-${one.id}-what`} dimColor wrap="truncate-end">{one.what}</ui.Text> : null}
+    </ui.Box>
+  ))
 // What a box asks for, in a few words, for its note once answered
 const boxHead = (text: string) => {
   const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
@@ -5981,11 +5998,12 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled �
   $.ui.invalidate('ui.render')
 }
 
-const boxesPart = ($: EngineInterface, ui: Ui) => {
-  if (!boxes.length || !('Input' in ui)) return null
-  // This chat's own requests first, the first of them with the keys, so a value typed for the notice it told goes to its own box
+// Each box with when it was asked, so the panel puts it among what waits on the person, the newest first
+const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false) => {
+  if (!boxes.length || !('Input' in ui)) return []
+  // This chat's own first request holds the keys, so a value typed for the notice it told goes to its own box, wherever it is drawn
   const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
-  return shown.map((one, n) => (
+  return shown.map((one, n) => ({ at: one.at, node: (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
       <ui.Text dimColor wrap="truncate-end">{`${one.key ? 'Admin password' : 'Key'} · waits for you to type it`}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
@@ -5997,7 +6015,7 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
           placeholder="Type or paste it here"
           value={boxDrafts.get(one.id) ?? ''}
           submitLabel="send"
-          autoFocus={n === 0 ? true : undefined}
+          autoFocus={n === 0 && !isKeysHeld ? true : undefined}
           onInput={value => void boxDrafts.set(one.id, value)}
           onSubmit={value => void sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`))}
         />
@@ -6007,7 +6025,7 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
         <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain onPress={() => void cancelBox($, one.id)} />
       </ui.Box>
     </ui.Box>
-  ))
+  ) }))
 }
 
 // The admin gate: an admin command (bin/admin) waits for the person's press on its work's card before it runs
@@ -6293,7 +6311,8 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
   return said
 }
-const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
+// `card` names the work whose card the gate is on: what was done is said in that card, where the gate was
+const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') => {
   presses += 1
   const id = gate.id
   if (gate.isUndone) return void answerUndone($, gate, said).then(() => redraw($)).catch(err => log($, `undone change not answered: ${String(err)}`))
@@ -6302,6 +6321,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
     void noteDone($, {
       id: `gate-${id}`,
       ...(gate.call ? { call: gate.call } : {}),
+      ...(card ? { card } : {}),
       // Refused, nothing runs: what it says is over at once
       ...(said === 'deny' ? { endedAt: 0 } : {}),
       head: gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host} into ${gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
@@ -6761,7 +6781,7 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
 // Drawn as Claude Code draws its own permission asks: an outlined box with the kind of ask at its top, never a filled card with an
 // edge as work's cards are, so an ask is not taken for one more piece of work
 const gateKind = (gate: Gate) => (gate.isUndone ? 'Put back' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
-const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
+const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean, card = '') => (
   <ui.Box key={key} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
     <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? (gate.isUndone ? 'yours to decide' : 'waits for your press') : isElsewhere ? 'asked in another chat' : 'no longer waits'}`}</ui.Text>
     <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
@@ -6790,19 +6810,21 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
     </ui.Text>
     {gateHeld.has(gate.id) && !isElsewhere ? (
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        <ui.Button key={`${key}-once-${loadMark}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate, 'once')} />
-        {gate.kind ? null : <ui.Button key={`${key}-always-${loadMark}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always')} />}
-        <ui.Button key={`${key}-deny-${loadMark}`} label="Deny" onPress={() => answerGate($, gate, 'deny')} />
+        <ui.Button key={`${key}-once-${loadMark}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate, 'once', card)} />
+        {gate.kind ? null : <ui.Button key={`${key}-always-${loadMark}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always', card)} />}
+        <ui.Button key={`${key}-deny-${loadMark}`} label="Deny" onPress={() => answerGate($, gate, 'deny', card)} />
       </ui.Box>
     ) : (
       <ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : 'It no longer waits.'}</ui.Text>
     )}
   </ui.Box>
 )
-const adminBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string) =>
-  one.admins?.length ? (
+// The gates on a work's card, and once one is answered, what was done in the same place, outlined green (grey once refused)
+const adminBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number) =>
+  one.admins?.length || cardNotesOf(one.id, at).length ? (
     <ui.Box key={key} flexDirection="column" gap={1}>
-      {one.admins.map(gate => gateRow($, ui, gate, `gate-${gate.id}`, Boolean(one.chat)))}
+      {(one.admins ?? []).map(gate => gateRow($, ui, gate, `gate-${gate.id}`, Boolean(one.chat), one.chat ? '' : one.id))}
+      {cardNotesPart(ui, one.id, at)}
     </ui.Box>
   ) : null
 // A gate with no card, at the top of the panel
@@ -9045,6 +9067,8 @@ const commandHooks = (on: On) => {
   // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
   on('ui.close', async ($, e, next) => {
     const r = await next(e)
+    // The list closed, by anyone: nothing of where it stood is kept, so the line above the prompt no longer points into it
+    if (e.id === LIST) (listOffsets.clear(), $.ui.invalidate('ui.render'))
     if (e.id === LIST && e.origin.kind === 'person' && dir) await choosePanel($, false)
     return r
   })
@@ -9265,10 +9289,21 @@ const usageWords = (f: UsageFigures) => ({
   gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy`,
   battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
 })
-const batteryWords = (b: UsageBattery) =>
-  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
-// What follows the charge: the time left, the time to full, or that it is on power; nothing while the system still estimates
-const batteryAfter = (b: UsageBattery) => (b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : '')
+// Each takes the battery as the bar shows it, so a charge the system calls full or empty has no time beside it
+const batteryWords = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : b.finishing ? 'finishing charge' : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
+// What follows the charge: the time left, the time to full, "finishing" once the system calls it full and still tops it up, or
+// nothing on power and while the system still estimates
+const batteryAfter = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : b.state === 'charging' && b.finishing && b.pct >= 100 ? ' finishing' : ''
+
+// The battery's state in full, for the line of more: a time only where the bar shows one, and what the system said in its place
+const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'battery'
+    ? b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : read.left ? 'on battery, at 0% as the system gives it' : 'on battery, the system is still estimating the time left'
+    : b.state === 'charging'
+      ? b.left ? `charging, ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge: the system calls it full and still tops it up' : 'charging: the system calls it full') : 'charging, the time to full still being estimated'
+      : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'
 
 // More of each figure, for a pointer resting on it: who uses the most, Claude's part, the parts of a speed, and the battery's state
 // in full. Only what the looks gave; a part that is not known is left out
@@ -9279,7 +9314,7 @@ const usageMore = (f: UsageFigures) => {
     memory: `Memory ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use${most(f.memTop, n => `${gbText(n)} GB`)} · Claude with what it started ${gbText(f.memClaude)} GB`,
     cpu: f.cpu === undefined ? '' : `Processor ${pctText(f.cpu)}% busy${f.ncpu && f.ncpu > 1 ? ` across ${f.ncpu} cores` : ''}${most(f.cpuTop, n => `${pctText(n)}%`)} · Claude with what it started ${pctText(f.cpuClaude ?? 0)}%`,
     gpu: f.gpu === undefined ? '' : `Graphics processor ${pctText(f.gpu)}% busy${f.gpuMem === undefined ? '' : f.gpuMemTotal ? ` · ${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB of its memory in use` : ` · ${gbText(f.gpuMem)} GB of memory in use`}`,
-    battery: !b ? '' : `Battery ${b.pct}% · ${b.state === 'battery' ? (b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : 'on battery, the system is still estimating the time left') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging, the time to full still being estimated') : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'}`,
+    battery: !b ? '' : `Battery ${b.pct}% · ${batteryNote(b)}`,
     disk: f.disk === undefined ? '' : `Disk ${rateText(f.disk).join(' ')} read and written${f.disks?.length ? ` · ${f.disks.join(', ')}` : ''}`,
     net: f.net === undefined ? '' : `Network ${rateText(f.net).join(' ')}${f.netIn !== undefined && f.netOut !== undefined ? ` · in ${rateText(f.netIn).join(' ')}, out ${rateText(f.netOut).join(' ')}` : ''}${f.ports?.length ? ` · ${f.ports.join(', ')}` : ''}`,
   }
@@ -9361,7 +9396,8 @@ const usageText = (ui: Ui, f: UsageFigures, room = Infinity) => {
     </Text>
   )
 }
-// The battery in words, short: "bat 85% 4:12" on battery, "bat 62% ↑1:05" charging (↑ and the time to full), "bat 100% ac" on power
+// The battery in words, short: "bat 85% 4:12" on battery, "bat 62% ↑1:05" charging (↑ and the time to full), "bat 100% finishing"
+// while the system calls it full and still tops it up, "bat 100% ac" on power
 const batteryText = (ui: Ui, b: UsageBattery) => {
   const { Text } = ui
   const low = isBatteryLow(b) ? USAGE_AMBER : undefined
@@ -9373,7 +9409,8 @@ const batteryText = (ui: Ui, b: UsageBattery) => {
     after ? <Text key="ba" color={b.state === 'charging' ? USAGE_PURPLE : low} dimColor={!low && b.state !== 'charging'}>{after}</Text> : null,
   ]
 }
-const batteryAfterText = (b: UsageBattery) => (b.state === 'plugged' ? ' ac' : b.state === 'charging' ? ` ↑${b.left ? leftText(b.left) : ''}` : b.left ? ` ${leftText(b.left)}` : '')
+const batteryAfterText = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'plugged' ? ' ac' : b.state === 'charging' ? (!b.left && b.finishing && b.pct >= 100 ? ' finishing' : ` ↑${b.left ? leftText(b.left) : ''}`) : b.left ? ` ${leftText(b.left)}` : ''
 // A short mark of a drawing, so a new drawing is a new picture to the app
 const hashOf = (text: string) => {
   let h = 0
@@ -9386,6 +9423,21 @@ const hashOf = (text: string) => {
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
 let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
+// Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
+// Pressed, it takes the list back to its top; nothing else moves the list
+const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
+  waitsAtTop > 0 && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced) ? (
+    <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden">
+      <ui.Button
+        key={`band-waits-${presses}`}
+        plain
+        hover={{ scope: 'band-waits', underline: true }}
+        onPress={() => ((presses += 1), void $.ui.scroll({ in: LIST, to: 'start', block: 'start' }).catch(() => undefined))}
+      >
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 waits' : `${waitsAtTop} wait`} for you at the top of the panel`}</ui.Text>
+      </ui.Button>
+    </ui.Box>
+  ) : null
 // The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
@@ -9424,6 +9476,7 @@ const bandHooks = (on: On) => {
         }
         return (
           <Box flexDirection="column">
+            {await waitMarker($, ui, e.surface)}
             <Box flexDirection="row" gap={1}>
               {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus at work on your reply', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
@@ -9455,7 +9508,7 @@ const bandHooks = (on: On) => {
         )
       }
     }
-    if (!working.length && !happy) return next(e)
+    if (!working.length && !happy) return (await waitMarker($, ui, e.surface)) ?? next(e)
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
@@ -9465,6 +9518,7 @@ const bandHooks = (on: On) => {
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
+    const marker = await waitMarker($, ui, e.surface)
     const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
     const row = (
       <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
@@ -9479,9 +9533,10 @@ const bandHooks = (on: On) => {
       </Box>
     )
     // Where the figures are drawn, a pointer resting on one shows more of it in a line above, so the figures stay where they are
-    return drawn && figures ? (
+    return (drawn && figures) || marker ? (
       <Box flexDirection="column">
-        {usageMoreDrawn(ui, figures)}
+        {marker}
+        {drawn && figures ? usageMoreDrawn(ui, figures) : null}
         {row}
       </Box>
     ) : (
@@ -9504,6 +9559,14 @@ const backAsked = async ($: EngineInterface, id: string) => {
   await $.ui.close({ id: LIST }).catch(() => undefined)
   await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS, focus: true })
 }
+// The ask whose reply box holds the terminal's keys in the list: kept on it while it waits, so an ask that comes in above it never
+// takes the keys from what the person is typing
+let keysAsk = ''
+// Where the list's window starts on each surface, as last drawn: above the prompt says what waits at the top once it is out of sight
+// (waitMarker). Forgotten when the list is closed
+const listOffsets = new Map<string, number>()
+// How many things wait on the person at the top of the list, as last drawn
+let waitsAtTop = 0
 const panelHooks = (on: On) => {
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
@@ -9762,7 +9825,7 @@ const panelHooks = (on: On) => {
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
-                autoFocus={e.surface === 'terminal' && !askFocused ? ((askFocused = true), true) : undefined}
+                autoFocus={e.surface === 'terminal' && !askFocused && ![...boxDrafts.values()].some(Boolean) && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={drafts.get(one.id) ?? ''}
                 submitLabel="send"
@@ -9843,9 +9906,9 @@ const panelHooks = (on: On) => {
                 {askBlock(one, `ask-${one.id}`)}
               </Box>
             ) : null}
-            {one.admins?.length ? (
+            {one.admins?.length || cardNotesOf(one.id, at).length ? (
               <Box key={`gate-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
-                {adminBlock($, table, one, `gates-${one.id}`)}
+                {adminBlock($, table, one, `gates-${one.id}`, at)}
               </Box>
             ) : null}
             {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
@@ -10695,12 +10758,12 @@ const panelHooks = (on: On) => {
               ) : null}
             </Box>
           </Box>
-          {one.admins?.length ? (
+          {one.admins?.length || cardNotesOf(one.id, at).length ? (
             <Box key="part-gates" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
                 <Text bold dimColor>Needs you now</Text>
-                {adminBlock($, table, one, `gates-big-${one.id}`)}
+                {adminBlock($, table, one, `gates-big-${one.id}`, at)}
               </Box>
             </Box>
           ) : null}
@@ -10751,6 +10814,8 @@ const panelHooks = (on: On) => {
         <Box flexDirection="column">
           <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waits for your answer' : 'asked in another chat'}`}</Text>
           <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+          {/* At the top, away from its chat's name: which chat it is */}
+          {c ? <Text key={`prompt-${key}-chat`} dimColor wrap="truncate-end">{`In the chat “${chatName(c)}”${c.host ? ` on ${macName(c.host)}` : ''}`}</Text> : null}
           <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
         </Box>
         <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
@@ -10985,6 +11050,35 @@ const panelHooks = (on: On) => {
     const ui = uiOf($, e)
     // A terminal too narrow to dock the panel seats it above the prompt, a few rows tall
     const isInline = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
+    // Everything that waits on the person, every chat's, together at the top under the header and the newest first: the notices
+    // (password and key boxes, gates, Claude Code's own prompts), then the cards of work that asked. Each stays until answered, and
+    // then leaves the top; a card goes back to its own place among the rest, which keep their order
+    const notices = [
+      // A box that comes while the person types a reply in the terminal leaves the keys with that reply
+      ...boxRows($, ui, e.surface === 'terminal' && Boolean(keysAsk && drafts.get(keysAsk))),
+      ...looseGates.map(gate => ({ at: gate.at, node: gateRow($, ui, gate, `gate-${gate.id}`, false) })),
+      ...waiting.map(p => ({ at: p.at, node: promptCard(p, `this-${p.id}`, answerHere(p)) })),
+      ...otherChats.flatMap(c => {
+        const url = pressOf(c)
+        return (c.prompts ?? []).map(p => ({ at: p.at, node: promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', c) }))
+      }),
+    ]
+    // A work that waits on the person comes to the top whole, its ask or its gate in it as ever; once a gate is answered, what was
+    // done shows in the card, outlined green, and the card stays at the top until that goes
+    const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
+    const isWaitingPress = (one: Todo) => one.status === 'working' && Boolean(one.admins?.length)
+    const isUp = (one: Todo) => isAsking(one) || isWaitingPress(one) || (!one.chat && cardNotesOf(one.id, at).length > 0)
+    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)))
+    const askingHere = shownWork.filter(isUp)
+    const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
+    const askCards = [...askingHere, ...askingThere].sort((a, b) => upSince(b) - upSince(a))
+    const restHere = shownWork.filter(one => !isUp(one))
+    // Notices and whole cards in one order, the newest first; a card that only says what was allowed comes under all that still
+    // waits. A card is drawn when the panel is
+    const top = [...notices.map(one => ({ at: one.at, draw: () => one.node })), ...askCards.map(one => ({ at: upSince(one) - (isAsking(one) || isWaitingPress(one) ? 0 : 1e15), draw: () => small(one) }))].sort((a, b) => b.at - a.at)
+    const waitsCount = notices.length + askCards.filter(one => isAsking(one) || isWaitingPress(one)).length
+    // The terminal's keys stay with the ask they were on while it waits
+    if (keysAsk && !askingHere.some(one => one.id === keysAsk && isAsking(one))) keysAsk = ''
     // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and
     // work that just finished (happy too for a workflow in its pause whose card turned green: it finished and its last round passed)
     const runningThere = elsewhere.filter(one => one.status === 'working' && !needsPerson(one))
@@ -10992,7 +11086,8 @@ const panelHooks = (on: On) => {
       here: working.filter(one => !needsPerson(one)).length + runningFlows.length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
-      asks: boxes.length + looseGates.length + own.filter(needsPerson).length + waiting.length + elsewhere.filter(needsPerson).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
+      // Each thing at the top counts once, as the line above the prompt counts them
+      asks: waitsCount,
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
@@ -11004,7 +11099,14 @@ const panelHooks = (on: On) => {
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     // A password or key box stays above it: the runner waits on it
-    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{doneNotesPart(ui, at)}{screen}</Box>
+    if (paneId === LIST && !alone) {
+      // Where this surface's list stands, as the person or a press last moved it (each move draws it again)
+      const was = listOffsets.get(e.surface) ?? 0
+      listOffsets.set(e.surface, Math.max(0, e.props.scroll.offset))
+      const count = waitsCount
+      if (count !== waitsAtTop || (was > 0) !== ((listOffsets.get(e.surface) ?? 0) > 0)) ((waitsAtTop = count), $.ui.invalidate('ui.render'))
+    }
+    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{notices.map(one => one.node)}{doneNotesPart(ui, at)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
     // A newer version the hourly look saw: its card under the header's lines, with Install
     const outCard = alone ? null : newOutCard($, ui, await newOut($, versions.version, versions.installed).catch(() => ''))
@@ -11055,29 +11157,23 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
         ) : null}
-        {!alone ? boxesPart($, ui) : null}
-        {!alone ? gatesPart($, ui) : null}
+        {!alone ? top.map(one => one.draw()) : null}
         {!alone ? doneNotesPart(ui, at) : null}
         {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
           ? big(alone, talked?.lines)
           : [
-              // This chat's work first, named as this chat's once another chat's is shown; work that needs the person's hands comes first
-              // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
-              ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-              ...waiting.map(p => promptCard(p, `this-${p.id}`, answerHere(p))),
+              // This chat's work first, named as this chat's once another chat's is shown, in the order it began; what waits on the
+              // person is above, at the top. Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
+              ...(listedChats.length && (restHere.length || shownFlows.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...promptsAnswered.map(p => answeredCard(p, `this-${p.id}`)),
-              ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
-              // Then each other chat under its name, those that wait on the person first
+              ...[...restHere.map(one => ({ at: one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              // Then each other chat under its name, with what is left of it once its asks are at the top
               ...listedChats.flatMap(c => {
-                const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
-                // Open that chat whenever its link opens here: a chat of this Mac, or one of another Mac with Remote Control on
-                // In a chat another Mac's app runs here, that Mac opens it
-                const url = pressOf(c)
-                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', c))
+                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => a.startedAt - b.startedAt)
                 const answered = answeredOf(c.answeredPrompts).map(p => answeredCard(p, `${c.host}-${c.chat}-${p.id}`, c))
-                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...answered, ...cards.map(one => small(one))]
+                return cards.length || answered.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...answered, ...cards.map(one => small(one))] : []
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}
