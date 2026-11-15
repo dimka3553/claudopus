@@ -16,7 +16,7 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isUpdateDue, loo
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSaid, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
+import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSaid, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
@@ -9994,20 +9994,22 @@ const panelHooks = (on: On) => {
           <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>
       )
-    // Under its name, the tree's lines carried down past it, so its second line hangs in the same place
+    // Under its name, the tree's lines carried down past it, as wide as its own lines and mark, so its second line starts under its
+    // name. The app drops a picture with no words for it, and the line then started at the card's edge, left of the tree
     const jobRails = (t: Twig, key: string) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt="" width={twigWidth(t)} height={LINE} />
+          <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt={t.isLast ? 'Last on the tree' : 'The tree goes on'} width={twigWidth(t)} height={LINE} />
         </Box>
       ) : (
         <Box key={key} flexShrink={0}>
-          <Text dimColor>{`${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}  `}</Text>
+          <Text dimColor>{`${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}   `}</Text>
         </Box>
       )
     // How it stands, its second line, so a glance tells whether it moves and how far it is: how much of how much, its percent,
-    // speed and time left as the run printed them; then paused, a wait's target, a watch's last event, nothing printed since it
-    // began, quiet for minutes (in amber), or when it last printed. Quiet is told apart from working in words, never by a clock
+    // speed and time left as the run printed them, or worked out from its percent where it says none; then paused, a wait's target,
+    // a watch's last event, nothing printed since it began, or quiet for minutes (in amber). A run that prints says nothing of when:
+    // its line is read every few seconds, so what it says is now
     const jobStand = (job: Job, width: number) => {
       const pct = job.pct ? [job.pct] : []
       const quiet = job.wroteAt ? at - job.wroteAt : 0
@@ -10019,18 +10021,25 @@ const panelHooks = (on: On) => {
         : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
         // (a server prints only when asked, so its quiet is no warning)
         : job.wroteAt && quiet >= JOB_QUIET && job.kind !== 'server' ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
-        : job.wroteAt ? [`printed ${shortAgo(quiet)} ago`, `printed ${shortAgo(quiet)} ago`, false]
+        : job.wroteAt ? ['', '', false]
         // A job whose output cannot be found says so, so a blank row is never taken for one that moves
         : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', 'no output', true]
         : ['', '', false]
       const warn = isWarn && Boolean(state)
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
       const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
-      const left = job.left && isFresh ? [job.left] : []
+      // a run whose own progress line gives its percent but no time left has one worked out from how long it has run, marked as a
+      // guess: only the work's own line, which counts the whole run (a tool's bar starts again at each epoch, package or phase),
+      // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
+      const share = Number.parseFloat(job.pct ?? '') / 100
+      const guess = !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
+      const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
-      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], [...compact, ...pct, short], [...compact, ...pct], [short]], width)
+      // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
+      const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
+      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
       return { text, isWarn: warn }
     }
     // A job's two lines: what it is, in the work's own words, with its time; and under it how it stands, then the latest line it
@@ -10076,7 +10085,8 @@ const panelHooks = (on: On) => {
           {head}
           <Box key={`stand-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
             {jobRails(t, `rails-${key}`)}
-            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+            {/* (on a desktop by the step a plain Button pads a run's name with, where its name is one, so the two start in one column) */}
+            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={canOpenJob(job) ? lead : 0}>
               {pctAt >= 0 && job.pct ? (
                 <Box flexDirection="row" flexShrink={0}>
                   {pctAt > 0 ? <Text dimColor>{stand.slice(0, pctAt)}</Text> : null}
