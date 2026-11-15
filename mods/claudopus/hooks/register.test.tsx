@@ -1982,10 +1982,10 @@ test('every run under a card says how it stands: a command held open shows its p
     await list.unmount()
     return all
   }
-  const shown = await until(async () => {
+  const shown = (await until(async () => {
     const all = await texts()
     return all.includes('460 MB of 1 GB · ') ? all : undefined
-  })
+  })) ?? []
   // The download held open: how much of how much, its percent, speed and time left, as curl printed them
   expect(shown.some(text => /^Download · Download the CT scans/.test(text))).toBe(true)
   expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · printed 2s ago$/.test(text))).toBe(true)
