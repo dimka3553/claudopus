@@ -54,7 +54,7 @@ const callBegun = async ($: EngineInterface, id: string, agent: string, tool: st
   const cmd = tool === 'Bash' ? oneLine(String(input?.command ?? '')).slice(0, 400) : ''
   const label = oneLine(String(input?.description ?? '') || cmd.split('\n')[0] || '').slice(0, 160)
   inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now(), ...(cmd ? { cmd, label } : {}) })
-  await update($, todos, list => withRunning(list, agent))
+  await changeTodos($, list => withRunning(list, agent))
 }
 
 // A call of a piece of work ended with what it returned: a line its agent had not seen come back before is news. The mod's own
@@ -69,7 +69,7 @@ const callEnded = async ($: EngineInterface, id: string, agent: string, tool: st
     if (seen.size > SEEN_KEPT) seenLines.set(agent, new Set([...seen].slice(-SEEN_KEPT / 2)))
     else seenLines.set(agent, seen)
   }
-  await update($, todos, list => withRunning(list, agent, isNew ? now : undefined))
+  await changeTodos($, list => withRunning(list, agent, isNew ? now : undefined))
 }
 
 // When something last moved under a piece of work: it or a helper started, ended, or had something new come back
@@ -81,7 +81,9 @@ const movedAt = (list: Todo[], top: Todo) => Math.max(...[top, ...underOf(list, 
 const lookStuck = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const told: Todo[] = []
-  await update($, todos, list => {
+  await changeTodos($, list => {
+    // Told afresh on each run of the change, as it runs again on a list written meanwhile
+    told.length = 0
     let isChanged = false
     const isPrompted = (one: Todo) => waiting.some(p => p.agent && topOf(list, p.agent) === one.id)
     const next = list.map(one => {
@@ -131,13 +133,13 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
   const cmd = oneLine(String(call.command ?? '')).slice(0, 400)
   const now = await $.clock.now()
-  await update($, todos, list =>
+  await changeTodos($, list =>
     list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(cmd ? { cmd } : {}), ...(call.tool === 'Monitor' ? { isWatch: true } : {}) }].slice(-BG_KEPT) } : one)),
   )
 }
 // Background work that has ended or was stopped leaves every card that kept it
 const dropBackground = async ($: EngineInterface, ids: string[]) =>
-  update($, todos, list => {
+  changeTodos($, list => {
     const isGone = (id: string) => ids.includes(id)
     if (!list.some(one => one.bg?.some(b => isGone(b.id)))) return list
     return list.map(one => {

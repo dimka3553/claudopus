@@ -241,14 +241,14 @@ const touchesGate = (e: ToolCallInput) => {
 
 const setGates = async ($: EngineInterface, top: string, fn: (list: Gate[]) => Gate[]) => {
   if (!top) looseGates = fn(looseGates)
-  else await update($, todos, list => list.map(one => (one.id !== top ? one : { ...one, admins: fn(one.admins ?? []).length ? fn(one.admins ?? []) : undefined })))
+  else await changeTodos($, list => list.map(one => (one.id !== top ? one : { ...one, admins: fn(one.admins ?? []).length ? fn(one.admins ?? []) : undefined })))
   redraw($)
 }
 // No hold outlives the copy of the mod that made it: a card that still shows one as a chat starts is cleared
 const clearGates = async ($: EngineInterface) => {
   looseGates = looseGates.filter(one => gateHeld.has(one.id))
   if ((await read($, todos)).some(one => one.admins?.some(gate => !gateHeld.has(gate.id))))
-    await update($, todos, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(gate => gateHeld.has(gate.id)).length ? one.admins.filter(gate => gateHeld.has(gate.id)) : undefined } : one)))
+    await changeTodos($, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(gate => gateHeld.has(gate.id)).length ? one.admins.filter(gate => gateHeld.has(gate.id)) : undefined } : one)))
 }
 // Holds the call until the person presses. A hook's own time is bounded, and time spent in a call on the engine is not counted:
 // the wait is a one-second sleep run by the engine, again and again, the press read from memory between them

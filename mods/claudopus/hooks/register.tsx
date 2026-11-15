@@ -128,6 +128,18 @@ const tick = atom({ plugin: 'claudopus', key: 'tick' } as const, 0, { shape: 'ti
 // When the panel was last drawn, kept through a reload (drawnNow, written by the timer each second, never read while drawing)
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
 let drawnNow = 0
+// The list of work is written only when it changes. Each write of a value the panel or Details read draws them again, and the app
+// builds a pane it is asked to draw whole afresh, even when it shows the same: the element under the pointer loses its hover look,
+// and a press on a button of the drawing replaced meanwhile reaches nothing. The list was written over with the same list every
+// few seconds while work ran (15 Nov, a minute of running work: seven writes, none of them a change). Should another write land
+// between the look and the write, the change is made again on what that write left
+const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
+  const now = await read($, todos)
+  const before = JSON.stringify(now)
+  const next = fn(now)
+  if (JSON.stringify(next) === before) return now
+  return update($, todos, list => (JSON.stringify(list) === before ? next : fn(list)))
+}
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
 // they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them
@@ -335,7 +347,15 @@ const movedTo = (name: string, at: number) => {
   return `${MODEL_HEAD}${name} at ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}. ${who(true)} chose it in the panel: your next steps run on ${name}.`
 }
 
-const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() => '')
+const readOr = ($: EngineInterface, path: string) =>
+  $.fs.read(path).catch(() => '').then(text => (listDrawing > 0 && isWatched(path, text) && !drawnFiles.has(path) && drawnFiles.set(path, text), text))
+// While the panel is drawn, the files its drawing reads, as read then: looked at again each second, so a change in one draws it
+// again (calmLook), as nothing else would
+let listDrawing = 0
+// Another hook may read while the panel is drawn: what grows as work runs (transcripts, logs, other chats' live files, words, asks,
+// keep files) and anything large is never watched, so it cannot draw the panel again each second
+const isWatched = (path: string, text: string) => text.length < 64_000 && !/\.jsonl$|\/log\.md$|\/live\/|\/words\/|\/asks\/|\/keep\/|\/helpers\//.test(path)
+const drawnFiles = new Map<string, string>()
 // Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
 // Added to its end, never read and written back whole: every chat on this Mac writes here, and two rewriting it at once left runs of
@@ -1154,7 +1174,7 @@ const sync = async ($: EngineInterface) => {
   )
   // The chat is read once for each such work, not at every look
   if (isUnseen) for (const one of live) if (!one.parentId) helpersChecked.add(one.id)
-  await update($, todos, list => {
+  await changeTodos($, list => {
     const cards = new Map(list.map(one => [one.id, one] as const))
     let isChanged = false
     for (const one of live) {
@@ -1195,7 +1215,7 @@ const sync = async ($: EngineInterface) => {
 const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: number) => Todo) => {
   const now = await $.clock.now()
   if (!(await read($, todos)).some(one => one.id === agentId)) await sync($)
-  await update($, todos, list => {
+  await changeTodos($, list => {
     const id = topOf(list, agentId)
     return list.map(one => (one.id === id ? fn(one, now) : one))
   })
@@ -1215,7 +1235,7 @@ const stop = async ($: EngineInterface, id: string) => {
   await stopHelpers($, id)
   const now = await $.clock.now()
   // What finished work left running is stopped with it
-  await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === id && one.leftSince ? { ...one, leftSince: undefined } : one)))
+  await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === id && one.leftSince ? { ...one, leftSince: undefined } : one)))
   await keepStoppedReports($, now)
   await lookEnds($)
 }
@@ -1226,7 +1246,7 @@ const choose = async ($: EngineInterface, id: string, model: string) => {
   await update($, view, v => ({ ...v, picking: '' }))
   const one = (await read($, todos)).find(todo => todo.id === id)
   if (!one || one.status !== 'working' || modelName(one.chosen ?? one.model ?? '') === modelName(model)) return
-  await update($, todos, list => list.map(todo => (todo.id === id ? { ...todo, model, chosen: model } : todo)))
+  await changeTodos($, list => list.map(todo => (todo.id === id ? { ...todo, model, chosen: model } : todo)))
   await tell($, id, movedTo(modelName(model), await $.clock.now()))
 }
 
@@ -1382,7 +1402,7 @@ const recoverEnded = async ($: EngineInterface) => {
   }
   // A card read back bare by an earlier version, with no times or model, is replaced
   if (found.length)
-    await update($, todos, now => capped(byEnd([...found.filter(one => !now.some(card => card.id === one.id && !isBare(card))), ...now.filter(card => !(isBare(card) && found.some(one => one.id === card.id)))])))
+    await changeTodos($, now => capped(byEnd([...found.filter(one => !now.some(card => card.id === one.id && !isBare(card))), ...now.filter(card => !(isBare(card) && found.some(one => one.id === card.id)))])))
 }
 
 // What was kept comes back into the list when the chat loads, below anything the list already holds
@@ -1391,7 +1411,7 @@ const loadFinished = async ($: EngineInterface) => {
   if (!id) return
   const kept = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   if (!Array.isArray(kept) || !kept.length) return
-  await update($, todos, list => {
+  await changeTodos($, list => {
     // What it left running is looked at afresh: the record of how it ended does not outlive the load
     const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined, bg: undefined, waitsSince: undefined }))
     return fresh.length ? capped(byEnd([...fresh, ...list])) : list
@@ -1409,7 +1429,6 @@ const follow = async ($: EngineInterface) => {
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)
   // Reports another chat kept since are listed here too
   await loadReports($).catch(() => undefined)
-  if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) await update($, tick, n => n + 1)
 }
 
 // A message as the panel quotes it: whole when short, else its first sentences
@@ -1728,7 +1747,8 @@ const refresh = async ($: EngineInterface) => {
   const open = await $.ui.panes().catch(() => [])
   if (!open.some(one => one.id === PANE && one.isShown)) return
   await scanServers($)
-  await update($, tick, n => n + 1)
+  // Its own value, which only the Servers tab reads: the panel is not drawn again with it
+  await update($, servers, list => [...list])
 }
 
 const stopServer = async ($: EngineInterface, pid: number) => {
@@ -1935,7 +1955,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
   // Its report holds them now: the work's next round records what still waits afresh
-  if (one.waits?.length) await update($, todos, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
+  if (one.waits?.length) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
   await loadReports($)
 }
 
@@ -4730,7 +4750,7 @@ const heldDrawings = new Map<string, { shape: string; content: string; at: numbe
 let freshness = 0
 const drawAgain = ($: EngineInterface) => {
   freshness += 1
-  $.ui.invalidate('ui.render')
+  void drawFresh($)
 }
 // The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
 // arrive, so a drawing never puts older letters over the newer ones the box already holds
@@ -4772,6 +4792,45 @@ const freeTimes = ($: EngineInterface) => {
   typing += 1
   isTyping = false
   if (wasHeld) drawAgain($)
+}
+// Every pane of the mod's is drawn again, from the values as they are now
+const drawFresh = async ($: EngineInterface) => $.ui.invalidate('ui.render')
+// What each pane showed when last drawn afresh: its shape, its content and when, so calmLook knows what has moved since
+const drawnPanes = new Map<string, { shape: string; content: string; at: number; side: string }>()
+// What the panel shows from the mod's own memory rather than its values: what the app's prompts, the admin and file gates, the boxes,
+// pictures, the update and the presses hold. A change in it draws the panel again within a second
+const sideSign = () =>
+  JSON.stringify([
+    waiting.map(one => [one.agent, one.tool, one.seen ?? 0, one.isPressedNo ?? false]), asked.length, answeredPrompts.length, [...promptSaid], [...promptHeld],
+    [...gateHeld], [...gateSaid.keys()], looseGates.map(one => one.id), [...undoneOffers.keys()], boxes.map(one => one.id), doneNotes.length, [...boxSaid], [...boxSent], boxPresses,
+    [...pictureIn.keys()], isUpdating, isReloadRefused, updatedMoment ?? null, presses, loadMark, freshness,
+  ])
+// While the person uses the panel (scrolls it, moves the focus in it, presses in it, or types) its running times stand still: they
+// move again ENGAGED after the person's last move
+const ENGAGED = 15_000
+let engagedAt = 0
+let calmAt = 0
+const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
+// Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
+// draw it again only every CALM while work moves, and not while the person uses it
+const calmLook = async ($: EngineInterface, isMoving: boolean) => {
+  const now = await $.clock.now()
+  const list = drawnPanes.get(LIST) ?? { shape: '', content: '', at: 0, side: sideSign() }
+  // What the mod holds in memory, or a file the panel read, changed: drawn again at once, as anything new is
+  const side = sideSign()
+  let isNew = !isTyping && list.side !== side
+  for (const [path, text] of isTyping ? [] : drawnFiles) {
+    const now = await readOr($, path)
+    if (now !== text) (drawnFiles.set(path, now), (isNew = true))
+  }
+  // Asked for once: a panel the app does not draw just then is not asked for again each second
+  if (isNew) return void ((list.side = side), drawAgain($), (list.side = sideSign()))
+  // Counted from the panel's last drawing afresh or the last of these, so a Details tab or the band drawn without the panel moves on
+  // every CALM too, not each second
+  if (!isMoving || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
+  calmAt = now
+  await writeHeldOthers($)
+  $.ui.invalidate('ui.render')
 }
 // Whether an element of the mod's is a box the person types into: an ask's reply box or a key box
 const isTypedBox = (element: string | undefined) => /-reply-|^box-.*-field/.test(element ?? '')
@@ -4853,8 +4912,9 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   answeredAsks.add(asked)
   const at = await $.clock.now()
   let isCleared = false
-  await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
+  // Set afresh on each run of the change, as it runs again on a list written meanwhile
+  await changeTodos($, list =>
+    ((isCleared = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isCleared) return
   answeredAt.set(one.id, ask.at)
@@ -4886,8 +4946,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   // Acted on from now while the work is started again with it; never on a card no run of its own will end
   const listed = await read($, todos)
   const isWaking = listed.find(card => card.id === one.id)?.status !== 'working' && listed.find(card => card.id === target)?.status !== 'working'
-  await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
+  await changeTodos($, list =>
+    ((isHeld = false), list).map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isHeld = true), { ...card, ask: { ...card.ask, replied: { text: said, at, ...(isWaking ? { isWaking } : {}) } }, entries: [...card.entries, { at, kind: 'steer' as const, text: said }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isHeld) return
   // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
@@ -4923,7 +4983,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
   // A reply that holds its ask is acted on from now: no answers on the card while its work is started again with it
-  await update($, todos, list => list.map(card => (card.id === one.id && card.ask?.replied?.text === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? { ...card, ask: { ...card.ask, replied: { ...card.ask.replied, isWaking: true } } } : card)))
+  await changeTodos($, list => list.map(card => (card.id === one.id && card.ask?.replied?.text === sent.text && !card.ask.replied.isWaking && card.status !== 'working' ? { ...card, ask: { ...card.ask, replied: { ...card.ask.replied, isWaking: true } } } : card)))
   sentReplies.set(one.id, { ...sent, to: 'work' })
   redraw($)
   // One message for a work: a second answer for the same one joins the first
@@ -4969,14 +5029,16 @@ const writtenIn = (target: string, card: string) => {
 // Finished, while it acts on it
 const wakeCard = async ($: EngineInterface, target: string) => {
   const now = await $.clock.now()
-  await update($, todos, list => list.map(card => (card.id !== target || card.status === 'working' ? card : (endedByHandback.delete(target), resumed(card, now)))))
+  let isWoken = false
+  await changeTodos($, list => ((isWoken = false), list).map(card => (card.id !== target || card.status === 'working' ? card : ((isWoken = true), resumed(card, now)))))
+  if (isWoken) endedByHandback.delete(target)
 }
 const wakeFailed = async ($: EngineInterface, { target, answers }: (typeof wakes)[number], reason: string) => {
   if (answers.some(({ one }) => pending.get(target) === one.id)) pending.delete(target)
   await log($, `work ${target} not started again with an answer: ${reason}`)
   // An ask its reply held waits on the person again, every answer back
   const ids = new Set(answers.map(({ one }) => one.id))
-  await update($, todos, list => list.map(card => (ids.has(card.id) && card.ask?.replied?.isWaking ? { ...card, ask: { ...card.ask, replied: { text: card.ask.replied.text, at: card.ask.replied.at } } } : card)))
+  await changeTodos($, list => list.map(card => (ids.has(card.id) && card.ask?.replied?.isWaking ? { ...card, ask: { ...card.ask, replied: { text: card.ask.replied.text, at: card.ask.replied.at } } } : card)))
   for (const { one, sent } of answers) {
     sentReplies.set(one.id, { ...sent, to: 'chat' })
     const said = named(ANSWER_FOR_CHAT(titleOf(one), sent.ask, sent.text))
@@ -5025,7 +5087,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   // Either way the ask is done with in the chat: the work asking again is sent to it afresh
   if (isHeld) answeredAsks.delete(a.key)
   inChat.delete(a.card.id)
-  await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
+  await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   dropDrafts($, a.card.id)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
   writtenIn(to, a.card.id)
@@ -5314,8 +5376,24 @@ const readOthers = async ($: EngineInterface) => {
   for (const key of [...endSeen.keys()]) if (!ids.has(key)) endSeen.delete(key)
   const isAppChanged = found.some(s => s.host) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
   const next = ordered(found)
-  if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
-  else if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) redraw($)
+  const was = await read($, others)
+  if (JSON.stringify(next) === JSON.stringify(was)) {
+    othersHeld = undefined
+    if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) redraw($)
+  } else if (calmOthers(next) !== calmOthers(was) || next.some(s => now - (was.find(w => w.host === s.host && w.chat === s.chat)?.at ?? 0) > STALE / 2)) {
+    othersHeld = undefined
+    await update($, others, () => next)
+  } else othersHeld = next
+}
+// Other chats' work as the panel shows it, but for what moves by itself as it runs (their beats, times, tokens and output): a change
+// in only that is not written at once, as each write draws the panel afresh under the pointer. It is held here and written with the
+// panel's running times (calmLook), and at the latest once a chat's beat is half way to being taken for gone
+let othersHeld: Shared[] | undefined
+const calmOthers = (list: Shared[]) => JSON.stringify(list.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })))
+const writeHeldOthers = async ($: EngineInterface) => {
+  const held = othersHeld
+  othersHeld = undefined
+  if (held) await update($, others, () => held)
 }
 
 // The chats this Mac's Claude app holds: its session files, one per chat, under
@@ -6355,14 +6433,14 @@ const touchesGate = (e: ToolCallInput) => {
 
 const setGates = async ($: EngineInterface, top: string, fn: (list: Gate[]) => Gate[]) => {
   if (!top) looseGates = fn(looseGates)
-  else await update($, todos, list => list.map(one => (one.id !== top ? one : { ...one, admins: fn(one.admins ?? []).length ? fn(one.admins ?? []) : undefined })))
+  else await changeTodos($, list => list.map(one => (one.id !== top ? one : { ...one, admins: fn(one.admins ?? []).length ? fn(one.admins ?? []) : undefined })))
   redraw($)
 }
 // No hold outlives the copy of the mod that made it: a card that still shows one as a chat starts is cleared
 const clearGates = async ($: EngineInterface) => {
   looseGates = looseGates.filter(one => gateHeld.has(one.id))
   if ((await read($, todos)).some(one => one.admins?.some(gate => !gateHeld.has(gate.id))))
-    await update($, todos, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(gate => gateHeld.has(gate.id)).length ? one.admins.filter(gate => gateHeld.has(gate.id)) : undefined } : one)))
+    await changeTodos($, list => list.map(one => (one.admins ? { ...one, admins: one.admins.filter(gate => gateHeld.has(gate.id)).length ? one.admins.filter(gate => gateHeld.has(gate.id)) : undefined } : one)))
 }
 // Holds the call until the person presses. A hook's own time is bounded, and time spent in a call on the engine is not counted:
 // the wait is a one-second sleep run by the engine, again and again, the press read from memory between them
@@ -7298,7 +7376,7 @@ const heldLook = async ($: EngineInterface, id: string) => {
   const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
   if (listed === 'idle' || listed === undefined) {
     const now = await $.clock.now()
-    await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
+    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
   if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
   await replyUnread($, id)
@@ -7493,13 +7571,11 @@ const chatHooks = (on: On) => {
       // Held while the person types into a reply box (holdTimes)
       // A pane held while only its running times moved is drawn again once CALM is over (heldDrawings)
       const calmNow = await $.clock.now()
-      const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length)
-      let isStale = false
-      if (!isTyping && isMoving) for (const [key, held] of heldDrawings) if (calmNow - held.at >= CALM) (heldDrawings.delete(key), (isStale = true))
+      const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.some(card => card.status === 'working'))
       // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
       if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
-      if (isStale) $.ui.invalidate('ui.render')
-      if (!isTyping && isMoving) await update($, tick, n => n + 1)
+      // The mod alone says when its panes are drawn again, and only when what they show has moved (calmLook)
+      await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
       if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
@@ -7646,8 +7722,8 @@ const chatHooks = (on: On) => {
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
       // Work nothing holds any more has nothing of its own left running in the background
-      if (!isHeld) await update($, todos, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
-      await update($, todos, list => {
+      if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
+      await changeTodos($, list => {
         const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
         // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
         // Work that gave its report waits on nothing it means to finish
@@ -7785,7 +7861,7 @@ const callBegun = async ($: EngineInterface, id: string, agent: string, tool: st
   const cmd = tool === 'Bash' ? oneLine(String(input?.command ?? '')).slice(0, 400) : ''
   const label = oneLine(String(input?.description ?? '') || cmd.split('\n')[0] || '').slice(0, 160)
   inFlight.set(id, { agent, what: runningWhat(tool), at: await $.clock.now(), ...(cmd ? { cmd, label } : {}) })
-  await update($, todos, list => withRunning(list, agent))
+  await changeTodos($, list => withRunning(list, agent))
 }
 
 // A call of a piece of work ended with what it returned: a line its agent had not seen come back before is news. The mod's own
@@ -7800,7 +7876,7 @@ const callEnded = async ($: EngineInterface, id: string, agent: string, tool: st
     if (seen.size > SEEN_KEPT) seenLines.set(agent, new Set([...seen].slice(-SEEN_KEPT / 2)))
     else seenLines.set(agent, seen)
   }
-  await update($, todos, list => withRunning(list, agent, isNew ? now : undefined))
+  await changeTodos($, list => withRunning(list, agent, isNew ? now : undefined))
 }
 
 // When something last moved under a piece of work: it or a helper started, ended, or had something new come back
@@ -7812,7 +7888,9 @@ const movedAt = (list: Todo[], top: Todo) => Math.max(...[top, ...underOf(list, 
 const lookStuck = async ($: EngineInterface) => {
   const now = await $.clock.now()
   const told: Todo[] = []
-  await update($, todos, list => {
+  await changeTodos($, list => {
+    // Told afresh on each run of the change, as it runs again on a list written meanwhile
+    told.length = 0
     let isChanged = false
     const isPrompted = (one: Todo) => waiting.some(p => p.agent && topOf(list, p.agent) === one.id)
     const next = list.map(one => {
@@ -7862,13 +7940,13 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
   const cmd = oneLine(String(call.command ?? '')).slice(0, 400)
   const now = await $.clock.now()
-  await update($, todos, list =>
+  await changeTodos($, list =>
     list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(cmd ? { cmd } : {}), ...(call.tool === 'Monitor' ? { isWatch: true } : {}) }].slice(-BG_KEPT) } : one)),
   )
 }
 // Background work that has ended or was stopped leaves every card that kept it
 const dropBackground = async ($: EngineInterface, ids: string[]) =>
-  update($, todos, list => {
+  changeTodos($, list => {
     const isGone = (id: string) => ids.includes(id)
     if (!list.some(one => one.bg?.some(b => isGone(b.id)))) return list
     return list.map(one => {
@@ -7980,7 +8058,7 @@ const keepDetached = async ($: EngineInterface, agent: string, call: { tool: str
   const what = oneLine(String(call.description ?? '') || found.core).slice(0, 160)
   const now = await $.clock.now()
   const id = `detached-${String(call.tool_use_id ?? now)}`
-  await update($, todos, list =>
+  await changeTodos($, list =>
     list.map(one => (one.id === agent ? { ...one, detached: [...(one.detached ?? []), { id, what, at: now, cmd: oneLine(command).slice(0, 400), log: logFile, pid }].slice(-BG_KEPT) } : one)),
   )
 }
@@ -8059,8 +8137,8 @@ const lookJobs = async ($: EngineInterface) => {
   // A detached job whose process ended leaves its card
   const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
   if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
-    await update($, todos, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined } : one)))
-    $.ui.invalidate('ui.render')
+    await changeTodos($, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined } : one)))
+    void drawFresh($)
   }
   // Each background command's shell, found by its words among the engine's shells: paused when any of its processes is, and gone
   // when no shell has been found for it twice in a row while others were (so a way of running the engine has not changed), as one the engine never said ended (only once a minute has passed)
@@ -8120,8 +8198,8 @@ const lookJobs = async ($: EngineInterface) => {
     isChanged = true
   }
   for (const owner of moved) jobNews.set(owner, now)
-  if (moved.size) await update($, todos, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
-  if (isChanged) $.ui.invalidate('ui.render')
+  if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
+  if (isChanged) void drawFresh($)
 }
 
 // A short time since, for a row's side: seconds, minutes, or hours and minutes
@@ -8145,7 +8223,7 @@ const openJobOutput = async ($: EngineInterface, job: Job) => {
   const file = jobFiles.get(job.id)
   // A press moves the buttons' keys, so the panel does not keep pulling back to this row
   presses += 1
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   if (!file || !canOpenJob(job)) return
   const at = await $.clock.now()
   const base = `${dir}/terminal`
@@ -8283,16 +8361,16 @@ const lookInOnHelpers = async ($: EngineInterface) => {
     if (isQuiet && helper.quietTold !== last) {
       const running = helper.running ? `${helper.running.what} for ${took(now - helper.running.at)}` : ''
       told.push({ to: parent.id, line: QUIET_HELPER(titleOf(helper), helper.id, Math.round((now - last) / 60_000), running) })
-      await update($, todos, all => all.map(one => (one.id === helper.id ? { ...one, quietTold: last } : one)))
+      await changeTodos($, all => all.map(one => (one.id === helper.id ? { ...one, quietTold: last } : one)))
     }
     const seen = stepsSeen.get(helper.id)
     if (seen && seen.steps >= SERIAL_STEPS && seen.singles / seen.steps >= SERIAL_SHARE && !helper.serialTold) {
       told.push({ to: parent.id, line: SERIAL_HELPER(titleOf(helper), helper.id, seen.steps) })
-      await update($, todos, all => all.map(one => (one.id === helper.id ? { ...one, serialTold: true } : one)))
+      await changeTodos($, all => all.map(one => (one.id === helper.id ? { ...one, serialTold: true } : one)))
     }
   }
   // Each card with helpers running keeps when they were last looked at and how many were quiet; one with none running keeps nothing
-  await update($, todos, all => {
+  await changeTodos($, all => {
     const changed = all.some(one => (looked.get(one.id)?.quiet ?? -1) !== (one.lookedIn?.quiet ?? -1) || (looked.get(one.id)?.running ?? -1) !== (one.lookedIn?.running ?? -1))
     return changed || looked.size ? all.map(one => ({ ...one, lookedIn: looked.get(one.id) ?? (one.lookedIn && one.status === 'working' ? undefined : one.lookedIn) })) : all
   })
@@ -8554,7 +8632,7 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   }
   if (!back.length && !lost.length) return
   const now = await $.clock.now()
-  await update($, todos, list => {
+  await changeTodos($, list => {
     const known = new Set(list.map(one => one.id))
     const added = [...back, ...lost].filter(one => !known.has(one)).map(one => ({ ...started(one, '', '', '', cutAt), status: 'stopped' as const, endedAt: cutAt }))
     return [...list, ...added].map(one =>
@@ -8771,7 +8849,7 @@ const workHooks = (on: On) => {
     let woken = ''
     const next = async (call: typeof e) => {
       const r = await run(call)
-      if (woken && !r.deny && !r.isError) await update($, todos, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
+      if (woken && !r.deny && !r.isError) await changeTodos($, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
       // Ended work a message starts again is at work from now: its card leaves Finished while it acts on the message
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
@@ -8834,7 +8912,7 @@ const workHooks = (on: On) => {
                   ? 'the work that started you'
                   : `the work${title(sender)}`
         }
-        await update($, todos, list =>
+        await changeTodos($, list =>
           list.map(one =>
             one.id !== target.id
               ? one
@@ -8860,7 +8938,7 @@ const workHooks = (on: On) => {
         const now = await $.clock.now()
         const isKeeping = isTool(e.tool, 'todo') || isTool(e.tool, 'note')
         let nudge = ''
-        await update($, todos, list =>
+        await changeTodos($, list =>
           list.map(one => {
             if (one.id !== id) return one
             const base = { ...(one.status === 'working' ? one : resumed(one, now)), steps: (one.steps ?? 0) + 1, answeredAt: undefined, waitsSince: undefined }
@@ -8923,7 +9001,7 @@ const workHooks = (on: On) => {
         await stopHelpers($, stopId)
         await dropBackground($, [stopId])
         const now = await $.clock.now()
-        await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
+        await changeTodos($, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
         await keepStoppedReports($, now)
         await lookEnds($)
       }
@@ -8957,7 +9035,7 @@ const workHooks = (on: On) => {
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
-    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     // A step the app sends to an older model or to Haiku after its safeguards flag a message is not moved back past the flag: the
     // work is ended there with a report that says so (FLAGGED), so its parent starts what is left again on a current model. An agent
@@ -8975,7 +9053,7 @@ const workHooks = (on: On) => {
       flaggedOnce.add(id)
       if (n === 1) await log($, `work ${id} was flagged and the app would send it to ${modelName(e.model)}: it is ended with a report instead`)
       if (dir) {
-        await update($, todos, list => list.map(one => (one.id === id ? { ...one, flagged: modelName(e.model), moved: undefined } : one)))
+        await changeTodos($, list => list.map(one => (one.id === id ? { ...one, flagged: modelName(e.model), moved: undefined } : one)))
         await stopHelpers($, id).catch(() => undefined)
       }
       // Its report goes back through the handback tool; where that does not end it, a plain last answer, and past a few the work is
@@ -9000,7 +9078,7 @@ const workHooks = (on: On) => {
     }
     // The card says so only while it holds: not once the app sends its steps to a right model again
     const moved = isMovedByApp ? modelName(e.model) : undefined
-    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
+    if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
     // A pick the engine has since passed is its family's newest
     const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined
     const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead
@@ -9009,7 +9087,7 @@ const workHooks = (on: On) => {
     const model = (r.usage as { model?: string } | undefined)?.model
     if (model) seeModel(model)
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)
-    if (id !== undefined && tokens && dir) await update($, todos, list => list.map(one => (one.id === id ? { ...one, tokens, model: one.chosen ?? (modelName(model ?? '') ? model : one.model) } : one)))
+    if (id !== undefined && tokens && dir) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, tokens, model: one.chosen ?? (modelName(model ?? '') ? model : one.model) } : one)))
 
     return r
   })
@@ -9074,7 +9152,7 @@ const workHooks = (on: On) => {
     const named1 = isOwn && !fromReport && !e.resume ? (await read($, reports)).filter(one => e.prompt.includes(`reports/${one.id}/`) || e.prompt.endsWith(`reports/${one.id}`)) : []
     const goesOn = named1.length === 1 && named1[0] && [...aboutWords(named1[0].title)].some(word => aboutWords(e.description ?? '').has(word)) ? named1[0].id : ''
     const from = fromReport || goesOn
-    await update($, todos, list => {
+    await changeTodos($, list => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
       const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
@@ -9107,11 +9185,18 @@ const commandHooks = (on: On) => {
   // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
+      // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
+      if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
     }
     return next(e)
   })
+  // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
+  on('ui.scroll', async ($, e, next) => {
+    if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
+    return next(e)
+  }).catch(($, e, next) => next(e))
   // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts
   on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)))
   // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
@@ -9646,6 +9731,8 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
+    if (paneId === LIST) listDrawing += 1
+    try {
     // While the person types into a box the pane is drawn as it last was, whole, but for a change in its shape; not typing, as it last
     // was while only its running times moved, for CALM at most (heldDrawings)
     const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}|${e.props.scroll.offset > 0 ? 1 : 0}`
@@ -9655,6 +9742,7 @@ const panelHooks = (on: On) => {
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return held.drawing as Awaited<ReturnType<typeof next>>
+    if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
     const drawing = await (async () => {
@@ -11200,7 +11288,11 @@ const panelHooks = (on: On) => {
     )
     })()
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     return drawing
+    } finally {
+      if (paneId === LIST) listDrawing -= 1
+    }
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
@@ -11215,7 +11307,7 @@ const tabHooks = (on: On) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
-    if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1))
+    if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>

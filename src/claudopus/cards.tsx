@@ -166,7 +166,7 @@ const sync = async ($: EngineInterface) => {
   )
   // The chat is read once for each such work, not at every look
   if (isUnseen) for (const one of live) if (!one.parentId) helpersChecked.add(one.id)
-  await update($, todos, list => {
+  await changeTodos($, list => {
     const cards = new Map(list.map(one => [one.id, one] as const))
     let isChanged = false
     for (const one of live) {
@@ -207,7 +207,7 @@ const sync = async ($: EngineInterface) => {
 const change = async ($: EngineInterface, agentId: string, fn: (one: Todo, at: number) => Todo) => {
   const now = await $.clock.now()
   if (!(await read($, todos)).some(one => one.id === agentId)) await sync($)
-  await update($, todos, list => {
+  await changeTodos($, list => {
     const id = topOf(list, agentId)
     return list.map(one => (one.id === id ? fn(one, now) : one))
   })
@@ -227,7 +227,7 @@ const stop = async ($: EngineInterface, id: string) => {
   await stopHelpers($, id)
   const now = await $.clock.now()
   // What finished work left running is stopped with it
-  await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === id && one.leftSince ? { ...one, leftSince: undefined } : one)))
+  await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === id && one.leftSince ? { ...one, leftSince: undefined } : one)))
   await keepStoppedReports($, now)
   await lookEnds($)
 }
@@ -238,7 +238,7 @@ const choose = async ($: EngineInterface, id: string, model: string) => {
   await update($, view, v => ({ ...v, picking: '' }))
   const one = (await read($, todos)).find(todo => todo.id === id)
   if (!one || one.status !== 'working' || modelName(one.chosen ?? one.model ?? '') === modelName(model)) return
-  await update($, todos, list => list.map(todo => (todo.id === id ? { ...todo, model, chosen: model } : todo)))
+  await changeTodos($, list => list.map(todo => (todo.id === id ? { ...todo, model, chosen: model } : todo)))
   await tell($, id, movedTo(modelName(model), await $.clock.now()))
 }
 
@@ -394,7 +394,7 @@ const recoverEnded = async ($: EngineInterface) => {
   }
   // A card read back bare by an earlier version, with no times or model, is replaced
   if (found.length)
-    await update($, todos, now => capped(byEnd([...found.filter(one => !now.some(card => card.id === one.id && !isBare(card))), ...now.filter(card => !(isBare(card) && found.some(one => one.id === card.id)))])))
+    await changeTodos($, now => capped(byEnd([...found.filter(one => !now.some(card => card.id === one.id && !isBare(card))), ...now.filter(card => !(isBare(card) && found.some(one => one.id === card.id)))])))
 }
 
 // What was kept comes back into the list when the chat loads, below anything the list already holds
@@ -403,7 +403,7 @@ const loadFinished = async ($: EngineInterface) => {
   if (!id) return
   const kept = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   if (!Array.isArray(kept) || !kept.length) return
-  await update($, todos, list => {
+  await changeTodos($, list => {
     // What it left running is looked at afresh: the record of how it ended does not outlive the load
     const fresh = kept.filter(one => one.id && one.status !== 'working' && !list.some(card => card.id === one.id)).map(one => ({ ...one, leftSince: undefined, stuckAt: undefined, bg: undefined, waitsSince: undefined }))
     return fresh.length ? capped(byEnd([...fresh, ...list])) : list
@@ -421,7 +421,6 @@ const follow = async ($: EngineInterface) => {
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)
   // Reports another chat kept since are listed here too
   await loadReports($).catch(() => undefined)
-  if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) await update($, tick, n => n + 1)
 }
 
 // A message as the panel quotes it: whole when short, else its first sentences

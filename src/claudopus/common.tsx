@@ -103,6 +103,18 @@ const tick = atom({ plugin: 'claudopus', key: 'tick' } as const, 0, { shape: 'ti
 // When the panel was last drawn, kept through a reload (drawnNow, written by the timer each second, never read while drawing)
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
 let drawnNow = 0
+// The list of work is written only when it changes. Each write of a value the panel or Details read draws them again, and the app
+// builds a pane it is asked to draw whole afresh, even when it shows the same: the element under the pointer loses its hover look,
+// and a press on a button of the drawing replaced meanwhile reaches nothing. The list was written over with the same list every
+// few seconds while work ran (15 Nov, a minute of running work: seven writes, none of them a change). Should another write land
+// between the look and the write, the change is made again on what that write left
+const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => {
+  const now = await read($, todos)
+  const before = JSON.stringify(now)
+  const next = fn(now)
+  if (JSON.stringify(next) === before) return now
+  return update($, todos, list => (JSON.stringify(list) === before ? next : fn(list)))
+}
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
 // they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them
@@ -310,7 +322,15 @@ const movedTo = (name: string, at: number) => {
   return `${MODEL_HEAD}${name} at ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}. ${who(true)} chose it in the panel: your next steps run on ${name}.`
 }
 
-const readOr = ($: EngineInterface, path: string) => $.fs.read(path).catch(() => '')
+const readOr = ($: EngineInterface, path: string) =>
+  $.fs.read(path).catch(() => '').then(text => (listDrawing > 0 && isWatched(path, text) && !drawnFiles.has(path) && drawnFiles.set(path, text), text))
+// While the panel is drawn, the files its drawing reads, as read then: looked at again each second, so a change in one draws it
+// again (calmLook), as nothing else would
+let listDrawing = 0
+// Another hook may read while the panel is drawn: what grows as work runs (transcripts, logs, other chats' live files, words, asks,
+// keep files) and anything large is never watched, so it cannot draw the panel again each second
+const isWatched = (path: string, text: string) => text.length < 64_000 && !/\.jsonl$|\/log\.md$|\/live\/|\/words\/|\/asks\/|\/keep\/|\/helpers\//.test(path)
+const drawnFiles = new Map<string, string>()
 // Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
 // Added to its end, never read and written back whole: every chat on this Mac writes here, and two rewriting it at once left runs of

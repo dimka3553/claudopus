@@ -48,6 +48,8 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
+    if (paneId === LIST) listDrawing += 1
+    try {
     // While the person types into a box the pane is drawn as it last was, whole, but for a change in its shape; not typing, as it last
     // was while only its running times moved, for CALM at most (heldDrawings)
     const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}|${e.props.scroll.offset > 0 ? 1 : 0}`
@@ -57,6 +59,7 @@ const panelHooks = (on: On) => {
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return held.drawing as Awaited<ReturnType<typeof next>>
+    if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
     const drawing = await (async () => {
@@ -1602,7 +1605,11 @@ const panelHooks = (on: On) => {
     )
     })()
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     return drawing
+    } finally {
+      if (paneId === LIST) listDrawing -= 1
+    }
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
