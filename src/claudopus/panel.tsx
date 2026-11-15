@@ -72,6 +72,8 @@ const panelHooks = (on: On) => {
     // A reply in words left here holds its ask as acted on until that chat's own file carries it; from then its file says
     for (const one of cardsOf(otherChats)) if (one.ask?.replied && actingOn.get(`${one.id}:${one.ask.at}`) === one.ask.replied.text) actingOn.delete(`${one.id}:${one.ask.at}`)
     const elsewhere = cardsOf(otherChats).map(one => (one.ask && answeredHere.has(`${one.id}:${one.ask.at}`) ? { ...one, ask: undefined } : one))
+    // Their helpers, which only a Details tab lists
+    const helpersThere = helpersOf(otherChats)
     const chat = await read($, me)
     const at = await $.clock.now()
     // Prompts answered here and in other chats, for a minute after their call ended
@@ -826,7 +828,7 @@ const panelHooks = (on: On) => {
 
     // The work this Details tab is for, if it is one; a workflow's tab folds each of its agents' chats apart
     const flowOpen = flowShown ? pickedOf(flowShown) : undefined
-    const workId = paneId === LIST ? '' : flowShown ? `${flowShown.id}:${flowOpen?.id ?? ''}` : ([...all, ...elsewhere].find(one => workPaneOf(one.id) === paneId)?.id ?? '')
+    const workId = paneId === LIST ? '' : flowShown ? `${flowShown.id}:${flowOpen?.id ?? ''}` : ([...all, ...elsewhere, ...helpersThere].find(one => workPaneOf(one.id) === paneId)?.id ?? '')
     // What is unfolded in this tab: runs of tool steps and long messages by number, and the parts named by OPEN_ASK and the rest
     const open = folds.get(workId) ?? []
     const fold = (at: number) => {
@@ -889,66 +891,88 @@ const panelHooks = (on: On) => {
       )
     }
 
-    // The to-dos: the one being done first, bright, with the dots and where the work says it is; the next few under it, dim; what
-    // is done or dropped folded into one quiet count. Orange is the header's alone
+    // The to-dos, every one in the order the work listed them: done ticked, the one being done bright with the dots and where the
+    // work says it is under it, the rest dim, dropped struck through. Many done fold into one row that opens them. Orange is the
+    // header's alone
     const todoPart = (one: Todo) => {
       const isWorking = one.status === 'working'
-      const doing = one.items.filter(item => item.state === 'doing')
-      const waiting = one.items.filter(item => item.state === 'open')
-      const done = one.items.filter(item => item.state === 'done')
-      const dropped = one.items.filter(item => item.state === 'dropped')
-      const kept = one.items.length - dropped.length
+      const done = one.items.filter(item => item.state === 'done').length
+      const kept = one.items.filter(item => item.state !== 'dropped').length
       const where = isWorking ? now(one) : ''
-      const shownNext = open.includes(OPEN_NEXT) ? waiting : waiting.slice(0, NEXT_SHOWN)
-      const settled = [done.length ? `${done.length} done` : '', dropped.length ? `${dropped.length} dropped` : ''].filter(Boolean).join(' · ')
+      const hasDoing = one.items.some(item => item.state === 'doing')
+      const isFolded = done > DONE_FOLDED && !open.includes(OPEN_DONE)
       if (!one.items.length && !where) return null
+      let isWhereSaid = false
       return part(
         'part-todos',
         'To-dos',
-        kept ? `${done.length} of ${kept} done` : '',
-        <Box flexDirection="column" gap={1}>
-          {doing.length || where ? (
-            <Box key="doing" flexDirection="column">
-              <Box flexDirection="column" minWidth={0} flexGrow={1} flexShrink={1}>
-                {doing.length ? (
-                  doing.map((item, i) => row(`doing-${i}`, isWorking ? live(`live-doing-${i}`) : <Text dimColor>○</Text>, item, i === 0 && where ? cut(where, room) : ''))
-                ) : (
-                  <Box flexDirection="row" alignItems="flex-start" gap={1}>
-                    {live('live-where')}
-                    <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                      <Text wrap="wrap">{cut(where, room)}</Text>
-                    </Box>
-                  </Box>
-                )}
+        kept ? `${done} of ${kept} done` : '',
+        <Box flexDirection="column">
+          {done > DONE_FOLDED ? opener(OPEN_DONE, isFolded ? `${done} done` : 'Fold the done') : null}
+          {one.items.map((item, i) => {
+            if (item.state === 'done' && isFolded) return null
+            if (item.state === 'doing') {
+              const under = !isWhereSaid && where ? cut(where, room) : ''
+              isWhereSaid = true
+              return row(`todo-${i}`, isWorking ? live(`live-doing-${i}`) : <Text dimColor>○</Text>, item, under)
+            }
+            const mark = item.state === 'done' ? <Text color="success" dimColor>✓</Text> : <Text dimColor>{item.state === 'dropped' ? '✕' : '○'}</Text>
+            return row(`todo-${i}`, mark, item)
+          })}
+          {!hasDoing && where ? (
+            <Box key="where" flexDirection="row" alignItems="flex-start" gap={1}>
+              {live('live-where')}
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                <Text wrap="wrap">{cut(where, room)}</Text>
               </Box>
-            </Box>
-          ) : null}
-          {waiting.length ? (
-            <Box key="next" flexDirection="column">
-              <Text dimColor>Next</Text>
-              {shownNext.map((item, i) => row(`next-${i}`, <Text dimColor>○</Text>, item))}
-              {waiting.length > NEXT_SHOWN ? opener(OPEN_NEXT, open.includes(OPEN_NEXT) ? 'Fewer' : `${waiting.length - NEXT_SHOWN} more`) : null}
-            </Box>
-          ) : null}
-          {settled ? (
-            <Box key="settled" flexDirection="column">
-              {opener(OPEN_DONE, settled)}
-              {open.includes(OPEN_DONE)
-                ? [...done, ...dropped].map((item, i) =>
-                    row(`settled-${i}`, <Text color={item.state === 'done' ? 'success' : undefined} dimColor>{item.state === 'done' ? '✓' : '✕'}</Text>, item),
-                  )
-                : null}
             </Box>
           ) : null}
         </Box>,
       )
     }
-
     // In Details: what the work has running, then every helper it started, and theirs, at work or ended, each with what it has
     // running under it, as the same tree as on its card, every job shown; each helper opens its own Details, which shows its own
+    // Under a helper at work, the step it is on and where it says it is; under a job, the last lines its output ends with, as a
+    // terminal shows them. Both sit where the row's name starts; one that ended has nothing under it
+    const underTwig = (t: Twig) => {
+      const pad = t.depth * 2 + 4
+      if (t.job) {
+        // the line its row already says is not said again
+        const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).filter(line => line.trim() !== (t.job?.latest ?? '').trim()).slice(-OUTPUT_LINES)
+        if (!tail.length) return null
+        return (
+          <Box key={`tail-${t.job.id}`} flexDirection="row" paddingLeft={pad} flexShrink={0}>
+            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={OUTPUT_FILL}>
+              {tail.map((line, n) => (
+                <Text key={`tail-${t.job?.id}-${n}`} dimColor wrap="truncate-end">
+                  {line}
+                </Text>
+              ))}
+            </Box>
+          </Box>
+        )
+      }
+      const kid = t.one
+      if (!kid || kid.status !== 'working') return null
+      const kept = kid.items.filter(item => item.state !== 'dropped')
+      const doing = kept.findIndex(item => item.state === 'doing')
+      const lines = [doing >= 0 ? `Step ${doing + 1} of ${kept.length} · ${kept[doing]?.text ?? ''}` : '', now(kid)].filter(Boolean)
+      if (!lines.length) return null
+      return (
+        <Box key={`under-${kid.id}`} flexDirection="column" paddingLeft={pad} flexShrink={0}>
+          {lines.map((line, n) => (
+            <Text key={`under-${kid.id}-${n}`} dimColor wrap="truncate-end">
+              {line}
+            </Text>
+          ))}
+        </Box>
+      )
+    }
     const helpersPart = (one: Todo) => {
-      const under = underOf(all, one.id)
-      const branches = [...jobBranches(one, true), ...withJobs(branchesOf(all, one.id, () => true), true)]
+      // Another chat's work has its helpers from that chat's file
+      const list = one.chat ? helpersThere : all
+      const under = underOf(list, one.id)
+      const branches = [...jobBranches(one, true), ...withJobs(branchesOf(list, one.id, () => true), true)]
       const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid, at).reduce((sum, job) => sum + (job.count ?? 1), 0), 0)
       if (!under.length && !jobs) return null
       const running = under.filter(kid => kid.status === 'working').length
@@ -959,7 +983,7 @@ const panelHooks = (on: On) => {
         'part-helpers',
         !jobs ? 'Helpers' : under.length ? 'Helpers and jobs' : 'Running',
         side,
-        <Box flexDirection="column">{twigsOf(branches).map(t => (t.job ? jobRow(t, 'details') : twigRow(t, 'details')))}</Box>,
+        <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
       )
     }
 
@@ -1067,21 +1091,32 @@ const panelHooks = (on: On) => {
       )
     }
 
-    // Another chat's work: its own chat is in that chat's panel, which one press opens wherever the app can open that chat (a chat of
-    // the app on this Mac, or one Remote Control serves); elsewhere it says where to go. Nothing of that chat is read from here
-    const theirChat = (one: Todo, c: NonNullable<Todo['chat']>) => {
-      const id = one.id
-      const s = otherChats.find(one => one.chat === c.id && one.host === c.host)
-      const canOpen = Boolean(s && pressOf(s))
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text dimColor wrap="wrap">{`Its chat is shown in the panel of the chat "${chatName(c)}"${c.host ? ` on ${macName(c.host)}` : ''}, which runs it.${one.status === 'working' ? ' Stop it or move it to another model there.' : ''}`}</Text>
-          {s && canOpen ? (
-            <Box flexDirection="row">
-              <Button key={`their-chat-${id}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, s))} />
-            </Box>
-          ) : null}
-        </Box>
+    // Another chat's work whose chat cannot be read here (a chat on another Mac, or one its file no longer holds): where it is. Its
+    // head has the press that opens that chat
+    const theirChat = (one: Todo, c: NonNullable<Todo['chat']>) => (
+      <Text dimColor wrap="wrap">{`Its chat is kept by the chat "${chatName(c)}"${c.host ? ` on ${macName(c.host)}` : ''}, which runs it.${one.status === 'working' ? ' Stop it or move it to another model there.' : ''}`}</Text>
+    )
+    // The press on another chat's name that opens it, wherever the app can open that chat (a chat of the app on this Mac, or one Remote
+    // Control serves)
+    const openTheirs = (one: Todo, c: NonNullable<Todo['chat']>) => {
+      const s = otherChats.find(other => other.chat === c.id && other.host === c.host)
+      return s && pressOf(s) ? <Button key={`their-chat-${one.id}-${presses}`} label="Open that chat ↗" plain onPress={() => void ((presses += 1), openChat($, s))} /> : null
+    }
+
+    // What the work reported as it ended, the first of it, whole on a press
+    const resultPart = (one: Todo) => {
+      if (one.status === 'working' || !one.answer.trim()) return null
+      const whole = one.answer.trim()
+      const short = cut(whole, RESULT_SHOWN)
+      const isLong = short !== whole
+      return part(
+        'part-result',
+        'Result',
+        '',
+        <Box flexDirection="column">
+          <Markdown text={isLong && !open.includes(OPEN_RESULT) ? short : whole} />
+          {isLong ? opener(OPEN_RESULT, open.includes(OPEN_RESULT) ? 'Show less' : 'Show all') : null}
+        </Box>,
       )
     }
 
@@ -1089,7 +1124,7 @@ const panelHooks = (on: On) => {
     // buttons sit at the top, above a chat of any length
     const big = (one: Todo, lines: Line[] | undefined) => {
       const showing = lines ? newest(lines).length : 0
-      const parent = one.parentId ? all.find(card => card.id === one.parentId) : undefined
+      const parent = one.parentId ? [...all, ...elsewhere, ...helpersThere].find(card => card.id === one.parentId) : undefined
       return (
         <Box key={`todo-${one.id}`} flexDirection="column" gap={1} flexGrow={1}>
           <Box key="part-head" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
@@ -1104,7 +1139,12 @@ const panelHooks = (on: On) => {
                   <Button key={`open-parent-${one.id}-${presses}`} label={`↑ A helper of: ${cut(titleOf(parent), Math.max(20, room - 16))}`} plain dimColor hover={{ scope: `parent-${one.id}`, underline: true }} onPress={() => openWork($, parent.id)} />
                 </Box>
               ) : null}
-              {one.chat ? <Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat, selfName()) ? `, ${chatSide(one.chat, selfName())}` : ''}`}</Text> : null}
+              {one.chat ? (
+                <Box flexDirection="row" flexWrap="wrap" alignItems="flex-start" gap={1}>
+                  <Text dimColor wrap="wrap">{`From the chat "${chatName(one.chat)}"${chatSide(one.chat, selfName()) ? `, ${chatSide(one.chat, selfName())}` : ''}`}</Text>
+                  {openTheirs(one, one.chat)}
+                </Box>
+              ) : null}
               {(one.status === 'working' && !one.chat) || left(one) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
@@ -1135,10 +1175,11 @@ const panelHooks = (on: On) => {
               <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
             </Box>
           ) : null}
+          {resultPart(one)}
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
-          {one.chat
+          {one.chat && !lines && (talks.has(one.id) || one.chat.host)
             ? part('part-chat', 'Its chat', '', theirChat(one, one.chat))
             : part('part-chat', 'Its chat', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading its chat…</Text>)}
         </Box>
@@ -1396,11 +1437,12 @@ const panelHooks = (on: On) => {
     }
 
     // A Details tab stays, even once its work has ended, until it is closed; work no longer kept says so
-    const alone = [...all, ...elsewhere].find(one => one.id === workId)
+    const alone = [...all, ...elsewhere, ...helpersThere].find(one => one.id === workId)
     if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This work has ended, or its chat is closed. Its chat keeps it.' : 'This work is no longer kept.'}</Text>
     // Its chat and pictures are read outside the drawing, which draws at once from what was read last: a long chat takes seconds to
     // read, and a drawing that waits on it is never shown
-    if (alone && !alone.chat) void loadWork($, alone.id).catch(() => undefined)
+    // Another chat's is read from that chat's own file, on this Mac
+    if (alone) void (alone.chat ? loadTheirs($, alone) : loadWork($, alone.id)).catch(() => undefined)
     const talked = alone ? talks.get(alone.id) : undefined
     // The reports kept, in every chat: on this pane only the button that opens their own
     const kept = await read($, reports)

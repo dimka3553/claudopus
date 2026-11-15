@@ -102,6 +102,7 @@ declare global {
   export import BRIDGE_ID = M5.BRIDGE_ID
   export import remoteId = M5.remoteId
   export import cardsOf = M5.cardsOf
+  export import helpersOf = M5.helpersOf
   export import chatName = M5.chatName
   export import chatSide = M5.chatSide
   export import clockOf = M5.clockOf
@@ -129,6 +130,7 @@ declare global {
   export import pushHead = M5.pushHead
   export import pushOf = M5.pushOf
   export import shareable = M5.shareable
+  export import shareableHelpers = M5.shareableHelpers
   export import sharedOf = M5.sharedOf
   export import signOf = M5.signOf
   export import STALE = M5.STALE
@@ -208,6 +210,8 @@ declare global {
   export import jobKindOf = M10.jobKindOf
   export import JOBS_SHOWN = M10.JOBS_SHOWN
   export import latestOf = M10.latestOf
+  export import tailOf = M10.tailOf
+  export import OUTPUT_LINES = M10.OUTPUT_LINES
   export import pidOf = M10.pidOf
   export import portOf = M10.portOf
   export import procsOf = M10.procsOf

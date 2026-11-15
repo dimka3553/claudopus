@@ -18,6 +18,13 @@ export const FETCH_EVERY = 10_000
 // What one card carries to other chats: enough for its small card and its Details, not its whole log
 const ITEMS_SHARED = 30
 const WORDS_SHARED = 1200
+// What it reported when it ended, as far as its Details shows it
+const ANSWER_SHARED = 1500
+// Its helpers, the newest first, so its Details lists them as its own chat's does
+const HELPERS_SHARED = 24
+const HELPER_ITEMS = 12
+// Text cut short says so
+const upTo = (text: string, most: number) => (text.length > most ? `${text.slice(0, most - 1).trimEnd()}…` : text)
 
 // Work that ended is shown in other chats' panels too, where it turns happy and folds into Finished as in its own: the newest few
 // that ended in the last hours, while its chat is open
@@ -34,8 +41,27 @@ export const shareable = (list: readonly Todo[], now = 0): Todo[] =>
       words: one.words.slice(0, WORDS_SHARED),
       items: one.items.slice(-ITEMS_SHARED),
       entries: [...one.entries].reverse().filter(entry => entry.kind !== 'steer').slice(0, 1),
-      answer: '',
+      answer: upTo(one.answer, ANSWER_SHARED),
     }))
+// The helpers under the work a chat shares, however deep, cut as their work is: another chat's Details lists them, and opens each
+export const shareableHelpers = (list: readonly Todo[], shared: readonly Todo[]): Todo[] => {
+  const ids = new Set(shared.map(one => one.id))
+  const topOf = (one: Todo) => {
+    let at = one
+    for (let n = 0; at.parentId && n < 10; n += 1) {
+      const up = list.find(other => other.id === at.parentId)
+      if (!up) return ''
+      at = up
+    }
+    return at.id
+  }
+  return list
+    .filter(one => one.parentId && !one.chat && ids.has(topOf(one)))
+    // Those at work first, so a busy chat never drops a running helper behind ended ones
+    .sort((a, b) => Number(b.status === 'working') - Number(a.status === 'working') || b.startedAt - a.startedAt)
+    .slice(0, HELPERS_SHARED)
+    .map(one => ({ ...one, words: '', items: one.items.slice(-HELPER_ITEMS), entries: [...one.entries].reverse().filter(entry => entry.kind !== 'steer').slice(0, 1), answer: upTo(one.answer, ANSWER_SHARED / 2) }))
+}
 
 // What tells one shared state from another, the running times aside: a file is written again when it changes or its beat is due
 export const signOf = (cards: readonly Todo[]) =>
@@ -79,14 +105,17 @@ export const sharedOf = (text: string, now: number, host = ''): Shared | undefin
     if (typeof one.chat !== 'string' || !one.chat || typeof one.at !== 'number' || !Array.isArray(one.cards)) return undefined
     if (now - one.at > STALE) return undefined
     // Running work under `cards`, ended work apart under `ended`, so a version that reads `cards` alone never shows ended work as running
-    const cards = [...one.cards, ...(Array.isArray(one.ended) ? (one.ended as unknown[]) : [])].filter((card): card is Todo => typeof card === 'object' && card !== null && 'id' in card && typeof card.id === 'string' && Boolean(card.id) && 'items' in card && Array.isArray(card.items) && 'entries' in card && Array.isArray(card.entries))
+    const isCard = (card: unknown): card is Todo => typeof card === 'object' && card !== null && 'id' in card && typeof card.id === 'string' && Boolean(card.id) && 'items' in card && Array.isArray(card.items) && 'entries' in card && Array.isArray(card.entries)
+    const cards = [...one.cards, ...(Array.isArray(one.ended) ? (one.ended as unknown[]) : [])].filter(isCard)
+    // Their helpers apart, under `helpers`, so a version that reads `cards` alone never lists a helper as work of its own
+    const helpers = (Array.isArray(one.helpers) ? (one.helpers as unknown[]) : []).filter(isCard).filter(card => typeof card.parentId === 'string' && Boolean(card.parentId))
     // A chat waiting on its own prompt is listed whether or not it has work
     const prompts = promptsOf(one.prompts).map(({ answered: _answered, isRunning: _running, isCut: _cut, endedAt: _ended, ...open }) => open)
     // Prompts answered there lately, said for a minute, so a chat is listed for them too
     const answeredPrompts = promptsOf(one.answeredPrompts).filter(p => p.answered)
     if (!cards.length && !prompts.length && !answeredPrompts.length) return undefined
     const link = linkOf(one.link)
-    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(prompts.length ? { prompts } : {}), ...(answeredPrompts.length ? { answeredPrompts } : {}), ...(link ? { link } : {}) }
+    return { chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards, ...(helpers.length ? { helpers } : {}), ...(prompts.length ? { prompts } : {}), ...(answeredPrompts.length ? { answeredPrompts } : {}), ...(link ? { link } : {}) }
   } catch {
     return undefined
   }
@@ -115,6 +144,9 @@ const short = (text: string) => [...text].reduce((sum, ch) => (sum * 31 + ch.cha
 export const remoteId = (s: Shared, id: string) => `${REMOTE}${short(`${s.host}/${s.chat}`)}-${id}`
 export const cardsOf = (list: readonly Shared[]): Todo[] =>
   list.flatMap(s => s.cards.map(one => ({ ...one, id: remoteId(s, one.id), chat: { id: s.chat, title: s.title, folder: s.folder, host: s.host, agent: one.id } })))
+// Their helpers the same way, each under its work's id here: listed only in a Details tab, never as cards of their own
+export const helpersOf = (list: readonly Shared[]): Todo[] =>
+  list.flatMap(s => (s.helpers ?? []).map(one => ({ ...one, id: remoteId(s, one.id), parentId: remoteId(s, one.parentId), chat: { id: s.chat, title: s.title, folder: s.folder, host: s.host, agent: one.id } })))
 
 // The other chats in the order the panel shows them: those that wait on the person first (an open prompt, which holds its chat up,
 // before an ask), then the one whose running work began first, then the open chats with none running, by name
