@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { appOf, batteryOfLinux, batteryOfMac, gpuOf, leftText, claudeOf, figuresOf, footprintOf, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, rawOfLinux, rawOfMac, secondsOfTime, usageMac, usageSvg, USAGE_AMBER, USAGE_PURPLE } from './usage'
+import { appOf, batteryOfLinux, batteryOfMac, batteryShown, batterySvg, gpuOf, leftText, claudeOf, figuresOf, footprintOf, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, rawOfLinux, rawOfMac, secondsOfTime, usageMac, usageSvg, USAGE_AMBER, USAGE_PURPLE } from './usage'
 
 const GiB = 1024 ** 3
 // A figure to six places, as two sums of tenths rarely meet exactly
@@ -173,7 +173,7 @@ test('the battery is taken as the system says it: the Mac own battery only, a ti
   expect(batteryOfMac(mac('85%; discharging; 4:12 remaining'))).toEqual({ pct: 85, state: 'battery', left: 252 })
   expect(batteryOfMac(mac('85%; discharging; (no estimate)'))).toEqual({ pct: 85, state: 'battery' })
   expect(batteryOfMac(mac('62%; charging; 1:05 remaining'))).toEqual({ pct: 62, state: 'charging', left: 65 })
-  expect(batteryOfMac(mac('99%; finishing charge; 0:05 remaining'))).toEqual({ pct: 99, state: 'charging', left: 5 })
+  expect(batteryOfMac(mac('99%; finishing charge; 0:05 remaining'))).toEqual({ pct: 99, state: 'charging', left: 5, finishing: true })
   expect(batteryOfMac(mac('100%; charged; 0:00 remaining'))).toEqual({ pct: 100, state: 'plugged' })
   expect(batteryOfMac(mac('80%; AC attached; not charging'))).toEqual({ pct: 80, state: 'plugged' })
   expect(batteryOfMac(mac('0%; charging; (no estimate)'))).toEqual({ pct: 0, state: 'charging' })
@@ -195,6 +195,27 @@ test('the battery is taken as the system says it: the Mac own battery only, a ti
   // A server, and a wireless mouse's battery
   expect(batteryOfLinux('')).toBeUndefined()
   expect(batteryOfLinux(sys({ 'hidpp_battery_0': { type: 'Battery', scope: 'Device', capacity: '90', status: 'Discharging' } }))).toBeUndefined()
+})
+
+test('the battery as the bar shows it never puts a time beside a charge the system calls full while charging, or empty on battery', async () => {
+  const mac = (from: string, line: string) => batteryOfMac(`Now drawing from '${from}'\n -InternalBattery-0 (id=1)\t${line} present: true\n`)!
+  // What this Mac reported: 100% (the cells at 95%), still charging, "finishing charge", 0:36 to full
+  const finishing = mac('AC Power', '100%; finishing charge; 0:36 remaining')
+  expect(finishing).toEqual({ pct: 100, state: 'charging', left: 36, finishing: true })
+  expect(batteryShown(finishing)).toEqual({ pct: 100, state: 'charging', finishing: true })
+  expect(batteryShown(mac('AC Power', '100%; charging; 0:12 remaining'))).toEqual({ pct: 100, state: 'charging' })
+  expect(batteryShown(mac('Battery Power', '0%; discharging; 0:09 remaining'))).toEqual({ pct: 0, state: 'battery' })
+  // A time beside a charge that is not full or empty stays as the system gives it
+  expect(batteryShown(mac('AC Power', '99%; finishing charge; 0:05 remaining'))).toEqual({ pct: 99, state: 'charging', left: 5, finishing: true })
+  expect(batteryShown(mac('Battery Power', '100%; discharging; 9:41 remaining'))).toEqual({ pct: 100, state: 'battery', left: 581 })
+  expect(batteryShown(mac('AC Power', '0%; charging; 2:10 remaining'))).toEqual({ pct: 0, state: 'charging', left: 130 })
+  // The icon: a bolt while it finishes the charge, a plug when held on power and not charging
+  expect(batterySvg(finishing).source).toContain('M4.2 2.5')
+  expect(batterySvg(mac('AC Power', '80%; AC attached; not charging')).source).toContain('M1 5.4h5')
+  // Two Linux batteries on average are never rounded up to full while one is not, nor down to empty while one is not
+  const sys = (rows: Record<string, Record<string, string>>) => Object.entries(rows).flatMap(([name, f]) => Object.entries(f).map(([k, v]) => `/sys/class/power_supply/${name}/${k}:${v}`)).join('\n')
+  expect(batteryOfLinux(sys({ BAT0: { type: 'Battery', capacity: '100', status: 'Full' }, BAT1: { type: 'Battery', capacity: '99', status: 'Charging' } }))).toEqual({ pct: 99, state: 'charging' })
+  expect(batteryOfLinux(sys({ BAT0: { type: 'Battery', capacity: '0', status: 'Discharging' }, BAT1: { type: 'Battery', capacity: '1', status: 'Discharging' } }))).toEqual({ pct: 1, state: 'battery' })
 })
 
 test('the graphics processor: the Mac busiest accelerator, Linux GPUs on average, none when nothing answers', async () => {

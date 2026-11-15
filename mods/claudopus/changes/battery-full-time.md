@@ -1,0 +1,1 @@
+- The battery above the prompt no longer shows a time to full beside 100%: while macOS calls it 100% and still tops it up, it says "finishing", and a battery macOS calls empty shows no time left beside 0%.

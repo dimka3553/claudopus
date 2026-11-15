@@ -27,7 +27,8 @@ export type UsageProc = { pid: string; ppid: string; cpu: number; mem: number; n
 // bytes moved since it started, by each disk and port, so one that comes or goes between looks moves no speed
 // The battery as the system reports it: its charge in percent, whether it runs on it, charges, or sits on power, and the time left
 // (to empty on battery, to full while charging) in minutes, only when the system gives one
-export type UsageBattery = { pct: number; state: 'battery' | 'charging' | 'plugged' | 'unknown'; left?: number }
+// finishing: macOS's own "finishing charge", the last topping up it does once it already calls the charge full or nearly
+export type UsageBattery = { pct: number; state: 'battery' | 'charging' | 'plugged' | 'unknown'; left?: number; finishing?: true }
 // The programs that use the most, by name, for the detail a pointer on a figure shows: [name, bytes] or [name, part of the processor]
 export type UsageTop = [string, number][]
 export type UsageRaw = { names?: Record<string, string>; memTop?: UsageTop; gpuMem?: number; gpuMemTotal?: number; netIn?: number; netOut?: number; gpu?: number; battery?: UsageBattery; at: number; cpu: Record<string, number>; claude: string[]; claudeMem: number; memUsed: number; memTotal: number; ncpu: number; disk: Record<string, number>; net: Record<string, number>; busy?: number; all?: number }
@@ -110,7 +111,14 @@ export const batteryOfMac = (text: string): UsageBattery | undefined => {
   const state = said === 'discharging' ? 'battery' : said === 'charging' || said === 'finishing charge' ? 'charging' : said === 'charged' || said === 'ac attached' ? 'plugged' : from === 'Battery Power' ? 'battery' : from === 'AC Power' ? 'plugged' : 'unknown'
   const t = /(\d+):(\d\d) remaining/.exec(m[3] ?? '')
   const left = t && (state === 'battery' || state === 'charging') ? Number(t[1]) * 60 + Number(t[2]) : 0
-  return { pct, state, ...(left > 0 ? { left } : {}) }
+  return { pct, state, ...(left > 0 ? { left } : {}), ...(said === 'finishing charge' ? { finishing: true as const } : {}) }
+}
+// The battery as the bar shows it: no time beside a charge the system already calls full while it charges, or empty on battery,
+// so the figure and the time never contradict each other. The time stays in what was read, for whoever wants it in full
+export const batteryShown = (b: UsageBattery): UsageBattery => {
+  if (!b.left || !((b.state === 'charging' && b.pct >= 100) || (b.state === 'battery' && b.pct <= 0))) return b
+  const { left: _, ...rest } = b
+  return rest
 }
 // /sys/class/power_supply: a supply of type Battery that powers the machine (not a mouse's, whose scope is Device). Linux gives
 // no time left of its own, so none is shown
@@ -120,7 +128,9 @@ export const batteryOfLinux = (text: string): UsageBattery | undefined => {
   const all = [...by.values()].filter(b => b.type === 'Battery' && b.scope !== 'Device' && /^\d+$/.test(b.capacity ?? ''))
   if (!all.length) return undefined
   // Two batteries (some laptops have them) read as one: their charge on average, discharging or charging if either is
-  const pct = Math.round(all.reduce((sum, b) => sum + Number(b.capacity), 0) / all.length)
+  // never rounded up to full while one is not, nor down to empty while one is not
+  const mean = Math.round(all.reduce((sum, b) => sum + Number(b.capacity), 0) / all.length)
+  const pct = Math.max(all.some(b => Number(b.capacity) > 0) ? 1 : 0, Math.min(all.every(b => Number(b.capacity) >= 100) ? 100 : 99, mean))
   const has = (status: string) => all.some(b => b.status === status)
   const state = has('Discharging') ? 'battery' : has('Charging') ? 'charging' : all.every(b => b.status === 'Full' || b.status === 'Not charging') ? 'plugged' : 'unknown'
   return { pct, state }
