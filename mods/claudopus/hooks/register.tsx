@@ -9728,14 +9728,18 @@ const panelHooks = (on: On) => {
       const warn = isWarn && Boolean(state)
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
       const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
-      // a run that gives its percent but no time left has one worked out from how long it has run, marked as a guess
+      // a run whose own progress line gives its percent but no time left has one worked out from how long it has run, marked as a
+      // guess: only the work's own line, which counts the whole run (a tool's bar starts again at each epoch, package or phase),
+      // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
       const share = Number.parseFloat(job.pct ?? '') / 100
-      const guess = !job.left && share >= 0.01 && share < 1 && ran >= 20_000 ? leftText((ran / 1000) * ((1 - share) / share)) : undefined
+      const guess = !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? leftText((ran / 1000) * ((1 - share) / share)) : undefined
       const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
-      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short]] : []), [...compact, ...pct, short], [...compact, ...pct], ...(left.length ? [left] : []), [...pct, short], [short]], width)
+      // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
+      const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
+      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
       return { text, isWarn: warn }
     }
     // A job's two lines: what it is, in the work's own words, with its time; and under it how it stands, then the latest line it
@@ -9781,7 +9785,8 @@ const panelHooks = (on: On) => {
           {head}
           <Box key={`stand-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
             {jobRails(t, `rails-${key}`)}
-            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+            {/* (on a desktop by the step a plain Button pads a run's name with, so the two start in one column) */}
+            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={lead}>
               {pctAt >= 0 && job.pct ? (
                 <Box flexDirection="row" flexShrink={0}>
                   {pctAt > 0 ? <Text dimColor>{stand.slice(0, pctAt)}</Text> : null}

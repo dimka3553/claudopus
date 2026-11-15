@@ -2148,6 +2148,8 @@ test("a run's second line starts under its name, with the tree's lines carried d
       const [lines] = all(head).filter(one => one.type === 'Svg')
       const [rails] = all(kids(stand)[0] as Node).filter(one => one.type === 'Svg')
       expect(rails?.props.width).toBe(lines?.props.width)
+      // and the words move in by the step the name's own button pads it with
+      expect(kids(stand)[1]?.props.paddingLeft).toBe('xs')
       expect(String(rails?.props.source)).toContain('<path')
     }
   }
@@ -2160,7 +2162,10 @@ test("a run's second line starts under its name, with the tree's lines carried d
   expect(shown).not.toMatch(/printed/)
   // A narrow panel keeps how long is left before the percent
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 40 }, surface: 'terminal' } as never)
-  expect((await narrow.findAll({ type: 'Text' })).map(one => one.text)).toContain('3/6 steps · ~2m left')
+  const tight = (await narrow.findAll({ type: 'Text' })).map(one => one.text)
+  expect(tight).toContain('3/6 steps · ~2m left')
+  // and one under a helper, with less room, keeps its count beside it
+  expect(tight).toContain('10/40 · ~6m left')
   await narrow.unmount()
 })
 
