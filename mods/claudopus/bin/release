@@ -26,11 +26,21 @@
 # holds the call leaves a grant naming this worktree and this branch, sealed as bin/admin's are, which this runner takes once. Run by
 # hand outside Claude Code at a terminal, it asks there instead. Exit 6 when neither said yes: nothing is done.
 set -uo pipefail
-# Nothing of the caller's shell decides what runs here: -p above reads no BASH_ENV and takes no function from the environment, the
-# system's own tools come before anything the caller's PATH adds, and no git setting comes from the environment
+# Nothing of the caller's environment decides what runs here or in what it starts (git, perl, gh, the build and checks): -p above
+# reads no BASH_ENV and takes no function from it, and a run with anything beyond the few it needs starts itself again with only
+# those, so no PERL5OPT, XDG_CONFIG_HOME, GIT_ or BASH_FUNC_ setting reaches git, perl or a child shell
+KEPT_ENV="HOME USER LOGNAME LANG LC_ALL LC_CTYPE TERM TMPDIR SSH_AUTH_SOCK PATH CLAUDECODE CLAUDE_CODE_EXECPATH GH_TOKEN GITHUB_TOKEN RELEASE_LOCKS RELEASE_BARRIER RELEASE_CHECK_WAIT RELEASE_CHECK_EVERY PWD OLDPWD SHLVL _"
+extra=
+for v in $(compgen -e); do case " $KEPT_ENV " in *" $v "*) ;; *) extra=1 ;; esac; done
+[ -z "$(/usr/bin/env | /usr/bin/sed -n '/^BASH_FUNC_/p')" ] || extra=1
+if [ -n "$extra" ]; then
+  kept=()
+  for v in $KEPT_ENV; do [ "$v" = _ ] || [ -z "${!v+x}" ] || kept+=("$v=${!v}"); done
+  exec /usr/bin/env -i "${kept[@]}" /bin/bash -p "$0" "$@"
+fi
+# The system's own tools come before anything the caller's PATH adds
 PATH=/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}
 export PATH
-for v in $(compgen -e | grep -E '^(GIT_|BASH_FUNC_)'); do unset "$v"; done
 unset CDPATH
 say() { echo "release: $*" >&2; }
 die() { say "$1"; exit "${2:-1}"; }
@@ -206,8 +216,10 @@ for try in 1 2 3 4 5; do
   BUILD= CHECK= DERIVED= VERSION_FILE= NAME= GITHUB_RELEASE= GITHUB_CHECKS= GITHUB_WORKFLOW=
   git cat-file -e "$base:.release" 2>/dev/null && settings_of ./.release "NAME VERSION_FILE DERIVED BUILD CHECK GITHUB_RELEASE GITHUB_CHECKS GITHUB_WORKFLOW"
   # This Mac's own file can add checks to wait for, never drop the ones main names
-  main_checks=$GITHUB_CHECKS
+  main_checks=$GITHUB_CHECKS main_workflow=$GITHUB_WORKFLOW
   settings_of "$common/release.local" "NAME VERSION_FILE DERIVED BUILD CHECK GITHUB_RELEASE GITHUB_CHECKS GITHUB_WORKFLOW"
+  # and the workflow that checks is main's, where main names one
+  [ -n "$main_checks" ] && GITHUB_WORKFLOW=$main_workflow
   [ -n "$main_checks" ] && [ "$GITHUB_CHECKS" != "$main_checks" ] && GITHUB_CHECKS="$main_checks${GITHUB_CHECKS:+,$GITHUB_CHECKS}"
   [ -z "$GITHUB_CHECKS" ] || [ -n "$(printf %s "$GITHUB_CHECKS" | tr -d ', \t\n\r')" ] || die "GITHUB_CHECKS names no check; nothing pushed" 3
   MAIN=$keep_main REMOTE=$keep_remote AFTER=$keep_after
