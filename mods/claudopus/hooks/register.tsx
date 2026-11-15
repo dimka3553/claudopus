@@ -20,7 +20,7 @@ import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSai
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
-import { batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
+import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept } from './usage'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
@@ -132,6 +132,9 @@ const figuresAt = atom({ plugin: 'claudopus', key: 'figures' } as const, 0, { sh
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
 let drawnNow = 0
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
+// What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
+// they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them
+const draftsKept = atom({ plugin: 'claudopus', key: 'drafts' } as const, {}, { shape: 'drafts-1' })
 // Each load of this code in a chat, first or a reload, is told by a mark of its own, kept in the session's state as the load now in
 // charge. A /reload-plugins starts the new copy but leaves the old copy's timers running in the same chat, and work an old copy wakes
 // with $.session.send runs under that copy, whose hooks the engine no longer calls: every panel tool of that work answered "no
@@ -2120,7 +2123,7 @@ const drawingMark = (pane: string, shown: unknown[]) => {
   drawings.set(pane, { look, n })
   return String(n)
 }
-const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
+const redraw = ($: EngineInterface) => drawAgain($)
 // Opens a pane from a press, in front: the app leaves a pane already open where it is, behind another tab, so one open but not
 // shown is opened again
 // The tabs as the engine lists them, one word each: id, then s shown, f holding the keyboard, p drawn, for the log
@@ -2796,7 +2799,7 @@ async function loadStats($: EngineInterface, scope: Scope, home: string, memory:
     held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Stats reads Claude’s records with jq, and jq was not found on ${thisMac()}.` : `The records could not be read: ${String(err)}` })
   } finally {
     reading.delete(scope)
-    $.ui.invalidate('ui.render')
+    drawAgain($)
   }
 }
 async function loadMemorySizes($: EngineInterface, memory: string) {
@@ -3276,7 +3279,7 @@ const pictureSaid = new Map<string, { text: string; copy?: string }>()
 const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tailscale']
 const shQuoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`
 const sendPicture = async ($: EngineInterface, path: string) => {
-  const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), $.ui.invalidate('ui.render'))
+  const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), drawAgain($))
   // A terminal with no word of where it is watched from: where the picture is, and no more
   if (!termFrom) return say(`It is at ${path} on ${thisMac()}`)
   say('Sending it to your device…')
@@ -3317,7 +3320,7 @@ const showPictureIn = async ($: EngineInterface, path: string, pane: string, row
   pictureIn.set(pane, { path, row })
   // One that could not be made is tried again on a new press
   for (const [id, one] of larges) if (!one && id.startsWith(`${path}:`)) larges.delete(id)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   // To its top, now and again once the picture is likely drawn in place of the Details
   await $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(() => undefined)
   $.clock.after(150, () => void $.ui.scroll({ in: pane, to: 'start', block: 'start' }).catch(() => undefined))
@@ -3332,7 +3335,7 @@ const scrollTo = ($: EngineInterface, pane: string, key: string, tries: number) 
 const pictureBack = ($: EngineInterface, pane: string) => {
   const was = pictureIn.get(pane)
   pictureIn.delete(pane)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   // Once the Details are drawn again, the picture's row is brought into view, where the person was
   if (was?.row) scrollTo($, pane, was.row, 6)
 }
@@ -3438,7 +3441,7 @@ const largeOf = ($: EngineInterface, path: string, id: string): Large | undefine
           if (larges.size >= 6) larges.delete(larges.keys().next().value ?? '')
           larges.set(id, one)
           making.delete(id)
-          $.ui.invalidate('ui.render')
+          drawAgain($)
           return one
         }),
     )
@@ -4588,7 +4591,7 @@ let screenSounded = ''
 const closeScreen = async ($: EngineInterface, version: string) => {
   presses += 1
   if (!isNewer(seenIn(await readOr($, seenPath())), version)) await writeSeen($, version)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 // The screen, over the panel: the blue happy octopus jumping, the version moved to, the changes of every version after the one seen
 // last, and the way back. Nothing in a copy a newer load of this chat replaced, nor for a version whose changes were seen
@@ -4705,20 +4708,96 @@ const openTerminal = async ($: EngineInterface, one: Todo) => {
 const replies = new Map<string, number>()
 // Each ask its own mark, so its reply box is a new one, empty, when the work asks something new, and the same one while it is held
 const askMark = (ask: NonNullable<Todo['ask']>) => `${ask.at}-${[...ask.text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)}`
-// What the person has typed into a reply box and not sent, by the work, so a redraw keeps it
+// What the person has typed into a reply box and not sent, by the work and the ask it was typed for (draftOf), so a redraw keeps it
+// and a newer ask of the same work starts with an empty box
 const drafts = new Map<string, string>()
-// While the person types into a reply box the list's running times stand still: the list is drawn again each second, and a box in
-// a list drawn that often lost its place and threw the panel to the bottom. Each letter typed, or the box taking the focus, holds
-// the times for TYPING more; sending lets them go
+const draftOf = (id: string, ask: NonNullable<Todo['ask']>) => `${id}|${askMark(ask)}`
+// Whether the person has typed something not sent into a work's reply box
+const hasDraft = (id: string) => [...drafts].some(([key, value]) => key.startsWith(`${id}|`) && Boolean(value))
+// While the person types into a reply box or a key box the panel and every Details tab hold their drawing whole. The app builds a
+// pane afresh at each drawing, the box in it too: a pane drawn every few seconds under the person's typing flickered the box's ring,
+// put older letters over newer ones, and, as Markdown came or went above, threw the panel to its bottom, out of the person's reach
+// (15 Nov, typing an answer while other work ran; measured on the app's own drawing, headless). Each letter typed, or the box taking
+// the focus, holds it for TYPING more; sending, any press, or the focus leaving the boxes lets it go
 const TYPING = 30_000
 let typing = 0
 let isTyping = false
+// Not typing, a pane is drawn again at once for anything new in what it shows, but for its running times alone at most every CALM:
+// each drawing is a new pane under the pointer, which lost its hover, and a click whose press and release fell on two drawings did
+// nothing (15 Nov: Approve took several clicks)
+const CALM = 10_000
+// The last drawing of each pane on each surface and size: what it showed in shape (paneShape) and in full (paneContent), when, and
+// which call for a drawing of the mod's own it answered (freshness)
+const heldDrawings = new Map<string, { shape: string; content: string; at: number; fresh: number; drawing: unknown }>()
+// Counts the mod's own calls for a drawing: a press, a reply, a picture made, a box that came. Each one is drawn at once
+let freshness = 0
+const drawAgain = ($: EngineInterface) => {
+  freshness += 1
+  $.ui.invalidate('ui.render')
+}
+// The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
+// arrive, so a drawing never puts older letters over the newer ones the box already holds
+const drawnDrafts = new Map<string, string>()
+const draftShown = (id: string, ask: NonNullable<Todo['ask']>) => {
+  const key = draftOf(id, ask)
+  if (isTyping && drawnDrafts.has(key)) return drawnDrafts.get(key) ?? ''
+  const value = drafts.get(key) ?? ''
+  drawnDrafts.set(key, value)
+  return value
+}
+// What a pane shows, as far as it moves while the person types: work that starts, finishes, asks, waits on an admin command, is cut
+// or stuck, or leaves after its pause, here or in another chat; workflows; boxes, gates and prompts that come or go; a Details
+// tab's own to-dos
+const paneShape = async ($: EngineInterface, paneId: string) => {
+  const at = await $.clock.now()
+  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at), (one.admins ?? []).map(gate => gate.id), one.leftSince ?? 0, one.cutAt ?? 0, one.stuckAt ?? 0, one.waitsSince ?? 0, one.running?.at ?? 0, jobsOf(one, at).length]
+  const own = await read($, todos)
+  const chats = await read($, others)
+  const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
+  const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
+  const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine])
+}
+// and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
+// drawn again at most every CALM
+const calmCard = (one: Todo) => {
+  const { tokens: _tokens, running: _running, newAt: _newAt, bg: _bg, seenJobs: _seen, detached: _detached, lookedIn: _looked, ...rest } = one as Todo & Record<string, unknown>
+  return rest
+}
+const paneContent = async ($: EngineInterface) => JSON.stringify([await read($, view), { ...(await read($, me)), tokens: 0 }, (await read($, reports)).length, (await read($, todos)).map(calmCard), (await read($, others)).map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })), await read($, flows), boxes, [...boxSaid], looseGates])
 const holdTimes = ($: EngineInterface) => {
   const made = (typing += 1)
   isTyping = true
-  $.clock.after(TYPING, () => void (typing === made && (isTyping = false)))
+  $.clock.after(TYPING, () => void (typing === made && ((isTyping = false), drawAgain($))))
 }
-const freeTimes = () => void ((typing += 1), (isTyping = false))
+const freeTimes = ($: EngineInterface) => {
+  const wasHeld = isTyping
+  typing += 1
+  isTyping = false
+  if (wasHeld) drawAgain($)
+}
+// Whether an element of the mod's is a box the person types into: an ask's reply box or a key box
+const isTypedBox = (element: string | undefined) => /-reply-|^box-.*-field/.test(element ?? '')
+// Kept through a reload of the mod, and read back as it loads; drafts for work no longer kept go then
+const keepDraft = ($: EngineInterface, key: string, value: string | undefined) =>
+  void update($, draftsKept, kept => {
+    const next = { ...(kept as Record<string, string>) }
+    if (value) next[key] = value
+    else delete next[key]
+    return next
+  }).catch(() => undefined)
+// A work's drafts go once its ask is answered
+const dropDrafts = ($: EngineInterface, id: string) => {
+  for (const key of [...drafts.keys()]) if (key.startsWith(`${id}|`)) drafts.delete(key)
+  void update($, draftsKept, kept => Object.fromEntries(Object.entries(kept as Record<string, string>).filter(([key]) => !key.startsWith(`${id}|`)))).catch(() => undefined)
+}
+const readDrafts = async ($: EngineInterface) => {
+  const kept = ((await read($, draftsKept).catch(() => ({}))) ?? {}) as Record<string, string>
+  const ids = new Set((await read($, todos)).map(one => one.id))
+  const live = Object.entries(kept).filter(([key, value]) => typeof value === 'string' && ids.has(key.split('|')[0] ?? ''))
+  for (const [key, value] of live) if (!drafts.has(key)) drafts.set(key, value)
+  if (live.length !== Object.keys(kept).length) await update($, draftsKept, () => Object.fromEntries(live))
+}
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
 type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean; isCard?: boolean }
@@ -4782,9 +4861,9 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   )
   if (!isCleared) return
   answeredAt.set(one.id, ask.at)
-  drafts.delete(one.id)
+  dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
-  if (isReply) freeTimes()
+  if (isReply) freeTimes($)
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
@@ -4815,8 +4894,10 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   )
   if (!isHeld) return
   // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
-  drafts.delete(one.id)
-  freeTimes()
+  dropDrafts($, one.id)
+  // A new box, empty, whenever it comes back: the surface keeps what was typed in a box it finds again by its key
+  replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
+  freeTimes($)
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
@@ -4948,7 +5029,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   if (isHeld) answeredAsks.delete(a.key)
   inChat.delete(a.card.id)
   await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
-  drafts.delete(a.card.id)
+  dropDrafts($, a.card.id)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
   writtenIn(to, a.card.id)
   const helper = a.ask.from && a.ask.from !== to ? (await read($, todos)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
@@ -5231,7 +5312,7 @@ const readOthers = async ($: EngineInterface) => {
       if (endSeen.has(key)) continue
       const isNew = now - card.endedAt < SEEN_ENDING
       endSeen.set(key, isNew ? now : 0)
-      if (isNew) $.clock.after(LINGER + 20, () => void update($, tick, n => n + 1))
+      if (isNew) $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
     }
   for (const key of [...endSeen.keys()]) if (!ids.has(key)) endSeen.delete(key)
   const isAppChanged = found.some(s => s.host) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
@@ -5789,7 +5870,8 @@ let boxes: Asked[] = []
 // what happens now, so nothing that needed them just vanishes
 // A note tied to the call the press let go (`call`) goes once that call ends, never before DONE_LEAST so it can be read, and at
 // most DONE_LONGEST while it runs; one with no call is shown DONE_SHOWN
-type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number }
+// `card`: the work whose card held the gate; the note is drawn in that card, not at the top
+type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number; card?: string }
 let doneNotes: DoneNote[] = []
 const DONE_SHOWN = 60_000
 const DONE_LEAST = 15_000
@@ -5802,9 +5884,9 @@ const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
   const at = await $.clock.now()
   const made = { ...note, at, ...(note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}) }
   doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), made].slice(-6)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   // Drawn again as its time ends, so it goes with nothing else to redraw the panel
-  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => $.ui.invalidate('ui.render'))
+  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => drawAgain($))
 }
 // The call a note tells of has ended: what it said is over, so the note goes (after DONE_LEAST from its press)
 const noteCallEnded = async ($: EngineInterface, call: string) => {
@@ -5813,9 +5895,9 @@ const noteCallEnded = async ($: EngineInterface, call: string) => {
   if (!doneNotes.some(one => one.call === call && one.endedAt === undefined)) return
   const at = await $.clock.now()
   doneNotes = doneNotes.map(one => (one.call === call && one.endedAt === undefined ? { ...one, endedAt: at } : one))
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   const last = Math.max(...doneNotes.filter(one => one.call === call).map(one => one.at + DONE_LEAST))
-  $.clock.after(Math.max(0, last - at) + 100, () => $.ui.invalidate('ui.render'))
+  $.clock.after(Math.max(0, last - at) + 100, () => drawAgain($))
 }
 // What was done is a line, as Claude Code reports a call's result under it: a mark and the words, with no box, fill or edge, so it is
 // never taken for a card of work. Green once allowed or given, grey once refused or cancelled
@@ -5829,15 +5911,34 @@ const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, lines: str
   </ui.Box>
 )
 const doneNotesPart = (ui: Ui, at: number) =>
-  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
+  doneNotes.filter(one => !one.card && isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
+// What was done with a gate on a work's card, in that card where the amber box was: the same outlined box, green once allowed, grey
+// once refused, saying what was allowed, until its note goes
+const cardNotesOf = (card: string, at: number) => doneNotes.filter(one => one.card === card && isNoteShown(one, at))
+const cardNotesPart = (ui: Ui, card: string, at: number) =>
+  cardNotesOf(card, at).map(one => (
+    <ui.Box key={`done-${one.id}`} flexDirection="column" borderStyle="round" borderColor={one.isOn ? DONE : '#808080'} paddingX={1} flexShrink={0}>
+      <ui.Text wrap="truncate-end" dimColor>{`${one.head} · ${one.isOn ? 'allowed' : 'refused'}`}</ui.Text>
+      <ui.Box flexDirection="row" gap={1}>
+        <ui.Text color={one.isOn ? DONE : undefined} dimColor={!one.isOn}>{one.isOn ? '✓' : '✕'}</ui.Text>
+        <ui.Box flexShrink={1} minWidth={0}>
+          <ui.Text wrap="wrap" color={one.isOn ? DONE : undefined} bold={one.isOn}>{one.said}</ui.Text>
+        </ui.Box>
+      </ui.Box>
+      {one.what ? <ui.Text key={`done-${one.id}-what`} dimColor wrap="truncate-end">{one.what}</ui.Text> : null}
+    </ui.Box>
+  ))
 // What a box asks for, in a few words, for its note once answered
 const boxHead = (text: string) => {
   const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
   const mac = text.match(/admin password of (.+?) to run/)?.[1]
   return mac ? `The admin password of ${mac}` : name ? `The key ${name}` : 'A key to save'
 }
-// What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
-const boxDrafts = new Map<string, string>()
+// What is typed in a box is kept by the surface alone, never here or drawn back: a drawing that carried it put older letters over
+// newer ones. Each try that left the box to be typed again gives its field a new key, so the field starts empty
+const boxTries = new Map<string, number>()
+// The boxes something is typed in, unsent, so an ask's reply box does not take the keys from them
+const boxTyped = new Set<string>()
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map<string, string>()
 // Sent from here: the box goes at once, before the runner removes its request
@@ -5913,10 +6014,10 @@ const lookBoxes = async ($: EngineInterface) => {
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
-  for (const id of [...boxDrafts.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxDrafts.delete(id), boxSaid.delete(id))
+  for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 
 // A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
@@ -5929,13 +6030,13 @@ const boxKeyring = ($: EngineInterface, what: 'set' | 'has' | 'delete', id: stri
       : Promise.resolve({ exitCode: -1 })
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
-  boxDrafts.delete(id)
   if (!value) return
   const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That was longer than ${BOX_LONGEST} characters, so it was not sent.` : /[^\x20-\x7E]/.test(value) ? 'That held a line break, a curly quote or another character outside plain letters, digits and signs, so it was not sent. Type it again.' : ''
   if (refused) {
     boxSaid.set(id, refused)
     boxPresses += 1
-    return void $.ui.invalidate('ui.render')
+    boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
+    return void drawAgain($)
   }
   const request = `${boxesDir()}/${id}.json`
   // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
@@ -5946,7 +6047,8 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   if (!sent) {
     boxSaid.set(id, 'It could not be sealed for the command that asked, so it was not sent.')
     boxPresses += 1
-    return void $.ui.invalidate('ui.render')
+    boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
+    return void drawAgain($)
   }
   const escaped = sent.replace(/[\\"]/g, '\\$&')
   const r = isLinux
@@ -5959,6 +6061,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   // and one whose runner stopped meanwhile is taken out again
   if (isKept && !(await $.fs.exists(request).catch(() => false))) await boxKeyring($, 'delete', id)
   boxPresses += 1
+  boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
   if (!isKept) {
     boxSaid.set(id, `It could not be put in ${keptWhere()}. Try again.`)
     await log($, `box ${id} not kept: security ended ${r.exitCode}`)
@@ -5970,25 +6073,25 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
-  boxDrafts.delete(id)
   boxSent.add(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
   // Cancelled, nothing more comes of it: it is over at once
   if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call, endedAt: 0 } : {}), head: boxHead(one.text), said, what: '' })
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 
-const boxesPart = ($: EngineInterface, ui: Ui) => {
-  if (!boxes.length || !('Input' in ui)) return null
-  // This chat's own requests first, the first of them with the keys, so a value typed for the notice it told goes to its own box
+// Each box with when it was asked, so the panel puts it among what waits on the person, the newest first
+const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false) => {
+  if (!boxes.length || !('Input' in ui)) return []
+  // This chat's own first request holds the keys, so a value typed for the notice it told goes to its own box, wherever it is drawn
   const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
-  return shown.map((one, n) => (
+  return shown.map((one, n) => ({ at: one.at, node: (
     <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
       <ui.Text dimColor wrap="truncate-end">{`${one.key ? 'Admin password' : 'Key'} · waits for you to type it`}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
@@ -5996,13 +6099,12 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
       <ui.Text dimColor wrap="wrap">{one.key ? 'What you type here shows as you type it. It goes only to the command that asked, sealed for it, never into a chat, and is not kept.' : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
-          key={`box-${one.id}-field-${boxPresses}`}
+          key={`box-${one.id}-field-${boxTries.get(one.id) ?? 0}`}
           placeholder="Type or paste it here"
-          value={boxDrafts.get(one.id) ?? ''}
           submitLabel="send"
-          autoFocus={n === 0 ? true : undefined}
-          onInput={value => void boxDrafts.set(one.id, value)}
-          onSubmit={value => void sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`))}
+          autoFocus={n === 0 && !isKeysHeld ? true : undefined}
+          onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($))}
+          onSubmit={value => void (boxTyped.delete(one.id), freeTimes($), sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`)))}
         />
       </ui.Box>
       {boxSaid.get(one.id) ? <ui.Text key={`box-${one.id}-said`} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
@@ -6010,7 +6112,7 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
         <ui.Button key={`box-${one.id}-cancel-${boxPresses}`} label="Cancel" plain onPress={() => void cancelBox($, one.id)} />
       </ui.Box>
     </ui.Box>
-  ))
+  ) }))
 }
 
 // The admin gate: an admin command (bin/admin) waits for the person's press on its work's card before it runs
@@ -6296,7 +6398,8 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
   return said
 }
-const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
+// `card` names the work whose card the gate is on: what was done is said in that card, where the gate was
+const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') => {
   presses += 1
   const id = gate.id
   if (gate.isUndone) return void answerUndone($, gate, said).then(() => redraw($)).catch(err => log($, `undone change not answered: ${String(err)}`))
@@ -6305,6 +6408,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
     void noteDone($, {
       id: `gate-${id}`,
       ...(gate.call ? { call: gate.call } : {}),
+      ...(card ? { card } : {}),
       // Refused, nothing runs: what it says is over at once
       ...(said === 'deny' ? { endedAt: 0 } : {}),
       head: gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host} into ${gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
@@ -6764,7 +6868,7 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
 // Drawn as Claude Code draws its own permission asks: an outlined box with the kind of ask at its top, never a filled card with an
 // edge as work's cards are, so an ask is not taken for one more piece of work
 const gateKind = (gate: Gate) => (gate.isUndone ? 'Put back' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
-const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
+const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean, card = '') => (
   <ui.Box key={key} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
     <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? (gate.isUndone ? 'yours to decide' : 'waits for your press') : isElsewhere ? 'asked in another chat' : 'no longer waits'}`}</ui.Text>
     <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
@@ -6793,19 +6897,21 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
     </ui.Text>
     {gateHeld.has(gate.id) && !isElsewhere ? (
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        <ui.Button key={`${key}-once-${loadMark}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate, 'once')} />
-        {gate.kind ? null : <ui.Button key={`${key}-always-${loadMark}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always')} />}
-        <ui.Button key={`${key}-deny-${loadMark}`} label="Deny" onPress={() => answerGate($, gate, 'deny')} />
+        <ui.Button key={`${key}-once-${loadMark}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate, 'once', card)} />
+        {gate.kind ? null : <ui.Button key={`${key}-always-${loadMark}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always', card)} />}
+        <ui.Button key={`${key}-deny-${loadMark}`} label="Deny" onPress={() => answerGate($, gate, 'deny', card)} />
       </ui.Box>
     ) : (
       <ui.Text dimColor wrap="wrap">{isElsewhere ? 'Allow or deny it on its card in its own chat.' : 'It no longer waits.'}</ui.Text>
     )}
   </ui.Box>
 )
-const adminBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string) =>
-  one.admins?.length ? (
+// The gates on a work's card, and once one is answered, what was done in the same place, outlined green (grey once refused)
+const adminBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number) =>
+  one.admins?.length || cardNotesOf(one.id, at).length ? (
     <ui.Box key={key} flexDirection="column" gap={1}>
-      {one.admins.map(gate => gateRow($, ui, gate, `gate-${gate.id}`, Boolean(one.chat)))}
+      {(one.admins ?? []).map(gate => gateRow($, ui, gate, `gate-${gate.id}`, Boolean(one.chat), one.chat ? '' : one.id))}
+      {cardNotesPart(ui, one.id, at)}
     </ui.Box>
   ) : null
 // A gate with no card, at the top of the panel
@@ -7229,7 +7335,7 @@ const chatHooks = (on: On) => {
     // A reload of this code while its panes stayed up, as in a chat that loads the mod from a folder it watches (the app's chats on
     // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press
     // reached nothing. Keys no load before used make it take each button afresh: the moment of the load, with room for a thousand presses
-    if ((await $.ui.panes().catch(() => [])).length) loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000
+    if ((await $.ui.panes().catch(() => [])).length) (loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000), (freshness += 1)
     await loadSettings($)
     await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`))
     // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
@@ -7345,6 +7451,8 @@ const chatHooks = (on: On) => {
     void recoverEnded($).catch(err => log($, `ended work not read back: ${String(err)}`))
     await sync($).catch(() => undefined)
     await loadReports($).catch(() => undefined)
+    // What the person had typed into a reply box before a reload of the mod is in its box again
+    await readDrafts($).catch(() => undefined)
     // Work that is running when the chat loads brings the panel up, if it has never opened
     // and comes back after a reload of the mod (which closes it) if it was open or work is running
     // Once the person has opened or closed the panel, every chat follows that choice instead, as it loads and every PANEL_EVERY
@@ -7386,16 +7494,24 @@ const chatHooks = (on: On) => {
       }
       const isFlowing = (await read($, flows)).some(f => f.status === 'working')
       // Held while the person types into a reply box (holdTimes)
-      if (!isTyping && (isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length))) await update($, tick, n => n + 1)
+      // A pane held while only its running times moved is drawn again once CALM is over (heldDrawings)
+      const calmNow = await $.clock.now()
+      const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length)
+      let isStale = false
+      if (!isTyping && isMoving) for (const [key, held] of heldDrawings) if (calmNow - held.at >= CALM) (heldDrawings.delete(key), (isStale = true))
+      // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
+      if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
+      if (isStale) $.ui.invalidate('ui.render')
+      if (!isTyping && isMoving) await update($, tick, n => n + 1)
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
       if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
       const now = await $.clock.now()
-      for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)].filter(card => isLingering(card, now))) {
+      for (const one of [...(await read($, flows)), ...(await read($, todos))].filter(card => isLingering(card, now))) {
         const key = `${one.id}:${one.endedAt}`
         if (lingerSet.has(key)) continue
         lingerSet.add(key)
-        $.clock.after(pauseFrom(one) + LINGER - now + 20, () => void ((lingerSet.delete(key), update($, tick, n => n + 1))))
+        $.clock.after(pauseFrom(one) + LINGER - now + 20, () => void ((lingerSet.delete(key), drawAgain($), update($, tick, n => n + 1))))
       }
     })
     everyLoad($, TICK, () => refresh($).catch(err => log($, `servers not looked at again: ${String(err)}`)))
@@ -8990,14 +9106,22 @@ const commandHooks = (on: On) => {
     return { text: opened.isPlaced ? 'Claudopus panel opened.' : nowhere('Claudopus') }
   })
 
-  // A reply box the person moves the focus into holds the list's times, so the list is not drawn under them as they start typing
+  // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
+  // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
-    if (e.origin.kind === 'person' && e.plugin === 'claudopus' && /-reply-/.test(e.element ?? '')) holdTimes($)
+    if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
+      if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
+      else freeTimes($)
+    }
     return next(e)
   })
+  // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts
+  on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)))
   // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
   on('ui.close', async ($, e, next) => {
     const r = await next(e)
+    // The list closed, by anyone: nothing of where it stood is kept, so the line above the prompt no longer points into it
+    if (e.id === LIST) (listOffsets.clear(), drawAgain($))
     if (e.id === LIST && e.origin.kind === 'person' && dir) await choosePanel($, false)
     return r
   })
@@ -9224,10 +9348,21 @@ const usageWords = (f: UsageFigures) => ({
   gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy${f.gpuClaude !== undefined ? `, Claude ${pctText(f.gpuClaude)}% of the whole` : ''}`,
   battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
 })
-const batteryWords = (b: UsageBattery) =>
-  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
-// What follows the charge: the time left, the time to full, or that it is on power; nothing while the system still estimates
-const batteryAfter = (b: UsageBattery) => (b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : '')
+// Each takes the battery as the bar shows it, so a charge the system calls full or empty has no time beside it
+const batteryWords = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : b.finishing ? 'finishing charge' : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
+// What follows the charge: the time left, the time to full, "finishing" once the system calls it full and still tops it up, or
+// nothing on power and while the system still estimates
+const batteryAfter = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : b.state === 'charging' && b.finishing && b.pct >= 100 ? ' finishing' : ''
+
+// The battery's state in full, for the line of more: a time only where the bar shows one, and what the system said in its place
+const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'battery'
+    ? b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : read.left ? 'on battery, at 0% as the system gives it' : 'on battery, the system is still estimating the time left'
+    : b.state === 'charging'
+      ? b.left ? `charging, ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge: the system calls it full and still tops it up' : 'charging: the system calls it full') : 'charging, the time to full still being estimated'
+      : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'
 
 // More of each figure, for a pointer resting on it: a heading with the figure in full, then rows of a name and its value (Claude's
 // part, the parts of a speed, who uses the most), and for the battery its state in words. Only what the looks gave: a part that is
@@ -9254,31 +9389,35 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
     },
     battery: !b ? undefined : {
       title: 'Battery',
-      value: `${b.pct}%`,
-      note: b.state === 'battery' ? (b.left ? `On battery, about ${leftText(b.left)} left` : 'On battery, the time left is still being estimated') : b.state === 'charging' ? (b.left ? `Charging, about ${leftText(b.left)} to full` : 'Charging, the time to full is still being estimated') : b.state === 'unknown' ? 'The system does not say whether it charges' : b.pct >= 100 ? 'Fully charged, on power' : 'On power, not charging',
+      value: `${batteryShown(b).pct}%`,
+      note: upperFirst(batteryNote(b)),
       // The strain on it: what the whole Mac draws, and what Claude's processors draw of that (the Mac counts no process's graphics
       // or screen power)
       rows: [
         ...(f.watts !== undefined ? [['The Mac is drawing', `${wattText(f.watts)} W`] as [string, string]] : []),
-        ...(f.wattsClaude !== undefined ? [["Claude's processor use", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [["Claude's processors draw", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
       ],
     },
     disk: f.disk === undefined ? undefined : {
       title: 'Disk',
       value: rateText(f.disk).join(' '),
       note: 'Reading and writing together',
-      rows: f.diskClaude !== undefined ? [['Claude and what it started', rateText(f.diskClaude).join(' ')]] : [],
+      rows: f.diskClaude !== undefined ? [['Claude and what it runs', rateFine(Math.min(f.diskClaude, f.disk))]] : [],
     },
     net: f.net === undefined ? undefined : {
       title: 'Network',
       value: rateText(f.net).join(' '),
       rows: [
-        ...(f.netIn !== undefined && f.netOut !== undefined ? [['Download', rateText(f.netIn).join(' ')], ['Upload', rateText(f.netOut).join(' ')]] as [string, string][] : []),
-        ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [['Claude downloading', rateText(f.netInClaude).join(' ')], ['Claude uploading', rateText(f.netOutClaude).join(' ')]] as [string, string][] : []),
+        ...(f.netIn !== undefined && f.netOut !== undefined ? [['Download', rateFine(f.netIn)], ['Upload', rateFine(f.netOut)]] as [string, string][] : []),
+        // Claude's own, never past the Mac's: nettop counts every interface, tunnels and loopback too, where the totals count the Mac's ports
+        ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [['Claude downloading', rateFine(f.netIn !== undefined ? Math.min(f.netInClaude, f.netIn) : f.netInClaude)], ['Claude uploading', rateFine(f.netOut !== undefined ? Math.min(f.netOutClaude, f.netOut) : f.netOutClaude)]] as [string, string][] : []),
       ],
     },
   }
 }
+// A speed in a card, where there is room for small ones: KB/s below a megabyte a second, so an API's trickle does not read 0
+const rateFine = (perSecond: number) => (perSecond < 1024 * 1024 ? `${Math.round(perSecond / 1024)} KB/s` : rateText(perSecond).join(' '))
+const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 // Watts, whole from ten up, a tenth below
 const wattText = (w: number) => (w >= 10 ? `${Math.round(w)}` : `${Math.round(w * 10) / 10}`)
 // The card, in the bar's own column above the figures: drawn hidden, and shown while the pointer rests on its figure through the
@@ -9381,7 +9520,8 @@ const usageText = (ui: Ui, f: UsageFigures, room = Infinity) => {
     </Text>
   )
 }
-// The battery in words, short: "bat 85% 4:12" on battery, "bat 62% ↑1:05" charging (↑ and the time to full), "bat 100% ac" on power
+// The battery in words, short: "bat 85% 4:12" on battery, "bat 62% ↑1:05" charging (↑ and the time to full), "bat 100% finishing"
+// while the system calls it full and still tops it up, "bat 100% ac" on power
 const batteryText = (ui: Ui, b: UsageBattery) => {
   const { Text } = ui
   const low = isBatteryLow(b) ? USAGE_AMBER : undefined
@@ -9393,7 +9533,8 @@ const batteryText = (ui: Ui, b: UsageBattery) => {
     after ? <Text key="ba" color={b.state === 'charging' ? USAGE_PURPLE : low} dimColor={!low && b.state !== 'charging'}>{after}</Text> : null,
   ]
 }
-const batteryAfterText = (b: UsageBattery) => (b.state === 'plugged' ? ' ac' : b.state === 'charging' ? ` ↑${b.left ? leftText(b.left) : ''}` : b.left ? ` ${leftText(b.left)}` : '')
+const batteryAfterText = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'plugged' ? ' ac' : b.state === 'charging' ? (!b.left && b.finishing && b.pct >= 100 ? ' finishing' : ` ↑${b.left ? leftText(b.left) : ''}`) : b.left ? ` ${leftText(b.left)}` : ''
 // A short mark of a drawing, so a new drawing is a new picture to the app
 const hashOf = (text: string) => {
   let h = 0
@@ -9406,6 +9547,21 @@ const hashOf = (text: string) => {
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
 let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
+// Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
+// Pressed, it takes the list back to its top; nothing else moves the list
+const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
+  waitsAtTop > 0 && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced) ? (
+    <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden">
+      <ui.Button
+        key={`band-waits-${presses}`}
+        plain
+        hover={{ scope: 'band-waits', underline: true }}
+        onPress={() => ((presses += 1), void $.ui.scroll({ in: LIST, to: 'start', block: 'start' }).catch(() => undefined))}
+      >
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 waits' : `${waitsAtTop} wait`} for you at the top of the panel`}</ui.Text>
+      </ui.Button>
+    </ui.Box>
+  ) : null
 // The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
@@ -9444,6 +9600,7 @@ const bandHooks = (on: On) => {
         }
         return (
           <Box flexDirection="column">
+            {await waitMarker($, ui, e.surface)}
             <Box flexDirection="row" gap={1}>
               {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus at work on your reply', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
@@ -9475,7 +9632,7 @@ const bandHooks = (on: On) => {
         )
       }
     }
-    if (!working.length && !happy) return next(e)
+    if (!working.length && !happy) return (await waitMarker($, ui, e.surface)) ?? next(e)
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
@@ -9485,6 +9642,7 @@ const bandHooks = (on: On) => {
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
+    const marker = await waitMarker($, ui, e.surface)
     const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
     const row = (
       <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
@@ -9499,9 +9657,10 @@ const bandHooks = (on: On) => {
       </Box>
     )
     // Where the figures are drawn, a pointer resting on one shows its card above them; the bar grows upward, so the figures stay put
-    return drawn && figures ? (
+    return (drawn && figures) || marker ? (
       <Box flexDirection="column">
-        {usageCardsDrawn(ui, figures)}
+        {marker}
+        {drawn && figures ? usageCardsDrawn(ui, figures) : null}
         {row}
       </Box>
     ) : (
@@ -9524,6 +9683,14 @@ const backAsked = async ($: EngineInterface, id: string) => {
   await $.ui.close({ id: LIST }).catch(() => undefined)
   await $.ui.open({ id: LIST, title: LIST_TITLE, rows: PANEL_ROWS, focus: true })
 }
+// The ask whose reply box holds the terminal's keys in the list: kept on it while it waits, so an ask that comes in above it never
+// takes the keys from what the person is typing
+let keysAsk = ''
+// Where the list's window starts on each surface, as last drawn: above the prompt says what waits at the top once it is out of sight
+// (waitMarker). Forgotten when the list is closed
+const listOffsets = new Map<string, number>()
+// How many things wait on the person at the top of the list, as last drawn
+let waitsAtTop = 0
 const panelHooks = (on: On) => {
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
@@ -9553,6 +9720,18 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
+    // While the person types into a box the pane is drawn as it last was, whole, but for a change in its shape; not typing, as it last
+    // was while only its running times moved, for CALM at most (heldDrawings)
+    const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}|${e.props.scroll.offset > 0 ? 1 : 0}`
+    const heldAt = await $.clock.now()
+    if (paneId === LIST) drawnNow = heldAt
+    const shape = await paneShape($, paneId)
+    const content = await paneContent($)
+    const held = heldDrawings.get(heldKey)
+    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return held.drawing as Awaited<ReturnType<typeof next>>
+    // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
+    if (paneId === LIST) await read($, tick)
+    const drawing = await (async () => {
     const { Box, Button, Markdown, Text } = uiOf($, e)
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
@@ -9574,7 +9753,7 @@ const panelHooks = (on: On) => {
       const from = await $.clock.now()
       // Only while the reload is recent: a panel first opened long after shows no finish of then
       for (const [key, value] of lateFrom) if (value === Infinity) from - Number(key.split(':').at(-1)) < RELOAD_GRACE * 2 ? lateFrom.set(key, from) : lateFrom.delete(key)
-      $.clock.after(LINGER + 20, () => void update($, tick, n => n + 1))
+      $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
     }
     const { isFinishedOpen = false } = await read($, view)
     // Every piece of work this chat keeps; its own are the ones the chat's thread started, the rest are their helpers
@@ -9782,12 +9961,12 @@ const panelHooks = (on: On) => {
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
-                autoFocus={e.surface === 'terminal' && !askFocused ? ((askFocused = true), true) : undefined}
+                autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
                 placeholder="Or reply in your own words"
-                value={drafts.get(one.id) ?? ''}
+                value={draftShown(one.id, ask)}
                 submitLabel="send"
-                onInput={value => void (drafts.set(one.id, value), holdTimes($))}
-                onSubmit={value => void (drafts.delete(one.id), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($))}
+                onSubmit={value => void (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
               />
             </Box>
           ) : null}
@@ -9863,9 +10042,9 @@ const panelHooks = (on: On) => {
                 {askBlock(one, `ask-${one.id}`)}
               </Box>
             ) : null}
-            {one.admins?.length ? (
+            {one.admins?.length || cardNotesOf(one.id, at).length ? (
               <Box key={`gate-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
-                {adminBlock($, table, one, `gates-${one.id}`)}
+                {adminBlock($, table, one, `gates-${one.id}`, at)}
               </Box>
             ) : null}
             {/* Nothing new has come back under it for a while: said in the colour of what needs the person */}
@@ -10671,12 +10850,12 @@ const panelHooks = (on: On) => {
               ) : null}
             </Box>
           </Box>
-          {one.admins?.length ? (
+          {one.admins?.length || cardNotesOf(one.id, at).length ? (
             <Box key="part-gates" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
                 <Text bold dimColor>Needs you now</Text>
-                {adminBlock($, table, one, `gates-big-${one.id}`)}
+                {adminBlock($, table, one, `gates-big-${one.id}`, at)}
               </Box>
             </Box>
           ) : null}
@@ -10726,6 +10905,8 @@ const panelHooks = (on: On) => {
         <Box flexDirection="column">
           <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waits for your answer' : 'asked in another chat'}`}</Text>
           <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+          {/* At the top, away from its chat's name: which chat it is */}
+          {c ? <Text key={`prompt-${key}-chat`} dimColor wrap="truncate-end">{`In the chat “${chatName(c)}”${c.host ? ` on ${macName(c.host)}` : ''}`}</Text> : null}
           <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
         </Box>
         <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
@@ -10960,6 +11141,35 @@ const panelHooks = (on: On) => {
     const ui = uiOf($, e)
     // A terminal too narrow to dock the panel seats it above the prompt, a few rows tall
     const isInline = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
+    // Everything that waits on the person, every chat's, together at the top under the header and the newest first: the notices
+    // (password and key boxes, gates, Claude Code's own prompts), then the cards of work that asked. Each stays until answered, and
+    // then leaves the top; a card goes back to its own place among the rest, which keep their order
+    const notices = [
+      // A box that comes while the person types a reply in the terminal leaves the keys with that reply
+      ...boxRows($, ui, e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk))),
+      ...looseGates.map(gate => ({ at: gate.at, node: gateRow($, ui, gate, `gate-${gate.id}`, false) })),
+      ...waiting.map(p => ({ at: p.at, node: promptCard(p, `this-${p.id}`, answerHere(p)) })),
+      ...otherChats.flatMap(c => {
+        const url = pressOf(c)
+        return (c.prompts ?? []).map(p => ({ at: p.at, node: promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', c) }))
+      }),
+    ]
+    // A work that waits on the person comes to the top whole, its ask or its gate in it as ever; once a gate is answered, what was
+    // done shows in the card, outlined green, and the card stays at the top until that goes
+    const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
+    const isWaitingPress = (one: Todo) => one.status === 'working' && Boolean(one.admins?.length)
+    const isUp = (one: Todo) => isAsking(one) || isWaitingPress(one) || (!one.chat && cardNotesOf(one.id, at).length > 0)
+    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)))
+    const askingHere = shownWork.filter(isUp)
+    const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
+    const askCards = [...askingHere, ...askingThere].sort((a, b) => upSince(b) - upSince(a))
+    const restHere = shownWork.filter(one => !isUp(one))
+    // Notices and whole cards in one order, the newest first; a card that only says what was allowed comes under all that still
+    // waits. A card is drawn when the panel is
+    const top = [...notices.map(one => ({ at: one.at, draw: () => one.node })), ...askCards.map(one => ({ at: upSince(one) - (isAsking(one) || isWaitingPress(one) ? 0 : 1e15), draw: () => small(one) }))].sort((a, b) => b.at - a.at)
+    const waitsCount = notices.length + askCards.filter(one => isAsking(one) || isWaitingPress(one)).length
+    // The terminal's keys stay with the ask they were on while it waits
+    if (keysAsk && !askingHere.some(one => one.id === keysAsk && isAsking(one))) keysAsk = ''
     // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and
     // work that just finished (happy too for a workflow in its pause whose card turned green: it finished and its last round passed)
     const runningThere = elsewhere.filter(one => one.status === 'working' && !needsPerson(one))
@@ -10967,7 +11177,8 @@ const panelHooks = (on: On) => {
       here: working.filter(one => !needsPerson(one)).length + runningFlows.length,
       there: runningThere.length,
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
-      asks: boxes.length + looseGates.length + own.filter(needsPerson).length + waiting.length + elsewhere.filter(needsPerson).length + listedChats.reduce((n, c) => n + (c.prompts?.length ?? 0), 0),
+      // Each thing at the top counts once, as the line above the prompt counts them
+      asks: waitsCount,
       isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
     }
     const mood = headMood(head)
@@ -10979,7 +11190,14 @@ const panelHooks = (on: On) => {
     // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     // A password or key box stays above it: the runner waits on it
-    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{doneNotesPart(ui, at)}{screen}</Box>
+    if (paneId === LIST && !alone) {
+      // Where this surface's list stands, as the person or a press last moved it (each move draws it again)
+      const was = listOffsets.get(e.surface) ?? 0
+      listOffsets.set(e.surface, Math.max(0, e.props.scroll.offset))
+      const count = waitsCount
+      if (count !== waitsAtTop || (was > 0) !== ((listOffsets.get(e.surface) ?? 0) > 0)) ((waitsAtTop = count), drawAgain($))
+    }
+    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{notices.map(one => one.node)}{doneNotesPart(ui, at)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
     // A newer version the hourly look saw: its card under the header's lines, with Install
     const outCard = alone ? null : newOutCard($, ui, await newOut($, versions.version, versions.installed).catch(() => ''))
@@ -11030,29 +11248,23 @@ const panelHooks = (on: On) => {
             ) : null}
           </Box>
         ) : null}
-        {!alone ? boxesPart($, ui) : null}
-        {!alone ? gatesPart($, ui) : null}
+        {!alone ? top.map(one => one.draw()) : null}
         {!alone ? doneNotesPart(ui, at) : null}
         {!alone ? afarPart(ui) : null}
         {!alone && isWelcomeOpen ? welcomeCard($, ui) : null}
         {alone
           ? big(alone, talked?.lines)
           : [
-              // This chat's work first, named as this chat's once another chat's is shown; work that needs the person's hands comes first
-              // Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
-              ...(listedChats.length && (shownWork.length || shownFlows.length || waiting.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
-              ...waiting.map(p => promptCard(p, `this-${p.id}`, answerHere(p))),
+              // This chat's work first, named as this chat's once another chat's is shown, in the order it began; what waits on the
+              // person is above, at the top. Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
+              ...(listedChats.length && (restHere.length || shownFlows.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...promptsAnswered.map(p => answeredCard(p, `this-${p.id}`)),
-              ...[...shownWork.map(one => ({ at: one.ask ? -1e15 + one.ask.at : one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
-              // Then each other chat under its name, those that wait on the person first
+              ...[...restHere.map(one => ({ at: one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              // Then each other chat under its name, with what is left of it once its asks are at the top
               ...listedChats.flatMap(c => {
-                const cards = shownOf(c).sort((a, b) => (a.ask ? -1e15 + a.ask.at : a.startedAt) - (b.ask ? -1e15 + b.ask.at : b.startedAt))
-                // Open that chat whenever its link opens here: a chat of this Mac, or one of another Mac with Remote Control on
-                // In a chat another Mac's app runs here, that Mac opens it
-                const url = pressOf(c)
-                const prompts = (c.prompts ?? []).map(p => promptCard(p, `${c.host}-${c.chat}-${p.id}`, c.host && !url ? `Answer it in that chat, on ${macName(c.host)}` : c.host ? `Answer it in that chat, which runs on ${macName(c.host)}` : 'Answer it in that chat', c))
+                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => a.startedAt - b.startedAt)
                 const answered = answeredOf(c.answeredPrompts).map(p => answeredCard(p, `${c.host}-${c.chat}-${p.id}`, c))
-                return [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...prompts, ...answered, ...cards.map(one => small(one))]
+                return cards.length || answered.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...answered, ...cards.map(one => small(one))] : []
               }),
             ]}
         {/* The Finished row sits at the pane's bottom edge, under everything else */}
@@ -11060,6 +11272,9 @@ const panelHooks = (on: On) => {
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
+    })()
+    heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    return drawing
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
@@ -11073,6 +11288,8 @@ const tabHooks = (on: On) => {
   on('ui.press', async ($, e, next) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
+    // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
+    if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>
@@ -11114,7 +11331,7 @@ const tabHooks = (on: On) => {
     void statsRead($, statsShown.scope).catch(() => undefined)
     return (
       <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {statsView(() => $.ui.invalidate('ui.render'), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
+        {statsView(() => drawAgain($), uiOf($, e), await $.clock.now(), scope => void statsRead($, scope).catch(() => undefined), e.surface, e.props.bodyColumns * 7.4 - 32)}
       </Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
@@ -11202,7 +11419,7 @@ const watchTabs = async ($: EngineInterface, ids: string[], why: string, since =
       const open = new Set((await $.ui.panes().catch(() => [])).map(pane => pane.id))
       const empty = ids.filter(id => open.has(id) && (tabAsked.get(id) ?? 0) < from)
       if (!empty.length) return
-      $.ui.invalidate('ui.render')
+      drawAgain($)
       if (wait === TAB_CHECKS.at(-1)) await log($, `tab ${empty.join(', ')} not asked for in ${wait / 1000}s after ${why}: drawn again`)
     })
 }

@@ -64,10 +64,21 @@ const usageWords = (f: UsageFigures) => ({
   gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy${f.gpuClaude !== undefined ? `, Claude ${pctText(f.gpuClaude)}% of the whole` : ''}`,
   battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
 })
-const batteryWords = (b: UsageBattery) =>
-  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
-// What follows the charge: the time left, the time to full, or that it is on power; nothing while the system still estimates
-const batteryAfter = (b: UsageBattery) => (b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : '')
+// Each takes the battery as the bar shows it, so a charge the system calls full or empty has no time beside it
+const batteryWords = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : b.finishing ? 'finishing charge' : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
+// What follows the charge: the time left, the time to full, "finishing" once the system calls it full and still tops it up, or
+// nothing on power and while the system still estimates
+const batteryAfter = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : b.state === 'charging' && b.finishing && b.pct >= 100 ? ' finishing' : ''
+
+// The battery's state in full, for the line of more: a time only where the bar shows one, and what the system said in its place
+const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'battery'
+    ? b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : read.left ? 'on battery, at 0% as the system gives it' : 'on battery, the system is still estimating the time left'
+    : b.state === 'charging'
+      ? b.left ? `charging, ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge: the system calls it full and still tops it up' : 'charging: the system calls it full') : 'charging, the time to full still being estimated'
+      : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'
 
 // More of each figure, for a pointer resting on it: a heading with the figure in full, then rows of a name and its value (Claude's
 // part, the parts of a speed, who uses the most), and for the battery its state in words. Only what the looks gave: a part that is
@@ -94,31 +105,35 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
     },
     battery: !b ? undefined : {
       title: 'Battery',
-      value: `${b.pct}%`,
-      note: b.state === 'battery' ? (b.left ? `On battery, about ${leftText(b.left)} left` : 'On battery, the time left is still being estimated') : b.state === 'charging' ? (b.left ? `Charging, about ${leftText(b.left)} to full` : 'Charging, the time to full is still being estimated') : b.state === 'unknown' ? 'The system does not say whether it charges' : b.pct >= 100 ? 'Fully charged, on power' : 'On power, not charging',
+      value: `${batteryShown(b).pct}%`,
+      note: upperFirst(batteryNote(b)),
       // The strain on it: what the whole Mac draws, and what Claude's processors draw of that (the Mac counts no process's graphics
       // or screen power)
       rows: [
         ...(f.watts !== undefined ? [['The Mac is drawing', `${wattText(f.watts)} W`] as [string, string]] : []),
-        ...(f.wattsClaude !== undefined ? [["Claude's processor use", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [["Claude's processors draw", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
       ],
     },
     disk: f.disk === undefined ? undefined : {
       title: 'Disk',
       value: rateText(f.disk).join(' '),
       note: 'Reading and writing together',
-      rows: f.diskClaude !== undefined ? [['Claude and what it started', rateText(f.diskClaude).join(' ')]] : [],
+      rows: f.diskClaude !== undefined ? [['Claude and what it runs', rateFine(Math.min(f.diskClaude, f.disk))]] : [],
     },
     net: f.net === undefined ? undefined : {
       title: 'Network',
       value: rateText(f.net).join(' '),
       rows: [
-        ...(f.netIn !== undefined && f.netOut !== undefined ? [['Download', rateText(f.netIn).join(' ')], ['Upload', rateText(f.netOut).join(' ')]] as [string, string][] : []),
-        ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [['Claude downloading', rateText(f.netInClaude).join(' ')], ['Claude uploading', rateText(f.netOutClaude).join(' ')]] as [string, string][] : []),
+        ...(f.netIn !== undefined && f.netOut !== undefined ? [['Download', rateFine(f.netIn)], ['Upload', rateFine(f.netOut)]] as [string, string][] : []),
+        // Claude's own, never past the Mac's: nettop counts every interface, tunnels and loopback too, where the totals count the Mac's ports
+        ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [['Claude downloading', rateFine(f.netIn !== undefined ? Math.min(f.netInClaude, f.netIn) : f.netInClaude)], ['Claude uploading', rateFine(f.netOut !== undefined ? Math.min(f.netOutClaude, f.netOut) : f.netOutClaude)]] as [string, string][] : []),
       ],
     },
   }
 }
+// A speed in a card, where there is room for small ones: KB/s below a megabyte a second, so an API's trickle does not read 0
+const rateFine = (perSecond: number) => (perSecond < 1024 * 1024 ? `${Math.round(perSecond / 1024)} KB/s` : rateText(perSecond).join(' '))
+const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 // Watts, whole from ten up, a tenth below
 const wattText = (w: number) => (w >= 10 ? `${Math.round(w)}` : `${Math.round(w * 10) / 10}`)
 // The card, in the bar's own column above the figures: drawn hidden, and shown while the pointer rests on its figure through the
@@ -221,7 +236,8 @@ const usageText = (ui: Ui, f: UsageFigures, room = Infinity) => {
     </Text>
   )
 }
-// The battery in words, short: "bat 85% 4:12" on battery, "bat 62% ↑1:05" charging (↑ and the time to full), "bat 100% ac" on power
+// The battery in words, short: "bat 85% 4:12" on battery, "bat 62% ↑1:05" charging (↑ and the time to full), "bat 100% finishing"
+// while the system calls it full and still tops it up, "bat 100% ac" on power
 const batteryText = (ui: Ui, b: UsageBattery) => {
   const { Text } = ui
   const low = isBatteryLow(b) ? USAGE_AMBER : undefined
@@ -233,7 +249,8 @@ const batteryText = (ui: Ui, b: UsageBattery) => {
     after ? <Text key="ba" color={b.state === 'charging' ? USAGE_PURPLE : low} dimColor={!low && b.state !== 'charging'}>{after}</Text> : null,
   ]
 }
-const batteryAfterText = (b: UsageBattery) => (b.state === 'plugged' ? ' ac' : b.state === 'charging' ? ` ↑${b.left ? leftText(b.left) : ''}` : b.left ? ` ${leftText(b.left)}` : '')
+const batteryAfterText = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'plugged' ? ' ac' : b.state === 'charging' ? (!b.left && b.finishing && b.pct >= 100 ? ' finishing' : ` ↑${b.left ? leftText(b.left) : ''}`) : b.left ? ` ${leftText(b.left)}` : ''
 // A short mark of a drawing, so a new drawing is a new picture to the app
 const hashOf = (text: string) => {
   let h = 0

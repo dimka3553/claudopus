@@ -3,6 +3,21 @@
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
 let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
+// Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
+// Pressed, it takes the list back to its top; nothing else moves the list
+const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
+  waitsAtTop > 0 && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced) ? (
+    <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden">
+      <ui.Button
+        key={`band-waits-${presses}`}
+        plain
+        hover={{ scope: 'band-waits', underline: true }}
+        onPress={() => ((presses += 1), void $.ui.scroll({ in: LIST, to: 'start', block: 'start' }).catch(() => undefined))}
+      >
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 waits' : `${waitsAtTop} wait`} for you at the top of the panel`}</ui.Text>
+      </ui.Button>
+    </ui.Box>
+  ) : null
 // The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
@@ -41,6 +56,7 @@ const bandHooks = (on: On) => {
         }
         return (
           <Box flexDirection="column">
+            {await waitMarker($, ui, e.surface)}
             <Box flexDirection="row" gap={1}>
               {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus at work on your reply', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
@@ -72,7 +88,7 @@ const bandHooks = (on: On) => {
         )
       }
     }
-    if (!working.length && !happy) return next(e)
+    if (!working.length && !happy) return (await waitMarker($, ui, e.surface)) ?? next(e)
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
@@ -82,6 +98,7 @@ const bandHooks = (on: On) => {
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
+    const marker = await waitMarker($, ui, e.surface)
     const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
     const row = (
       <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
@@ -96,9 +113,10 @@ const bandHooks = (on: On) => {
       </Box>
     )
     // Where the figures are drawn, a pointer resting on one shows its card above them; the bar grows upward, so the figures stay put
-    return drawn && figures ? (
+    return (drawn && figures) || marker ? (
       <Box flexDirection="column">
-        {usageCardsDrawn(ui, figures)}
+        {marker}
+        {drawn && figures ? usageCardsDrawn(ui, figures) : null}
         {row}
       </Box>
     ) : (

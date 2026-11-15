@@ -4546,6 +4546,104 @@ test("while the person types into a card's reply box the list's running times st
   await list.unmount()
 })
 
+test('while the person types into an ask the panel holds its drawing whole, as other cards move, start and finish around it: the 15 Nov panel that jumped to its bottom and flickered with every letter typed', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two pieces of work', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Keep digging for head CTs', prompt: 'dig' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which source next?', details: 'A long explanation.\n\n- one\n- two\n- three', choices: ['Kaggle', 'TCIA', 'Not now'] } as never)
+  for (const surface of ['desktop', 'terminal'] as const) {
+    const list = await $.ui.mount({ ...LIST, surface } as never)
+    const ears = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface } as never)
+    await clock.advance(2000)
+    const drawing = async (pane: typeof list) => JSON.stringify([...(await pane.findAll({ type: 'Text' })).map(one => one.text), ...(await pane.findAll({ type: 'Input' } as never)).map(one => [one.key, one.props.value])])
+    const box = (await list.findAll({ type: 'Input' } as never)).find(one => /^ask-a1-reply-/.test(one.key ?? ''))
+    expect(box).toBeDefined()
+    const [before, beforeDetails] = [await drawing(list), await drawing(ears)]
+    // Each letter is one change: none of them draws the panel again, nor Details
+    for (const text of ['N', 'No', 'Non', 'Non-A']) await list.input({ key: box?.key ?? '', text, kind: 'change' } as never)
+    expect(await drawing(list)).toBe(before)
+    // The other card writes a new line and its time moves: the panel still holds its drawing, and so does Details
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `n-${surface}`, agentId: 'a2', text: `I am measuring the left ear on the ${surface}.` } as never)
+    await clock.advance(3000)
+    await list.input({ key: box?.key ?? '', text: 'Non-Asian', kind: 'change' } as never)
+    expect(await drawing(list)).toBe(before)
+    expect(await drawing(ears)).toBe(beforeDetails)
+    // A third piece of work starts: it is drawn, and the box is drawn with the text it had, never the letters as they come
+    await $.agent.spawn({ ...spawn, description: `Find more scans ${surface}`, prompt: 'more' } as never)
+    expect(await until(async () => list.find({ type: 'Text', text: `Find more scans ${surface}` }))).toBeDefined()
+    expect((await list.findAll({ type: 'Input' } as never)).find(one => /^ask-a1-reply-/.test(one.key ?? ''))?.props.value).toBe('')
+    // Typing stopped: the panel moves on, with the other card's new line, and the box holds what was typed
+    await clock.advance(31_000)
+    expect(await until(async () => list.find({ type: 'Text', text: `I am measuring the left ear on the ${surface}.` }))).toBeDefined()
+    expect((await list.findAll({ type: 'Input' } as never)).find(one => /^ask-a1-reply-/.test(one.key ?? ''))?.props.value).toBe('Non-Asian')
+    // A press is the person's own move: it lets the panel go at once
+    await list.input({ key: box?.key ?? '', text: 'Non-Asian heads', kind: 'change' } as never)
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `m-${surface}`, agentId: 'a2', text: `Both ears done on the ${surface}.` } as never)
+    await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'TCIA')?.key ?? '' })
+    expect(await until(async () => list.find({ type: 'Text', text: `Both ears done on the ${surface}.` }))).toBeDefined()
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${surface}`, agentId: 'a1', text: 'Which source next?', choices: ['Kaggle', 'TCIA', 'Not now'] } as never)
+    await Promise.all([list.unmount(), ears.unmount()])
+  }
+})
+
+test('with work running and nobody typing, the panel is drawn again at once for anything new, but for its running times alone only every ten seconds, so a button under the pointer keeps its hover and takes its click', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I go on?', choices: ['Approve', 'Not now'] } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const texts = async () => JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  await clock.advance(1000)
+  const before = await texts()
+  await clock.advance(3000)
+  expect(await texts()).toBe(before)
+  // The work writes a line: drawn at once
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'I am looking at the left ear.' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'I am looking at the left ear.' }))).toBeDefined()
+  // and its time moves again within ten seconds
+  const after = await texts()
+  await clock.advance(11_000)
+  expect(await until(async () => ((await texts()) !== after ? true : undefined))).toBe(true)
+  // A press shows what it did at once
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key ?? '' })
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'May I go on?' })) ? undefined : true))).toBe(true)
+  // and so does one that only opens a part of the panel, Finished, with work ended and other work running
+  await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' } as never)
+  await $.turn.complete({ answer: 'Nose checked.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a2' } as never)
+  await clock.advance(12_000)
+  const shut = await texts()
+  await pressed(list, 'finished-fold')
+  expect(await until(async () => ((await texts()) !== shut ? true : undefined))).toBe(true)
+  await list.unmount()
+})
+
+test('a key box keeps what is typed in it without drawing it back, and holds the panel while it is typed into', async ($, on) => {
+  const { clock, files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'get the data', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Get the data', prompt: 'data' } as never)
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret SAMPLE_USER here fetch' } as never).catch(() => undefined)
+  const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'SAMPLE_USER', chat: 'engine-id', at: 1_700_000_000_000 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
+  expect(field).toBeDefined()
+  if (!field) return
+  // The surface keeps the letters itself: the box is drawn with no value, so a drawing never puts older letters over newer ones
+  expect(field.props.value).toBeUndefined()
+  const before = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  await list.input({ key: field.key ?? '', text: 'made-up-na', kind: 'change' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'I am waiting for the made-up name.' } as never)
+  await clock.advance(3000)
+  expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).toBe(before)
+  expect((await list.findAll({ type: 'Input' } as never)).find(one => one.key === field.key)).toBeDefined()
+  await list.unmount()
+})
+
 test('an ask outlives the work that made it: amber after the work ends, with or without buttons of its own, until the person answers', async ($, on) => {
   const { submitted, resumed, clock } = world(on)
   await $.session.start(start)
@@ -4636,6 +4734,10 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   expect(await list.find({ type: 'Text', text: ASK })).toBeDefined()
   expect(await labels()).toContain('Release it')
   expect((await list.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(true)
+  // and its box is a new one, empty: the surface would put the sent words back into a box it found again by its old key
+  const back = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  expect(back?.key).not.toBe(box?.key)
+  expect(back?.props.value).toBe('')
   expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
   expect(resumed.filter(line => line.startsWith('a1: '))).toHaveLength(1)
   // More words from the person keep it open still; Release it settles it, and the card finishes once the work has acted on it
@@ -5290,9 +5392,10 @@ test("the panel shows every open chat's running work under that chat's name, thi
   expect(bold.indexOf('This chat')).toBeGreaterThan(-1)
   expect(bold.indexOf('This chat')).toBeLessThan(bold.indexOf('Fix the nose'))
   expect(bold.indexOf('Fix the nose')).toBeLessThan(bold.indexOf('Billing page'))
-  // Under the other chat's name, its ask first
-  expect(bold.indexOf('Billing page')).toBeLessThan(bold.indexOf('Send the invoices'))
-  expect(bold.indexOf('Send the invoices')).toBeLessThan(bold.indexOf('Check the totals'))
+  // Its ask is at the top with everything that waits on the person, above every chat's name; the rest under that chat's name
+  expect(bold.indexOf('Send the invoices')).toBeGreaterThan(-1)
+  expect(bold.indexOf('Send the invoices')).toBeLessThan(bold.indexOf('This chat'))
+  expect(bold.indexOf('Billing page')).toBeLessThan(bold.indexOf('Check the totals'))
   expect(bold).not.toContain('Old landing page')
   expect(await list.find({ type: 'Text', text: 'billing' })).toBeDefined()
   // The header counts every chat's: the ask first, then all that runs, here and there
@@ -5511,8 +5614,9 @@ test("while the person types a reply into an ask, work finishing here and in ano
   expect(await drawn(list)).toContain('happy')
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
-  // The half reply is still in its box
-  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('Not ye')
+  // The half reply is still in its box: while typing the box holds the letters itself, and once typing stops it is drawn with them
+  await clock.advance(31_000)
+  expect(await until(async () => ((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value === 'Not ye' ? true : undefined))).toBe(true)
   await list.unmount()
 })
 
@@ -7208,6 +7312,161 @@ test('a press is answered by a line, not a card: an ask is an outlined box, what
   expect(await edges()).toBe(withNote)
 })
 
+// A long list of another chat's running work, two of whose cards wait on a gate and one on an ask: what the 15 Nov panel drew below
+// the fold, where the person had to scroll to find Allow once
+const longList = (at: number, gates: Record<string, number>, asks: Record<string, number> = {}) =>
+  JSON.stringify({
+    chat: 'chat-b', title: 'Billing page', folder: '/repo/billing', host: '', at,
+    cards: ['one', 'two', 'three', 'four', 'five', 'six'].map((name, n) => ({
+      id: `w${n + 1}`, parentId: '', isFork: false, tokens: 0, title: `Card ${name}`, words: name, items: [], entries: [], answer: '', startedAt: at - 600_000 + n * 60_000, endedAt: 0, status: 'working',
+      ...(gates[`w${n + 1}`] ? { admins: [{ id: `g${n + 1}`, host: 'here', command: `run step ${name}`, at: gates[`w${n + 1}`] }] } : {}),
+      ...(asks[`w${n + 1}`] ? { ask: { text: `Which way for ${name}?`, at: asks[`w${n + 1}`], choices: ['Left', 'Right'] } } : {}),
+    })),
+  })
+const textOrder = async (pane: { findAll: (q: { type: string }) => Promise<{ text?: unknown }[]> }) => (await pane.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
+
+test('a work that waits for a press comes to the top whole, its amber box in it, the newest first with the cards that asked; answered, it goes back and nothing else moves', async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  const at = 1_700_000_000_000
+  files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }, { w4: at - 1500 }))
+  await clock.advance(5000)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
+  const texts = await textOrder(list)
+  const first = (text: string) => texts.indexOf(text)
+  // Newest first: the card whose gate came last, the card that asked, the older gate's card; then the rest in the order they began
+  expect(first('Card six')).toBeLessThan(first('Card four'))
+  expect(first('Card four')).toBeLessThan(first('Card five'))
+  expect(first('Card five')).toBeLessThan(first('Card one'))
+  // Each gate is in its own card, right under its title, never apart from it
+  expect(first('Card six')).toBeLessThan(first('run step six'))
+  expect(first('run step six')).toBeLessThan(first('Card four'))
+  expect(first('Card five')).toBeLessThan(first('run step five'))
+  expect(first('run step five')).toBeLessThan(first('Card one'))
+  const rest = (all: string[]) => all.filter(one => /^Card (one|two|three)$/.test(one))
+  expect(rest(texts)).toEqual(['Card one', 'Card two', 'Card three'])
+  // The newer gate is answered (in its own chat): its card goes back to where it began, and the others keep their order
+  files.set(`${MEMORY}/live/chat-b.json`, longList(at + 6000, { w5: at - 2000 }, { w4: at - 1500 }))
+  await clock.advance(5000)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'run step six' })) ? undefined : true))).toBe(true)
+  const after = await textOrder(list)
+  expect(after.indexOf('Card four')).toBeLessThan(after.indexOf('Card five'))
+  expect(after.filter(one => /^Card (one|two|three|six)$/.test(one))).toEqual(['Card one', 'Card two', 'Card three', 'Card six'])
+})
+
+test('a gate answered on its card says what was allowed in that same card, outlined green, while the card stays at the top', async ($, on) => {
+  const { press, bash, held, list } = await gated($, on)
+  const call = bash('b1', `${ADMIN} here 'chmod 644 /etc/hosts'`)
+  expect(await held('b1')).toBeDefined()
+  await press('gate-b1-0-once')
+  await call
+  const green = await until(async () => ((await list.findAll({ type: 'Box' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.borderStyle === 'round' && one.props.borderColor === 'success'))
+  expect(green?.key).toBe('done-gate-b1-0')
+  const texts = await textOrder(list)
+  // In its card, under the work's title, not a line of its own at the top
+  expect(texts.indexOf('Fix the hosts file')).toBeLessThan(texts.indexOf('You allowed it once · it runs now'))
+  expect(texts.filter(one => one === 'You allowed it once · it runs now').length).toBe(1)
+  // Under anything that still waits: another work's gate comes in, and its card is drawn above the answered one
+  await $.agent.spawn({ ...spawn, description: 'Tidy the logs', prompt: 'tidy the logs' } as never)
+  const call2 = bash('b2', `${ADMIN} here 'id -u'`, 'a2')
+  expect(await held('b2')).toBeDefined()
+  const now = await textOrder(list)
+  expect(now.indexOf('Tidy the logs')).toBeGreaterThan(-1)
+  expect(now.indexOf('Tidy the logs')).toBeLessThan(now.indexOf('Fix the hosts file'))
+  void call2.catch(() => undefined)
+})
+
+test('scrolled down a long list, the line above the prompt says how many wait at the top, and pressed takes the list there; at the top it says nothing', async ($, on) => {
+  const { files, clock } = world(on, { panes: ['claudopus'] })
+  await $.session.start(start)
+  const at = 1_700_000_000_000
+  files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }))
+  await clock.advance(5000)
+  const MARK = '↑ 2 wait for you at the top of the panel'
+  for (const surface of ['desktop', 'terminal']) {
+    const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface } as never)
+    expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
+    const band = await $.ui.mount({ ...BAND, surface } as never)
+    expect(await until(async () => band.find({ type: 'Text', text: MARK }))).toBeDefined()
+    await band.unmount()
+    await down.unmount()
+    const top = await $.ui.mount({ ...LIST, surface } as never)
+    expect(await until(async () => top.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
+    const still = await $.ui.mount({ ...BAND, surface } as never)
+    expect(await still.find({ type: 'Text', text: MARK })).toBeUndefined()
+    await still.unmount()
+    await top.unmount()
+  }
+})
+
+test("in the terminal, an ask that comes in above the one being typed in never takes the keys from it; the newest ask is drawn first", async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two things', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  const focused = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => one.props.autoFocus).map(one => (one.key ?? '').split('-reply')[0])
+  expect(await until(async () => ((await focused()).length ? focused() : undefined))).toEqual([expect.stringContaining('a1')])
+  await clock.advance(2000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which ear first?', choices: ['Left', 'Right'] } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Which ear first?' }))).toBeDefined()
+  const texts = await textOrder(list)
+  expect(texts.indexOf('Which ear first?')).toBeLessThan(texts.indexOf('May I delete the old repo?'))
+  expect(await focused()).toEqual([expect.stringContaining('a1')])
+})
+
+test('the line above the prompt never points into a list that is not open', async ($, on) => {
+  const { files, clock } = world(on)
+  await $.session.start(start)
+  const at = 1_700_000_000_000
+  files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }))
+  await clock.advance(5000)
+  const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface: 'desktop' } as never)
+  expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
+  await down.unmount()
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect((await textOrder(band)).some(one => one.includes('wait for you at the top'))).toBe(false)
+})
+
+test('in the terminal, a password box that comes while a reply is being typed leaves the keys with the reply', async ($, on) => {
+  const w = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two things', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  const inputs = async () => (await list.findAll({ type: 'Input' } as never)).map(one => ({ key: one.key ?? '', focus: Boolean(one.props.autoFocus) }))
+  const reply = await until(async () => (await inputs()).find(one => one.focus))
+  await list.input({ key: reply?.key ?? '', text: 'Not y', kind: 'change' } as never)
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never).catch(() => undefined)
+  const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }))
+  await w.clock.advance(1000)
+  expect(await until(async () => ((await inputs()).some(one => one.key.startsWith('box-')) ? true : undefined))).toBe(true)
+  expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([reply?.key])
+})
+
+test('in the terminal, an ask that comes while a password is being typed leaves the keys with the password box', async ($, on) => {
+  const w = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two things', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never).catch(() => undefined)
+  const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }))
+  await w.clock.advance(1000)
+  const inputs = async () => (await list.findAll({ type: 'Input' } as never)).map(one => ({ key: one.key ?? '', focus: Boolean(one.props.autoFocus) }))
+  const box = await until(async () => (await inputs()).find(one => one.key.startsWith('box-')))
+  await list.input({ key: box?.key ?? '', text: 'hunt', kind: 'change' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  expect(await until(async () => ((await inputs()).some(one => one.key.startsWith('ask-')) ? true : undefined))).toBe(true)
+  expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([box?.key])
+})
+
 // Each finding of the security review of 0.2.100 (F-001 to F-022), held by a test that fails on the code before its fix. The findings
 // the runners hold (F-006, F-008, F-009, F-017, F-018) are tested in mods/claudopus/bin/admin.test.sh too, on a real keychain or keyring
 
@@ -8109,12 +8368,21 @@ test('a look that gives nothing waits as long as one that works, so a broken loo
 // What the Mac's own commands print for the graphics processor and the battery, in each case the bar must tell apart
 const gpuAt = (pct: number) => `@@GPU@@\n"Device Utilization %"=${pct}`
 const batt = (line: string) => `@@BATT@@\nNow drawing from 'Battery Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`
+const ac = (line: string) => `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`
 const BATTERIES: { name: string; extra: string; desk: string[]; term: RegExp; alt: string }[] = [
   { name: 'on battery with a time left', extra: `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`, desk: ['37%', '85% 4:12 left'], term: / gpu[▰▱]{3} 37% bat 85% 4:12 disk/, alt: 'Battery: 85%, 4:12 left' },
   { name: 'on battery while the system still estimates', extra: batt('64%; discharging; (no estimate)'), desk: ['64%'], term: / bat 64% disk/, alt: 'Battery: 64%, on battery' },
   { name: 'charging', extra: batt('62%; charging; 1:05 remaining'), desk: ['62% 1:05 to full'], term: / bat 62% ↑1:05 disk/, alt: 'Battery: 62%, charging, 1:05 to full' },
   { name: 'fully charged on power', extra: `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t100%; charged; 0:00 remaining present: true`, desk: ['100%'], term: / bat 100% ac disk/, alt: 'Battery: 100%, on power' },
   { name: 'low on battery', extra: batt('12%; discharging; 0:41 remaining'), desk: ['12% 0:41 left'], term: / bat 12% 0:41 disk/, alt: 'Battery: 12%, 0:41 left' },
+  // macOS calls the charge 100% while it still tops the cells up, and still gives a time to full: the time beside 100% is dropped
+  { name: 'called full while it finishes the charge', extra: ac('100%; finishing charge; 0:36 remaining'), desk: ['100% finishing'], term: / bat 100% finishing disk/, alt: 'Battery: 100%, finishing charge' },
+  { name: 'called full while it still says charging', extra: ac('100%; charging; 0:12 remaining'), desk: ['100%'], term: / bat 100% ↑ disk/, alt: 'Battery: 100%, charging' },
+  { name: 'nearly full, finishing the charge', extra: ac('99%; finishing charge; 0:05 remaining'), desk: ['99% 0:05 to full'], term: / bat 99% ↑0:05 disk/, alt: 'Battery: 99%, charging, 0:05 to full' },
+  { name: 'held at 80% by optimised charging, or on a charger too weak to charge', extra: ac('80%; AC attached; not charging'), desk: ['80%'], term: / bat 80% ac disk/, alt: 'Battery: 80%, on power' },
+  { name: 'charging while the system still estimates', extra: ac('45%; charging; (no estimate)'), desk: ['45%'], term: / bat 45% ↑ disk/, alt: 'Battery: 45%, charging' },
+  // The low end the same way: a charge the system calls 0% has no time left beside it
+  { name: 'called empty with a time left', extra: batt('0%; discharging; 0:09 remaining'), desk: ['0%'], term: / bat 0% disk/, alt: 'Battery: 0%, on battery' },
 ]
 for (const one of BATTERIES)
   test(`the bar shows the battery as the system reports it: ${one.name}`, async ($, on) => {
@@ -8131,7 +8399,7 @@ for (const one of BATTERIES)
     const drawings = await desk.findAll({ type: 'Svg' })
     expect(drawings.find(d => String(d.props.alt).startsWith('Battery'))?.props.alt).toBe(one.alt)
     // Never a figure the system did not give
-    if (/no estimate|charged/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
+    if (/no estimate|charged|\t(100|0)%|not charging/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
     if (one.name === 'low on battery') expect((await desk.find({ type: 'Text', text: /^12% 0:41 left$/ }))?.props.color).toBe('#E5A50A')
     await desk.unmount()
     const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
@@ -8174,7 +8442,7 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
     memory: ['Memory', '29 of 64 GB', 'Claude and what it started', '3.3 GB', 'Using the most', 'Safari', '0.4 GB'],
     cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
     gpu: ['Graphics processor', '37% busy', 'Graphics memory in use', '1.2 GB'],
-    battery: ['Battery', '85%', 'On battery, about 4:12 left'],
+    battery: ['Battery', '85%', 'On battery, 4:12 left as the system estimates it'],
     disk: ['Disk', '63 MB/s', 'Reading and writing together'],
     net: ['Network', '1 MB/s', 'Download', 'Upload'],
   }
@@ -8236,6 +8504,24 @@ test('in a narrow terminal a figure that does not fit is left out whole, the net
   expect(await line(44)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 85% 4:12$/)
   expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4:12$/)
   expect(await line(80)).toMatch(/bat 85% 4:12 disk 63M\/s net 1M\/s$/)
+})
+test('in a phone-narrow terminal the word for a charge the system calls full while it finishes is shown whole', async ($, on) => {
+  let n = 0
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, `${gpuAt(37)}\n${ac('100%; finishing charge; 0:00 remaining')}`) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const term = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 44 }, surface: 'terminal' } as never)
+  await until(async () => ((await term.find({ type: 'Text', text: /^mem/ })) ? true : undefined))
+  expect((await term.find({ type: 'Text', text: /^mem/ }))?.text).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 100% finishing$/)
+  await term.unmount()
+  // and the line of more says what the system said, with no estimate it did not give
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  expect((await desk.find({ type: 'Text', text: /^Battery 100% · / }))?.text).toBe('Battery 100% · finishing the charge: the system calls it full and still tops it up')
+  await desk.unmount()
 })
 
 // F-019 and F-020 of the security review, for the hourly look: it only reads the version page and shows a newer version with Install;

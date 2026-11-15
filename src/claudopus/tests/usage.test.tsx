@@ -95,12 +95,21 @@ test('a look that gives nothing waits as long as one that works, so a broken loo
 // What the Mac's own commands print for the graphics processor and the battery, in each case the bar must tell apart
 const gpuAt = (pct: number) => `@@GPU@@\n"Device Utilization %"=${pct}`
 const batt = (line: string) => `@@BATT@@\nNow drawing from 'Battery Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`
+const ac = (line: string) => `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`
 const BATTERIES: { name: string; extra: string; desk: string[]; term: RegExp; alt: string }[] = [
   { name: 'on battery with a time left', extra: `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`, desk: ['37%', '85% 4:12 left'], term: / gpu[▰▱]{3} 37% bat 85% 4:12 disk/, alt: 'Battery: 85%, 4:12 left' },
   { name: 'on battery while the system still estimates', extra: batt('64%; discharging; (no estimate)'), desk: ['64%'], term: / bat 64% disk/, alt: 'Battery: 64%, on battery' },
   { name: 'charging', extra: batt('62%; charging; 1:05 remaining'), desk: ['62% 1:05 to full'], term: / bat 62% ↑1:05 disk/, alt: 'Battery: 62%, charging, 1:05 to full' },
   { name: 'fully charged on power', extra: `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t100%; charged; 0:00 remaining present: true`, desk: ['100%'], term: / bat 100% ac disk/, alt: 'Battery: 100%, on power' },
   { name: 'low on battery', extra: batt('12%; discharging; 0:41 remaining'), desk: ['12% 0:41 left'], term: / bat 12% 0:41 disk/, alt: 'Battery: 12%, 0:41 left' },
+  // macOS calls the charge 100% while it still tops the cells up, and still gives a time to full: the time beside 100% is dropped
+  { name: 'called full while it finishes the charge', extra: ac('100%; finishing charge; 0:36 remaining'), desk: ['100% finishing'], term: / bat 100% finishing disk/, alt: 'Battery: 100%, finishing charge' },
+  { name: 'called full while it still says charging', extra: ac('100%; charging; 0:12 remaining'), desk: ['100%'], term: / bat 100% ↑ disk/, alt: 'Battery: 100%, charging' },
+  { name: 'nearly full, finishing the charge', extra: ac('99%; finishing charge; 0:05 remaining'), desk: ['99% 0:05 to full'], term: / bat 99% ↑0:05 disk/, alt: 'Battery: 99%, charging, 0:05 to full' },
+  { name: 'held at 80% by optimised charging, or on a charger too weak to charge', extra: ac('80%; AC attached; not charging'), desk: ['80%'], term: / bat 80% ac disk/, alt: 'Battery: 80%, on power' },
+  { name: 'charging while the system still estimates', extra: ac('45%; charging; (no estimate)'), desk: ['45%'], term: / bat 45% ↑ disk/, alt: 'Battery: 45%, charging' },
+  // The low end the same way: a charge the system calls 0% has no time left beside it
+  { name: 'called empty with a time left', extra: batt('0%; discharging; 0:09 remaining'), desk: ['0%'], term: / bat 0% disk/, alt: 'Battery: 0%, on battery' },
 ]
 for (const one of BATTERIES)
   test(`the bar shows the battery as the system reports it: ${one.name}`, async ($, on) => {
@@ -117,7 +126,7 @@ for (const one of BATTERIES)
     const drawings = await desk.findAll({ type: 'Svg' })
     expect(drawings.find(d => String(d.props.alt).startsWith('Battery'))?.props.alt).toBe(one.alt)
     // Never a figure the system did not give
-    if (/no estimate|charged/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
+    if (/no estimate|charged|\t(100|0)%|not charging/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
     if (one.name === 'low on battery') expect((await desk.find({ type: 'Text', text: /^12% 0:41 left$/ }))?.props.color).toBe('#E5A50A')
     await desk.unmount()
     const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
@@ -160,7 +169,7 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
     memory: ['Memory', '29 of 64 GB', 'Claude and what it started', '3.3 GB', 'Using the most', 'Safari', '0.4 GB'],
     cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
     gpu: ['Graphics processor', '37% busy', 'Graphics memory in use', '1.2 GB'],
-    battery: ['Battery', '85%', 'On battery, about 4:12 left'],
+    battery: ['Battery', '85%', 'On battery, 4:12 left as the system estimates it'],
     disk: ['Disk', '63 MB/s', 'Reading and writing together'],
     net: ['Network', '1 MB/s', 'Download', 'Upload'],
   }
@@ -222,4 +231,22 @@ test('in a narrow terminal a figure that does not fit is left out whole, the net
   expect(await line(44)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 85% 4:12$/)
   expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4:12$/)
   expect(await line(80)).toMatch(/bat 85% 4:12 disk 63M\/s net 1M\/s$/)
+})
+test('in a phone-narrow terminal the word for a charge the system calls full while it finishes is shown whole', async ($, on) => {
+  let n = 0
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, `${gpuAt(37)}\n${ac('100%; finishing charge; 0:00 remaining')}`) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const term = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 44 }, surface: 'terminal' } as never)
+  await until(async () => ((await term.find({ type: 'Text', text: /^mem/ })) ? true : undefined))
+  expect((await term.find({ type: 'Text', text: /^mem/ }))?.text).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 100% finishing$/)
+  await term.unmount()
+  // and the line of more says what the system said, with no estimate it did not give
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  expect((await desk.find({ type: 'Text', text: /^Battery 100% · / }))?.text).toBe('Battery 100% · finishing the charge: the system calls it full and still tops it up')
+  await desk.unmount()
 })

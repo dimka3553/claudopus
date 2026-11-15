@@ -35,9 +35,10 @@ test("the panel shows every open chat's running work under that chat's name, thi
   expect(bold.indexOf('This chat')).toBeGreaterThan(-1)
   expect(bold.indexOf('This chat')).toBeLessThan(bold.indexOf('Fix the nose'))
   expect(bold.indexOf('Fix the nose')).toBeLessThan(bold.indexOf('Billing page'))
-  // Under the other chat's name, its ask first
-  expect(bold.indexOf('Billing page')).toBeLessThan(bold.indexOf('Send the invoices'))
-  expect(bold.indexOf('Send the invoices')).toBeLessThan(bold.indexOf('Check the totals'))
+  // Its ask is at the top with everything that waits on the person, above every chat's name; the rest under that chat's name
+  expect(bold.indexOf('Send the invoices')).toBeGreaterThan(-1)
+  expect(bold.indexOf('Send the invoices')).toBeLessThan(bold.indexOf('This chat'))
+  expect(bold.indexOf('Billing page')).toBeLessThan(bold.indexOf('Check the totals'))
   expect(bold).not.toContain('Old landing page')
   expect(await list.find({ type: 'Text', text: 'billing' })).toBeDefined()
   // The header counts every chat's: the ask first, then all that runs, here and there
@@ -256,8 +257,9 @@ test("while the person types a reply into an ask, work finishing here and in ano
   expect(await drawn(list)).toContain('happy')
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
-  // The half reply is still in its box
-  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('Not ye')
+  // The half reply is still in its box: while typing the box holds the letters itself, and once typing stops it is drawn with them
+  await clock.advance(31_000)
+  expect(await until(async () => ((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value === 'Not ye' ? true : undefined))).toBe(true)
   await list.unmount()
 })
 

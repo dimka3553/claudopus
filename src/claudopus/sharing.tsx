@@ -224,7 +224,7 @@ const readOthers = async ($: EngineInterface) => {
       if (endSeen.has(key)) continue
       const isNew = now - card.endedAt < SEEN_ENDING
       endSeen.set(key, isNew ? now : 0)
-      if (isNew) $.clock.after(LINGER + 20, () => void update($, tick, n => n + 1))
+      if (isNew) $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
     }
   for (const key of [...endSeen.keys()]) if (!ids.has(key)) endSeen.delete(key)
   const isAppChanged = found.some(s => s.host) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
