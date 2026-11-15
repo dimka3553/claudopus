@@ -1503,7 +1503,7 @@ const panelHooks = (on: On) => {
     const isKeyed = e.surface === 'terminal' && !boxes.length
     keyed = isKeyed
     const versions = alone ? { version: '', installed: '', isWaiting: false } : await versionsOf($)
-    // A newer version whose changes the person has not seen: its screen covers the whole panel until it is closed, in place of the header's moment
+    // Just moved to a newer version whose changes the person has not seen: one quiet line in the header, with What's new, until closed
     const screen = alone ? undefined : await updateScreen($, ui, versions.version, head.asks, e.surface)
     // A password or key box stays above it: the runner waits on it
     if (paneId === LIST && !alone) {
@@ -1513,10 +1513,9 @@ const panelHooks = (on: On) => {
       const count = waitsCount
       if (count !== waitsAtTop || (was > 0) !== ((listOffsets.get(e.surface) ?? 0) > 0)) ((waitsAtTop = count), $.ui.invalidate('ui.render'))
     }
-    if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{notices.map(one => one.node)}{doneNotesPart(ui, at)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
-    // A newer version the hourly look saw: its card under the header's lines, with Install
-    const outCard = alone ? null : newOutCard($, ui, await newOut($, versions.version, versions.installed).catch(() => ''))
+    // Where updating stands for this chat: a small box under the header's lines, its steps each a press
+    const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 
     return (
       <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={e.props.scroll.bodyRows}>
@@ -1538,7 +1537,7 @@ const panelHooks = (on: On) => {
                     <Box flexShrink={0}>
                       <Text bold>Claudopus</Text>
                     </Box>
-                    {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} installed, type /reload-plugins` : ''}`}</Text> : null}
+                    {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}`}</Text> : null}
                   </Box>
                 )}
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>

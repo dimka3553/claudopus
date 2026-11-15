@@ -143,30 +143,24 @@ test('About opens the changelog in a tab of its own, every version newest first,
   expect(texts).toContain('Pictures open large.')
 })
 
-test('a newer version than the one whose changes were seen covers the panel with what changed since, until Back to the panel', async ($, on) => {
+test('a chat that moved to a newer version than the one whose changes were seen says so in one quiet note in the header, with What\'s new, until closed', async ($, on) => {
   const { files } = world(on, { changelog: CHANGELOG })
   files.set(`${MEMORY}/seen.json`, JSON.stringify({ version: '0.0.8' }))
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
-  expect(await until(async () => pane.find({ type: 'Text', text: 'Claudopus updated' }))).toBeDefined()
-  const texts = (await pane.findAll({ type: 'Text' })).map(one => one.text)
-  expect(texts).toContain('v0.0.8 → v0.1.0 · 2 versions')
-  expect(texts.filter(one => /^v0\.\d\.\d+$/.test(one))).toEqual(['v0.1.0', 'v0.0.9'])
-  expect(texts).not.toContain('An old change.')
-  // The whole panel: no header buttons under it
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).not.toContain('Stats')
-  await pressed(pane, 'update-top-close')
+  expect(await until(async () => pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' }))).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '· from v0.0.8, 2 versions' })).toBeDefined()
+  // The panel stays whole beneath it: its header buttons are there
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toContain('Stats')
+  await pressed(pane, 'update-close')
   expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0')
-  await pane.unmount()
-  const after = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
-  expect(await until(async () => (await after.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
-  expect(await after.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+  expect(await until(async () => ((await pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })) ? undefined : true))).toBe(true)
   // A load of the same version again shows nothing
-  await after.unmount()
+  await pane.unmount()
   await $.session.start(start)
   const again = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
   expect(await until(async () => (await again.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
-  expect(await again.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+  expect(await again.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })).toBeUndefined()
 })
 
 test('a first install starts the record of changes seen at its own version, and shows no update screen', async ($, on) => {
@@ -175,7 +169,7 @@ test('a first install starts the record of changes seen at its own version, and 
   expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0')
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
   expect(await until(async () => (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })).toBeUndefined()
 })
 
 

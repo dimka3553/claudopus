@@ -93,40 +93,30 @@ const closeScreen = async ($: EngineInterface, version: string) => {
   if (!isNewer(seenIn(await readOr($, seenPath())), version)) await writeSeen($, version)
   $.ui.invalidate('ui.render')
 }
-// The screen, over the panel: the blue happy octopus jumping, the version moved to, the changes of every version after the one seen
-// last, and the way back. Nothing in a copy a newer load of this chat replaced, nor for a version whose changes were seen
-const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, asks: number, surface?: string) => {
+// The note a chat shows once it moved to a newer version whose changes the person has not seen on this Mac: one quiet box in the
+// header, where the update's steps were, saying what it moved from and how many versions that covers, with What's new (the
+// Changelog tab) and Close, which marks it seen for every chat. Nothing in a copy a newer load of this chat replaced
+const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, _asks: number, _surface?: string) => {
   if (!dir || !loaded) return undefined
   const seen = seenIn(await readOr($, seenPath()))
   if (!isScreenDue(loaded, seen) || (await read($, ranVersion)) !== loaded) return undefined
   const { shown, left } = missedOf(await versionsLogged($), seen, loaded)
-  // The screen is the moment, bigger: the header's is not played behind it, and the sound plays once for the version on this Mac
-  if (updatedMoment) updatedMoment = undefined
+  // The sound plays once for the version on this Mac
   if (screenSounded !== loaded) void playUpdated($, (screenSounded = loaded))
-  const back = (key: string) => (
-    <ui.Box key={key} flexDirection="row" flexWrap="wrap" gap={1} flexShrink={0}>
-      <ui.Button key={`${key}-close-${presses}`} label="Back to the panel" hotkey="b" onPress={() => void closeScreen($, loaded).catch(err => log($, `update screen not closed: ${String(err)}`))} />
-      <ui.Button key={`${key}-log-${presses}`} label="Changelog" plain onPress={() => void openChangelog($).catch(err => log($, `changelog not opened: ${String(err)}`))} />
-    </ui.Box>
-  )
   const count = shown.length + left
   return (
-    <ui.Box key="update-screen" flexDirection="column" gap={1} flexGrow={1} {...(surface === 'terminal' ? { width: '100%' } : {})}>
-      {/* The terminal leaves a column's rows as wide as what they hold, so there the head is made as wide as the panel to centre in it */}
-      <ui.Box key="update-head" flexDirection="column" alignItems="center" gap={1} backgroundColor={FILL} paddingX={2} paddingY={2} flexShrink={0} {...(surface === 'terminal' ? { width: '100%' } : {})}>
-        {octopus(ui, 'update-mark', 'updated', UPDATE_MARK, `Claudopus, updated to ${loaded}`, $, { surface, requestId: LIST })}
-        <ui.Text bold color={FLOW}>Claudopus updated</ui.Text>
-        <ui.Text dimColor wrap="wrap">{`v${seen} → v${loaded}${count > 1 ? ` · ${count} versions` : ''}`}</ui.Text>
+    <ui.Box key="update-notice" flexDirection="column" borderStyle="round" borderColor={NOTICE_EDGE} paddingX={1} flexShrink={0}>
+      <ui.Box key="update-title" flexDirection="row" gap={1} minWidth={0}>
+        <ui.Box flexShrink={0}>
+          <ui.Text color={FLOW}>{`Updated to Claudopus ${loaded}`}</ui.Text>
+        </ui.Box>
+        <ui.Text dimColor wrap="truncate-end">{`· from v${seen}${count > 1 ? `, ${count} versions` : ''}`}</ui.Text>
       </ui.Box>
-      {back('update-top')}
-      {asks ? <ui.Text key="update-asks" color={NEEDS} wrap="wrap">{`${asks === 1 ? 'Something needs' : `${asks} things need`} you: go back to the panel to see ${asks === 1 ? 'it' : 'them'}.`}</ui.Text> : null}
-      <ui.Text key="update-new" bold>{"What's new"}</ui.Text>
-      {shown.length ? null : <ui.Text dimColor>This version has no changes written down.</ui.Text>}
-      {shown.map(v => versionBand(ui, `update-${v.version}`, v, v.date))}
-      {olderLine(ui, 'update-older', left, () => void openChangelog($).catch(err => log($, `changelog not opened: ${String(err)}`)))}
-      {shown.length > 1 ? back('update-bottom') : null}
+      {shown[0]?.changes[0] ? <ui.Text key="update-what" dimColor wrap="wrap">{shown[0].changes[0].length > 140 ? `${shown[0].changes[0].slice(0, 137).replace(/\s+\S*$/, '')}…` : shown[0].changes[0]}</ui.Text> : null}
+      <ui.Box key="update-done-buttons" flexDirection="row" flexWrap="wrap" columnGap={2}>
+        <ui.Button key={`update-new-${presses}`} label="What's new" onPress={() => void ((presses += 1), closeScreen($, loaded).then(() => openChangelog($))).catch(err => log($, `changelog not opened: ${String(err)}`))} />
+        <ui.Button key={`update-close-${presses}`} label="Close" plain dimColor onPress={() => void closeScreen($, loaded).catch(err => log($, `update note not closed: ${String(err)}`))} />
+      </ui.Box>
     </ui.Box>
   )
 }
-// The octopus on the update screen, twice the header's
-const UPDATE_MARK = 96

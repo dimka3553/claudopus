@@ -25,9 +25,11 @@ export type Models = Record<Role, string>
 export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', fable: 'Fable 5.2', haiku: 'Haiku 5.5' }
 // `admin`: when the person is asked before an admin command runs: "each" time (as shipped), once for a piece of "work", or "never".
 // "work" and "never" count only with `adminSealed`, the seal a press in this tab makes; without it every command asks.
-// `updates`: false turns off the hourly look at the version page (it only looks; an update installs only at a press)
+// `updates`: false looks at the version page only when asked (Config's Check now); `updateEvery` how many hours apart the look runs
+// otherwise; `skipVersion` a version the person skipped, kept quiet with every older one. None of them installs anything: Download
+// and Install are presses in the panel, and nothing here can make them run by themselves
 // `adminPassword` is read no more: no admin password is kept
-export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; models?: Partial<Models>; admin?: string; adminSealed?: string; adminPassword?: string }
+export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; admin?: string; adminSealed?: string; adminPassword?: string }
 export const ADMIN_MODES = [
   { value: 'each', label: 'Ask each time' },
   { value: 'work', label: 'Ask once per piece of work' },
@@ -92,6 +94,17 @@ export const sectionsOf = (text: string) =>
 
 // ---- Acts: in ./register, beside the other calls on the engine ----
 
+// How often the look runs, as Config offers it; 0 is only when asked
+export const LOOK_CHOICES = [
+  { value: '1', label: 'Every hour' },
+  { value: '6', label: 'Every 6 hours' },
+  { value: '24', label: 'Once a day' },
+  { value: '168', label: 'Once a week' },
+  { value: '0', label: 'Only when I ask' },
+] as const
+// How long ago, in a few words
+export const agoText = (ms: number) => (ms < 90_000 ? 'just now' : ms < 90 * 60_000 ? `${Math.round(ms / 60_000)} min ago` : ms < 36 * 3_600_000 ? `${Math.round(ms / 3_600_000)} h ago` : `${Math.round(ms / 86_400_000)} days ago`)
+
 // ---- The tab ----
 
 // The text being edited in the tab, and what the person has typed so far, so a redraw keeps it
@@ -101,6 +114,8 @@ export type ConfigShown = {
   // The version this chat runs, and Check for updates as it stands
   version: string
   check: { isChecking: boolean; said: string; isError: boolean }
+  // Where this chat's copy loads from, in words, and when the last look was and what it saw
+  updates?: { where: string; lookedAt: number; seen: string; now: number }
   texts: { text: Text; isOwn: boolean; isStale: boolean; path: string; body: string }[]; config: Config; failed: string
   // Admin commands: what is in force, a "work" or "never" in config.json that no press here sealed, the commands always allowed
   // (and how many in the file carry no seal of this Mac's), and whether this chat is reached from another device
@@ -114,6 +129,7 @@ export type ConfigActs = {
   putBack: (text: Text) => void
   set: (key: keyof Config, value: unknown, role?: Role) => void
   check: () => void
+  lookEvery: (hours: number) => void
   gateMode: (mode: AdminMode) => void
   gateRemove: (host: string, command: string) => void
 }
@@ -290,19 +306,32 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         'Updates',
         '',
         <Box flexDirection="column" gap={1}>
-          {toggle(
-            'updates',
+          {item(
+            'config-look',
             'Look for new versions',
-            "Every hour one chat reads claudopus.ai's version page, and the panel says when a newer one is out, with Install. Nothing is downloaded or installed until you press it. Off, nothing looks.",
+            'Reads the version page on claudopus.ai, and the panel says when a newer one is out. It never downloads or installs anything: each of Download, Install and Reload is your press in the panel.',
+            <Select
+              key="config-look-pick"
+              options={[...LOOK_CHOICES]}
+              value={config.updates === false ? '0' : String(LOOK_CHOICES.some(one => one.value === String(config.updateEvery)) ? config.updateEvery : 1)}
+              onSelect={value => acts.lookEvery(Number(value))}
+            />,
+            config.updates === false || (config.updateEvery !== undefined && config.updateEvery !== 1),
+            () => acts.lookEvery(1),
           )}
           {item(
             'config-check',
-            shown.version ? `This chat runs v${shown.version}` : 'Check for updates',
-            'Looks for a newer release now and gets it, through Claude Code\'s own update steps; type /reload-plugins in a chat to switch it.',
+            shown.version ? `This chat runs v${shown.version}` : 'Check now',
+            [
+              shown.updates?.where ? `It loads from ${shown.updates.where}.` : '',
+              shown.updates?.lookedAt ? `Last looked ${agoText(shown.updates.now - shown.updates.lookedAt)}${shown.updates.seen ? `: v${shown.updates.seen} is the newest out` : ''}.` : 'Not looked yet.',
+            ]
+              .filter(Boolean)
+              .join(' '),
             shown.check.isChecking ? (
               <Text key="config-check-checking" dimColor>Checking…</Text>
             ) : (
-              <Button key={`config-check-${presses}`} label="Check for updates" onPress={acts.check} />
+              <Button key={`config-check-${presses}`} label="Check now" onPress={acts.check} />
             ),
             false,
             () => undefined,
@@ -310,6 +339,9 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
               <Text key="config-check-said" color={shown.check.isError ? 'error' : undefined} wrap="wrap">{shown.check.said}</Text>
             ) : null,
           )}
+          {typeof config.skipVersion === 'string' && config.skipVersion
+            ? item('config-skip', 'Skipped', `You skipped v${config.skipVersion}: it and older ones stay quiet, and a newer one shows.`, <Button key={`config-skip-back-${presses}`} label="Show it again" plain dimColor onPress={() => acts.set('skipVersion', undefined)} />, false, () => undefined)
+            : null}
         </Box>,
       )}
       {shown.failed ? (

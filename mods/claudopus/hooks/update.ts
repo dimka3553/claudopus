@@ -1,9 +1,7 @@
-// Claudopus keeps itself up to date: Claude Code leaves a marketplace that is not Anthropic's alone unless each person turns its
-// auto-update on, and the desktop app runs its engine with DISABLE_AUTOUPDATER=1, which turns that pass off anyway. So every few
-// hours one chat on the Mac asks Claude Code itself to refresh this mod's marketplace and update the mod, the two steps a person
-// would type. It runs those steps only when the version page on claudopus.ai names a version other than the one installed, so a
-// look is one small fetch, with no model or agent in it. Chats that start after an update load the new version; chats already open
-// keep the one they loaded.
+// Updating Claudopus, the pure parts: it never installs by itself. A look only reads the version page on claudopus.ai (one small
+// fetch, with no model or agent in it), and the panel says when it names a newer version. Then three steps, each a press: Download
+// fetches the release and checks it is what the release published, Install puts it in place (Claude Code's own steps for an
+// installed copy, a fast-forward for a folder of the code), Reload switches a chat to it.
 
 // The page that says which version is current: site/version.json, made by build.mjs from plugin.json and served from main
 export const VERSION_PAGE = 'https://www.claudopus.ai/version.json'
@@ -148,26 +146,64 @@ const versionIn = (manifest: string) => {
   }
 }
 
-// The two commands, in order: refresh the marketplace's copy (`plugin update` alone does not, and reports the old version as the
-// latest), then update the mod from it, at the scope it was installed at
+// Claude Code's two steps for an installed copy, in order: refresh the marketplace's copy, then update the mod from it, at the scope
+// it was installed at
 export const updateSteps = (engine: string, from: { marketplace: string; plugin: string }, scope?: string): [string[], string[]] => [
   [engine, 'plugin', 'marketplace', 'update', from.marketplace],
   [engine, 'plugin', 'update', `${from.plugin}@${from.marketplace}`, ...(scope ? ['--scope', scope] : [])],
 ]
 
-// The version `plugin update` says it moved to, or the one it says is already the latest
-export const updatedTo = (out: string): { version: string; isNew: boolean } | undefined => {
-  const moved = /updated from \S+ to (\S+?)\.?(?:\s|$)/.exec(out)
-  if (moved?.[1]) return { version: moved[1], isNew: true }
-  const same = /already at the latest version \(([^)]+)\)/.exec(out)
-  return same?.[1] ? { version: same[1], isNew: false } : undefined
+// ---- What a release published ----
+
+// The version page as the release made it (build.mjs): the version, git's fingerprint of the mod's folder as released (`tree`), its
+// size in bytes, and the newest versions with the first line of each one's changes. Read strictly: a page without a fingerprint
+// is no release a download can be checked against, and every line is plain text of a bounded length
+export type Published = { version: string; tree: string; size: number; versions: { version: string; line: string; more: number }[] }
+const VERSION_RE = /^\d{1,4}(?:\.\d{1,6}){1,3}$/
+export const isVersion = (text: unknown): text is string => typeof text === 'string' && VERSION_RE.test(text)
+export const isTree = (text: unknown): text is string => typeof text === 'string' && /^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(text)
+const plainLine = (text: unknown, most = 140) =>
+  typeof text === 'string'
+    ? text
+        .replace(/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁦-⁩]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, most)
+    : ''
+export const publishedOf = (text: string): Published | undefined => {
+  try {
+    const page = JSON.parse(text) as { version?: unknown; tree?: unknown; size?: unknown; versions?: unknown }
+    if (!isVersion(page?.version) || !isTree(page.tree)) return undefined
+    const versions = (Array.isArray(page.versions) ? page.versions : [])
+      .slice(0, 60)
+      .filter((one): one is { version: string; line?: unknown; more?: unknown } => isVersion((one as { version?: unknown })?.version))
+      .map(one => ({ version: one.version, line: plainLine(one.line), more: Math.max(0, Math.min(99, Math.floor(Number(one.more) || 0))) }))
+    const size = Number(page.size)
+    return { version: page.version, tree: page.tree, size: Number.isFinite(size) && size > 0 ? Math.floor(size) : 0, versions }
+  } catch {
+    return undefined
+  }
 }
+// The versions a chat running `loaded` has not had, newest first, as the page lists them (the page's own version always among them)
+export const missedOn = (page: Published, loaded: string) => {
+  const listed = page.versions.filter(one => isNewer(one.version, loaded))
+  return listed.some(one => one.version === page.version) || !isNewer(page.version, loaded) ? listed : [{ version: page.version, line: '', more: 0 }, ...listed]
+}
+// A size as people read it
+export const sizeText = (bytes: number) => (bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : bytes >= 1e3 ? `${Math.round(bytes / 1e3)} KB` : `${bytes} bytes`)
 
-// ---- One look: the version page, then the two steps when it names another version ----
+// ---- Where this chat's copy comes from, and what updating it means there ----
 
-// What a look found: this Mac already has the version the page names, it downloaded it now, or it could not tell or download
-export type Look = { kind: 'latest'; version: string } | { kind: 'updated'; version: string } | { kind: 'failed'; why: string; version?: string; next?: string }
-// What a look needs of the Mac, so the hourly look and Config's Check for updates run the very same steps, and tests can give them
+// An installed copy whose marketplace is a git clone Claude Code keeps (installed from GitHub): a download fetches the release into
+// that clone, Install runs Claude Code's own two steps. A folder of the code that is Claudopus's main checkout (a chat run from it,
+// or an installed copy whose marketplace is that folder): a download fetches the release into its git, Install moves the folder's
+// main forward to it, a fast-forward only. Anything else is said as it is, and offered nothing
+export type Source =
+  | { kind: 'clone'; repo: string; sub: string; plugins: string; marketplace: string; plugin: string; scope?: string }
+  | { kind: 'folder'; repo: string; sub: string; runs: 'folder' | 'copy'; record?: { plugins: string; marketplace: string; plugin: string; scope?: string } }
+  | { kind: 'none'; why: string }
+
+// What one step needs of the Mac, so the panel's presses and the tests run the very same steps
 export type LookIo = {
   read: (path: string) => Promise<string>
   write: (path: string, text: string) => Promise<unknown>
@@ -175,116 +211,204 @@ export type LookIo = {
   page: () => Promise<{ ok: boolean; status: number; text: string }>
   now: () => Promise<number>
   log: (text: string) => Promise<unknown>
+  wait?: (ms: number) => Promise<unknown>
 }
-// One look, run by whoever holds the update lock: it reads the version page, runs the two update steps only when the page names a
-// version other than the one installed, and keeps what it learnt in update.json
-export const lookOnce = async (io: LookIo, at: { from: { plugins: string; marketplace: string; plugin: string }; root: string; engine: string; stampPath: string; cwd?: string }): Promise<Look> => {
-  const { from, engine, stampPath } = at
-  const before = stampOf(await io.read(stampPath).catch(() => ''))
-  const now = await io.now()
-  const installed = await io.read(`${from.plugins}/installed_plugins.json`).catch(() => '')
-  const id = `${from.plugin}@${from.marketplace}`
-  // A chat on a copy another update has replaced has no entry of its own: the copy it would load now stands for it, so its scope and
-  // version are the ones compared and updated (a project-only install is not updated at the user's scope)
-  const root = scopeOf(installed, id, at.root) ? at.root : (copyOf(installed, id, at.root, at.cwd)?.installPath ?? at.root)
-  const scope = scopeOf(installed, id, root)
-  const have = installedVersionOf(installed, id, root, scope)
-  // The version page on claudopus.ai says which version is current; the same one installed means nothing is run
-  const page = await io.page()
-  const current = page.ok ? versionOnPage(page.text) : undefined
-  if (!current) {
-    const result = `version page not read: ${page.ok ? 'no version on it' : page.status || page.text.slice(0, 120)}`
-    await io.write(stampPath, JSON.stringify({ at: now, version: before?.version || have, result }))
-    await io.log(`Claudopus ${result}`)
-    return { kind: 'failed', why: page.ok ? 'claudopus.ai named no version' : page.status ? `claudopus.ai answered ${page.status}` : 'claudopus.ai did not answer' }
-  }
-  if (current === have) {
-    await io.write(stampPath, JSON.stringify({ at: now, version: have, result: 'latest' }))
-    return { kind: 'latest', version: have }
-  }
-  await io.log(`Claudopus ${current} is on the version page and ${have} is installed: updating`)
-  // A marketplace that is a folder of the code (a git checkout) is brought up to date first, so the refresh finds the new version
-  const known = await io.read(`${from.plugins}/known_marketplaces.json`).catch(() => '')
-  const source = (() => {
-    try {
-      const one = JSON.parse(known)?.[from.marketplace]?.source
-      return one?.source === 'directory' && typeof one.path === 'string' ? one.path : ''
-    } catch {
-      return ''
-    }
-  })()
-  const pulled = source ? await pullFolder(io, source) : undefined
-  if (pulled?.kind === 'refused') await io.log(`Claudopus marketplace folder not updated: ${pulled.why}`)
-  const [refresh, update] = updateSteps(engine, from, scope)
-  const run = (argv: string[], timeoutMs: number) => io.run(argv, timeoutMs).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
-  const refreshed = await run(refresh, 180_000)
-  const updated = refreshed.exitCode === 0 ? await run(update, 300_000) : refreshed
-  const to = refreshed.exitCode === 0 ? updatedTo(`${updated.stdout}\n${updated.stderr}`) : undefined
-  const why = `${updated.stderr || updated.stdout}`.trim().slice(-200)
-  const result = to ? (to.isNew ? 'updated' : 'latest') : `${refreshed.exitCode === 0 ? 'not updated' : 'marketplace not refreshed'}: ${why}`
-  // A look that learnt nothing keeps the version the last one found, so About still says what is installed
-  await io.write(stampPath, JSON.stringify({ at: now, version: to?.version ?? before?.version ?? '', result }))
-  if (to?.isNew) await io.log(`Claudopus updated to ${to.version}: chats that start from now on load it`)
-  else if (!to) await io.log(`Claudopus ${result}`)
-  // Both steps ran, yet where Claude Code installs it from still has an older version than the page (a folder of its code not brought
-  // up to date): the newest is not here, and that is said rather than "newest"
-  if (to && isNewer(current, to.version))
-    return pulled?.kind === 'refused'
-      ? { kind: 'failed', version: current, why: `where Claude Code installs it from still has v${to.version}: ${pulled.why}`, next: 'Nothing in it was changed.' }
-      : { kind: 'failed', version: current, why: `where Claude Code installs it from still has v${to.version}`, next: 'Bring that up to date, then check again.' }
-  if (to) return { kind: to.isNew ? 'updated' : 'latest', version: to.version }
-  const said = why.split('\n').at(-1)?.trim() ?? ''
-  return { kind: 'failed', version: current, why: `${refreshed.exitCode === 0 ? 'Claude Code did not update it' : 'Claude Code could not refresh where it comes from'}${said ? ` (${said.slice(0, 120)})` : ''}` }
-}
+const gitIn = (io: Pick<LookIo, 'run'>, folder: string) => (args: string[], timeoutMs = 20_000) =>
+  io
+    .run(['env', 'GIT_TERMINAL_PROMPT=0', 'GIT_ASKPASS=true', 'GIT_SSH_COMMAND=ssh -o BatchMode=yes', 'git', '-C', folder, ...args], timeoutMs)
+    .catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+const lastLine = (out: { stdout: string; stderr: string }) => `${out.stderr || out.stdout}`.trim().split(/[\r\n]/).at(-1)?.trim().replace(/^(fatal|error): /, '').slice(0, 140) ?? ''
 
-// What Config's Check for updates says once its look is over, for a chat running `loaded`: newest, downloaded and waiting for
-// /reload-plugins in this chat, or why not. A chat on this Mac also switches by itself once it is idle; one run from another Mac
-// cannot (the engine refuses a reload it was not typed in there), so there it is only typed
-export const checkSaid = (look: Look, loaded: string, isTypedOnly = false, isFolder = false): { text: string; isError: boolean } => {
-  if (look.kind === 'failed')
-    return { text: `Couldn't ${look.version ? `${isFolder ? 'update to' : 'download'} v${look.version}` : 'check'}: ${look.why}. ${look.next ?? 'Try again later.'}`, isError: true }
-  if (loaded && isNewer(look.version, loaded))
-    return { text: `v${look.version} ${isFolder ? 'is in its folder now' : 'downloaded'}. Type /reload-plugins to switch this chat to it${isTypedOnly ? '.' : ', or it switches by itself in a moment.'}`, isError: false }
-  return { text: `You're on the newest version (v${look.version}).`, isError: false }
-}
-// ---- A copy run from a folder of its code: the folder is brought up to date with git ----
-
-// A folder of the code is a git checkout; bringing it up to date fetches main from online and moves main forward to it, only as a
-// plain fast-forward. Only Claudopus's own main checkout is touched: not another repo that holds the folder, not a worktree (where
-// work is under way) and not a branch other than main, which releases never reach. git itself refuses, before it changes anything,
-// when an uncommitted change or an untracked file there would be overwritten, so work in the folder is never lost; a main with commits
-// of its own is left alone. `isClean` says whether the folder had no uncommitted changes, so nothing uncommitted is copied on
-export type Pulled = { kind: 'pulled' | 'same'; isClean: boolean } | { kind: 'refused'; why: string }
-export const pullFolder = async (io: Pick<LookIo, 'run'>, folder: string): Promise<Pulled> => {
-  const git = (args: string[], timeoutMs = 20_000) =>
-    io
-      .run(['env', 'GIT_TERMINAL_PROMPT=0', 'GIT_ASKPASS=true', 'GIT_SSH_COMMAND=ssh -o BatchMode=yes', 'git', '-C', folder, ...args], timeoutMs)
-      .catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
-  const last = (out: { stdout: string; stderr: string }) => `${out.stderr || out.stdout}`.trim().split('\n').at(-1)?.trim().replace(/^(fatal|error): /, '').slice(0, 140) ?? ''
-  if ((await git(['rev-parse', '--show-toplevel'])).exitCode !== 0) return { kind: 'refused', why: 'its folder is not a git checkout' }
+// A folder of the code is offered a release only as Claudopus's own main checkout on main, following an online main: a worktree, a
+// branch other than main or another repo is never reached by a release, so a download there would not change what the chat runs.
+// What it is, or why it is not offered, in plain words
+export type FolderReady = { ok: true; branch: string; upstream: string } | { ok: false; why: string; what: string }
+export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Promise<FolderReady> => {
+  const git = gitIn(io, folder)
+  if ((await git(['rev-parse', '--show-toplevel'])).exitCode !== 0) return { ok: false, what: 'a folder', why: "it isn't a git checkout, so a release can't be brought into it" }
   if ((await git(['ls-files', '--error-unmatch', ':/mods/claudopus/.claude-plugin/plugin.json'])).exitCode !== 0)
-    return { kind: 'refused', why: "its folder is in a git checkout that isn't Claudopus's" }
+    return { ok: false, what: 'a folder', why: "it is in a git checkout that isn't Claudopus's" }
   const [gitDir = '', commonDir = ''] = (await git(['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'])).stdout.trim().split('\n')
-  if (gitDir.trim() !== commonDir.trim()) return { kind: 'refused', why: 'its folder is a git worktree, not the main checkout' }
   const branch = (await git(['symbolic-ref', '-q', '--short', 'HEAD'])).stdout.trim()
-  if (!branch) return { kind: 'refused', why: 'its folder is on no branch' }
+  if (gitDir.trim() !== commonDir.trim())
+    return { ok: false, what: `a worktree of the code${branch ? `, on branch ${branch}` : ''}`, why: 'releases come out on main and never reach a worktree: merge main there, then reload' }
+  if (!branch) return { ok: false, what: 'a checkout of the code on no branch', why: 'releases come out on main: switch it to main, then check again' }
   const upstream = (await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim()
-  if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream)) return { kind: 'refused', why: `its folder is on ${upstream ? `${branch}, following ${upstream}` : branch}, and releases come out on main` }
-  const fetched = await git(['fetch', '--quiet'], 120_000)
-  if (fetched.exitCode !== 0) return { kind: 'refused', why: `its folder could not fetch ${upstream} (${last(fetched)})` }
-  const [head, theirs] = [(await git(['rev-parse', 'HEAD'])).stdout.trim(), (await git(['rev-parse', '@{u}'])).stdout.trim()]
-  if (!head || !theirs) return { kind: 'refused', why: `git did not say where ${upstream} is` }
-  const isClean = async () => {
-    const status = await git(['status', '--porcelain', '--untracked-files=no'])
-    return status.exitCode === 0 && !status.stdout.trim()
+  if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream))
+    return { ok: false, what: `a checkout of the code on ${branch}${upstream ? `, following ${upstream}` : ''}`, why: 'releases come out on main: switch it to main, then check again' }
+  return { ok: true, branch, upstream }
+}
+
+// ---- The three steps: Download, Install, Reload ----
+
+// Where the steps stand on this Mac, kept in update-steps.json so a reload or another chat shows the same. Only its shape is kept:
+// a version, a stage, a commit and a fingerprint, numbers, and why a step failed as one of FAILS, never a text to show, as any
+// program can write the file. Nothing in it is trusted to install: Install reads the version page again and checks the download
+// against it once more
+export type Stage = 'downloading' | 'downloaded' | 'installing' | 'installed' | 'failed'
+export const FAILS = {
+  page: "claudopus.ai's version page couldn't be read",
+  unchecked: 'the version page has no fingerprint to check a download against',
+  fetch: "the release couldn't be fetched from GitHub",
+  mismatch: "what came down isn't what the release published, so it was thrown away",
+  'own-commits': "the folder's main has commits of its own that the release doesn't have",
+  overwrite: "uncommitted changes in the folder touch files the release changes",
+  moved: "the folder couldn't be moved forward",
+  install: "Claude Code's update step failed",
+  'installed-mismatch': "the copy Claude Code installed isn't what the release published, so the old one was put back",
+  'newer-out': 'a newer version came out since this one was downloaded',
+  stopped: 'it stopped before it finished, when its chat closed or reloaded',
+  busy: 'another chat is updating Claudopus right now',
+  gone: 'the download is no longer there',
+} as const
+export type Fail = keyof typeof FAILS
+export type Steps = { version: string; stage: Stage; at: number; commit?: string; tree?: string; fail?: Fail; step?: 'download' | 'install'; pct?: number; got?: number; from?: string }
+export const stepsOf = (text: string): Steps | undefined => {
+  try {
+    const v = JSON.parse(text) as Record<string, unknown>
+    const stages: Stage[] = ['downloading', 'downloaded', 'installing', 'installed', 'failed']
+    if (!isVersion(v?.version) || !stages.includes(v.stage as Stage) || typeof v.at !== 'number') return undefined
+    const commit = typeof v.commit === 'string' && /^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(v.commit) ? v.commit : undefined
+    const fail = typeof v.fail === 'string' && v.fail in FAILS ? (v.fail as Fail) : undefined
+    const num = (n: unknown, most: number) => (typeof n === 'number' && Number.isFinite(n) ? Math.max(0, Math.min(most, n)) : undefined)
+    return {
+      version: v.version,
+      stage: v.stage as Stage,
+      at: v.at,
+      ...(commit ? { commit } : {}),
+      ...(isTree(v.tree) ? { tree: v.tree } : {}),
+      ...(fail ? { fail } : {}),
+      ...(v.step === 'download' || v.step === 'install' ? { step: v.step } : {}),
+      ...(num(v.pct, 100) !== undefined ? { pct: num(v.pct, 100) } : {}),
+      ...(num(v.got, 1e10) !== undefined ? { got: num(v.got, 1e10) } : {}),
+      ...(isVersion(v.from) ? { from: v.from } : {}),
+    }
+  } catch {
+    return undefined
   }
-  if (head === theirs) return { kind: 'same', isClean: await isClean() }
-  if ((await git(['merge-base', '--is-ancestor', 'HEAD', '@{u}'])).exitCode !== 0) return { kind: 'refused', why: `its folder's main has commits of its own that ${upstream} does not have` }
-  const merged = await git(['merge', '--ff-only', '--quiet', '@{u}'], 120_000)
-  if (merged.exitCode === 0) return { kind: 'pulled', isClean: await isClean() }
-  const said = `${merged.stderr}\n${merged.stdout}`
-  if (/would be overwritten/.test(said)) return { kind: 'refused', why: "changes in its folder that aren't committed touch files the update changes" }
-  return { kind: 'refused', why: `git would not update its folder (${last(merged)})` }
+}
+// A step under way that has said nothing for this long has stopped: its chat closed or reloaded mid-way
+export const STEP_STALE = 90_000
+
+// git's own progress as a download comes: the percent of what it receives and how much so far, then of resolving what came
+export const fetchProgress = (said: string): { pct: number; got: number; phase: 'receiving' | 'resolving' } | undefined => {
+  const lines = said.split(/[\r\n]+/).filter(Boolean)
+  for (const line of lines.reverse()) {
+    const got = /Receiving objects:\s+(\d{1,3})%[^,]*(?:,\s+([\d.]+)\s+(KiB|MiB|GiB|bytes))?/.exec(line)
+    if (got) {
+      const n = Number(got[2] ?? 0)
+      const unit = { bytes: 1, KiB: 1024, MiB: 1024 ** 2, GiB: 1024 ** 3 }[(got[3] ?? 'bytes') as 'bytes'] ?? 1
+      return { pct: Math.min(100, Number(got[1])), got: Math.round(n * unit), phase: 'receiving' }
+    }
+    const resolving = /Resolving deltas:\s+(\d{1,3})%/.exec(line)
+    if (resolving) return { pct: Math.min(100, Number(resolving[1])), got: 0, phase: 'resolving' }
+  }
+  return undefined
+}
+
+// git's fingerprint of a folder as it is on disk, every file counted (none left out by an ignore list), so it is compared with the
+// release's `tree` file for file: a copy Claude Code installed is checked this way
+export const TREE_OF_FOLDER =
+  'd=$(mktemp -d) || exit 1; trap \'rm -rf "$d"\' EXIT; git init -q --bare "$d/g" || exit 1; ' +
+  'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" -c core.excludesFile=/dev/null add -A -f . >/dev/null 2>&1 || exit 1; ' +
+  'GIT_DIR="$d/g" GIT_INDEX_FILE="$d/i" GIT_WORK_TREE="$1" git -C "$1" write-tree'
+export const treeOfFolder = async (io: Pick<LookIo, 'run'>, folder: string) => {
+  const out = await io.run(['sh', '-c', TREE_OF_FOLDER, 'sh', folder], 60_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))
+  const tree = out.exitCode === 0 ? out.stdout.trim() : ''
+  return isTree(tree) ? tree : ''
+}
+
+// The ref a download is kept under in the repo's git, apart from its branches and tags, so nothing the person has is touched
+export const DOWNLOAD_REF = 'refs/claudopus/update'
+// Where git's progress goes while a download runs, read as it comes
+export type Progress = (p: { pct: number; got: number; phase: 'receiving' | 'resolving' | 'checking' }) => unknown
+
+// Download: the release's tag fetched into DOWNLOAD_REF, then checked against the page: the mod's folder in it must be the very tree
+// the release published, and its manifest that version. Nothing the chat runs, no branch and no working file changes; one that does
+// not match is thrown away. A folder also says whether its main can move forward to it
+export type Downloaded = { ok: true; commit: string } | { ok: false; fail: Fail; detail: string }
+export const download = async (io: LookIo, src: Exclude<Source, { kind: 'none' }>, page: Published, progressFile: string, onProgress?: Progress): Promise<Downloaded> => {
+  const git = gitIn(io, src.repo)
+  const tag = `v${page.version}`
+  const fetching = io
+    .run(['sh', '-c', '"$@" 2>"$0"', progressFile, 'env', 'GIT_TERMINAL_PROMPT=0', 'GIT_ASKPASS=true', 'GIT_SSH_COMMAND=ssh -o BatchMode=yes', 'git', '-C', src.repo, 'fetch', '--progress', '--no-tags', '--no-write-fetch-head', 'origin', `+refs/tags/${tag}:${DOWNLOAD_REF}`], 600_000)
+    .catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+  let isDone = false
+  void fetching.then(() => (isDone = true))
+  while (!isDone && io.wait) {
+    await Promise.race([fetching, io.wait(700)])
+    const p = fetchProgress(await io.read(progressFile).catch(() => ''))
+    if (p && !isDone) await onProgress?.(p)
+  }
+  const fetched = await fetching
+  const said = await io.read(progressFile).catch(() => '')
+  if (fetched.exitCode !== 0) return { ok: false, fail: 'fetch', detail: lastLine({ stdout: '', stderr: said || fetched.stderr }) }
+  await onProgress?.({ pct: 100, got: fetchProgress(said)?.got ?? 0, phase: 'checking' })
+  const commit = (await git(['rev-parse', '--verify', '-q', `${DOWNLOAD_REF}^{commit}`])).stdout.trim()
+  const tree = commit ? (await git(['rev-parse', '--verify', '-q', `${commit}:${src.sub}`])).stdout.trim() : ''
+  const manifest = commit ? (await git(['show', `${commit}:${src.sub}/.claude-plugin/plugin.json`])).stdout : ''
+  if (!commit || tree !== page.tree || versionIn(manifest) !== page.version) {
+    await git(['update-ref', '-d', DOWNLOAD_REF])
+    await io.log(`Claudopus ${page.version} download thrown away: its folder is ${tree || 'missing'}, the release published ${page.tree}`)
+    return { ok: false, fail: 'mismatch', detail: '' }
+  }
+  if (src.kind === 'folder' && (await git(['merge-base', '--is-ancestor', 'HEAD', commit])).exitCode !== 0) return { ok: false, fail: 'own-commits', detail: '' }
+  await io.log(`Claudopus ${page.version} downloaded into ${src.repo} and checked: it is the tree the release published (${page.tree})`)
+  return { ok: true, commit }
+}
+
+// Install: the download checked once more against the version page read now, then, for a clone, Claude Code's own two steps and the
+// copy they installed checked file for file, its record put back as it was when it is not the release; for a folder, its main moved
+// forward to the download, a fast-forward only, which git refuses before it changes anything when work in the folder would be lost.
+// `dirty` says the folder has uncommitted changes, which stay, and which a chat run from it loads on top
+export type Installed = { ok: true; version: string; dirty: boolean } | { ok: false; fail: Fail; detail: string }
+export const install = async (io: LookIo, src: Exclude<Source, { kind: 'none' }>, page: Published, commit: string, engine: string): Promise<Installed> => {
+  const git = gitIn(io, src.repo)
+  const tree = (await git(['rev-parse', '--verify', '-q', `${commit}:${src.sub}`])).stdout.trim()
+  if (!tree) return { ok: false, fail: 'gone', detail: '' }
+  if (tree !== page.tree) return { ok: false, fail: 'mismatch', detail: '' }
+  const record = src.kind === 'clone' ? src : src.record
+  // Claude Code's steps, then what they installed checked; a copy that isn't the release has its record put back
+  const viaClaudeCode = async (rec: NonNullable<typeof record>): Promise<Installed | undefined> => {
+    const path = `${rec.plugins}/installed_plugins.json`
+    const before = await io.read(path).catch(() => '')
+    const id = `${rec.plugin}@${rec.marketplace}`
+    for (const step of updateSteps(engine, rec, rec.scope)) {
+      const out = await io.run(step, 300_000).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+      if (out.exitCode !== 0) return { ok: false, fail: 'install', detail: lastLine(out) }
+    }
+    const copy = copyOf(await io.read(path).catch(() => ''), id, '')
+    const got = copy?.installPath ? await treeOfFolder(io, copy.installPath) : ''
+    if (got === page.tree) return undefined
+    if (before) await io.write(path, before)
+    await io.log(`Claudopus ${page.version}: the copy Claude Code installed (${copy?.installPath ?? 'none'}) is ${got || 'unreadable'}, not the release's ${page.tree}; its record was put back`)
+    return { ok: false, fail: 'installed-mismatch', detail: '' }
+  }
+  if (src.kind === 'clone') {
+    // Claude Code's refresh takes whatever is newest online: only when that is still this release are its steps run
+    const online = (await git(['ls-remote', 'origin', 'HEAD'], 60_000)).stdout.trim().split(/\s/)[0] ?? ''
+    if (!online) return { ok: false, fail: 'fetch', detail: 'GitHub did not answer' }
+    if (online !== commit) return { ok: false, fail: 'newer-out', detail: '' }
+    const failed = await viaClaudeCode(src)
+    return failed ?? { ok: true, version: page.version, dirty: false }
+  }
+  const ready = await folderReady(io, src.repo)
+  if (!ready.ok) return { ok: false, fail: 'moved', detail: ready.why }
+  if ((await git(['merge-base', '--is-ancestor', 'HEAD', commit])).exitCode !== 0) return { ok: false, fail: 'own-commits', detail: '' }
+  const merged = await git(['merge', '--ff-only', '--quiet', commit], 120_000)
+  if (merged.exitCode !== 0) {
+    const said = `${merged.stderr}\n${merged.stdout}`
+    return /would be overwritten/.test(said) ? { ok: false, fail: 'overwrite', detail: '' } : { ok: false, fail: 'moved', detail: lastLine(merged) }
+  }
+  const status = await git(['status', '--porcelain', '--untracked-files=no', '--', src.sub])
+  const dirty = status.exitCode !== 0 || Boolean(status.stdout.trim())
+  await io.log(`Claudopus folder ${src.repo} moved forward to ${page.version} (${commit})${dirty ? ', with uncommitted changes in it kept' : ''}`)
+  // Claude Code's record of the folder follows it, only from a folder with nothing uncommitted, as it copies the folder as it is
+  if (src.record && !dirty) {
+    const failed = await viaClaudeCode(src.record)
+    if (failed) return failed
+  }
+  return { ok: true, version: page.version, dirty }
 }
 
 // The marketplace a copy run from a folder belongs to, when Claude Code knows that folder as a directory marketplace: its record
@@ -300,63 +424,62 @@ export const folderMarketplace = (known: string, root: string): string | undefin
   }
 }
 
-// One look for a copy run from a folder of its code: the version page, then, when it names a newer version than the folder has,
-// the folder brought up to date; Claude Code's record of a directory marketplace in that folder is refreshed after it
-export const folderLook = async (io: LookIo, at: { root: string; plugins: string; engine: string; stampPath: string }): Promise<Look> => {
-  const { root, stampPath } = at
-  const now = await io.now()
-  const manifest = async () => versionIn(await io.read(`${root}/.claude-plugin/plugin.json`).catch(() => ''))
-  const have = await manifest()
-  const page = await io.page()
-  const current = page.ok ? versionOnPage(page.text) : undefined
-  if (!current) {
-    const result = `version page not read: ${page.ok ? 'no version on it' : page.status || page.text.slice(0, 120)}`
-    await io.write(stampPath, JSON.stringify({ at: now, version: have, result }))
-    await io.log(`Claudopus ${result}`)
-    return { kind: 'failed', why: page.ok ? 'claudopus.ai named no version' : page.status ? `claudopus.ai answered ${page.status}` : 'claudopus.ai did not answer' }
+// ---- The notice: one line of where updating stands for this chat ----
+
+// What the panel says, worked out from what is true now: the version this chat runs, the version the Mac has (installed, or the
+// folder it runs from), what the last look saw, the steps file, and what the person put off or skipped. `reload` is a chat behind
+// what the Mac has; `cannot` a set-up a release never reaches
+export type Notice =
+  | { kind: 'available'; version: string; count: number }
+  | { kind: 'downloading'; version: string; pct?: number; got?: number }
+  | { kind: 'downloaded'; version: string; commit: string }
+  | { kind: 'installing'; version: string }
+  | { kind: 'reload'; version: string }
+  | { kind: 'failed'; version: string; fail: Fail; step: 'download' | 'install' }
+  | { kind: 'cannot'; version: string; what: string; why: string }
+export const noticeOf = (at: {
+  loaded: string
+  installed: string
+  seen: string
+  steps?: Steps
+  page?: Published
+  skipped?: string
+  later?: { version: string; until: number }
+  cannot?: { what: string; why: string }
+  now: number
+}): Notice | undefined => {
+  const { loaded, installed, steps, now } = at
+  if (!isVersion(loaded)) return undefined
+  const isPut = (version: string) => Boolean(at.later && at.later.version === version && now < at.later.until)
+  // The Mac has a newer copy than this chat runs: what is left is this chat's reload
+  if (isVersion(installed) && isNewer(installed, loaded)) return isPut(installed) ? undefined : { kind: 'reload', version: installed }
+  const out = [at.seen, at.page?.version].filter(isVersion).sort((a, b) => (isNewer(a, b) ? -1 : 1))[0] ?? ''
+  const isOut = (version: string) => isNewer(version, loaded) && !(isVersion(at.skipped) && !isNewer(version, at.skipped)) && !isPut(version)
+  // A step on this Mac, for a version still newer than this chat's and no older than the newest out
+  if (steps && isNewer(steps.version, loaded) && !(out && isNewer(out, steps.version))) {
+    const isLive = now - steps.at < STEP_STALE && now >= steps.at
+    if (steps.stage === 'downloading' || steps.stage === 'installing')
+      return isLive
+        ? steps.stage === 'downloading'
+          ? { kind: 'downloading', version: steps.version, pct: steps.pct, got: steps.got }
+          : { kind: 'installing', version: steps.version }
+        : isPut(steps.version) ? undefined : { kind: 'failed', version: steps.version, fail: 'stopped', step: steps.stage === 'downloading' ? 'download' : 'install' }
+    if (isPut(steps.version)) return undefined
+    if (steps.stage === 'downloaded' && steps.commit) return { kind: 'downloaded', version: steps.version, commit: steps.commit }
+    if (steps.stage === 'failed' && steps.fail) return { kind: 'failed', version: steps.version, fail: steps.fail, step: steps.step ?? 'download' }
   }
-  if (have && !isNewer(current, have)) {
-    await io.write(stampPath, JSON.stringify({ at: now, version: have, result: 'latest' }))
-    return { kind: 'latest', version: have }
-  }
-  await io.log(`Claudopus ${current} is on the version page and its folder ${root} has ${have || 'no version'}: bringing the folder up to date`)
-  const pulled = await pullFolder(io, root)
-  const to = await manifest()
-  if (pulled.kind === 'refused') {
-    await io.write(stampPath, JSON.stringify({ at: now, version: to, result: `folder not updated: ${pulled.why}` }))
-    await io.log(`Claudopus folder not updated: ${pulled.why}`)
-    return { kind: 'failed', version: current, why: pulled.why, next: 'Nothing in it was changed.' }
-  }
-  if (pulled.kind === 'pulled') {
-    await io.log(`Claudopus folder updated from ${have} to ${to}: chats that reload or start from now on load it`)
-    // Claude Code's own record of the folder follows it, when it knows the folder as a marketplace; what it says is only logged
-    const marketplace = folderMarketplace(await io.read(`${at.plugins}/known_marketplaces.json`).catch(() => ''), root)
-    const plugin = nameIn(await io.read(`${root}/.claude-plugin/plugin.json`).catch(() => ''))
-    const installed = await io.read(`${at.plugins}/installed_plugins.json`).catch(() => '')
-    const scopes = (() => {
-      try {
-        return (JSON.parse(installed)?.plugins?.[`${plugin}@${marketplace}`] ?? []).map((one: { scope?: unknown }) => one?.scope) as unknown[]
-      } catch {
-        return []
-      }
-    })()
-    const scope = scopes.includes('user') ? 'user' : scopes.find((one): one is string => typeof one === 'string' && /^(user|project|local)$/.test(one))
-    // Only a folder with nothing uncommitted: the record is copied from the folder as it is on disk
-    if (marketplace && plugin && scope && pulled.isClean)
-      for (const step of updateSteps(at.engine, { marketplace, plugin }, scope)) {
-        const out = await io.run(step, 180_000).catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
-        if (out.exitCode === 0) continue
-        await io.log(`Claudopus record of ${plugin}@${marketplace} not refreshed: ${`${out.stderr || out.stdout}`.trim().slice(-160)}`)
-        break
-      }
-  }
-  await io.write(stampPath, JSON.stringify({ at: now, version: to, result: pulled.kind === 'pulled' ? 'updated' : 'latest' }))
-  if (to && isNewer(current, to)) return { kind: 'failed', version: current, why: `its folder's main online still has v${to}`, next: 'Check again in a few minutes.' }
-  return { kind: pulled.kind === 'pulled' ? 'updated' : 'latest', version: to || current }
+  if (!out || !isOut(out)) return undefined
+  if (at.cannot) return { kind: 'cannot', version: out, ...at.cannot }
+  const count = at.page && at.page.version === out ? missedOn(at.page, loaded).length : 1
+  return { kind: 'available', version: out, count: Math.max(1, count) }
 }
 
-// Whether a look is due: none yet, or the last one is older than UPDATE_EVERY (a clock moved back counts as due)
-export const isUpdateDue = (stamp: UpdateStamp | undefined, now: number) => !stamp || now - stamp.at >= UPDATE_EVERY || now < stamp.at
+// How often the look may run, as Config offers it, in hours; anything else is the hour as shipped
+export const LOOK_EVERY_HOURS = [1, 6, 24, 168] as const
+export const lookEveryOf = (hours: unknown) => ((LOOK_EVERY_HOURS as readonly number[]).includes(Number(hours)) ? Number(hours) : 1) * 3_600_000
+
+// Whether a look is due: none yet, or the last one is older than `every` (a clock moved back counts as due)
+export const isUpdateDue = (stamp: UpdateStamp | undefined, now: number, every = UPDATE_EVERY) => !stamp || now - stamp.at >= every || now < stamp.at
 
 // Whether version a is newer than b, by its dotted numbers
 export const isNewer = (a: string, b: string) => {
