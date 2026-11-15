@@ -62,9 +62,10 @@ export const secondsOfTime = (time: string) => {
 // Claude: the app, every claude chat, the engine this runs in, and everything they started, with work that runs on after the command
 // that started it ended (nohup, a script left running): its parent gone, launchd (1) took it in, and its process group's leader, the
 // shell that started it, is gone too. A shell in a terminal gives each job its own group, so one left there leads its own group and
-// is not taken; apps' and the system's own helpers left that way (crash reporters) are not taken either
+// is not taken; an app launchd starts leads its own group too. The system's own and crash reporters left that way are not taken.
+// The Mac's own python3 runs from Xcode, under /Applications, so that is not left out
 const isClaudeName = (name: string) => /^claude$/i.test(name.split('/').pop() ?? '')
-const isLeftWork = (p: UsageProc, alive: Set<string>) => p.ppid === '1' && !!p.pgid && p.pgid !== p.pid && !alive.has(p.pgid) && !/^\/(Applications|System|Library)\/|crashpad/i.test(p.name)
+const isLeftWork = (p: UsageProc, alive: Set<string>) => p.ppid === '1' && !!p.pgid && p.pgid !== p.pid && !alive.has(p.pgid) && !/^\/System\/|crashpad/i.test(p.name)
 export const claudeOf = (procs: UsageProc[], self: string) => {
   const alive = new Set(procs.map(p => p.pid))
   const found = new Set(procs.filter(p => p.pid === self || isClaudeName(p.name) || isLeftWork(p, alive)).map(p => p.pid))

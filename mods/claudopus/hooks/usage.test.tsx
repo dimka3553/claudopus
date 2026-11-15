@@ -297,6 +297,7 @@ const leftLook = (o: { nj1423: number; nj9001: number; nj9100?: number; cpuNj: n
     ...(o.nj9100 !== undefined ? [' 9100  9000 100000   0:01.00  8990 /usr/local/bin/ffmpeg'] : []),
     ' 1151     1  10000   0:00.00  1143 /Applications/Slack.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler',
     ' 7000     1  30000   0:05.00  7000 /usr/local/bin/rsync',
+    ' 9200     1  30000   0:05.00  9190 /Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python',
     '@@VM@@',
     'Mach Virtual Memory Statistics: (page size of 16384 bytes)',
     'Anonymous pages:                             1583261.',
@@ -321,7 +322,8 @@ const leftLook = (o: { nj1423: number; nj9001: number; nj9100?: number; cpuNj: n
 
 test('work a chat left running after its command ended is Claude\'s; an app\'s crash reporter and a terminal\'s job are not', async () => {
   const raw = rawOfMac(leftLook({ nj1423: 0, nj9001: 0, cpuNj: 0, gpuNj: 0, gpu932: 0, gpu408: 0 }), 0)
-  expect(new Set(raw?.claude)).toEqual(new Set(['852', '932', '1423', '9000', '9001']))
+  // The Mac's own python3, which runs from Xcode, left running too
+  expect(new Set(raw?.claude)).toEqual(new Set(['852', '932', '1423', '9000', '9001', '9200']))
   // A look from before the process group was asked for still reads, and takes no left work
   const old = rawOfMac(macLook({ appCpu: '0:10.00', shellCpu: '0:00.00', otherCpu: '0:00.00', disk: '1000.00', inBytes: 0, outBytes: 0 }), 0)
   expect(old?.claude).toContain('5000')

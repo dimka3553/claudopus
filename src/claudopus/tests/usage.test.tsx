@@ -279,10 +279,10 @@ test('the battery card says what the Mac draws, the processors and graphics each
   await clock.advance(1000)
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: 'The whole Mac draws' })) ? true : undefined))
-  for (const text of ['The whole Mac draws', '80 W', 'Processors, every program', 'Claude of that', 'Graphics, every program', 'Claude of that, estimated'])
+  for (const text of ['The whole Mac draws', '80 W', 'Processors, every program', "Claude's own processes", 'Graphics, every program', 'Claude of that, estimated'])
     expect(await desk.find({ type: 'Text', text })).toBeDefined()
   expect(await desk.find({ type: 'Text', text: "Claude's processors draw" })).toBeUndefined()
-  expect(await desk.find({ type: 'Text', text: /^Claude: the app, its chats and all their work\. The screen, memory and storage count only in the whole\.$/ })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: /^Claude: the app, its chats and all their work\. Part of what the processors draw is no program's, and work that ends within seconds is missed\. The screen, memory and storage count only in the whole, which the Mac updates about once a minute\.$/ })).toBeDefined()
   // The graphics card: busy is time at work, what it draws, and who uses it most
   for (const text of ['Time at work, at any speed', 'Drawing', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
   await desk.unmount()

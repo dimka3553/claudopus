@@ -119,12 +119,12 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
       rows: [
         ...(f.watts !== undefined ? [['The whole Mac draws', `${wattText(f.watts)} W`] as [string, string]] : []),
         ...(f.wattsCpu !== undefined ? [['Processors, every program', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
-        ...(f.wattsClaude !== undefined ? [[f.wattsCpu !== undefined ? 'Claude of that' : "Claude's processes on the processors", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [["Claude's own processes", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
         ...(f.wattsGpu !== undefined ? [['Graphics, every program', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
         ...(f.wattsGpuClaude !== undefined ? [['Claude of that, estimated', `${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
       ],
       ...(f.wattsClaude !== undefined || f.wattsGpuClaude !== undefined
-        ? { foot: `Claude: the app, its chats and all their work.${f.wattsGpuClaude === undefined ? ' Graphics is not in its watts.' : ''} The screen, memory and storage count only in the whole.` }
+        ? { foot: `Claude: the app, its chats and all their work.${f.wattsGpuClaude === undefined ? ' Graphics is not in its watts.' : ''} Part of what the processors draw is no program's, and work that ends within seconds is missed. The screen, memory and storage count only in the whole, which the Mac updates about once a minute.` }
         : {}),
     },
     disk: f.disk === undefined ? undefined : {
