@@ -16,7 +16,6 @@ import { copyOf, download, FAILS, folderMarketplace, folderReady, install, insta
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { isPulledBack, PULL_MARKS } from './scrolls'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import { leftoversOf, memOf, leftName, PS_COLUMNS } from './jobs'
 import type { OpenCall, Proc, Span } from './jobs'
@@ -472,8 +471,6 @@ const sips = ($: EngineInterface) => (isLinux ? `${$.plugin.root}/bin/sips` : 's
 const RECORD_FOR = 180_000
 const RECORD_SWITCH = 'record-panel.on'
 const RECORD_FRESH = 60_000
-// Set only while a recording asked for it: the pull back to a typed box let through (commands.tsx)
-let isPullGuardOff = false
 let recording: { path: string; until: number; lines: string[]; written: number; started: number } | undefined
 let recordLooked = 0
 let typedCount = new Map<string, number>()
@@ -486,7 +483,6 @@ const isRecording = async ($: EngineInterface) => {
     if (at < recording.until) return true
     await recordFlush($)
     recording = undefined
-    isPullGuardOff = false
     return false
   }
   if (!dir || at - recordLooked < 2000) return false
@@ -496,8 +492,6 @@ const isRecording = async ($: EngineInterface) => {
   if (!stat) return false
   // A switch left from long ago, its removal failed or its chat gone, starts nothing: it goes
   if (at - stat.mtimeMs > RECORD_FRESH) return void (await $.process.run(['rm', '-f', on]).catch(() => undefined)), false
-  // A switch that says "unguarded" records with the pull back let through, to compare with and without it
-  isPullGuardOff = /unguarded/.test(await readOr($, on))
   const chat = (await $.session.id().catch(() => '')).slice(0, 8) || 'chat'
   recording = { path: `${dir}/panel-record/${chat}-${new Date(at).toISOString().replace(/[:.]/g, '-')}.jsonl`, until: at + RECORD_FOR, lines: [], written: 0, started: at }
   typedCount = new Map()
@@ -506,7 +500,7 @@ const isRecording = async ($: EngineInterface) => {
   const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
   const flushing = () => $.clock.after(2000, () => void (recording ? recordFlush($).then(() => (recording && ((void isRecording($)), flushing()))) : undefined))
   flushing()
-  await recordLine($, { ev: 'start', isPullGuardOff, version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
+  await recordLine($, { ev: 'start', version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
   return true
 }
 // One event, with its time from the start
@@ -557,6 +551,36 @@ const drawingShape = (drawing: unknown) => {
 const recordDrawn = new Map<string, unknown>()
 const lastSign = new Map<string, string>()
 const recorderHooks = (on: On) => {
+  // The bar above the prompt, where the reply box is drawn: each drawing, whether it was the one held, and the boxes in it
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!(await isRecording($))) return next(e)
+    const began = await $.clock.now()
+    const r = await next(e)
+    const isSame = recordDrawn.get('bar') === r
+    recordDrawn.set('bar', r)
+    const shape = drawingShape(r)
+    await recordLine($, { ev: 'render', component: e.component, id: e.requestId, surface: e.surface, offset: e.props.scroll.offset, rows: e.props.scroll.bodyRows, collapsed: e.props.isCollapsed, ms: (await $.clock.now()) - began, held: isSame, typing: isTyping, nodes: shape.nodes, inputs: shape.inputs, sign: shape.sign })
+    return r
+  })
+  on('ui.scroll', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (await isRecording($)) await recordLine($, { ev: 'scroll', id: e.requestId, site: 'bar', origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows })
+    return next(e)
+  })
+  on('ui.input', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (await isRecording($)) {
+      const key = keyShown(e.element) ?? ''
+      typedCount.set(key, (typedCount.get(key) ?? 0) + 1)
+      await recordLine($, { ev: 'input', id: e.requestId, site: 'bar', element: key, kind: e.kind, count: typedCount.get(key) })
+    }
+    return next(e)
+  })
+  on('ui.press', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!(await isRecording($))) return next(e)
+    await recordLine($, { ev: 'press', id: e.requestId, site: 'bar', element: keyShown(e.element) })
+    const r = await next(e)
+    await recordLine($, { ev: 'pressed', site: 'bar', element: keyShown(r.element) })
+    return r
+  })
   on('ui.render', { component: 'Pane', requestId: LIST }, async ($, e, next) => {
     if (!(await isRecording($))) return next(e)
     const id = e.requestId ?? ''
@@ -578,9 +602,19 @@ const recorderHooks = (on: On) => {
     if (await isRecording($)) await recordLine($, { ev: 'scroll', id: e.requestId, origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows })
     return next(e)
   })
-  on('ui.focus', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element) })
-    return next(e)
+  // Every site's focus moves, the panel's and the rest (a press that takes the focus out of the panel), and what came of each
+  // (by site kind: the panel's own hook in commands.tsx is the one without a matcher, and the engine allows one)
+  on('ui.focus', { component: 'Pane' }, async ($, e, next) => {
+    if (!(await isRecording($))) return next(e)
+    const r = await next(e)
+    await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element), deny: r.deny !== undefined })
+    return r
+  })
+  on('ui.focus', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!(await isRecording($))) return next(e)
+    const r = await next(e)
+    await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element), deny: r.deny !== undefined })
+    return r
   })
   // Typing as a count by box: the value is never read
   on('ui.input', { requestId: LIST }, async ($, e, next) => {
@@ -592,9 +626,13 @@ const recorderHooks = (on: On) => {
     }
     return next(e)
   })
+  // A press, and whether it reached its button: an element the drawing no longer holds runs nothing
   on('ui.press', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'press', id: e.requestId, element: keyShown(e.element) })
-    return next(e)
+    if (!(await isRecording($))) return next(e)
+    await recordLine($, { ev: 'press', id: e.requestId, element: keyShown(e.element) })
+    const r = await next(e)
+    await recordLine($, { ev: 'pressed', element: keyShown(r.element) })
+    return r
   })
 }
 
@@ -5302,7 +5340,8 @@ const hasDraft = (id: string) => [...drafts].some(([key, value]) => key.startsWi
 // pane afresh at each drawing, the box in it too: a pane drawn every few seconds under the person's typing flickered the box's ring,
 // put older letters over newer ones, and, as Markdown came or went above, threw the panel to its bottom, out of the person's reach
 // (15 Nov, typing an answer while other work ran; measured on the app's own drawing, headless). Each letter typed, or the box taking
-// the focus, holds it for TYPING more; sending, any press, or the focus leaving the boxes lets it go
+// the focus, holds it for TYPING more; sending, any press, or the focus leaving the boxes lets it go. The desktop app's reply box is
+// in the bar above the prompt (repliesInBar), which is held the same way while it is typed in
 const TYPING = 30_000
 let typing = 0
 let isTyping = false
@@ -5322,8 +5361,8 @@ const drawAgain = ($: EngineInterface) => {
 // The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
 // arrive, so a drawing never puts older letters over the newer ones the box already holds
 const drawnDrafts = new Map<string, string>()
-const draftShown = (id: string, ask: NonNullable<Todo['ask']>) => {
-  const key = draftOf(id, ask)
+const draftShown = (id: string, ask: NonNullable<Todo['ask']>) => draftDrawn(draftOf(id, ask))
+const draftDrawn = (key: string) => {
   if (isTyping && drawnDrafts.has(key)) return drawnDrafts.get(key) ?? ''
   const value = drafts.get(key) ?? ''
   drawnDrafts.set(key, value)
@@ -5340,7 +5379,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed]])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -5477,6 +5516,83 @@ const asPressed = (one: Todo): Todo => {
   if (!isAnswered && admins?.length === one.admins?.length) return one
   return { ...one, ask: isAnswered ? undefined : one.ask, admins: admins?.length ? admins : undefined }
 }
+// Where a reply in words is typed. The desktop app keeps moving a pane's window back to a box that holds the cursor inside it, many
+// times a second, and reports each move as the person's own scroll (found live, 15 Nov: stuck at the box while typing, a bounce
+// once the moves were refused). A pane has no part that stays still, so on a surface whose bar above the prompt takes a box
+// (barBoxes: the bar was drawn there with an Input in its table) an ask's reply box is drawn in that bar, a site of its own that the
+// pane's scrolling does not reach, and never in the pane. It is there only once the person asks for it: the card's answers end
+// with "Reply in your own words", which opens the box in the bar for that card, and Close takes it away again (16 Nov: a box
+// always in the bar looked bad, and the person asked for it as one of the options)
+// A bar the person folded shows nothing of the mod's, and one of the app's surveys takes its place: neither takes the box, and the
+// card has its own again, so a reply in words can always be typed somewhere
+const barBoxes = new Set<string>()
+const repliesInBar = (surface: string) => barBoxes.has(surface)
+// When the bar's box last took the cursor or a letter, 0 once the cursor is known to have left it or its reply was sent: the bar
+// holds its drawing that long (band.tsx, barHeld). The app may say nothing when the cursor leaves for the chat's own box, so the
+// hold ends by itself BAR_BOX_HELD after the last sign of it
+let barBoxAt = 0
+const BAR_BOX_HELD = 300_000
+const isBarBox = (element: string | undefined) => /^band-.*-reply-/.test(element ?? '')
+// The card whose reply box is open in the bar, none when it is closed: opened by the card's "Reply in your own words", closed by
+// Close (on the card or in the bar), by the reply sent, by the card answered, or by the bar folding. One box at a time: opened on
+// another card it is that card's, and what was half typed is kept for the card it was typed for. Nothing but the person closes or
+// moves it while the card asks: when the work puts a new question in place of the one it was opened on (replyMark), the box stays
+// as it is, with what is typed in it, and what is sent from it answers the question the work asks then (16 Nov, the person:
+// "it should just allow me to keep typing until I myself either close it or open the new question")
+let replyTo = ''
+let replyMark = ''
+const isReplyOpen = (one: Todo) => Boolean(replyTo && one.id === replyTo && one.ask)
+// The open box's own name and what is typed in it, the same through a new question of its work
+const barBoxKey = (id: string) => `band-${id}-reply-${replies.get(id) ?? 0}-${replyMark}`
+const barDraft = (id: string) => `${id}|${replyMark}`
+// This chat's cards that wait for an answer
+const asksForBar = (cards: Todo[]) => cards.filter(one => !one.parentId && !one.chat && Boolean(asPressed(one).ask) && !isActingOnReply(one))
+const barTarget = (cards: Todo[]) => (replyTo ? asksForBar(cards).find(isReplyOpen) : undefined)
+// The bar's own id on each surface, as its drawing is asked for: where the cursor is put when the box opens
+const barIds = new Map<string, string>()
+// What was typed in the bar's box is its card's: when the work has since put a new question in place of the one the box was
+// opened on, the words are shown under that question too, in the box as it is opened again and in the card's own box when the
+// bar folds. Only the words of the box the person last had open for that card (barLeft), never those of an older question
+const barLeft = new Map<string, string>()
+const carryDraft = ($: EngineInterface, one: Todo, from: string | undefined) => {
+  if (!one.ask || !from) return
+  const to = draftOf(one.id, one.ask)
+  const typed = drafts.get(from)
+  if (from === to || !typed || drafts.get(to)) return
+  drafts.set(to, typed)
+  keepDraft($, to, typed)
+  drafts.delete(from)
+  keepDraft($, from, undefined)
+}
+// A reply sent from the bar's box answers what its card asks as it is sent: the box may have been drawn for an earlier question.
+// On its way from the press itself, as an answer from the card is (answersOnWay)
+const sendFromBar = ($: EngineInterface, id: string, value: string) => {
+  const run = (async () => {
+    const one = (await read($, todos)).find(card => card.id === id)
+    if (one?.ask && value.trim()) await answerAsk($, one, value, true)
+  })()
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+// Opens the bar's reply box for a card, or closes it. Opening it, the cursor is asked into the box: the app gives it only where
+// the bar already holds the keys, so where it does not the person clicks the box
+const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) => {
+  if (replyTo) barLeft.set(replyTo, barDraft(replyTo))
+  if (one) (carryDraft($, one, barLeft.get(one.id)), barLeft.delete(one.id))
+  replyTo = one?.ask ? one.id : ''
+  replyMark = one?.ask ? askMark(one.ask) : ''
+  barBoxAt = 0
+  presses += 1
+  redraw($)
+  const ask = one?.ask
+  const bar = barIds.get(surface)
+  if (!one || !ask || !bar) return
+  void $.ui
+    .focus({ requestId: bar, key: barBoxKey(one.id) })
+    .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
+    .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
+}
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
   if (one.chat) return
@@ -5493,6 +5609,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   // Answered in the press's own drawing, before anything is awaited: what was pressed, on its way
   const mark = `${ask.at}:${ask.text}`
   askPressed.set(one.id, mark)
+  // Its reply box in the bar goes with the answer, and is closed when the same work asks again
+  if (replyTo === one.id) ((replyTo = ''), (replyMark = ''), (barBoxAt = 0))
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at: Infinity, line, isCard: true, askAt: ask.at })
   if (isReply) freeTimes($)
@@ -10363,12 +10481,6 @@ const workHooks = (on: On) => {
 
 // The /claudopus and /servers commands, and the panel's focus and close
 
-// Panes whose focus is in a box the person types in, and each pane's last move of the person's
-const boxFocused = new Set<string>()
-const lastMoves = new Map<string, { at: number; by: number }>()
-// Where the app's last refused pull would have put each pane: the focused box's place
-const pulledTo = new Map<string, number>()
-
 const commandHooks = (on: On) => {
 
   on('command.run', { command: 'claudopus' }, async $ => {
@@ -10384,28 +10496,25 @@ const commandHooks = (on: On) => {
   // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
   // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
+    // The bar holds its drawing for as long as its reply box has the cursor (band.tsx), however the cursor came there: by the
+    // person's click in the box, as the box takes it when they click into the bar (autoFocus), or by the mod's own call
+    const isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element)
+    if (isInBarBox) barBoxAt = await $.clock.now()
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
+      if (!isInBarBox) barBoxAt = 0
     }
-    // Which panes have the focus in a box typed into, for the pull back below
-    if (e.plugin === 'claudopus' && isTypedBox(e.element)) boxFocused.add(e.requestId)
-    else boxFocused.delete(e.requestId)
     return next(e)
   })
   // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
   on('ui.scroll', async ($, e, next) => {
     if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
-    // The app pulling the pane back to the box the person types in, reported as their move, is refused: the window stays where
-    // they scrolled it (scrolls.ts)
-    if (e.origin.kind === 'person') {
-      const move = { at: await $.clock.now(), by: e.by, to: e.offset }
-      if (!isPullGuardOff && isPulledBack(lastMoves.get(e.requestId), move, boxFocused.has(e.requestId), pulledTo.get(e.requestId)))
-        return (Math.abs(e.by) >= PULL_MARKS && pulledTo.set(e.requestId, e.offset), recordEvent($, 'pull-refused', { by: e.by, to: e.offset }), {})
-      lastMoves.set(e.requestId, move)
-    }
+    // Every move is let through as it comes. The app's own moves back to a box that holds the cursor in a pane arrive here as the
+    // person's, already drawn: refusing them only undid each one a moment later, a bounce worse than the pull (0.2.135, taken out).
+    // The reply box is drawn in the bar above the prompt instead, where there is nothing to pull (asking.tsx, repliesInBar)
     return next(e)
   }).catch(($, e, next) => next(e))
   // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts
@@ -10893,14 +11002,69 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
       </ui.Button>
     </ui.Box>
   ) : null
+// The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
+// to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
+// panel's scrolling. The box is the card's own: the same answer, and the same box through a new question of its work, until the
+// person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
+const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
+  const draft = barDraft(one.id)
+  return (
+    <ui.Box key="band-reply" flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
+      <ui.Box flexShrink={1} minWidth={0}>
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your reply to “${cut(titleOf(one), 40)}”`}</ui.Text>
+      </ui.Box>
+      {'Input' in ui ? (
+        <ui.Box flexShrink={0}>
+          <ui.Input
+            key={barBoxKey(one.id)}
+            placeholder="Type your reply"
+            value={draftDrawn(draft)}
+            submitLabel="send"
+            autoFocus
+            onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
+            onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))}
+          />
+        </ui.Box>
+      ) : null}
+      <ui.Box flexShrink={0}>
+        <ui.Button key={`band-reply-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
+      </ui.Box>
+    </ui.Box>
+  )
+}
+// The bar as last drawn on each surface while a reply box was in it: while the person types, and for as long as the box holds the
+// cursor (barBoxAt), it is drawn as it was, whole, but for a change in what it holds, as a pane is (heldDrawings): each drawing is
+// a new box under the cursor, its ring drawn again and a selection or a half-composed letter lost
+const barHeld = new Map<string, { shape: string; drawing: unknown }>()
+// When this surface's bar last asked for the cards to be drawn again as its box came or went: at most once a second, so two
+// windows of one chat that differ never ask in turn without end
+let barFlipAt = 0
 // The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
   // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
+    // Whether this surface's bar takes the reply box, and whether it shows just now: the cards draw their asks by it (repliesInBar)
+    // While one of the app's surveys holds the bar the box has no place in it, and the card has its own again
+    // Folded by the person, nothing of the bar is on screen: the card has its own box then too
+    const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey && !e.props.isCollapsed
+    if (e.requestId) barIds.set(e.surface, e.requestId)
     const cards = await read($, todos)
+    const flipAt = await $.clock.now()
+    if (canBox !== barBoxes.has(e.surface)) {
+      if (canBox) barBoxes.add(e.surface)
+      else barBoxes.delete(e.surface)
+      // A box open in a bar that can no longer show it is closed, and stays closed when the bar is back; what was half typed in
+      // it is drawn in the card's own box, and nothing is held as typed in any more
+      const open = canBox ? undefined : cards.find(one => one.id === replyTo)
+      if (open) (carryDraft($, open, barDraft(open.id)), freeTimes($))
+      if (!canBox) ((replyTo = ''), (replyMark = ''), barHeld.delete(e.surface))
+      barBoxAt = 0
+      // Only a card that asks is drawn differently for it
+      if (asksForBar(cards).length && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
+    }
+    if (e.props.hasSurvey) return next(e)
     const working = cards.filter(one => !one.parentId && one.status === 'working')
     // Work that just finished makes the octopus happy for its pause, the band staying that long even when nothing else runs;
     // the redraw set for the pause's end is read so the band leaves or goes back to work then
@@ -10963,6 +11127,31 @@ const bandHooks = (on: On) => {
         )
       }
     }
+    // The reply box the person opened from a card, while that card still asks; its ask answered or gone, the box goes with it
+    const target = canBox ? barTarget(cards) : undefined
+    if (replyTo && canBox && !target) ((replyTo = ''), (replyMark = ''))
+    if (target?.ask) {
+      // Drawn as it was while the box is typed in or holds the cursor: only the card it is for draws it anew, so neither the panel
+      // scrolled under the cursor nor work starting or ending puts a new box under it. The row takes the place of the figures
+      // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
+      const shape = barBoxKey(target.id)
+      const held = barHeld.get(e.surface)
+      if ((isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)) && held?.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
+      // What waits at the top of a panel scrolled away is still pointed at, as the bar is drawn; not while the box is held
+      const marker = await waitMarker($, ui, e.surface)
+      const reply = barReply($, ui, target)
+      const drawing = marker ? (
+        <Box flexDirection="column">
+          {marker}
+          {reply}
+        </Box>
+      ) : (
+        reply
+      )
+      barHeld.set(e.surface, { shape, drawing })
+      return drawing
+    }
+    barHeld.delete(e.surface)
     if (!working.length && !happy) return (await waitMarker($, ui, e.surface)) ?? next(e)
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
@@ -11211,7 +11400,8 @@ const panelHooks = (on: On) => {
 
     // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button, then
     // the same three ways to answer on every ask, on the small card as in Details: the work's own buttons, or Done and Not now when
-    // it gave none, and a box for a reply in the person's own words. The list's times stand still while the person types (holdTimes)
+    // it gave none, and a box for a reply in the person's own words, which the desktop app has in the bar above the prompt and
+    // not on the card (repliesInBar). The list's times stand still while the person types (holdTimes)
     // In the terminal the first ask's reply box holds the keys as the panel takes them: what is typed then is the person's words,
     // never a button's letter, and Tab leaves it for the buttons and their keys
     let askFocused = false
@@ -11311,9 +11501,23 @@ const panelHooks = (on: On) => {
             {answers.map((choice, n) => (
               <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
+            {/* Where the bar above the prompt holds the reply box, the last answer opens it there for this card, and closes it again */}
+            {'Input' in table && repliesInBar(e.surface) ? (
+              isReplyOpen(one) ? (
+                <Button key={`${key}-inbar-close-${presses}`} label="Close the reply box" onPress={press => openReply($, undefined, press.surface)} />
+              ) : (
+                <Button key={`${key}-inbar-${presses}`} label="Reply in your own words" onPress={press => openReply($, one, press.surface)} />
+              )
+            ) : null}
           </Box>
           )}
-          {'Input' in table && !one.chat ? (
+          {/* Where the bar above the prompt holds the reply box, the card has none: a box typed in here is what the app drags the
+              panel to. Once opened it says where to type: the app puts the cursor there only on the person's own click */}
+          {'Input' in table && !one.chat && repliesInBar(e.surface) ? (
+            isReplyOpen(one) ? (
+              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type it in the box above the chat</Text>
+            ) : null
+          ) : 'Input' in table && !one.chat ? (
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
@@ -12751,8 +12955,6 @@ const tabHooks = (on: On) => {
   on('ui.input', async ($, e, next) => {
     const r = await next(e)
     if (e.plugin !== 'claudopus' || e.kind !== 'submit') return r
-    // A box sent is gone: the pull back to it no longer applies (commands.tsx)
-    boxFocused.delete(e.requestId)
     // Two replies to ended work went from the timer with no sign of why: each submit says here what it found on its way
     void log($, `reply submitted: ${answersOnWay.size} answer(s) and ${wakes.length} wake(s) on the way`)
     if (answersOnWay.size || wakes.length) await sendWakes($, true).catch(err => log($, `reply not sent: ${String(err)}`))

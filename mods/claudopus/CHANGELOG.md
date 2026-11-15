@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.139 · 16 November 2026
+- In the desktop app a card's answers now end with "Reply in your own words": it opens the reply box in the bar above the chat's prompt, named after the work it goes to, so the panel scrolls freely while you type. One box and one Send; the card has a box of its own only while that bar is folded or one of the app's surveys is in it
+- Close in the bar, or "Close the reply box" on the card, takes the box away again and keeps what you had typed; pressing "Reply in your own words" on another card moves the box to that one. A new question from the same work leaves the box open with what you typed, and what you send then answers that question
+- Taken out: the 0.2.135 change that made the panel bounce while a reply box held the cursor. The box for a password or key is still at the top of the panel, which stays at its top while your cursor is in that box
+- The panel's recorder also notes which button each press reached, where the focus went, and what happens in the bar above the prompt
+
 ## 0.2.138 · 16 November 2026
 - Everything Claudopus says about updating now says only which version your chats run, which is the newest, and to press Update, then type /reload-plugins.
 - A chat running a test build of Claudopus is told Update leaves it alone.

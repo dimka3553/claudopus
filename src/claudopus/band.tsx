@@ -23,14 +23,69 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
       </ui.Button>
     </ui.Box>
   ) : null
+// The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
+// to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
+// panel's scrolling. The box is the card's own: the same answer, and the same box through a new question of its work, until the
+// person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
+const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
+  const draft = barDraft(one.id)
+  return (
+    <ui.Box key="band-reply" flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
+      <ui.Box flexShrink={1} minWidth={0}>
+        <ui.Text color={NEEDS} bold wrap="truncate-end">{`↳ Your reply to “${cut(titleOf(one), 40)}”`}</ui.Text>
+      </ui.Box>
+      {'Input' in ui ? (
+        <ui.Box flexShrink={0}>
+          <ui.Input
+            key={barBoxKey(one.id)}
+            placeholder="Type your reply"
+            value={draftDrawn(draft)}
+            submitLabel="send"
+            autoFocus
+            onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
+            onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))}
+          />
+        </ui.Box>
+      ) : null}
+      <ui.Box flexShrink={0}>
+        <ui.Button key={`band-reply-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
+      </ui.Box>
+    </ui.Box>
+  )
+}
+// The bar as last drawn on each surface while a reply box was in it: while the person types, and for as long as the box holds the
+// cursor (barBoxAt), it is drawn as it was, whole, but for a change in what it holds, as a pane is (heldDrawings): each drawing is
+// a new box under the cursor, its ring drawn again and a selection or a half-composed letter lost
+const barHeld = new Map<string, { shape: string; drawing: unknown }>()
+// When this surface's bar last asked for the cards to be drawn again as its box came or went: at most once a second, so two
+// windows of one chat that differ never ask in turn without end
+let barFlipAt = 0
 // The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
   // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
+    // Whether this surface's bar takes the reply box, and whether it shows just now: the cards draw their asks by it (repliesInBar)
+    // While one of the app's surveys holds the bar the box has no place in it, and the card has its own again
+    // Folded by the person, nothing of the bar is on screen: the card has its own box then too
+    const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey && !e.props.isCollapsed
+    if (e.requestId) barIds.set(e.surface, e.requestId)
     const cards = await read($, todos)
+    const flipAt = await $.clock.now()
+    if (canBox !== barBoxes.has(e.surface)) {
+      if (canBox) barBoxes.add(e.surface)
+      else barBoxes.delete(e.surface)
+      // A box open in a bar that can no longer show it is closed, and stays closed when the bar is back; what was half typed in
+      // it is drawn in the card's own box, and nothing is held as typed in any more
+      const open = canBox ? undefined : cards.find(one => one.id === replyTo)
+      if (open) (carryDraft($, open, barDraft(open.id)), freeTimes($))
+      if (!canBox) ((replyTo = ''), (replyMark = ''), barHeld.delete(e.surface))
+      barBoxAt = 0
+      // Only a card that asks is drawn differently for it
+      if (asksForBar(cards).length && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
+    }
+    if (e.props.hasSurvey) return next(e)
     const working = cards.filter(one => !one.parentId && one.status === 'working')
     // Work that just finished makes the octopus happy for its pause, the band staying that long even when nothing else runs;
     // the redraw set for the pause's end is read so the band leaves or goes back to work then
@@ -93,6 +148,31 @@ const bandHooks = (on: On) => {
         )
       }
     }
+    // The reply box the person opened from a card, while that card still asks; its ask answered or gone, the box goes with it
+    const target = canBox ? barTarget(cards) : undefined
+    if (replyTo && canBox && !target) ((replyTo = ''), (replyMark = ''))
+    if (target?.ask) {
+      // Drawn as it was while the box is typed in or holds the cursor: only the card it is for draws it anew, so neither the panel
+      // scrolled under the cursor nor work starting or ending puts a new box under it. The row takes the place of the figures
+      // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
+      const shape = barBoxKey(target.id)
+      const held = barHeld.get(e.surface)
+      if ((isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)) && held?.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
+      // What waits at the top of a panel scrolled away is still pointed at, as the bar is drawn; not while the box is held
+      const marker = await waitMarker($, ui, e.surface)
+      const reply = barReply($, ui, target)
+      const drawing = marker ? (
+        <Box flexDirection="column">
+          {marker}
+          {reply}
+        </Box>
+      ) : (
+        reply
+      )
+      barHeld.set(e.surface, { shape, drawing })
+      return drawing
+    }
+    barHeld.delete(e.surface)
     if (!working.length && !happy) return (await waitMarker($, ui, e.surface)) ?? next(e)
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
