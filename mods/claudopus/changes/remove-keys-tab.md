@@ -1,0 +1,1 @@
+- The Keys button beside Memory is gone. Claudopus still keeps the list of keys you have given, by name and where each is kept, in keys.md in the memory folder; work still reads it before asking, and an ask for a key you already gave is still refused with where it is.

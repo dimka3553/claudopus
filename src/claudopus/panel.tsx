@@ -1669,7 +1669,6 @@ const panelHooks = (on: On) => {
               {reportsButton($, ui, kept, isKeyed)}
               {statsButton($, ui, isKeyed)}
               {memoryButton($, ui, isKeyed)}
-              {keysButton($, ui, isKeyed)}
               {configButton($, ui, isKeyed)}
               {aboutButton($, ui, isKeyed)}
               {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x Tab for keys</Text> : null}

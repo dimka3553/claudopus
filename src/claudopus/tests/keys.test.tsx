@@ -1,4 +1,4 @@
-// The keys remembered: names and stores only, made again from the stores, shown by the Keys button, and an ask for a kept key refused
+// The keys remembered: names and stores only, made again from the stores, read by work in keys.md, and an ask for a kept key refused
 
 // Made-up keys, as a person would have given them, in each store
 const keysLaid = (files: Map<string, string>) => {
@@ -24,19 +24,13 @@ const keysLaid = (files: Map<string, string>) => {
 }
 const VALUES = ['el-made-up-value-0001', 'kg-made-up-value-0002', 'env-made-up-value-0003', 'env-made-up-value-0004', 'sbos-made-up-value-0005', 'sbos-made-up-value-0006', 'made-up-value-0009', 'long-made-up', 'pk_made_up']
 
-test('the list of keys holds every store\'s names and never a value, and the Keys button shows it in a tab', SLOW, async ($, on) => {
-  const { files, tabs, logged } = world(on)
+test('the list of keys holds every store\'s names and never a value', async ($, on) => {
+  const { files, logged } = world(on)
   keysLaid(files)
   await $.session.start(start)
   // SBOS's list, as a piece of work reads it, is taken in
   await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's1', agentId: 'w1' } as never)
-  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  expect((await keyed(pane, 'keys-open'))?.props.label).toBe('Keys')
-  await pressed(pane, 'keys-open')
-  const opened = await until(async () => tabs.find(tab => /^memory-keys-md-\d+: Keys$/.test(tab)))
-  expect(opened).toBeDefined()
-  const tab = await $.ui.mount({ ...LIST, requestId: (opened ?? '').split(':')[0], surface: 'desktop' } as never)
-  const shown = String((await tab.find({ type: 'Markdown' }))?.props.text)
+  const shown = files.get(`${MEMORY}/keys.md`) ?? ''
   for (const name of ['ELEVENLABS_API_KEY', 'KAGGLE_KEY', "Claudopus's keychain", '| elevenlabs-api |', 'OPENAI_API_KEY', 'DB_PASSWORD', '/repo/render/.env.local', 'elevenlabs-key', 'asked, not given', 'github-token', 'SBOS secrets'])
     expect(shown).toContain(name)
   // Not a key: an app's own storage, a variable that holds none, and an example file

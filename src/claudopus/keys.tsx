@@ -1,7 +1,7 @@
 // The keys remembered: which keys, tokens and logins the person has given, and where each is kept, by name only, never a value.
 // It is made again from each store's own list of names (Claudopus's keychain, the rest of this Mac's keychain, the .env files in each
 // subject's folder) and from what SBOS last said it holds, so a key taken out of a store stops being listed. Work reads it in
-// keys.md in the memory folder, the Keys button shows it, and work that asks for a key it lists is told where that key is
+// keys.md in the memory folder before asking for one, and work that asks for a key it lists is told where that key is
 
 const KEYS_FILE = 'keys.md'
 const KEYS_STATE = 'keys.json'
@@ -252,18 +252,6 @@ const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string
   }
   return ''
 }
-
-const openKeys = ($: EngineInterface) => {
-  presses += 1
-  void refreshKeys($)
-    .then(() => openMemory($, `${dir}/${KEYS_FILE}`))
-    .catch(err => log($, `keys not opened: ${String(err)}`))
-}
-const keysButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
-  <ui.Box key="keys-button" flexShrink={0}>
-    <ui.Button key={`keys-open-${presses}`} label="Keys" hotkey={isKeyed ? 'k' : undefined} plain={isKeyed ? true : undefined} onPress={() => openKeys($)} />
-  </ui.Box>
-)
 
 // What a call changed in a store: a key given or forgotten through the secret runner, or SBOS's list of names, makes the list again.
 // Run as each call ends, by the work's own hook on every call
