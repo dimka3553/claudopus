@@ -66,6 +66,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const resumed: string[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
+  // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
+  const agentModels: (string | undefined)[] = []
+  const asked: (string | undefined)[] = []
   const played: string[] = []
   const notified: string[] = []
   // What was handed to osascript
@@ -391,6 +394,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   // A command a test holds running until it lets it go, with what it then prints: `held.get(id)?.(text)`
   const held = new Map<string, (text: string) => void>()
   on('tool.call', async (_, e) => {
+    if (e.tool === 'Agent') agentModels.push((e as { model?: string }).model)
     const command = String((e as { command?: string }).command ?? '')
     // The person says no to the app's prompt for this tool
     // as the engine says it: an error result in words, the same for an approval cut short
@@ -429,6 +433,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('agent.spawn', (_, e) => {
     prompts.push(e.prompt)
     backgrounds.push(e.background)
+    asked.push(e.model)
     const resume = (e as { resume?: { agentId?: string } }).resume
     // The model an agent's own type starts it on, by its task's few words, as Explore starts on Haiku
     return { model: options.startedOn?.[e.description ?? ''] ?? options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
@@ -461,7 +466,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -550,33 +555,87 @@ test('work never starts as a copy of the chat: a fork or an agent with no model 
   expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`)
 })
 
-test('no agent is started on an older model or on Haiku, by the chat or by a piece of work; the three aliases and their newest versions pass', async ($, on) => {
-  const { files } = world(on)
+test('no agent is started on an older model or on Haiku, by the chat or by a piece of work: one named so starts on its family\'s newest; the aliases and their newest versions pass as named', async ($, on) => {
+  const { files, agentModels } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
-  const call = (model: string, agentId?: string) => $.tool.call({ tool: 'Agent', tool_use_id: `m-${model}-${agentId ?? ''}`, prompt: 'fix the nose', subagent_type: 'general-purpose', model, ...(agentId ? { agentId } : {}) } as never)
+  const call = async (model: string, agentId?: string) => {
+    const r = await $.tool.call({ tool: 'Agent', tool_use_id: `m-${model}-${agentId ?? ''}`, prompt: 'fix the nose', subagent_type: 'general-purpose', model, ...(agentId ? { agentId } : {}) } as never)
+    return { deny: (r as { deny?: string }).deny, model: agentModels.at(-1) }
+  }
 
   // A newer version than the mod knows is no older model; nor is an id with a date, a window or a provider around it
-  for (const model of ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5.5', 'claude-opus-5-6', 'claude-opus-6', 'claude-fable-5-3', 'claude-sonnet-6', 'claude-opus-5-5-20261001', 'opus[1m]', 'us.anthropic.claude-opus-5-5-v1:0', 'inherit']) expect((await call(model)).deny).toBeUndefined()
-  for (const model of ['haiku', 'claude-haiku-5-5', 'claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-3-5-sonnet-20241022', 'claude-sonnet-4-5-20250929']) expect((await call(model)).deny).toContain('No work runs on')
-  expect((await call('claude-opus-4-8')).deny).toBe(
-    'No work runs on Opus 4.8. Name the model by its alias: "opus" for most work, "sonnet" for long legwork, "fable" only for heavy or really complicated work, "opus" or "fable" for checking what was built, never weaker than what built it. Never an older version, never Haiku.',
-  )
+  for (const model of ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5.5', 'claude-opus-5-6', 'claude-opus-6', 'claude-fable-5-3', 'claude-sonnet-6', 'claude-opus-5-5-20261001', 'opus[1m]', 'us.anthropic.claude-opus-5-5-v1:0', 'inherit']) expect(await call(model)).toEqual({ deny: undefined, model })
+  // An older version, a full id or not, starts on its family's newest by its alias, and Haiku on Sonnet
+  for (const [model, alias] of [['haiku', 'sonnet'], ['claude-haiku-5-5', 'sonnet'], ['claude-opus-4-8', 'opus'], ['claude-opus-5', 'opus'], ['claude-sonnet-5', 'sonnet'], ['claude-fable-5-1', 'fable'], ['claude-3-5-sonnet-20241022', 'sonnet'], ['claude-sonnet-4-5-20250929', 'sonnet'], ['claude-opus-4-8[1m]', 'opus']]) expect(await call(model!)).toEqual({ deny: undefined, model: alias })
   // A helper a piece of work starts is held to the same, and one that names no model keeps its work's
-  expect((await call('haiku', 'a1')).deny).toContain('No work runs on Haiku')
-  expect((await call('claude-opus-4-8', 'a1')).deny).toContain('No work runs on Opus 4.8')
-  expect((await call('sonnet', 'a1')).deny).toBeUndefined()
+  expect(await call('haiku', 'a1')).toEqual({ deny: undefined, model: 'sonnet' })
+  expect(await call('claude-opus-4-8', 'a1')).toEqual({ deny: undefined, model: 'opus' })
+  expect(await call('sonnet', 'a1')).toEqual({ deny: undefined, model: 'sonnet' })
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'h0', prompt: 'look it up', subagent_type: 'general-purpose', agentId: 'a1' } as never)).deny).toBeUndefined()
-  expect(files.get(`${MEMORY}/log.md`)).toContain('refused an Agent call on Opus 4.8')
+  expect(files.get(`${MEMORY}/log.md`)).toContain('an Agent call on Opus 4.8 starts on Opus 5.5')
+})
+
+test('every start is held to a current model: an older id, a parent on an older model, a checker weaker than its builder, a workflow agent and a copy', async ($, on) => {
+  const { asked, files } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  const go = (e: Record<string, unknown>) => $.agent.spawn({ ...spawn, prompt: 'p', parentModel: 'claude-opus-5-5', ...e } as never) as Promise<{ deny?: string; agentId?: string }>
+  // Named older, by a full id the Agent tool's own check never saw (a workflow script's, a hook's): its family's newest
+  await go({ model: 'claude-opus-4-8', parentAgentId: 'a0' })
+  expect(asked.at(-1)).toBe('claude-opus-5-5')
+  await go({ model: 'claude-haiku-4-5', parentAgentId: 'a0' })
+  expect(asked.at(-1)).toBe('claude-sonnet-5-5')
+  // No model, under a parent the app moved to an older model: not left to inherit it
+  await go({ parentModel: 'claude-opus-4-8', parentAgentId: 'a0', description: 'Search the docs' })
+  expect(asked.at(-1)).toBe('claude-opus-5-5')
+  await go({ model: 'inherit', parentModel: 'claude-sonnet-5', parentAgentId: 'a0', description: 'Search the docs' })
+  expect(asked.at(-1)).toBe('claude-sonnet-5-5')
+  // No model under a current parent is left to the engine: the kind's own model, then the parent's
+  await go({ parentAgentId: 'a0', description: 'Search the docs' })
+  expect(asked.at(-1)).toBeUndefined()
+  // A check of what was built never runs weaker than what built it, nor below Opus
+  await go({ model: 'sonnet', parentAgentId: 'a0', description: 'Second look at the CT scans page' })
+  expect(asked.at(-1)).toBe('claude-opus-5-5')
+  await go({ model: 'opus', parentModel: 'claude-fable-5-2', parentAgentId: 'a0', description: 'Check the page for faults' })
+  expect(asked.at(-1)).toBe('claude-fable-5-2')
+  await go({ parentModel: 'claude-sonnet-5-5', parentAgentId: 'a0', description: 'Review what was built' })
+  expect(asked.at(-1)).toBe('claude-opus-5-5')
+  await go({ model: 'fable', parentAgentId: 'a0', description: 'Second look at the page' })
+  expect(asked.at(-1)).toBe('fable')
+  // A workflow script's agent is held to the same
+  await go({ model: 'claude-sonnet-4-5', workflow: { runId: 'wf_1', agentIndex: 1 }, description: 'Index the photos' })
+  expect(asked.at(-1)).toBe('claude-sonnet-5-5')
+  await go({ model: 'sonnet', workflow: { runId: 'wf_1', agentIndex: 2 }, description: 'Verify the fix' })
+  expect(asked.at(-1)).toBe('claude-opus-5-5')
+  // A copy of an agent on an older model cannot be moved, so it is refused with why
+  expect((await go({ fork: true, parentModel: 'claude-opus-4-8', parentAgentId: 'a0' })).deny).toContain('No work runs on Opus 4.8. Start a fresh agent')
+  expect((await go({ fork: true, parentAgentId: 'a0' })).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain('a workflow agent asked to run on Sonnet 4.5 starts on Sonnet 5.5')
+})
+
+test('what counts as current follows the newest model the engine offers, never a version written into the mod', async ($, on) => {
+  const { asked, agentModels } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  // The engine starts work on a newer Opus by its alias: from then on Opus 5.5 is an older model, and the card's choice offers the newer one
+  await $.agent.spawn({ ...spawn, prompt: 'p', model: 'opus', parentModel: 'claude-opus-6' } as never)
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-6', messageCount: 2, agentId: 'a1' })) void _
+  await $.agent.spawn({ ...spawn, prompt: 'p', model: 'claude-opus-5-5', parentModel: 'claude-opus-6', parentAgentId: 'a1' } as never)
+  expect(asked.at(-1)).toBe('claude-opus-6')
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'n1', prompt: 'p', subagent_type: 'general-purpose', model: 'claude-opus-5-5', agentId: 'a1' } as never)
+  expect(agentModels.at(-1)).toBe('opus')
 })
 
 test('with Haiku named in the settings for a kind of work, an agent on Haiku is let through; an older model still is not', async ($, on) => {
-  const { files } = world(on)
+  const { files, agentModels } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ models: { legwork: 'haiku' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'haiku' } as never)).deny).toBeUndefined()
-  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)).deny).toContain('No work runs on Opus 4.8')
+  expect(agentModels.at(-1)).toBe('haiku')
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)
+  expect(agentModels.at(-1)).toBe('opus')
 })
 
 test('with the handing-over switched off the mod refuses no model and moves no step', async ($, on) => {
@@ -940,6 +999,147 @@ test('a chat the app runs on another Mac over ssh tells every conversation that 
   // A second copy of the mod that already added them, rule and all, does not make them go out twice
   const twice = await $.prompt.context({ blocks: [], instructionFiles: [{ path: '/other/copy/rules/CLAUDE.md', kind: 'user', content: ours }] })
   expect(twice.instructionFiles?.length).toBe(1)
+})
+
+
+const go2 = ($: Parameters<TestBody>[0], e: Record<string, unknown>) => $.agent.spawn({ ...spawn, prompt: 'p', parentModel: 'claude-sonnet-5-5', ...e } as never) as Promise<{ deny?: string; agentId?: string }>
+const steps = async ($: Parameters<TestBody>[0], index: number, model: string, agentId?: string) => {
+  const chunks: { kind: string; name?: string; text?: string }[] = []
+  for await (const c of $.turn.step({ turnId: 't', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) chunks.push(c as never)
+  return chunks
+}
+
+test('a way to an older model a second look found is closed: settings name haiku, an older Haiku full id', async ($, on) => {
+  const { files, agentModels, asked } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ models: { legwork: 'haiku' } }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'index', wait: false, origin: composer })
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-3-5-haiku-20241022' } as never)
+  await go2($, { model: 'claude-haiku-4-5', parentAgentId: 'a0' })
+  expect(agentModels.at(-1)).not.toBe('claude-3-5-haiku-20241022')
+})
+
+test('a way to an older model a second look found is closed: aliases and suffixes', async ($, on) => {
+  const { agentModels, asked } = world(on, { model: 'claude-sonnet-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'x', wait: false, origin: composer })
+  const out: Record<string, unknown> = {}
+  for (const m of ['claude-sonnet-4-5[1m]', 'us.anthropic.claude-sonnet-4-5-20250929-v1:0', 'claude-sonnet-4-5@20250929', 'opusplan', 'best', 'default', 'sonnet[1m]', 'Claude-Sonnet-4-5', 'anthropic/claude-sonnet-4.5', 'claude-3-opus-20240229', 'claude-opus-4']) {
+    await $.tool.call({ tool: 'Agent', tool_use_id: `k-${m}`, prompt: 'x', subagent_type: 'general-purpose', model: m } as never)
+    await go2($, { model: m, parentAgentId: 'a0', description: 'Search docs' })
+    out[m] = [agentModels.at(-1), asked.at(-1)]
+  }
+  // checker words with odd aliases
+  const ch: Record<string, unknown> = {}
+  for (const m of ['opusplan', 'best', 'default', 'sonnet[1m]']) {
+    await go2($, { model: m, parentModel: 'claude-opus-5-5', parentAgentId: 'a0', description: 'Review the change' })
+    ch[m] = asked.at(-1)
+  }
+  // teammate with an older model
+  await go2($, { model: 'claude-sonnet-4-5', isTeammate: true, name: 'scout' })
+  expect(true).toBe(true)
+})
+
+test('a way to an older model a second look found is closed: checker from the chat own thread on sonnet under an Opus chat', async ($, on) => {
+  const { asked } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'x', wait: false, origin: composer })
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'cc1', prompt: 'look', subagent_type: 'general-purpose', model: 'sonnet', description: 'Second look at the page' } as never)
+  await go2($, { tool_use_id: 'cc1', model: 'sonnet', parentModel: 'claude-opus-5-5', description: 'Second look at the page' })
+  expect(asked.at(-1)).not.toBe('sonnet')
+})
+
+test('a way to an older model a second look found is closed: checker word match', async ($, on) => {
+  const { asked } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'x', wait: false, origin: composer })
+  const out: Record<string, unknown> = {}
+  for (const d of ['Check out the repo', 'Check CI logs', 'Check disk usage on Azure', 'Review PR comments and summarize', 'Build a health check endpoint', 'Write a spell checker', 'Check Stripe balance', 'Audit log export script',
+    'Reviewer pass on the diff', 'Auditor for the PR', 'Verification of the build', 'Validate the fix', 'QA the page', 'Test the fix in the app', 'Critique the design', 'Find bugs in the change', 'Double-checked results', 'Inspect the output', 'Verified claims', 'Look over the diff', 'Proofread the report', 'Hunt for faults']) {
+    await go2($, { model: 'sonnet', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', description: d })
+    out[d] = asked.at(-1)
+  }
+  // Legwork that only names checking stays on the model asked; a look over what was built runs on Opus
+  for (const d of Object.keys(out).slice(0, 8)) expect([d, out[d]]).toEqual([d, 'sonnet'])
+  for (const d of Object.keys(out).slice(8)) expect([d, out[d]]).toEqual([d, 'claude-opus-5-5'])
+})
+
+test('a way to an older model a second look found is closed: stale card pick after a newer model is seen', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'model-a1')
+  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
+  // another agent reports a newer Sonnet
+  await $.agent.spawn({ ...spawn, prompt: 'other', description: 'Other' } as never)
+  await steps($, 0, 'claude-sonnet-6', 'a2')
+  await steps($, 1, 'claude-opus-5-5', 'a1')
+  expect(stepped.at(-1)).not.toBe('claude-sonnet-5-5')
+})
+
+test('a way to an older model a second look found is closed: resume after a flag', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5', startedOn: { Resumed: 'claude-opus-4-8' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix.' } as never)
+  await steps($, 0, 'claude-opus-5-5', 'a1')
+  const f = await steps($, 1, 'claude-opus-4-8', 'a1')
+  const before = stepped.length
+  await $.agent.spawn({ ...spawn, prompt: 'go on', description: 'Resumed', resume: { agentId: 'a1' } } as never)
+  const r = await steps($, 0, 'claude-opus-4-8', 'a1')
+  expect(stepped.slice(before)).toEqual([])
+})
+
+test('a way to an older model a second look found is closed: own older equal to the fallback, main thread, unknown agent, handback hold', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5', startedOn: { 'Old kind': 'claude-opus-4-8' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix.' } as never)
+  await $.agent.spawn({ ...spawn, prompt: 'p', description: 'Old kind', parentAgentId: 'a1' } as never)
+  await steps($, 0, 'claude-opus-4-8', 'a2')
+  await steps($, 0, 'claude-opus-4-8')
+  await steps($, 0, 'claude-opus-4-8', 'zz')
+  // a1 has a helper a2 working; a1 is flagged; does its handback go through?
+  await steps($, 1, 'claude-opus-4-8', 'a1')
+  const h = await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'toolu_flagged_a1', agentId: 'a1', message: 'x' } as never)
+  for (let i = 2; i < 8; i++) await steps($, i, 'claude-opus-4-8', 'a1')
+  // a step with an empty / odd model
+  let crash = ''
+  try { await steps($, 9, '', 'a1'); await steps($, 0, undefined as never, 'a1') } catch (err) { crash = String(err) }
+  expect(true).toBe(true)
+})
+
+test('a check is known by a checking word and what was built, or a look that is only a check; legwork that names checking something else is not', async ($, on) => {
+  const { asked } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'x', wait: false, origin: composer })
+  const startOn = async (description: string) => {
+    await $.agent.spawn({ ...spawn, prompt: 'p', model: 'sonnet', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', description } as never)
+    return asked.at(-1)
+  }
+  for (const d of ['Check my work', 'Review my PR', 'Code review of the change', 'Checker for the branch', 'Re-check against commit 2752ee8', 'Recheck the fixes', 'Sanity check', 'Spot-check results', 'Audit the change', 'What is wrong with the build', 'Look for holes in the fix', 'Second look']) expect([d, await startOn(d)]).toEqual([d, 'claude-opus-5-5'])
+  for (const d of ['Check the Stripe balance', 'Check the weather API quota', 'Check the repo out', 'Review the docs and summarize', 'Inspect disk usage', 'Validate JSON schema files', 'Verify the domain DNS records', 'Check the PR status']) expect([d, await startOn(d)]).toEqual([d, 'sonnet'])
+})
+
+test('a resumed helper keeps the model it first started on: an Explore helper resumed still runs on Sonnet, a flagged one is never moved up', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5', startedOn: { Explore: 'claude-haiku-5-5' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix.' } as never)
+  const step = async (index: number, model: string, agentId: string) => {
+    for await (const _ of $.turn.step({ turnId: 't', index, model, messageCount: 2, agentId })) void _
+  }
+  const ex = (await $.agent.spawn({ ...spawn, prompt: 'look', description: 'Explore', parentAgentId: 'a1' } as never)) as { agentId: string }
+  await $.agent.spawn({ ...spawn, prompt: 'go on', description: 'Explore', resume: { agentId: ex.agentId }, parentAgentId: 'a1' } as never)
+  await step(0, 'claude-haiku-5-5', ex.agentId)
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  await step(1, 'claude-opus-4-8', 'a1')
+  await $.agent.spawn({ ...spawn, prompt: 'go on', resume: { agentId: 'a1' } } as never)
+  const before = stepped.length
+  await step(2, 'claude-opus-4-8', 'a1')
+  expect(stepped.length).toBe(before)
 })
 
 // Cards: work becoming a card, its to-dos, its own chat, steers, context and model, Details, stops, its pause, work the engine reports
@@ -1516,13 +1716,15 @@ test("a card's title, its line of facts and every line under them start at one l
   await expectOneEdge(4)
 })
 
-test('work the app moves to an older model or to Haiku stays on it and its card says so; a helper whose own kind starts on Haiku runs on Sonnet', async ($, on) => {
-  const { stepped, files } = world(on, { model: 'claude-fable-5-2', startedOn: { 'Look it up': 'claude-haiku-5-5' } })
+test('work a safety flag would move to an older model is ended with a report that says so, never run there; an agent whose own kind starts it on an older model or Haiku runs on the newest', async ($, on) => {
+  const { stepped, files } = world(on, { model: 'claude-fable-5-2', startedOn: { 'Look it up': 'claude-haiku-5-5', 'Old kind': 'claude-opus-4-1' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
   const step = async (index: number, model: string, agentId: string | undefined = 'a1') => {
-    for await (const _ of $.turn.step({ turnId: 'turn-2', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) void _
+    const chunks: { kind: string; name?: string; json?: string; text?: string }[] = []
+    for await (const c of $.turn.step({ turnId: 'turn-2', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) chunks.push(c as never)
+    return chunks
   }
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const line = async () => (await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')
@@ -1530,49 +1732,57 @@ test('work the app moves to an older model or to Haiku stays on it and its card 
   // On the model it was started on, nothing is changed and the card says nothing more
   await step(0, 'claude-opus-5-5')
   expect(stepped).toEqual(['claude-opus-5-5'])
-  expect(await line()).not.toContain('by the app')
+  expect(await line()).not.toContain('safety flag')
 
-  // The app's safeguards flagged a message and the app sends the next steps to Opus 4.8: they stay there, and the card says so
-  await step(1, 'claude-opus-4-8')
-  await step(2, 'claude-opus-4-8')
-  expect(stepped).toEqual(['claude-opus-5-5', 'claude-opus-4-8', 'claude-opus-4-8'])
-  expect(await line()).toContain('moved to Opus 4.8 by the app')
-  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was sent to Opus 4.8 by the app: its steps stay there').length).toBe(2)
+  // The app's safeguards flagged a message and the app would send the next step to Opus 4.8: no request is made there; the work
+  // hands back a report that says why, and its card says so
+  const flagged = await step(1, 'claude-opus-4-8')
+  expect(stepped).toEqual(['claude-opus-5-5'])
+  expect(flagged.find(c => c.kind === 'tool')?.name).toBe('SubagentHandback')
+  expect(JSON.parse(flagged.find(c => c.kind === 'input')?.json ?? '{}').message).toContain('Start what is left again on the current model, leaving out what was flagged')
+  expect(await line()).toContain('ended after a safety flag, not carried on on Opus 4.8')
+  // Where the handback does not end it, a step after is a plain last answer, and still nothing runs on the older model
+  const again = await step(2, 'claude-opus-4-8')
+  expect(stepped).toEqual(['claude-opus-5-5'])
+  expect(again.find(c => c.kind === 'text')?.text).toContain('an older model no work runs on')
+  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was flagged and the app would send it to Opus 4.8').length).toBe(2)
 
-  // Once the app sends its steps to a right model again, a newer one too, nothing is changed and the card no longer says so
-  await step(3, 'claude-opus-5-6')
-  expect(stepped.at(-1)).toBe('claude-opus-5-6')
-  expect(await line()).not.toContain('by the app')
-  await step(4, 'claude-opus-4-8')
-  expect(await line()).toContain('moved to Opus 4.8 by the app')
-
-  // A helper of an agent type the app runs on Haiku runs on Sonnet 5.5; an older Sonnet the app moved it to stays
+  // A helper of an agent type that starts on Haiku runs on Sonnet 5.5; an older Sonnet the app moves it to is not run either
   await $.agent.spawn({ ...spawn, description: 'Look it up', prompt: 'look it up', parentAgentId: 'a1' } as never)
   await step(0, 'claude-haiku-5-5', 'a2')
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
   await step(1, 'claude-sonnet-5', 'a2')
-  expect(stepped.slice(-2)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5'])
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  expect(stepped.length).toBe(2)
+
+  // An agent whose own kind names an older Opus runs on the newest Opus, step after step
+  await $.agent.spawn({ ...spawn, description: 'Old kind', prompt: 'look again', parentAgentId: 'a1' } as never)
+  await step(0, 'claude-opus-4-1', 'a3')
+  await step(1, 'claude-opus-4-1', 'a3')
+  expect(stepped.slice(-2)).toEqual(['claude-opus-5-5', 'claude-opus-5-5'])
 
   // The chat's own thread runs on the model the person picked for it, whichever that is
   await step(0, 'claude-opus-4-8', '')
   expect(stepped.at(-1)).toBe('claude-opus-4-8')
 
-  // A model the person picks on the card is used for the steps the app sends to a right model, never in place of the app's move
-  await pressed(pane, 'model-a1')
-  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
-  await step(5, 'claude-opus-5-5')
-  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
-  await step(6, 'claude-opus-4-8')
-  expect(stepped.at(-1)).toBe('claude-opus-4-8')
-  expect(await line()).toContain('moved to Opus 4.8 by the app')
-
-  // F-003: a step of work that started on another model, which the app sends to Haiku, stays there too, and the card says so
-  await step(7, 'claude-haiku-5-5')
-  expect(stepped.at(-1)).toBe('claude-haiku-5-5')
-  expect(await line()).toContain('moved to Haiku 5.5 by the app')
   // An agent whose start the mod did not see (a workflow's, before this copy loaded) is left where the app sent it, Haiku too
   await step(0, 'claude-haiku-5-5', 'w1')
   expect(stepped.at(-1)).toBe('claude-haiku-5-5')
   expect(files.get(`${MEMORY}/log.md`)).toContain('work w1 was sent to Haiku 5.5 by the app: its steps stay there')
+})
+
+test('work the person moved to a model of their own is ended too when a safety flag would move it to an older model', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'model-a1')
+  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
+  expect(stepped).toEqual(['claude-sonnet-5-5'])
+  for await (const _ of $.turn.step({ turnId: 't', index: 1, model: 'claude-opus-4-8', messageCount: 2, agentId: 'a1' })) void _
+  expect(stepped).toEqual(['claude-sonnet-5-5'])
 })
 
 test('work that answers from an older model all the same says so on its card', async ($, on) => {
@@ -7806,7 +8016,7 @@ test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper
 
 // A Mac's look as its commands print it, with Claude's app and chat, another app, and how much has moved by the nth look
 const psTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}.00`
-const lookAt = (n: number, anon = 1583261) =>
+const lookAt = (n: number, anon = 1583261, extra = '') =>
   [
     '@@SELF@@ 1423',
     '@@PS@@',
@@ -7828,6 +8038,7 @@ const lookAt = (n: number, anon = 1583261) =>
     `   19.03 42547108 ${1000 + n * 300} `,
     '@@NET@@',
     `en0        1500  <Link#15>   02:00:00:00:00:01 1     0 ${n * 5_000_000} 2     0 0     0`,
+    extra,
     '@@TOP@@',
     'PID    MEM',
     '852    3000M',
@@ -7893,6 +8104,112 @@ test('a look that gives nothing waits as long as one that works, so a broken loo
   for (let s = 0; s < 6; s++) await clock.advance(1000)
   expect(asked.length).toBe(3)
   expect(asked[2]?.includes('top -l')).toBe(false)
+})
+
+// What the Mac's own commands print for the graphics processor and the battery, in each case the bar must tell apart
+const gpuAt = (pct: number) => `@@GPU@@\n"Device Utilization %"=${pct}`
+const batt = (line: string) => `@@BATT@@\nNow drawing from 'Battery Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`
+const BATTERIES: { name: string; extra: string; desk: string[]; term: RegExp; alt: string }[] = [
+  { name: 'on battery with a time left', extra: `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`, desk: ['37%', '85% 4:12 left'], term: / gpu[▰▱]{3} 37% bat 85% 4:12 disk/, alt: 'Battery: 85%, 4:12 left' },
+  { name: 'on battery while the system still estimates', extra: batt('64%; discharging; (no estimate)'), desk: ['64%'], term: / bat 64% disk/, alt: 'Battery: 64%, on battery' },
+  { name: 'charging', extra: batt('62%; charging; 1:05 remaining'), desk: ['62% 1:05 to full'], term: / bat 62% ↑1:05 disk/, alt: 'Battery: 62%, charging, 1:05 to full' },
+  { name: 'fully charged on power', extra: `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t100%; charged; 0:00 remaining present: true`, desk: ['100%'], term: / bat 100% ac disk/, alt: 'Battery: 100%, on power' },
+  { name: 'low on battery', extra: batt('12%; discharging; 0:41 remaining'), desk: ['12% 0:41 left'], term: / bat 12% 0:41 disk/, alt: 'Battery: 12%, 0:41 left' },
+]
+for (const one of BATTERIES)
+  test(`the bar shows the battery as the system reports it: ${one.name}`, async ($, on) => {
+    let n = 0
+    const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, one.extra) })
+    await $.session.start(start)
+    await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+    await clock.advance(1000)
+    await clock.advance(6000)
+    await clock.advance(1000)
+    const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+    await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+    for (const text of one.desk) expect((await desk.find({ type: 'Text', text: new RegExp(`^${text}$`) }))?.text).toBe(text)
+    const drawings = await desk.findAll({ type: 'Svg' })
+    expect(drawings.find(d => String(d.props.alt).startsWith('Battery'))?.props.alt).toBe(one.alt)
+    // Never a figure the system did not give
+    if (/no estimate|charged/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
+    if (one.name === 'low on battery') expect((await desk.find({ type: 'Text', text: /^12% 0:41 left$/ }))?.props.color).toBe('#E5A50A')
+    await desk.unmount()
+    const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+    expect((await term.find({ type: 'Text', text: /^mem/ }))?.text).toMatch(one.term)
+    await term.unmount()
+  })
+
+test('a computer with no battery shows none, and a desktop plugged into a UPS does not take it for its own', async ($, on) => {
+  let n = 0
+  const ups = "@@BATT@@\nNow drawing from 'AC Power'\n -CP1500PFCLCDa (id=1234)\t100%; charged; 0:00 remaining present: true"
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, ups) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  expect((await desk.findAll({ type: 'Svg' })).find(d => String(d.props.alt).startsWith('Battery'))).toBeUndefined()
+  expect(await desk.find({ type: 'Text', text: /%/ })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: /100%/ })).toBeUndefined()
+  await desk.unmount()
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  expect((await term.find({ type: 'Text', text: /^mem/ }))?.text).not.toMatch(/bat|gpu/)
+  await term.unmount()
+})
+
+test('a pointer resting on a figure shows more of it in a line above: who uses the most, the parts of a speed, the battery in full', async ($, on) => {
+  let n = 0
+  const extra = `${gpuAt(37)}\n"In use system memory"=1288490188\n${batt('85%; discharging; 4:12 remaining')}`
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, extra) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  const more: Record<string, string> = {
+    memory: 'Memory 29 of 64 GB in use · most: Claude 3.3 GB, Safari 0.4 GB · Claude with what it started 3.3 GB',
+    cpu: 'Processor 50% busy across 10 cores · most: Safari 30%, Claude 20% · Claude with what it started 20%',
+    gpu: 'Graphics processor 37% busy · 1.2 GB of memory in use',
+    battery: 'Battery 85% · on battery, 4:12 left as the system estimates it',
+    disk: 'Disk 63 MB/s read and written · disk0',
+    net: 'Network 1 MB/s · in 1 MB/s, out 0 MB/s · en0',
+  }
+  const boxes = await desk.findAll({ type: 'Box' })
+  for (const [key, text] of Object.entries(more)) {
+    // Hidden until the pointer rests on its own figure (the test kit does not show the hover itself)
+    const line = boxes.find(b => b.props.key === `usage-more-${key}`)
+    expect(line?.props.display).toBe('none')
+    expect(line?.text).toBe(text)
+  }
+  // Above the figures, so they stay where they are when it shows
+  const band = boxes.find(b => b.props.flexDirection === 'column' && b.text.endsWith('1 MB/s'))
+  expect(band?.text.startsWith('Memory 29')).toBe(true)
+  await desk.unmount()
+})
+
+test('in a narrow terminal a figure that does not fit is left out whole, the network and the disk first, never the battery cut', async ($, on) => {
+  let n = 0
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const line = async (bodyColumns: number) => {
+    const term = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns }, surface: 'terminal' } as never)
+    await until(async () => ((await term.find({ type: 'Text', text: /^mem/ })) ? true : undefined))
+    const text = (await term.find({ type: 'Text', text: /^mem/ }))?.text ?? ''
+    await term.unmount()
+    return text
+  }
+  // A phone's 50 columns: memory, the processor and the battery whole; a little more room, the graphics processor too
+  expect(await line(44)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 85% 4:12$/)
+  expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4:12$/)
+  expect(await line(80)).toMatch(/bat 85% 4:12 disk 63M\/s net 1M\/s$/)
 })
 
 // F-019 and F-020 of the security review, for the hourly look: it only reads the version page and shows a newer version with Install;

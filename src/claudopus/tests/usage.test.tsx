@@ -2,7 +2,7 @@
 
 // A Mac's look as its commands print it, with Claude's app and chat, another app, and how much has moved by the nth look
 const psTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}.00`
-const lookAt = (n: number, anon = 1583261) =>
+const lookAt = (n: number, anon = 1583261, extra = '') =>
   [
     '@@SELF@@ 1423',
     '@@PS@@',
@@ -24,6 +24,7 @@ const lookAt = (n: number, anon = 1583261) =>
     `   19.03 42547108 ${1000 + n * 300} `,
     '@@NET@@',
     `en0        1500  <Link#15>   02:00:00:00:00:01 1     0 ${n * 5_000_000} 2     0 0     0`,
+    extra,
     '@@TOP@@',
     'PID    MEM',
     '852    3000M',
@@ -89,4 +90,110 @@ test('a look that gives nothing waits as long as one that works, so a broken loo
   for (let s = 0; s < 6; s++) await clock.advance(1000)
   expect(asked.length).toBe(3)
   expect(asked[2]?.includes('top -l')).toBe(false)
+})
+
+// What the Mac's own commands print for the graphics processor and the battery, in each case the bar must tell apart
+const gpuAt = (pct: number) => `@@GPU@@\n"Device Utilization %"=${pct}`
+const batt = (line: string) => `@@BATT@@\nNow drawing from 'Battery Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`
+const BATTERIES: { name: string; extra: string; desk: string[]; term: RegExp; alt: string }[] = [
+  { name: 'on battery with a time left', extra: `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`, desk: ['37%', '85% 4:12 left'], term: / gpu[▰▱]{3} 37% bat 85% 4:12 disk/, alt: 'Battery: 85%, 4:12 left' },
+  { name: 'on battery while the system still estimates', extra: batt('64%; discharging; (no estimate)'), desk: ['64%'], term: / bat 64% disk/, alt: 'Battery: 64%, on battery' },
+  { name: 'charging', extra: batt('62%; charging; 1:05 remaining'), desk: ['62% 1:05 to full'], term: / bat 62% ↑1:05 disk/, alt: 'Battery: 62%, charging, 1:05 to full' },
+  { name: 'fully charged on power', extra: `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t100%; charged; 0:00 remaining present: true`, desk: ['100%'], term: / bat 100% ac disk/, alt: 'Battery: 100%, on power' },
+  { name: 'low on battery', extra: batt('12%; discharging; 0:41 remaining'), desk: ['12% 0:41 left'], term: / bat 12% 0:41 disk/, alt: 'Battery: 12%, 0:41 left' },
+]
+for (const one of BATTERIES)
+  test(`the bar shows the battery as the system reports it: ${one.name}`, async ($, on) => {
+    let n = 0
+    const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, one.extra) })
+    await $.session.start(start)
+    await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+    await clock.advance(1000)
+    await clock.advance(6000)
+    await clock.advance(1000)
+    const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+    await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+    for (const text of one.desk) expect((await desk.find({ type: 'Text', text: new RegExp(`^${text}$`) }))?.text).toBe(text)
+    const drawings = await desk.findAll({ type: 'Svg' })
+    expect(drawings.find(d => String(d.props.alt).startsWith('Battery'))?.props.alt).toBe(one.alt)
+    // Never a figure the system did not give
+    if (/no estimate|charged/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
+    if (one.name === 'low on battery') expect((await desk.find({ type: 'Text', text: /^12% 0:41 left$/ }))?.props.color).toBe('#E5A50A')
+    await desk.unmount()
+    const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+    expect((await term.find({ type: 'Text', text: /^mem/ }))?.text).toMatch(one.term)
+    await term.unmount()
+  })
+
+test('a computer with no battery shows none, and a desktop plugged into a UPS does not take it for its own', async ($, on) => {
+  let n = 0
+  const ups = "@@BATT@@\nNow drawing from 'AC Power'\n -CP1500PFCLCDa (id=1234)\t100%; charged; 0:00 remaining present: true"
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, ups) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  expect((await desk.findAll({ type: 'Svg' })).find(d => String(d.props.alt).startsWith('Battery'))).toBeUndefined()
+  expect(await desk.find({ type: 'Text', text: /%/ })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: /100%/ })).toBeUndefined()
+  await desk.unmount()
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  expect((await term.find({ type: 'Text', text: /^mem/ }))?.text).not.toMatch(/bat|gpu/)
+  await term.unmount()
+})
+
+test('a pointer resting on a figure shows more of it in a line above: who uses the most, the parts of a speed, the battery in full', async ($, on) => {
+  let n = 0
+  const extra = `${gpuAt(37)}\n"In use system memory"=1288490188\n${batt('85%; discharging; 4:12 remaining')}`
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, extra) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  const more: Record<string, string> = {
+    memory: 'Memory 29 of 64 GB in use · most: Claude 3.3 GB, Safari 0.4 GB · Claude with what it started 3.3 GB',
+    cpu: 'Processor 50% busy across 10 cores · most: Safari 30%, Claude 20% · Claude with what it started 20%',
+    gpu: 'Graphics processor 37% busy · 1.2 GB of memory in use',
+    battery: 'Battery 85% · on battery, 4:12 left as the system estimates it',
+    disk: 'Disk 63 MB/s read and written · disk0',
+    net: 'Network 1 MB/s · in 1 MB/s, out 0 MB/s · en0',
+  }
+  const boxes = await desk.findAll({ type: 'Box' })
+  for (const [key, text] of Object.entries(more)) {
+    // Hidden until the pointer rests on its own figure (the test kit does not show the hover itself)
+    const line = boxes.find(b => b.props.key === `usage-more-${key}`)
+    expect(line?.props.display).toBe('none')
+    expect(line?.text).toBe(text)
+  }
+  // Above the figures, so they stay where they are when it shows
+  const band = boxes.find(b => b.props.flexDirection === 'column' && b.text.endsWith('1 MB/s'))
+  expect(band?.text.startsWith('Memory 29')).toBe(true)
+  await desk.unmount()
+})
+
+test('in a narrow terminal a figure that does not fit is left out whole, the network and the disk first, never the battery cut', async ($, on) => {
+  let n = 0
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const line = async (bodyColumns: number) => {
+    const term = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns }, surface: 'terminal' } as never)
+    await until(async () => ((await term.find({ type: 'Text', text: /^mem/ })) ? true : undefined))
+    const text = (await term.find({ type: 'Text', text: /^mem/ }))?.text ?? ''
+    await term.unmount()
+    return text
+  }
+  // A phone's 50 columns: memory, the processor and the battery whole; a little more room, the graphics processor too
+  expect(await line(44)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 85% 4:12$/)
+  expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4:12$/)
+  expect(await line(80)).toMatch(/bat 85% 4:12 disk 63M\/s net 1M\/s$/)
 })

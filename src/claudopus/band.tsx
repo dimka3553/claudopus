@@ -3,6 +3,8 @@
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
 let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
+// The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
+const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
   // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
@@ -80,10 +82,11 @@ const bandHooks = (on: On) => {
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
-    return (
-      <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
+    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
+    const row = (
+      <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
         {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
-        {figures ? (e.surface === 'terminal' ? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box> : usageDrawn(ui, figures) ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box>) : null}
+        {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
         {/* The figures fill a phone's terminal: the hint shows until they come */}
         {isPanelAway && !figures ? (
           <Box flexShrink={0}>
@@ -91,6 +94,15 @@ const bandHooks = (on: On) => {
           </Box>
         ) : null}
       </Box>
+    )
+    // Where the figures are drawn, a pointer resting on one shows more of it in a line above, so the figures stay where they are
+    return drawn && figures ? (
+      <Box flexDirection="column">
+        {usageMoreDrawn(ui, figures)}
+        {row}
+      </Box>
+    ) : (
+      row
     )
   })
 
