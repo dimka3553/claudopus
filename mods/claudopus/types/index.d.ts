@@ -79,6 +79,8 @@ export type Todo = {
   // `isUndone`: a file of theirs a command changed, put back as it was (`isOutside`: found changed between commands, by an editor or a program left running); Allow makes the change again
   admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean; call?: string; folder?: string; branch?: string }[]
   startedAt: number
+  // When it first began, kept when it is started again (whose startedAt moves on so its time runs on): the cards keep their places by it
+  begunAt?: number
   // 0 while it works
   endedAt: number
   // When its turn last ended with its answer, finished, while its own background work still held it; absent once it steps again.
@@ -119,6 +121,9 @@ export type Todo = {
   quietTold?: number
   // A helper whose work was told it works through in order what could be split
   serialTold?: boolean
+  // Stopped by the person's own press on Stop, on its card or a helper's: when. Until `isLifted`, set by their next message, the chat
+  // or the work above it may not start it again, message it or start the same work afresh, and nothing of the mod's wakes it
+  byYou?: { at: number; isLifted?: boolean }
   // Only work that is working has a card; one that has ended is kept, so a message to it brings its card back as it was
   status: 'working' | 'done' | 'stopped' | 'failed'
   // Set on a card another chat shares: that chat, the Mac it runs on when another (empty for this one), and the card's own id there.

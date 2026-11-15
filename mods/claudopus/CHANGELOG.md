@@ -2,6 +2,29 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.126 · 15 November 2026
+- A newer Claudopus is now a small grey box in the panel's header, not a big notice: the version, how many versions it covers since yours, and in a line what is new.
+- Updating is three steps, each your press, the box showing where it stands: Download (with its size and progress as it comes), Install (saying what it replaces), and Reload (saying whether this chat or every chat needs it). Not now keeps it quiet for a day, Skip this version until a newer one.
+- A download is checked against the fingerprint the release published before it can be installed, and checked again at Install; one that does not match is thrown away, and an installed copy that does not match has Claude Code's record put back. A failed step says what failed and that what your chat runs is unchanged.
+- A chat run from a folder of the code says so, and its steps fetch into that folder and move it forward, a fast-forward only; a worktree or another branch is told a release never reaches it and is offered no download.
+- Config's Updates: look every hour, every 6 hours, once a day, once a week or only when you ask; Check now only looks; it says which version this chat runs and where it loads from.
+- After a chat moves to a newer version, one quiet line says so with What's new, in place of the screen that covered the whole panel.
+
+## 0.2.125 · 15 November 2026
+- The battery card now shows what the whole Mac draws, what the processors and the graphics processor each draw, and Claude's part of each; Claude's graphics power is marked as estimated, and the card says what "Claude" covers and that the screen, memory and storage count only in the whole.
+- Claude's watts, disk and network now count work a chat left running after its command ended, and processes that started between two readings, which were missed before.
+- The graphics card says busy is time at work at any speed, shows what the graphics processor draws, and lists who uses it most, with macOS drawing the screen named as such.
+
+## 0.2.124 · 15 November 2026
+- After you answer an ask on its card (a button such as Release it or Done, or a reply from its box), the card stays where it was at the top for a minute, saying what you answered, instead of jumping away under your pointer.
+- A piece of work started again by your answer, such as Release it on work that had ended, keeps its place among the cards instead of moving to the very bottom of the panel.
+
+## 0.2.123 · 15 November 2026
+- A Stop you press on a card, or on a helper under it, now holds: the chat is told you stopped it, and it cannot start that work again, message it or start the same work afresh until you send a new message asking for it.
+- Nothing of Claudopus's own wakes stopped work: answers that were on their way to it are dropped, and it is not carried on after a cut-off.
+- The helpers and background commands of stopped work stop with it; anything it started detached is named to the chat as left running.
+- A card you stopped says "Stopped by you", keeps what it had done, and has Start again in its details.
+
 ## 0.2.122 · 15 November 2026
 - In the desktop app, resting the pointer on a figure above the prompt now really shows its card, one at a time, gone as the pointer leaves: who uses the most memory and processor, the battery in words, network download and upload
 - The cards show Claude's own part of the graphics processor, the disk and the network, and the strain on the battery: what the Mac draws and what Claude's processors draw, in watts

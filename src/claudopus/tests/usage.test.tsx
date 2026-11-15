@@ -251,3 +251,39 @@ test('in a phone-narrow terminal the word for a charge the system calls full whi
   expect(await desk.find({ type: 'Text', text: 'Finishing the charge: the system calls it full and still tops it up' })).toBeDefined()
   await desk.unmount()
 })
+
+test('the battery card says what the Mac draws, the processors and graphics each, Claude\'s part of each, and what Claude covers', async ($, on) => {
+  let n = 0
+  // Each look: Claude's renderer a quarter of the graphics time, Safari the rest; Claude's chat 20 J a look, the
+  // processors 40 J, the graphics processor 5 J
+  const power = (k: number) =>
+    [
+      gpuAt(60),
+      ac('94%; charging; (no estimate)'),
+      '@@POWER@@',
+      '"SystemLoad"=80000',
+      '@@GPUP@@',
+      `      "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=${k * 1e9}})`,
+      '      "IOUserClientCreator" = "pid 852, Claude"',
+      `      "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=${k * 3e9}})`,
+      '      "IOUserClientCreator" = "pid 700, Safari"',
+      '@@RU@@',
+      `1423 0 0 ${k * 20e9}`,
+      `E ${k * 40e9} ${k * 5e9}`,
+    ].join('\n')
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, power(n)) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: 'The whole Mac draws' })) ? true : undefined))
+  for (const text of ['The whole Mac draws', '80 W', 'Processors, every program', "Claude's own processes", 'Graphics, every program', 'Claude of that, estimated'])
+    expect(await desk.find({ type: 'Text', text })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: "Claude's processors draw" })).toBeUndefined()
+  expect(await desk.find({ type: 'Text', text: /^Claude: the app, its chats and all their work\. Part of what the processors draw is no program's, and work that ends within seconds is missed\. The screen, memory and storage count only in the whole, which the Mac updates about once a minute\.$/ })).toBeDefined()
+  // The graphics card: busy is time at work, what it draws, and who uses it most
+  for (const text of ['Time at work, at any speed', 'Drawing', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
+  await desk.unmount()
+})
