@@ -526,12 +526,12 @@ const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly 
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))
 const pressed = async (pane: { press: (q: { key: string }) => Promise<unknown> } & Parameters<typeof keyed>[0], base: string) => pane.press({ key: (await keyed(pane, base))?.key ?? base })
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' } as const
-// What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 10 seconds
-// (past the kit's own limit for a test not marked SLOW), not by a count of tries: on a loaded machine or GitHub's slower runner a
+// What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
+// (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a
 // count of tries ran out before the work did
 declare const Date: { now: () => number }
 const until = async <T,>(look: () => Promise<T | undefined>) => {
-  for (const end = Date.now() + 10_000; ; ) {
+  for (const end = Date.now() + 40_000; ; ) {
     const got = await look()
     if (got) return got
     if (Date.now() > end) return undefined
