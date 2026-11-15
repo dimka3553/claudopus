@@ -357,6 +357,79 @@ const loadWork = async ($: EngineInterface, id: string) => {
   if (isChanged) redraw($)
 }
 
+// Another chat's work keeps its chat in that chat's transcript on this Mac, which the engine gives this chat no rows of: it is read
+// from its file, the end of it, in the same rows. A chat on another Mac is not read: its Details says where it is
+const THEIR_TAIL = 800_000
+const SAFE_ID = /^[A-Za-z0-9_-]{1,80}$/
+// A transcript's lines as the engine's rows: what the work was told, what it wrote, each tool step with what came back
+const rowsOfTranscript = (text: string): SessionMessage[] => {
+  const rows: SessionMessage[] = []
+  const uses = new Map<string, ToolUseSummary>()
+  const textOf = (content: unknown) =>
+    typeof content === 'string' ? content : Array.isArray(content) ? content.flatMap(block => (block && typeof block === 'object' && (block as { type?: unknown }).type === 'text' && typeof (block as { text?: unknown }).text === 'string' ? [(block as { text: string }).text] : [])).join('\n') : ''
+  for (const line of text.split('\n')) {
+    if (!line.startsWith('{')) continue
+    let entry: { type?: unknown; isMeta?: unknown; message?: { content?: unknown } }
+    try {
+      entry = JSON.parse(line) as typeof entry
+    } catch {
+      continue
+    }
+    const content = entry.message?.content
+    if (entry.type === 'assistant') {
+      const toolUses = (Array.isArray(content) ? content : []).flatMap((block): ToolUseSummary[] => {
+        const b = block as { type?: unknown; id?: unknown; name?: unknown; input?: unknown }
+        if (b?.type !== 'tool_use' || typeof b.id !== 'string' || typeof b.name !== 'string') return []
+        const use: ToolUseSummary = { tool_use_id: b.id, tool: b.name, input: b.input && typeof b.input === 'object' ? (b.input as Record<string, unknown>) : {} }
+        uses.set(b.id, use)
+        return [use]
+      })
+      rows.push({ role: 'assistant', text: textOf(content), toolUses } as SessionMessage)
+    } else if (entry.type === 'user' && entry.isMeta !== true) {
+      // What came back to a tool step goes with that step; the rest is what the work was told
+      for (const block of Array.isArray(content) ? content : []) {
+        const b = block as { type?: unknown; tool_use_id?: unknown; content?: unknown; is_error?: unknown }
+        const use = b?.type === 'tool_result' && typeof b.tool_use_id === 'string' ? uses.get(b.tool_use_id) : undefined
+        if (use) Object.assign(use, { text: textOf(b.content), ...(b.is_error === true ? { isError: true } : {}) })
+      }
+      const said = textOf(content)
+      if (said) rows.push({ role: 'user', text: said, toolUses: [] } as unknown as SessionMessage)
+    }
+  }
+  return rows
+}
+const loadTheirs = async ($: EngineInterface, one: Todo) => {
+  const c = one.chat
+  const id = one.id
+  if (!c || c.host || !SAFE_ID.test(c.id) || !SAFE_ID.test(c.agent ?? '') || loading.has(id)) return
+  loading.add(id)
+  let isChanged = false
+  try {
+    // Read again when it has made a step, said where it is, or ended: not as its context grows
+    const key = [one.steps ?? 0, one.entries.at(-1)?.text ?? '', one.status, one.items.length, one.endedAt].join(':')
+    const now = await $.clock.now()
+    const was = talks.get(id)
+    if (was?.key === key && (was.lines || now - (was.at ?? 0) < RETRY_READ)) return
+    const home = (await $.env.get('HOME')) ?? ''
+    // Its folder named as the engine names its projects, and failing that any project that holds that chat
+    const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-')
+    const name = `${c.id}/subagents/agent-${c.agent}.jsonl`
+    const r = await $.process
+      .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', `${home}/.claude/projects`, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
+      .catch(() => undefined)
+    const rows = r?.exitCode === 0 ? rowsOfTranscript(r.stdout) : undefined
+    talks.set(id, { key, lines: rows?.length ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
+    isChanged = true
+  } catch (err) {
+    if (!talks.has(id)) talks.set(id, { key: '', lines: undefined, at: await $.clock.now().catch(() => 0) })
+    isChanged = true
+    await log($, `chat of ${id} not read: ${String(err)}`).catch(() => undefined)
+  } finally {
+    loading.delete(id)
+  }
+  if (isChanged) redraw($)
+}
+
 // The pictures an ask is about, drawn small on its card under what it is about, so the person decides there without waiting for
 // the chat to send them (14 Nov: a card asked to pick one of four designs, and the designs came only later, in the chat). Each
 // small copy is smaller than a chat's: a card's pictures are drawn in the list, beside every other card, and the list is one drawing
