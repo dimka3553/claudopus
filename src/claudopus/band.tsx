@@ -35,8 +35,8 @@ const bandHooks = (on: On) => {
     const { Box, Text } = ui
 
     // What waits on the person, each with its answers, above the figures: the same as at the top of the panel, answered the same way
-    const rows = await barWaitsDrawn($, ui, e)
     const marker = await finishMarker($, ui, e.surface)
+    const rows = await barWaitsDrawn($, ui, e, marker ? 1 : 0)
     const waits = rows || marker ? (
       <Box key="band-top" flexDirection="column">
         {rows}

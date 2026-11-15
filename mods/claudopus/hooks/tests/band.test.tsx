@@ -770,7 +770,7 @@ test('an answer from the bar that could not be written says so in its row and pu
   const rowsBefore = await barRows(s.band)
   s.failWrites(1000)
   await s.band.press({ key: await barKey(s.band, 'Neither') }).catch(() => undefined)
-  expect(await until(async () => s.band.find({ type: 'Text', text: 'Pick the logo · not sent, press it again · ' }))).toBeDefined()
+  expect(await until(async () => s.band.find({ type: 'Text', text: 'Not sent, press it again · ' }))).toBeDefined()
   expect(await barLabels(s.band, 'ask-a2')).toEqual(['The blue one', 'The green one', 'Neither'])
   expect(await barRows(s.band)).toEqual(rowsBefore)
   expect(s.picked()).toEqual([])
@@ -1008,4 +1008,58 @@ test('in a terminal of 9 rows the waiting rows, the hint and the figures fit in 
   const lines = rows * 3 + 1 + 1
   expect({ rows, lines }).toEqual({ rows, lines: Math.min(lines, 9) })
   await term.unmount()
+})
+
+test('in the terminal, answering a row with long answers lets no other row in under it: the bar keeps its rows and lines', SLOW, async ($, on) => {
+  const s = await askScene($, on)
+  await $.agent.spawn({ ...spawn, description: 'Pick the photo', prompt: 'pick' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which photo?', choices: ['The one from the beach trip', 'The one from the mountains', 'The one in the old city', 'None of them at all'] } as never)
+  const term = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 6, scroll: { offset: 0, bodyRows: 6 } }, surface: 'terminal' } as never)
+  await until(async () => ((await barLabels(term)).length ? true : undefined))
+  const before = await barRows(term)
+  const lines = async () => (await term.findAll({ type: 'Text' })).length + (await term.findAll({ type: 'Box' })).filter(b => b.props.flexWrap === 'wrap').length
+  const linesBefore = await lines()
+  const one = String((await term.findAll({ type: 'Button' })).find(b => b.props.hotkey === '1')?.key)
+  await term.press({ key: one })
+  await term.press({ key: String((await term.findAll({ type: 'Button' })).find(b => b.props.hotkey === '1')?.key) })
+  expect(await until(async () => term.find({ type: 'Text', text: /✓ You answered/ }))).toBeDefined()
+  expect(await barRows(term)).toEqual(before)
+  expect(await lines()).toBeGreaterThanOrEqual(linesBefore)
+  void s
+  await term.unmount()
+})
+
+test('in the app, an ask opened in its row keeps its opened lines when one of its answers is pressed', SLOW, async ($, on) => {
+  const s = await askScene($, on)
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const more = await until(async () => (await band.findAll({ type: 'Button' })).find(b => /^bar-ask-a1-.*-more$/.test(b.key ?? '')))
+  await band.press({ key: String(more?.key) })
+  const open = async () => (await band.findAll({ type: 'Box' })).some(b => /^bar-ask-a1-.*-open$/.test(b.key ?? ''))
+  expect(await until(async () => ((await open()) ? true : undefined))).toBe(true)
+  await band.press({ key: String((await band.findAll({ type: 'Button' })).find(b => b.props.label === 'Not now' && (b.key ?? '').startsWith('bar-'))?.key) })
+  expect(await until(async () => band.find({ type: 'Text', text: /✓ You answered/ }))).toBeDefined()
+  expect(await open()).toBe(true)
+  void s
+  await band.unmount()
+})
+
+test("a gate pressed in the app's bar, the terminal's and the panel at once sends one answer, the first", SLOW, async ($, on) => {
+  const w = await gated($, on)
+  const call = w.bash('d1', `${ADMIN} here 'chmod 644 /etc/hosts'`)
+  expect(await w.held('d1')).toBeDefined()
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  await until(async () => ((await barLabels(band)).length && (await barLabels(term)).length ? true : undefined))
+  const deny = String((await band.findAll({ type: 'Button' })).find(b => b.props.label === 'Deny' && (b.key ?? '').startsWith('bar-'))?.key)
+  const tAllow = (await term.findAll({ type: 'Button' })).find(b => b.props.label === 'Allow once')?.key
+  const pAlways = (await w.list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('gate-d1-0-always'))?.key
+  await term.press({ key: String(tAllow) })
+  await band.press({ key: deny })
+  await term.press({ key: String(tAllow) }).catch(() => undefined)
+  if (pAlways) await w.list.press({ key: pAlways }).catch(() => undefined)
+  w.wake()
+  const r = (await call) as { deny?: string }
+  expect(r.deny).toBeDefined()
+  expect(await w.list.find({ type: 'Text', text: /^You (allowed|always)/ })).toBeUndefined()
+  await Promise.all([band.unmount(), term.unmount()])
 })

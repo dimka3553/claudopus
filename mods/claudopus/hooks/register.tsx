@@ -10615,6 +10615,8 @@ const barAt = new Map<string, number>()
 const barSeen = new Map<string, { ask?: NonNullable<Todo['ask']>; gate?: Gate }>()
 // The answered rows whose leaving is set, by `${row}@${until}`
 const barTimed = new Set<string>()
+// The lines each row's answers took in the terminal while it waited: answered, what was said takes as many, so nothing moves
+const barTail = new Map<string, number>()
 // The answer picked in the terminal by its number, which the same number again sends
 let barPick: { id: string; n: number } | undefined
 
@@ -10680,6 +10682,7 @@ const barWaits = async ($: EngineInterface, at: number): Promise<BarWait[]> => {
     barSeen.delete(id)
     for (const key of [...barOpen]) if (key.endsWith(`|${id}`)) barOpen.delete(key)
     for (const key of [...barTimed]) if (key.startsWith(`${id}@`)) barTimed.delete(key)
+    barTail.delete(id)
   }
   // Newest first; asked in the same moment, the one listed later first, as the panel orders them
   return rows.map((row, n) => ({ row, n })).sort((a, b) => b.row.at - a.row.at || b.n - a.n).map(one => one.row)
@@ -10687,7 +10690,8 @@ const barWaits = async ($: EngineInterface, at: number): Promise<BarWait[]> => {
 
 // Whether a gate's whole command is drawn in its row on this surface: short enough, or opened there (never in the terminal, whose
 // row has no room for it)
-const commandLines = (text: string, columns: number) => text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / Math.max(20, columns))), 0)
+// Counted at a few cells under the width, as words wrap before the edge
+const commandLines = (text: string, columns: number) => text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / Math.max(20, columns - 8))), 0)
 const isCommandWhole = (gate: Gate, surface: string, row: string, columns: number) => {
   if (gate.kind === 'release') return true
   const text = gate.command ?? ''
@@ -10770,15 +10774,18 @@ const barDesktop = ($: EngineInterface, ui: Ui, rows: BarWait[], surface: Render
     const isOpen = barOpen.has(openKey)
     const color = one.state === 'waits' ? NEEDS : one.state === 'acting' ? LIVE : one.state === 'answered' ? DONE : undefined
     const ask = one.kind === 'ask' && one.state === 'waits' ? one.card?.ask : undefined
+    // Opened and then answered: the same opened lines, what was said in place of the reply box
+    const askShown = one.kind === 'ask' && one.state !== 'acting' ? (ask ?? one.ask) : undefined
     const answers = barAnswers(one, surface, columns)
     const second = one.kind === 'gate' && one.gate ? gateSecond(one.gate, surface, one.id, columns) : ''
-    const canOpen = Boolean(ask) || (one.kind === 'gate' && one.state === 'waits')
+    const canOpen = Boolean(ask) || (one.kind === 'gate' && one.state === 'waits') || (isOpen && Boolean(askShown))
     return (
       <Box key={`bar-${one.id}`} flexDirection="column" borderStyle="round" borderColor={color} borderDimColor={!color} paddingX={1} flexShrink={0}>
         <Box key={`bar-${one.id}-line`} flexDirection="row" alignItems="center" gap={1}>
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             <Text wrap="truncate-end">
-              <Text dimColor>{`${one.who}${one.failed ? ` · ${one.failed}` : ''} · `}</Text>
+              {/* Not sent: said first, in place of whose it is, so the question stays in view */}
+              {one.failed ? <Text color={NEEDS}>{`${upperFirst(one.failed)} · `}</Text> : <Text dimColor>{`${one.who} · `}</Text>}
               {one.state === 'waits' || one.state === 'acting' ? <Text color={color} bold>{one.what}</Text> : <Text color={color} dimColor={!color} bold>{one.said ?? ''}</Text>}
             </Text>
           </Box>
@@ -10791,7 +10798,7 @@ const barDesktop = ($: EngineInterface, ui: Ui, rows: BarWait[], surface: Render
         {/* What it runs, whole and wrapped when it can be allowed here; answered, the same lines, dim */}
         {second ? <Text key={`bar-${one.id}-command`} mono dimColor={one.state !== 'waits'} wrap="wrap">{second}</Text> : null}
         {/* Opened: the whole of it, as on its card, with the box for a reply in words */}
-        {isOpen && ask && one.card ? barAskOpen($, ui, one, one.card, ask, surface) : null}
+        {isOpen && askShown ? barAskOpen($, ui, one, askShown, surface, !ask) : null}
         {isOpen && one.kind === 'gate' && one.state === 'waits' ? (
           <Box key={`bar-${one.id}-open`} flexDirection="row" gap={1}>
             <Text dimColor wrap="wrap">{one.gate?.kind === 'release' ? 'Allow: this branch is merged into main, checked and pushed. Deny: nothing is released, and the work is told.' : one.gate?.kind === 'file' ? 'Allow: the change is made as shown. Deny: the file stays as it is, and the work is told.' : 'Allow: it runs as shown. Deny: it does not run, and the work is told.'}</Text>
@@ -10816,7 +10823,8 @@ const barDesktop = ($: EngineInterface, ui: Ui, rows: BarWait[], surface: Render
 }
 
 // An ask's row opened: its whole question, what it is about, what to copy, its pictures on its card, and a box to reply in words
-const barAskOpen = ($: EngineInterface, ui: Ui, row: BarWait, one: Todo, ask: NonNullable<Todo['ask']>, surface: RenderSurface) => {
+const barAskOpen = ($: EngineInterface, ui: Ui, row: BarWait, ask: NonNullable<Todo['ask']>, surface: RenderSurface, isDone: boolean) => {
+  const cardId = row.cardId ?? ''
   const { Box, Button, Text } = ui
   return (
     <Box key={`bar-${row.id}-open`} flexDirection="column" gap={1} paddingTop={1}>
@@ -10827,21 +10835,23 @@ const barAskOpen = ($: EngineInterface, ui: Ui, row: BarWait, one: Todo, ask: No
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             <Text mono wrap="wrap">{ask.copy}</Text>
           </Box>
-          <Button key={`bar-${row.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} />
+          <Button key={`bar-${row.id}-copy-${presses}`} label={copiedKey === cardId ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, cardId, ask.copy ?? '', press.surface)} />
         </Box>
       ) : null}
       <Box key={`bar-${row.id}-links`} flexDirection="row" gap={2}>
         {ask.pictures?.length ? <Text dimColor>{`${ask.pictures.length === 1 ? 'A picture' : `${ask.pictures.length} pictures`} on its card`}</Text> : null}
         <Button key={`bar-${row.id}-card`} label="Show its card in the panel" plain hover={{ scope: `bar-${row.id}-card`, underline: true }} onPress={() => void barShow($, row)} />
       </Box>
-      {'Input' in ui && surface !== 'terminal' ? (
+      {isDone ? (
+        <Text key={`bar-${row.id}-replied`} dimColor wrap="truncate-end">{row.said ?? ''}</Text>
+      ) : 'Input' in ui && surface !== 'terminal' && row.card ? (
         <Box width="100%" flexDirection="column">
           <ui.Input
-            key={`bar-${row.id}-reply-${replies.get(one.id) ?? 0}`}
+            key={`bar-${row.id}-reply-${replies.get(cardId) ?? 0}`}
             placeholder="Or reply in your own words"
             submitLabel="send"
             onInput={() => holdTimes($)}
-            onSubmit={value => void (freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+            onSubmit={value => void (freeTimes($), value.trim() && row.card ? answerAsk($, row.card, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
           />
         </Box>
       ) : null}
@@ -10852,18 +10862,20 @@ const barAskOpen = ($: EngineInterface, ui: Ui, row: BarWait, one: Todo, ask: No
 // The lines a row takes in the terminal: its line, a gate's command, an ask's two notes, then its answers (or, answered, what was
 // said in their place), wrapped at the band's width
 const termLines = (row: BarWait, columns: number, answers: BarAnswer[]) => {
-  const second = row.kind === 'gate' && row.gate ? commandLines(`    ${gateSecond(row.gate, 'terminal', row.id, columns)}`, columns) : 0
+  const second = row.kind === 'gate' && row.gate ? commandLines(gateSecond(row.gate, 'terminal', row.id, columns), columns - 4) : 0
   const notes = row.kind === 'ask' && row.state !== 'acting' ? Number(Boolean(row.ask?.details)) + Number(Boolean(row.ask?.copy)) : 0
-  const tail = answers.length ? Math.max(1, Math.ceil((4 + answers.reduce((n, a) => n + a.label.length + 6, 0)) / Math.max(20, columns))) : 1
+  const tail = Math.max(answers.length ? Math.max(1, Math.ceil((4 + answers.reduce((n, a) => n + a.label.length + 6, 0)) / Math.max(20, columns - 8))) : 1, barTail.get(row.id) ?? 1)
+  if (answers.length) barTail.set(row.id, tail)
   return 1 + second + notes + tail
 }
 // The rows in the terminal: a line each, its answers numbered under it. A bare digit typed in an empty prompt presses a band's Button,
 // and a message may begin with one, so the first press only picks the answer and says so; the same digit again sends it. Numbers run
 // on from row to row, up to nine. Rows are shown while they fit in the band above the prompt with the figures' line and the hint;
 // the rest are counted
-const barTerminal = ($: EngineInterface, ui: Ui, rows: BarWait[], columns: number, maxRows: number) => {
+const barTerminal = ($: EngineInterface, ui: Ui, rows: BarWait[], columns: number, maxRows: number, reserved: number) => {
   const { Box, Button, Text } = ui
-  const budget = Math.max(1, maxRows - 2)
+  // The figures' line, the hint and what band.tsx draws under the rows keep theirs
+  const budget = Math.max(1, maxRows - 2 - reserved)
   let used = 0
   let digit = 0
   const numbered: { row: BarWait; answers: (BarAnswer & { n: number })[] }[] = []
@@ -10888,10 +10900,14 @@ const barTerminal = ($: EngineInterface, ui: Ui, rows: BarWait[], columns: numbe
         return (
           <Box key={`bar-${row.id}`} flexDirection="column">
             <Text wrap="truncate-end">
-              <Text dimColor>{`${row.who}${row.failed ? ` · ${row.failed}` : ''}: `}</Text>
+              {row.failed ? <Text color={NEEDS}>{`${upperFirst(row.failed)}: `}</Text> : <Text dimColor>{`${row.who}: `}</Text>}
               <Text color={isDone ? undefined : color} dimColor={isDone} bold={!isDone}>{cut(row.what, Math.max(40, columns * 2))}</Text>
             </Text>
-            {second ? <Text key={`bar-${row.id}-command`} dimColor wrap="wrap">{`    ${second}`}</Text> : null}
+            {second ? (
+              <Box key={`bar-${row.id}-command`} paddingLeft={4}>
+                <Text dimColor wrap="wrap">{second}</Text>
+              </Box>
+            ) : null}
             {/* The chat's notice with what it is about went to this chat */}
             {row.kind === 'ask' && row.state !== 'acting' && row.ask?.details ? <Text key={`bar-${row.id}-details`} dimColor wrap="truncate-end">    What it is about is in the chat above and on its card</Text> : null}
             {row.kind === 'ask' && row.state !== 'acting' && row.ask?.copy ? <Text key={`bar-${row.id}-copy`} dimColor={isDone} wrap="truncate-end">{`    ${oneLine(row.ask.copy)}`}</Text> : null}
@@ -10900,9 +10916,13 @@ const barTerminal = ($: EngineInterface, ui: Ui, rows: BarWait[], columns: numbe
                 {answers.map(answer => (answer.n ? <Button key={`bar-${row.id}-answer-${answer.n}-${loadMark}`} label={answer.label} plain hotkey={String(answer.n)} onPress={() => barPress($, row, answer, answer.n)} /> : null))}
               </Box>
             ) : (
-              <Text key={`bar-${row.id}-said`} color={isDone ? color : undefined} dimColor={!isDone || !color} bold={isDone && Boolean(color)} wrap="truncate-end">
-                {`    ${isDone || row.state === 'acting' ? row.said ?? '' : row.kind === 'box' ? 'Type it in the panel: /claudopus, then ctrl+x Tab' : row.kind === 'there' ? 'Answer it in its own chat' : row.kind === 'gate' ? 'Allow or deny it on its card' : ''}`}
-              </Text>
+              <Box key={`bar-${row.id}-said`} flexDirection="column">
+                <Text color={isDone ? color : undefined} dimColor={!isDone || !color} bold={isDone && Boolean(color)} wrap="truncate-end">
+                  {`    ${isDone || row.state === 'acting' ? row.said ?? '' : row.kind === 'box' ? 'Type it in the panel: /claudopus, then ctrl+x Tab' : row.kind === 'there' ? 'Answer it in its own chat' : row.kind === 'gate' ? 'Allow or deny it on its card' : ''}`}
+                </Text>
+                {/* As many lines as its answers took, so the bar keeps its height until the row leaves */}
+                {Array.from({ length: Math.max(0, (barTail.get(row.id) ?? 1) - 1) }, (_, n) => <Text key={`bar-${row.id}-said-${n}`}> </Text>)}
+              </Box>
             )}
           </Box>
         )
@@ -10917,16 +10937,16 @@ const barTerminal = ($: EngineInterface, ui: Ui, rows: BarWait[], columns: numbe
 }
 
 // The rows, or nothing when nothing waits. Each answered row is drawn again when its moment is over, once
-const barWaitsDrawn = async ($: EngineInterface, ui: Ui, e: { surface: RenderSurface; props: { bodyColumns: number; maxRows: number } }) => {
+const barWaitsDrawn = async ($: EngineInterface, ui: Ui, e: { surface: RenderSurface; props: { bodyColumns: number; maxRows: number } }, reserved = 0) => {
   const at = await $.clock.now()
   const rows = await barWaits($, at)
   for (const row of rows) {
-    if (row.until === undefined || barTimed.has(`${row.id}@${row.until}`)) continue
+    if (row.until === undefined || !Number.isFinite(row.until) || barTimed.has(`${row.id}@${row.until}`)) continue
     barTimed.add(`${row.id}@${row.until}`)
     $.clock.after(Math.max(0, row.until - at) + 50, () => $.ui.invalidate('ui.render'))
   }
   if (!rows.length) return null
-  return e.surface === 'terminal' ? barTerminal($, ui, rows, e.props.bodyColumns, e.props.maxRows) : barDesktop($, ui, rows, e.surface, e.props.bodyColumns)
+  return e.surface === 'terminal' ? barTerminal($, ui, rows, e.props.bodyColumns, e.props.maxRows, reserved) : barDesktop($, ui, rows, e.surface, e.props.bodyColumns)
 }
 
 // Above the prompt: the small octopus while work runs, and how Claude uses this computer
@@ -10966,8 +10986,8 @@ const bandHooks = (on: On) => {
     const { Box, Text } = ui
 
     // What waits on the person, each with its answers, above the figures: the same as at the top of the panel, answered the same way
-    const rows = await barWaitsDrawn($, ui, e)
     const marker = await finishMarker($, ui, e.surface)
+    const rows = await barWaitsDrawn($, ui, e, marker ? 1 : 0)
     const waits = rows || marker ? (
       <Box key="band-top" flexDirection="column">
         {rows}
