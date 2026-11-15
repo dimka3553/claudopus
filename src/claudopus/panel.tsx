@@ -306,8 +306,8 @@ const panelHooks = (on: On) => {
               <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
             {/* Where the bar above the prompt holds the reply box, the last answer opens it there for this card, and closes it again */}
-            {'Input' in table && repliesInBar(e.surface) && !barShut.has(e.surface) ? (
-              replyTo === one.id ? (
+            {'Input' in table && repliesInBar(e.surface) ? (
+              isReplyOpen(one) ? (
                 <Button key={`${key}-inbar-close-${presses}`} label="Close the reply box" onPress={press => openReply($, undefined, press.surface)} />
               ) : (
                 <Button key={`${key}-inbar-${presses}`} label="Reply in your own words" onPress={press => openReply($, one, press.surface)} />
@@ -316,12 +316,10 @@ const panelHooks = (on: On) => {
           </Box>
           )}
           {/* Where the bar above the prompt holds the reply box, the card has none: a box typed in here is what the app drags the
-              panel to. It says where the box is once opened, and how to get at it while the bar is folded */}
+              panel to. Once opened it says where to type: the app puts the cursor there only on the person's own click */}
           {'Input' in table && !one.chat && repliesInBar(e.surface) ? (
-            barShut.has(e.surface) ? (
-              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ To reply in words, open the folded bar above the chat's prompt</Text>
-            ) : replyTo === one.id ? (
-              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Your reply box is open above the chat's prompt</Text>
+            isReplyOpen(one) ? (
+              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type your reply in the box above the chat's prompt</Text>
             ) : null
           ) : 'Input' in table && !one.chat ? (
             <Box width="100%" flexDirection="column">

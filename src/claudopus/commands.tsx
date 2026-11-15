@@ -15,13 +15,16 @@ const commandHooks = (on: On) => {
   // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
   // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
+    // The bar holds its drawing for as long as its reply box has the cursor (band.tsx), however the cursor came there: by the
+    // person's click in the box, as the box takes it when they click into the bar (autoFocus), or by the mod's own call
+    const isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element)
+    if (isInBarBox) barBoxAt = await $.clock.now()
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
-      // The bar holds its drawing for as long as its reply box has the cursor (band.tsx)
-      barBoxAt = e.plugin === 'claudopus' && isBarBox(e.element) ? await $.clock.now() : 0
+      if (!isInBarBox) barBoxAt = 0
     }
     return next(e)
   })

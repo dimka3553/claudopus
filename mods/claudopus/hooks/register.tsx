@@ -5361,8 +5361,8 @@ const drawAgain = ($: EngineInterface) => {
 // The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
 // arrive, so a drawing never puts older letters over the newer ones the box already holds
 const drawnDrafts = new Map<string, string>()
-const draftShown = (id: string, ask: NonNullable<Todo['ask']>) => {
-  const key = draftOf(id, ask)
+const draftShown = (id: string, ask: NonNullable<Todo['ask']>) => draftDrawn(draftOf(id, ask))
+const draftDrawn = (key: string) => {
   if (isTyping && drawnDrafts.has(key)) return drawnDrafts.get(key) ?? ''
   const value = drafts.get(key) ?? ''
   drawnDrafts.set(key, value)
@@ -5379,7 +5379,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], [...barShut], replyTo])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -5523,9 +5523,9 @@ const asPressed = (one: Todo): Todo => {
 // pane's scrolling does not reach, and never in the pane. It is there only once the person asks for it: the card's answers end
 // with "Reply in your own words", which opens the box in the bar for that card, and Close takes it away again (16 Nov: a box
 // always in the bar looked bad, and the person asked for it as one of the options)
+// A bar the person folded shows nothing of the mod's, and one of the app's surveys takes its place: neither takes the box, and the
+// card has its own again, so a reply in words can always be typed somewhere
 const barBoxes = new Set<string>()
-// Surfaces whose bar is folded by the person or held by a survey: nothing of the mod's shows there just now
-const barShut = new Set<string>()
 const repliesInBar = (surface: string) => barBoxes.has(surface)
 // When the bar's box last took the cursor or a letter, 0 once the cursor is known to have left it or its reply was sent: the bar
 // holds its drawing that long (band.tsx, barHeld). The app may say nothing when the cursor leaves for the chat's own box, so the
@@ -5534,18 +5534,47 @@ let barBoxAt = 0
 const BAR_BOX_HELD = 300_000
 const isBarBox = (element: string | undefined) => /^band-.*-reply-/.test(element ?? '')
 // The card whose reply box is open in the bar, none when it is closed: opened by the card's "Reply in your own words", closed by
-// Close (on the card or in the bar), by the reply sent, or by the ask going. One box at a time: opened on another card it is that
-// card's, and what was half typed is kept for the card it was typed for
+// Close (on the card or in the bar), by the reply sent, by the card answered, or by the bar folding. One box at a time: opened on
+// another card it is that card's, and what was half typed is kept for the card it was typed for. Nothing but the person closes or
+// moves it while the card asks: when the work puts a new question in place of the one it was opened on (replyMark), the box stays
+// as it is, with what is typed in it, and what is sent from it answers the question the work asks then (16 Nov, the person:
+// "it should just allow me to keep typing until I myself either close it or open the new question")
 let replyTo = ''
+let replyMark = ''
+const isReplyOpen = (one: Todo) => Boolean(replyTo && one.id === replyTo && one.ask)
+// The open box's own name and what is typed in it, the same through a new question of its work
+const barBoxKey = (id: string) => `band-${id}-reply-${replies.get(id) ?? 0}-${replyMark}`
+const barDraft = (id: string) => `${id}|${replyMark}`
 // This chat's cards that wait for an answer
 const asksForBar = (cards: Todo[]) => cards.filter(one => !one.parentId && !one.chat && Boolean(asPressed(one).ask) && !isActingOnReply(one))
-const barTarget = (cards: Todo[]) => (replyTo ? asksForBar(cards).find(one => one.id === replyTo) : undefined)
+const barTarget = (cards: Todo[]) => (replyTo ? asksForBar(cards).find(isReplyOpen) : undefined)
 // The bar's own id on each surface, as its drawing is asked for: where the cursor is put when the box opens
 const barIds = new Map<string, string>()
+// What was typed for a card and never sent is the card's: a question its work has since put in place of the one it was typed for
+// shows it too, in the bar's box as it is opened again and in the card's own box when the bar folds
+const carryDraft = ($: EngineInterface, one: Todo) => {
+  if (!one.ask) return
+  const to = draftOf(one.id, one.ask)
+  if (drafts.get(to)) return
+  const from = [...drafts.keys()].filter(key => key !== to && key.startsWith(`${one.id}|`) && drafts.get(key)).pop()
+  const typed = from ? drafts.get(from) : undefined
+  if (!from || !typed) return
+  drafts.set(to, typed)
+  keepDraft($, to, typed)
+  drafts.delete(from)
+  keepDraft($, from, undefined)
+}
+// A reply sent from the bar's box answers what its card asks as it is sent: the box may have been drawn for an earlier question
+const sendFromBar = async ($: EngineInterface, id: string, value: string) => {
+  const one = (await read($, todos)).find(card => card.id === id)
+  if (one?.ask && value.trim()) await answerAsk($, one, value, true)
+}
 // Opens the bar's reply box for a card, or closes it. Opening it, the cursor is asked into the box: the app gives it only where
 // the bar already holds the keys, so where it does not the person clicks the box
 const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) => {
-  replyTo = one?.id ?? ''
+  if (one) carryDraft($, one)
+  replyTo = one?.ask ? one.id : ''
+  replyMark = one?.ask ? askMark(one.ask) : ''
   barBoxAt = 0
   presses += 1
   redraw($)
@@ -5553,7 +5582,7 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
   const bar = barIds.get(surface)
   if (!one || !ask || !bar) return
   void $.ui
-    .focus({ requestId: bar, key: `band-${one.id}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}` })
+    .focus({ requestId: bar, key: barBoxKey(one.id) })
     .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
     .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
 }
@@ -5573,6 +5602,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   // Answered in the press's own drawing, before anything is awaited: what was pressed, on its way
   const mark = `${ask.at}:${ask.text}`
   askPressed.set(one.id, mark)
+  // Its reply box in the bar goes with the answer, and is closed when the same work asks again
+  if (replyTo === one.id) ((replyTo = ''), (replyMark = ''), (barBoxAt = 0))
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at: Infinity, line, isCard: true, askAt: ask.at })
   if (isReply) freeTimes($)
@@ -10458,13 +10489,16 @@ const commandHooks = (on: On) => {
   // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
   // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
+    // The bar holds its drawing for as long as its reply box has the cursor (band.tsx), however the cursor came there: by the
+    // person's click in the box, as the box takes it when they click into the bar (autoFocus), or by the mod's own call
+    const isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element)
+    if (isInBarBox) barBoxAt = await $.clock.now()
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
-      // The bar holds its drawing for as long as its reply box has the cursor (band.tsx)
-      barBoxAt = e.plugin === 'claudopus' && isBarBox(e.element) ? await $.clock.now() : 0
+      if (!isInBarBox) barBoxAt = 0
     }
     return next(e)
   })
@@ -10965,8 +10999,8 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
 // to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
 // panel's scrolling. The box is the card's own: the same drafts, the same answer, a new one for each ask. It takes the cursor when
 // the person clicks anywhere in the bar (autoFocus)
-const barReply = ($: EngineInterface, ui: Ui, one: Todo, ask: NonNullable<Todo['ask']>) => {
-  const draft = draftOf(one.id, ask)
+const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
+  const draft = barDraft(one.id)
   return (
     <ui.Box key="band-reply" flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
       <ui.Box flexShrink={1} minWidth={0}>
@@ -10975,18 +11009,18 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo, ask: NonNullable<Todo['
       {'Input' in ui ? (
         <ui.Box flexShrink={0}>
           <ui.Input
-            key={`band-${one.id}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
+            key={barBoxKey(one.id)}
             placeholder="Type your reply"
-            value={draftShown(one.id, ask)}
+            value={draftDrawn(draft)}
             submitLabel="send"
             autoFocus
             onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
-            onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+            onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))}
           />
         </ui.Box>
       ) : null}
       <ui.Box flexShrink={0}>
-        <ui.Button key={`band-reply-close-${presses}`} label="Close" plain onPress={press => openReply($, undefined, press.surface)} />
+        <ui.Button key={`band-reply-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
       </ui.Box>
     </ui.Box>
   )
@@ -11006,18 +11040,23 @@ const bandHooks = (on: On) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // Whether this surface's bar takes the reply box, and whether it shows just now: the cards draw their asks by it (repliesInBar)
     // While one of the app's surveys holds the bar the box has no place in it, and the card has its own again
-    const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey
-    const isShut = canBox && Boolean(e.props.isCollapsed)
+    // Folded by the person, nothing of the bar is on screen: the card has its own box then too
+    const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey && !e.props.isCollapsed
     if (e.requestId) barIds.set(e.surface, e.requestId)
     const cards = await read($, todos)
     const flipAt = await $.clock.now()
-    if ((canBox !== barBoxes.has(e.surface) || isShut !== barShut.has(e.surface)) && flipAt - barFlipAt >= 1000) {
+    if (canBox !== barBoxes.has(e.surface)) {
       if (canBox) barBoxes.add(e.surface)
       else barBoxes.delete(e.surface)
-      if (isShut) barShut.add(e.surface)
-      else barShut.delete(e.surface)
+      // A box open in a bar that can no longer show it is closed, and stays closed when the bar is back; what was half typed in
+      // it is drawn in the card's own box, and nothing is held as typed in any more
+      const open = canBox ? undefined : cards.find(one => one.id === replyTo)
+      if (open) carryDraft($, open)
+      if (!canBox) ((replyTo = ''), (replyMark = ''), barHeld.delete(e.surface))
+      barBoxAt = 0
+      freeTimes($)
       // Only a card that asks is drawn differently for it
-      if (asksForBar(cards).length) ((barFlipAt = flipAt), drawAgain($))
+      if (asksForBar(cards).length && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
     const working = cards.filter(one => !one.parentId && one.status === 'working')
@@ -11083,32 +11122,26 @@ const bandHooks = (on: On) => {
       }
     }
     // The reply box the person opened from a card, while that card still asks; its ask answered or gone, the box goes with it
-    const target = canBox && !isShut ? barTarget(cards) : undefined
-    if (replyTo && canBox && !isShut && !target) replyTo = ''
+    const target = canBox ? barTarget(cards) : undefined
+    if (replyTo && canBox && !target) ((replyTo = ''), (replyMark = ''))
     if (target?.ask) {
-      // Drawn as it was while the box is typed in or holds the cursor: nothing but the card it is for, or work starting or ending,
-      // draws it anew, so the panel scrolled under the cursor moves nothing here
-      const shape = JSON.stringify([target.id, askMark(target.ask), replies.get(target.id) ?? 0, working.length > 0, happy])
+      // Drawn as it was while the box is typed in or holds the cursor: only the card it is for draws it anew, so neither the panel
+      // scrolled under the cursor nor work starting or ending puts a new box under it. The row takes the place of the figures
+      // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
+      const shape = barBoxKey(target.id)
       const held = barHeld.get(e.surface)
       if ((isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)) && held?.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
-      const reply = barReply($, ui, target, target.ask)
-      let drawing: JSX.Element = reply
-      if (working.length || happy) {
-        await read($, figuresAt)
-        const figures = usageNow(await $.clock.now())
-        if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
-        const drawn = figures ? usageDrawn(ui, figures) : null
-        drawing = (
-          <Box flexDirection="column" gap="sm">
-            {reply}
-            <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-              {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
-              {drawn ? usageSpacersDrawn(ui) : null}
-              {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, Infinity)}</Box>) : null}
-            </Box>
-          </Box>
-        )
-      }
+      // What waits at the top of a panel scrolled away is still pointed at, as the bar is drawn; not while the box is held
+      const marker = await waitMarker($, ui, e.surface)
+      const reply = barReply($, ui, target)
+      const drawing = marker ? (
+        <Box flexDirection="column">
+          {marker}
+          {reply}
+        </Box>
+      ) : (
+        reply
+      )
       barHeld.set(e.surface, { shape, drawing })
       return drawing
     }
@@ -11151,7 +11184,8 @@ const bandHooks = (on: On) => {
     }
     // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
     return drawing(drawn ? usageSpacersDrawn(ui) : null)
-  })
+    // A bar that could not be drawn takes no box: the card has its own again
+  }).catch(($, e, next) => ((replyTo = ''), (replyMark = ''), barBoxes.delete(e.surface), next(e)))
 
 }
 
@@ -11463,8 +11497,8 @@ const panelHooks = (on: On) => {
               <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
             {/* Where the bar above the prompt holds the reply box, the last answer opens it there for this card, and closes it again */}
-            {'Input' in table && repliesInBar(e.surface) && !barShut.has(e.surface) ? (
-              replyTo === one.id ? (
+            {'Input' in table && repliesInBar(e.surface) ? (
+              isReplyOpen(one) ? (
                 <Button key={`${key}-inbar-close-${presses}`} label="Close the reply box" onPress={press => openReply($, undefined, press.surface)} />
               ) : (
                 <Button key={`${key}-inbar-${presses}`} label="Reply in your own words" onPress={press => openReply($, one, press.surface)} />
@@ -11473,12 +11507,10 @@ const panelHooks = (on: On) => {
           </Box>
           )}
           {/* Where the bar above the prompt holds the reply box, the card has none: a box typed in here is what the app drags the
-              panel to. It says where the box is once opened, and how to get at it while the bar is folded */}
+              panel to. Once opened it says where to type: the app puts the cursor there only on the person's own click */}
           {'Input' in table && !one.chat && repliesInBar(e.surface) ? (
-            barShut.has(e.surface) ? (
-              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ To reply in words, open the folded bar above the chat's prompt</Text>
-            ) : replyTo === one.id ? (
-              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Your reply box is open above the chat's prompt</Text>
+            isReplyOpen(one) ? (
+              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type your reply in the box above the chat's prompt</Text>
             ) : null
           ) : 'Input' in table && !one.chat ? (
             <Box width="100%" flexDirection="column">

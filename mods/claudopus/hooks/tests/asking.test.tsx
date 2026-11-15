@@ -1848,12 +1848,12 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
 })
 
 test("where the bar above the prompt takes a box, a card's answers end with Reply in your own words, which opens the reply box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time", async ($, on) => {
-  const { appended, clock } = world(on)
+  const { appended, clock } = world(on, { panes: ['claudopus'] })
   await $.session.start(start)
   await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which ear first?', choices: ['Left', 'Right'] } as never)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  let list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   type Site = typeof list
   const boxesIn = async (site: Site) => (await site.findAll({ type: 'Input' } as never)).filter(one => /-reply-/.test(one.key ?? ''))
@@ -1882,9 +1882,16 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect(await says(bar, /^↳ Your reply to “Check the ears”$/)).toBe(true)
   expect((await labelled(bar, 'Close')).length).toBe(1)
   expect((await boxesIn(list)).length + (await boxesIn(details)).length).toBe(0)
-  expect(await says(list, /^✎ Your reply box is open above the chat's prompt$/)).toBe(true)
+  expect(await says(list, /^✎ Type your reply in the box above the chat's prompt$/)).toBe(true)
   expect((await labelled(list, CLOSE)).length).toBe(1)
   expect((await labelled(list, OPEN)).length).toBe(0)
+  // The panel scrolled away from its top with the box open: the bar still points at what waits there
+  const MARK = '↑ 1 waits for you at the top of the panel'
+  const scrolled = async (offset: number) => (await list.unmount(), (list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset, bodyRows: 20 } }, surface: 'desktop' } as never)))
+  await scrolled(40)
+  expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined()
+  await scrolled(0)
+  expect(await until(async () => ((await bar.find({ type: 'Text', text: MARK })) ? undefined : true))).toBe(true)
   // Half typed: the same box through the bar's own drawings, drawn with the text it was last drawn with, never with letters
   // older than the box holds
   const [first] = await boxesIn(bar)
@@ -1892,6 +1899,17 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   await clock.advance(6000)
   expect((await boxesIn(bar))[0]?.key).toBe(first?.key)
   expect((await boxesIn(bar))[0]?.props.value ?? '').toBe('')
+  // A letter typed holds the bar as drawn for as long as the box may hold the cursor, past the half minute typing holds the
+  // panel: the panel scrolled meanwhile draws nothing new under the cursor. Five minutes after the last letter it is drawn again
+  await scrolled(40)
+  await clock.advance(31_000)
+  expect(await bar.find({ type: 'Text', text: MARK })).toBeUndefined()
+  expect((await boxesIn(bar))[0]?.key).toBe(first?.key)
+  await clock.advance(270_000)
+  await scrolled(0)
+  await scrolled(40)
+  expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined()
+  await scrolled(0)
   // Closed from the bar: the box is gone and the card offers it again; opened again, what was typed is back
   await bar.press({ key: (await labelled(bar, 'Close'))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(bar)).length === 0 ? true : undefined))).toBe(true)
@@ -1922,26 +1940,70 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('in their own words: The left, but keep the scan')))).toBeDefined()
   expect(await until(async () => ((await boxesIn(bar)).length === 0 ? true : undefined))).toBe(true)
   expect((await labelled(list, OPEN)).length).toBe(1)
-  // The bar folded by the person: nothing of it shows, so the card says how to get at the box instead of offering it
+  // The bar folded by the person with a reply half typed in it: nothing of the bar is on screen, so the card has its own box
+  // again, with what was typed, and offers no box elsewhere
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(bar)).length === 1 ? true : undefined))).toBe(true)
+  await bar.input({ key: (await boxesIn(bar))[0]?.key ?? '', text: 'Nov', kind: 'change' } as never)
   await bar.unmount()
   await clock.advance(2000)
   const folded = await $.ui.mount({ ...BAND, props: { ...BAND.props, isCollapsed: true }, surface: 'desktop' } as never)
-  expect(await until(async () => ((await says(list, /^✎ To reply in words, open the folded bar above the chat's prompt$/)) ? true : undefined))).toBe(true)
-  expect((await boxesIn(list)).length + (await labelled(list, OPEN)).length).toBe(0)
-  // One of the app's surveys in the bar: the box has no place there, and the card has its own again
+  expect(await until(async () => ((await boxesIn(list))[0]?.props.value === 'Nov' ? true : undefined))).toBe(true)
+  expect((await boxesIn(folded)).length + (await labelled(list, OPEN)).length + (await labelled(list, CLOSE)).length).toBe(0)
+  // Unfolded: the box does not open by itself; the card offers it again
   await folded.unmount()
   await clock.advance(2000)
+  const unfolded = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect(await until(async () => ((await labelled(list, OPEN)).length === 1 && (await boxesIn(list)).length === 0 ? true : undefined))).toBe(true)
+  expect((await boxesIn(unfolded)).length).toBe(0)
+  // One of the app's surveys in the bar while the box is open: the box has no place there, and the card has its own again, with
+  // what was typed
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(unfolded))[0]?.props.value === 'Nov' ? true : undefined))).toBe(true)
+  await unfolded.unmount()
+  await clock.advance(2000)
   const surveyed = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true }, surface: 'desktop' } as never)
-  expect(await until(async () => ((await boxesIn(list)).length === 1 ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await boxesIn(list))[0]?.props.value === 'Nov' ? true : undefined))).toBe(true)
   await surveyed.unmount()
   await clock.advance(2000)
-  // The bar back and the box opened: a button pressed on the card answers it, and the box leaves the bar with the ask
+  // The bar back and the box opened, a reply half typed: a new question from the same work leaves the box as it is, the same box
+  // with what was typed. Only the person closes or moves it (16 Nov)
   const again = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   expect(await until(async () => ((await labelled(list, OPEN)).length === 1 ? true : undefined))).toBe(true)
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(again))[0]?.props.value === 'Nov' ? true : undefined))).toBe(true)
+  const [typedIn] = await boxesIn(again)
+  await again.input({ key: typedIn?.key ?? '', text: 'Nov 20', kind: 'change' } as never)
+  await clock.advance(2000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a2', text: 'Which year?', choices: ['2025', '2026'] } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Which year?' }))).toBeDefined()
+  expect((await boxesIn(again)).map(one => one.key)).toEqual([typedIn?.key])
+  expect((await labelled(list, CLOSE)).length).toBe(1)
+  // Closed and opened again under the new question, what was typed is still there
+  await list.press({ key: (await labelled(list, CLOSE))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(again)).length === 0 ? true : undefined))).toBe(true)
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
+  expect(await until(async () => ((await boxesIn(again))[0]?.props.value === 'Nov 20' ? true : undefined))).toBe(true)
+  // Sent from a box drawn before yet another question came, it answers what the work asks now, and the box goes; the same work
+  // asking again finds it closed
+  const [second] = await boxesIn(again)
+  await again.input({ key: second?.key ?? '', text: 'Nov 202', kind: 'change' } as never)
+  await clock.advance(2000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3b', agentId: 'a2', text: 'Which decade?', choices: ['2010s', '2020s'] } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Which decade?' }))).toBeDefined()
+  expect((await boxesIn(again)).map(one => one.key)).toEqual([second?.key])
+  await again.input({ key: second?.key ?? '', text: 'November 2026' })
+  expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('in their own words: November 2026')))).toBeDefined()
+  expect(await until(async () => ((await boxesIn(again)).length === 0 ? true : undefined))).toBe(true)
+  await clock.advance(2000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a2', text: 'Which day?', choices: ['Monday', 'Friday'] } as never)
+  expect(await until(async () => ((await labelled(list, OPEN)).length === 1 ? true : undefined))).toBe(true)
+  expect((await boxesIn(again)).length + (await labelled(list, CLOSE)).length).toBe(0)
+  // A button pressed on the card with the box open answers it, and the box leaves the bar with the ask
+  await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(again)).length === 1 ? true : undefined))).toBe(true)
-  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'October')?.key ?? '' })
-  expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"October"')))).toBeDefined()
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Monday')?.key ?? '' })
+  expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Monday"')))).toBeDefined()
   expect(await until(async () => ((await boxesIn(again)).length === 0 ? true : undefined))).toBe(true)
   await Promise.all([list.unmount(), details.unmount(), again.unmount()])
 })

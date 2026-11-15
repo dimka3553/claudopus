@@ -27,8 +27,8 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
 // to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
 // panel's scrolling. The box is the card's own: the same drafts, the same answer, a new one for each ask. It takes the cursor when
 // the person clicks anywhere in the bar (autoFocus)
-const barReply = ($: EngineInterface, ui: Ui, one: Todo, ask: NonNullable<Todo['ask']>) => {
-  const draft = draftOf(one.id, ask)
+const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
+  const draft = barDraft(one.id)
   return (
     <ui.Box key="band-reply" flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
       <ui.Box flexShrink={1} minWidth={0}>
@@ -37,18 +37,18 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo, ask: NonNullable<Todo['
       {'Input' in ui ? (
         <ui.Box flexShrink={0}>
           <ui.Input
-            key={`band-${one.id}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
+            key={barBoxKey(one.id)}
             placeholder="Type your reply"
-            value={draftShown(one.id, ask)}
+            value={draftDrawn(draft)}
             submitLabel="send"
             autoFocus
             onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
-            onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+            onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))}
           />
         </ui.Box>
       ) : null}
       <ui.Box flexShrink={0}>
-        <ui.Button key={`band-reply-close-${presses}`} label="Close" plain onPress={press => openReply($, undefined, press.surface)} />
+        <ui.Button key={`band-reply-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
       </ui.Box>
     </ui.Box>
   )
@@ -68,18 +68,23 @@ const bandHooks = (on: On) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // Whether this surface's bar takes the reply box, and whether it shows just now: the cards draw their asks by it (repliesInBar)
     // While one of the app's surveys holds the bar the box has no place in it, and the card has its own again
-    const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey
-    const isShut = canBox && Boolean(e.props.isCollapsed)
+    // Folded by the person, nothing of the bar is on screen: the card has its own box then too
+    const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e) && !e.props.hasSurvey && !e.props.isCollapsed
     if (e.requestId) barIds.set(e.surface, e.requestId)
     const cards = await read($, todos)
     const flipAt = await $.clock.now()
-    if ((canBox !== barBoxes.has(e.surface) || isShut !== barShut.has(e.surface)) && flipAt - barFlipAt >= 1000) {
+    if (canBox !== barBoxes.has(e.surface)) {
       if (canBox) barBoxes.add(e.surface)
       else barBoxes.delete(e.surface)
-      if (isShut) barShut.add(e.surface)
-      else barShut.delete(e.surface)
+      // A box open in a bar that can no longer show it is closed, and stays closed when the bar is back; what was half typed in
+      // it is drawn in the card's own box, and nothing is held as typed in any more
+      const open = canBox ? undefined : cards.find(one => one.id === replyTo)
+      if (open) carryDraft($, open)
+      if (!canBox) ((replyTo = ''), (replyMark = ''), barHeld.delete(e.surface))
+      barBoxAt = 0
+      freeTimes($)
       // Only a card that asks is drawn differently for it
-      if (asksForBar(cards).length) ((barFlipAt = flipAt), drawAgain($))
+      if (asksForBar(cards).length && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
     const working = cards.filter(one => !one.parentId && one.status === 'working')
@@ -145,32 +150,26 @@ const bandHooks = (on: On) => {
       }
     }
     // The reply box the person opened from a card, while that card still asks; its ask answered or gone, the box goes with it
-    const target = canBox && !isShut ? barTarget(cards) : undefined
-    if (replyTo && canBox && !isShut && !target) replyTo = ''
+    const target = canBox ? barTarget(cards) : undefined
+    if (replyTo && canBox && !target) ((replyTo = ''), (replyMark = ''))
     if (target?.ask) {
-      // Drawn as it was while the box is typed in or holds the cursor: nothing but the card it is for, or work starting or ending,
-      // draws it anew, so the panel scrolled under the cursor moves nothing here
-      const shape = JSON.stringify([target.id, askMark(target.ask), replies.get(target.id) ?? 0, working.length > 0, happy])
+      // Drawn as it was while the box is typed in or holds the cursor: only the card it is for draws it anew, so neither the panel
+      // scrolled under the cursor nor work starting or ending puts a new box under it. The row takes the place of the figures
+      // while it is open: figures drawn under a held box would stand still, and a row that came and went would move the box
+      const shape = barBoxKey(target.id)
       const held = barHeld.get(e.surface)
       if ((isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)) && held?.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
-      const reply = barReply($, ui, target, target.ask)
-      let drawing: JSX.Element = reply
-      if (working.length || happy) {
-        await read($, figuresAt)
-        const figures = usageNow(await $.clock.now())
-        if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
-        const drawn = figures ? usageDrawn(ui, figures) : null
-        drawing = (
-          <Box flexDirection="column" gap="sm">
-            {reply}
-            <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-              {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
-              {drawn ? usageSpacersDrawn(ui) : null}
-              {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, Infinity)}</Box>) : null}
-            </Box>
-          </Box>
-        )
-      }
+      // What waits at the top of a panel scrolled away is still pointed at, as the bar is drawn; not while the box is held
+      const marker = await waitMarker($, ui, e.surface)
+      const reply = barReply($, ui, target)
+      const drawing = marker ? (
+        <Box flexDirection="column">
+          {marker}
+          {reply}
+        </Box>
+      ) : (
+        reply
+      )
       barHeld.set(e.surface, { shape, drawing })
       return drawing
     }
@@ -213,7 +212,8 @@ const bandHooks = (on: On) => {
     }
     // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
     return drawing(drawn ? usageSpacersDrawn(ui) : null)
-  })
+    // A bar that could not be drawn takes no box: the card has its own again
+  }).catch(($, e, next) => ((replyTo = ''), (replyMark = ''), barBoxes.delete(e.surface), next(e)))
 
 }
 
