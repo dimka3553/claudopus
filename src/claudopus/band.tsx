@@ -5,8 +5,8 @@ let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
 // Above the prompt, which never scrolls: once the list is scrolled away from its top, how many things wait there for the person.
 // Pressed, it takes the list back to its top; nothing else moves the list
-const waitMarker = ($: EngineInterface, ui: Ui) =>
-  waitsAtTop > 0 && listOffset > 0 ? (
+const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
+  waitsAtTop > 0 && (listOffsets.get(surface) ?? 0) > 0 && (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced) ? (
     <ui.Box key="band-waits" flexDirection="row" flexShrink={0} height={1} overflow="hidden">
       <ui.Button
         key={`band-waits-${presses}`}
@@ -56,7 +56,7 @@ const bandHooks = (on: On) => {
         }
         return (
           <Box flexDirection="column">
-            {waitMarker($, ui)}
+            {await waitMarker($, ui, e.surface)}
             <Box flexDirection="row" gap={1}>
               {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus at work on your reply', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
@@ -88,7 +88,7 @@ const bandHooks = (on: On) => {
         )
       }
     }
-    if (!working.length && !happy) return waitMarker($, ui) ?? next(e)
+    if (!working.length && !happy) return (await waitMarker($, ui, e.surface)) ?? next(e)
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
@@ -98,7 +98,7 @@ const bandHooks = (on: On) => {
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
-    const marker = waitMarker($, ui)
+    const marker = await waitMarker($, ui, e.surface)
     const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
     const row = (
       <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">

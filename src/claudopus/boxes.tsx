@@ -71,7 +71,8 @@ let boxes: Asked[] = []
 // what happens now, so nothing that needed them just vanishes
 // A note tied to the call the press let go (`call`) goes once that call ends, never before DONE_LEAST so it can be read, and at
 // most DONE_LONGEST while it runs; one with no call is shown DONE_SHOWN
-type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number }
+// `card`: the work whose card held the gate; the note is drawn in that card, not at the top
+type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number; card?: string }
 let doneNotes: DoneNote[] = []
 const DONE_SHOWN = 60_000
 const DONE_LEAST = 15_000
@@ -111,7 +112,23 @@ const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, lines: str
   </ui.Box>
 )
 const doneNotesPart = (ui: Ui, at: number) =>
-  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
+  doneNotes.filter(one => !one.card && isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
+// What was done with a gate on a work's card, in that card where the amber box was: the same outlined box, green once allowed, grey
+// once refused, saying what was allowed, until its note goes
+const cardNotesOf = (card: string, at: number) => doneNotes.filter(one => one.card === card && isNoteShown(one, at))
+const cardNotesPart = (ui: Ui, card: string, at: number) =>
+  cardNotesOf(card, at).map(one => (
+    <ui.Box key={`done-${one.id}`} flexDirection="column" borderStyle="round" borderColor={one.isOn ? DONE : '#808080'} paddingX={1} flexShrink={0}>
+      <ui.Text wrap="truncate-end" dimColor>{`${one.head} · ${one.isOn ? 'allowed' : 'refused'}`}</ui.Text>
+      <ui.Box flexDirection="row" gap={1}>
+        <ui.Text color={one.isOn ? DONE : undefined} dimColor={!one.isOn}>{one.isOn ? '✓' : '✕'}</ui.Text>
+        <ui.Box flexShrink={1} minWidth={0}>
+          <ui.Text wrap="wrap" color={one.isOn ? DONE : undefined} bold={one.isOn}>{one.said}</ui.Text>
+        </ui.Box>
+      </ui.Box>
+      {one.what ? <ui.Text key={`done-${one.id}-what`} dimColor wrap="truncate-end">{one.what}</ui.Text> : null}
+    </ui.Box>
+  ))
 // What a box asks for, in a few words, for its note once answered
 const boxHead = (text: string) => {
   const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
@@ -267,7 +284,7 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled �
 }
 
 // Each box with when it was asked, so the panel puts it among what waits on the person, the newest first
-const boxRows = ($: EngineInterface, ui: Ui) => {
+const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false) => {
   if (!boxes.length || !('Input' in ui)) return []
   // This chat's own first request holds the keys, so a value typed for the notice it told goes to its own box, wherever it is drawn
   const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
@@ -283,7 +300,7 @@ const boxRows = ($: EngineInterface, ui: Ui) => {
           placeholder="Type or paste it here"
           value={boxDrafts.get(one.id) ?? ''}
           submitLabel="send"
-          autoFocus={n === 0 ? true : undefined}
+          autoFocus={n === 0 && !isKeysHeld ? true : undefined}
           onInput={value => void boxDrafts.set(one.id, value)}
           onSubmit={value => void sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`))}
         />
