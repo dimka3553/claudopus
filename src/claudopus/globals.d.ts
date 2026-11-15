@@ -223,6 +223,7 @@ declare global {
   export import Job = M10.Job
   export import JobKind = M10.JobKind
   export import TabMove = M9.TabMove
+  export import batteryShown = M11.batteryShown
   export import batterySvg = M11.batterySvg
   export import FOOTPRINT_EVERY = M11.FOOTPRINT_EVERY
   export import gbText = M11.gbText
