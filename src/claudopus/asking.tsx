@@ -167,7 +167,7 @@ const readDrafts = async ($: EngineInterface) => {
 }
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
-type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean; isCard?: boolean }
+type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -232,7 +232,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   if (isReply) freeTimes($)
   const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at })
   redraw($)
   // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
@@ -242,8 +242,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
   // Marked on its way once written, so a step that began before it never counts as reading it
   const told = working ? await tell($, target, to) : undefined
-  if (told && !told.deny) return void (writtenIn(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true }), redraw($))
-  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true })
+  if (told && !told.deny) return void (writtenIn(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at }), redraw($))
+  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
 }
 // A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
 // and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its
@@ -268,7 +268,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   freeTimes($)
   const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at })
   redraw($)
   // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
@@ -278,7 +278,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const to = `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) return void (writtenIn(target, one.id), redraw($))
-  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true })
+  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
 }
 // An answer to work that has ended starts that work again with it, as a message to it: the chat then gets the work's report as
 // it gets any, and nothing goes into the chat in the person's place.
@@ -434,6 +434,11 @@ const replyUnread = async ($: EngineInterface, agentId: string) => {
   if (sent?.to !== 'work' || !one) return
   const isHeld = one.ask?.replied?.text === sent.text
   await toEnded($, one, agentId, `${who(true)} ${isHeld ? 'replied to' : 'answered'} your ask ("${sent.ask}"), and you ended before reading it: ${sent.text}${isHeld ? `\n${named(REPLY_HOLDS)}` : ''}\n${RESUMED_BY_ANSWER}`, sent)
+}
+// An answer given on the card in the last ANSWER_SHOWN: the card stays where it was meanwhile (answeredSince), and says it
+const heldAnswer = (one: Todo, now: number) => {
+  const sent = one.chat ? undefined : sentReplies.get(one.id)
+  return sent?.isCard && sent.to !== 'lost' && now - sent.at < ANSWER_SHOWN ? sent : undefined
 }
 // What the card says of the answer last given to its ask, for ANSWER_SHOWN after, until the work writes a newer line or asks again.
 // An answer that could not be left for another Mac says so under the ask, which is back
