@@ -142,6 +142,16 @@ test('the moment changes only at UPDATED_SAYS and its end, so a panel drawn over
   expect(looks.map(one => one.t)).toEqual([0, UPDATED_SAYS, UPDATED_FOR])
 })
 
+test('the moment never shows a version but the one moved to', async () => {
+  // The rolling number of 0.2.40 to 0.2.64 showed v0.2.65 to v0.2.69 on its way from 0.2.63 to 0.2.64
+  for (const [from, to] of [['0.2.63', '0.2.64'], ['0.2.59', '0.2.61'], ['0.2.99', '0.3.0']] as [string, string][]) {
+    for (let t = 0; t < UPDATED_FOR; t += 10) {
+      const shown = (updatedLook(to, t) ?? []).map(p => p.text).join('').match(/v?\d+(\.\d+)+/g) ?? []
+      expect({ from, t, shown: shown.filter(one => one.replace(/^v/, '') !== to) }).toEqual({ from, t, shown: [] })
+    }
+  }
+})
+
 test('the octopus of the moment is the happy one in blue, jumping all through it', async () => {
   // Shaped as art/happy.svg is: two pictures taking turns, each on a timed animate (the tests cannot read the mod's files)
   const happy = '<svg viewBox="0 0 24 24"><g fill="#4EBA65"><g><animate attributeName="visibility" values="visible;hidden" dur="2s" calcMode="discrete" fill="freeze"/></g><g><animate attributeName="visibility" values="hidden;visible" dur="2s" calcMode="discrete" fill="freeze"/></g></g></svg>'

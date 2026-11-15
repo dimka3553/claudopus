@@ -357,6 +357,29 @@ test('work that answers a question while a copy of its own still runs, with that
   await pane.unmount()
 })
 
+test('work that reports with everything it set out to do done, leaving a server of its own running, has finished: green, and its card says it left something running', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const { clock } = world(on, { art: true, agents, kinds })
+  await $.session.start(start)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const call = (tool: string, id: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, tool_use_id: id, agentId: 'a1', ...input } as never)
+  await $.prompt.submit({ text: 'run the site for me', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Run the site', prompt: 'run it' } as never)
+  kinds.a1 = 'general-purpose'
+  await call('mcp__claudopus__todo', 't1', { item: 'Start the site', state: 'doing' })
+  await call('Bash', 'b1', { command: 'npm run dev', description: 'Serve the site', run_in_background: true })
+  await call('mcp__claudopus__todo', 't2', { item: 'Start the site', state: 'done' })
+  await call('SubagentHandback', 'h1', { message: 'The site runs at http://localhost:3000.' })
+  agents.a1 = 'waiting'
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
+  expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  expect(await pane.find({ type: 'Text', text: /^Still at work/ })).toBeUndefined()
+  await clock.advance(20_000)
+  expect(await pane.find({ type: 'Text', text: /^It left something running in the background, / })).toBeDefined()
+  await pane.unmount()
+})
+
 test('work that answers on the way while a helper of its still works, with its to-do still being done, stays at work', async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = {}

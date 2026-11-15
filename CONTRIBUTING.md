@@ -25,8 +25,8 @@ The GitHub check (`.github/workflows/check.yml`) runs the build check, the notif
 
 ## Tests
 
-- Before adding a test, find the one that already covers the behaviour and extend it. A new test must fail without your change, for a reason no other test catches: `node src/claudopus/guard.mjs new` runs your branch's tests on main's code and lists the new ones that still pass, and `node src/claudopus/guard.mjs break <file> <text> <replacement>` puts a fault back and lists the tests that catch it. Each takes about a minute.
-- A change that makes a test redundant removes it in the same change. Several inputs of one behaviour are one table-driven test. Set-ups more than one area uses go in `src/claudopus/tests/world.tsx`.
+- Before adding a test, find the one that already covers the behaviour and extend it. A new or extended test must fail without your change, for a reason no other test catches: `node src/claudopus/guard.mjs new` runs your branch's new and changed tests on the code where it left main and lists those that still pass, and `node src/claudopus/guard.mjs break <file> <text> <replacement>` puts a fault back and lists the tests that catch it. Each takes a minute or a few.
+- A change that makes a test redundant removes it in the same change, but only when every case it holds fails another test under a break of its own; one break both catch is no proof. Several inputs of one behaviour are one table-driven test. Set-ups more than one area uses go in `src/claudopus/tests/world.tsx`.
 - A pull request says what its tests guard, not how many there are.
 
 - `README.md` and `mods/claudopus/README.md` are the same text, so change them together.

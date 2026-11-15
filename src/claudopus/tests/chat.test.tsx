@@ -486,6 +486,27 @@ test('a chat the app runs on another Mac over ssh tells every conversation that 
   expect(twice.instructionFiles?.length).toBe(1)
 })
 
+const go2 = ($: Parameters<TestBody>[0], e: Record<string, unknown>) => $.agent.spawn({ ...spawn, prompt: 'p', parentModel: 'claude-sonnet-5-5', ...e } as never) as Promise<{ deny?: string; agentId?: string }>
+
+test('with Haiku named in the settings, an older Haiku asked for by its full id is still not started', async ($, on) => {
+  const { files, agentModels, asked } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ models: { legwork: 'haiku' } }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'index', wait: false, origin: composer })
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-3-5-haiku-20241022' } as never)
+  await go2($, { model: 'claude-haiku-4-5', parentAgentId: 'a0' })
+  expect(agentModels.at(-1)).not.toBe('claude-3-5-haiku-20241022')
+})
+
+test('a checker the chat\'s own thread starts on Sonnet under an Opus chat runs on Opus', async ($, on) => {
+  const { asked } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'x', wait: false, origin: composer })
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'cc1', prompt: 'look', subagent_type: 'general-purpose', model: 'sonnet', description: 'Second look at the page' } as never)
+  await go2($, { tool_use_id: 'cc1', model: 'sonnet', parentModel: 'claude-opus-5-5', description: 'Second look at the page' })
+  expect(asked.at(-1)).not.toBe('sonnet')
+})
+
 test('a model picked on a card is moved to its family\'s newest once a newer one is seen', async ($, on) => {
   const { stepped } = world(on, { model: 'claude-opus-5-5' })
   await $.session.start(start)
@@ -523,7 +544,7 @@ test('a check is known by a checking word and what was built, or a look that is 
     return asked.at(-1)
   }
   for (const d of ['Check my work', 'Review my PR', 'Code review of the change', 'Checker for the branch', 'Re-check against commit 2752ee8', 'Recheck the fixes', 'Sanity check', 'Spot-check results', 'Audit the change', 'What is wrong with the build', 'Look for holes in the fix', 'Second look', 'Reviewer pass on the diff', 'Auditor for the PR', 'Verification of the build', 'Validate the fix', 'QA the page', 'Test the fix in the app', 'Critique the design', 'Find bugs in the change', 'Double-checked results', 'Inspect the output', 'Verified claims', 'Look over the diff', 'Proofread the report', 'Hunt for faults']) expect([d, await startOn(d)]).toEqual([d, 'claude-opus-5-5'])
-  for (const d of ['Check the Stripe balance', 'Check the weather API quota', 'Check the repo out', 'Review the docs and summarize', 'Inspect disk usage', 'Validate JSON schema files', 'Verify the domain DNS records', 'Check the PR status', 'Check CI logs', 'Check disk usage on Azure', 'Build a health check endpoint', 'Write a spell checker', 'Audit log export script']) expect([d, await startOn(d)]).toEqual([d, 'sonnet'])
+  for (const d of ['Check the Stripe balance', 'Check the weather API quota', 'Check the repo out', 'Review the docs and summarize', 'Inspect disk usage', 'Validate JSON schema files', 'Verify the domain DNS records', 'Check the PR status', 'Check out the repo', 'Review PR comments and summarize', 'Check Stripe balance', 'Check CI logs', 'Check disk usage on Azure', 'Build a health check endpoint', 'Write a spell checker', 'Audit log export script']) expect([d, await startOn(d)]).toEqual([d, 'sonnet'])
 })
 
 test('a resumed helper keeps the model it first started on: an Explore helper resumed still runs on Sonnet, a flagged one is never moved up', async ($, on) => {
