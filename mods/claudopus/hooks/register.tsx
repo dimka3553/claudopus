@@ -124,6 +124,9 @@ const view = atom({ plugin: 'claudopus', key: 'view' } as const, { openId: '' },
 const servers = atom({ plugin: 'claudopus', key: 'servers' } as const, [], { shape: 'servers-2' })
 // Counts the passes that bring the screen up to date: each one redraws what reads it
 const tick = atom({ plugin: 'claudopus', key: 'tick' } as const, 0, { shape: 'tick-1' })
+// When the figures above the prompt last changed: the band redraws on that alone, never each second, since each redraw of it closes
+// and opens again a hover card the pointer rests on, and can leave one open after the pointer has gone on to the next figure
+const figuresAt = atom({ plugin: 'claudopus', key: 'figures' } as const, 0, { shape: 'figures-1' })
 // Whether the panel was open when last looked: a reload of the mod closes it, and it comes back by itself if it was
 // When the panel was last drawn, kept through a reload (drawnNow, written by the timer each second, never read while drawing)
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
@@ -9185,7 +9188,7 @@ const lookUsage = async ($: EngineInterface) => {
   try {
     const path = await usagePathOf($)
     const shared = keptOf(await $.fs.read(path).catch(() => ''))
-    if (shared && isFresh(shared.at)) return void (usageKept = shared)
+    if (shared && isFresh(shared.at)) return void (await keepUsage($, shared))
     const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
     if (taking && now >= taking && now - taking < USAGE_EVERY / 2) return
     await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
@@ -9197,11 +9200,17 @@ const lookUsage = async ($: EngineInterface) => {
     const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
     const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
     if (!kept) return
-    usageKept = kept
+    await keepUsage($, kept)
     await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
   } finally {
     usageBusy = false
   }
+}
+// New figures are kept, and the band that shows them redraws
+const keepUsage = async ($: EngineInterface, kept: UsageKept) => {
+  const isNew = kept.at !== usageKept?.at
+  usageKept = kept
+  if (isNew) await update($, figuresAt, () => kept.at)
 }
 // The figures to show, when a look has been had lately
 const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)
@@ -9450,8 +9459,8 @@ const bandHooks = (on: On) => {
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
     // How Claude uses this computer: memory in use and Claude's part, how busy the processor is and Claude's part, the disk's and the
-    // network's speed, looked at every few seconds while work runs. The second's tick redraws it as the figures move
-    await read($, tick)
+    // network's speed, looked at every few seconds while work runs. New figures redraw it
+    await read($, figuresAt)
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 

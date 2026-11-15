@@ -28,7 +28,7 @@ const lookUsage = async ($: EngineInterface) => {
   try {
     const path = await usagePathOf($)
     const shared = keptOf(await $.fs.read(path).catch(() => ''))
-    if (shared && isFresh(shared.at)) return void (usageKept = shared)
+    if (shared && isFresh(shared.at)) return void (await keepUsage($, shared))
     const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
     if (taking && now >= taking && now - taking < USAGE_EVERY / 2) return
     await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
@@ -40,11 +40,17 @@ const lookUsage = async ($: EngineInterface) => {
     const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
     const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
     if (!kept) return
-    usageKept = kept
+    await keepUsage($, kept)
     await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
   } finally {
     usageBusy = false
   }
+}
+// New figures are kept, and the band that shows them redraws
+const keepUsage = async ($: EngineInterface, kept: UsageKept) => {
+  const isNew = kept.at !== usageKept?.at
+  usageKept = kept
+  if (isNew) await update($, figuresAt, () => kept.at)
 }
 // The figures to show, when a look has been had lately
 const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)

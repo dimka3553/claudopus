@@ -77,8 +77,8 @@ const bandHooks = (on: On) => {
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
     // How Claude uses this computer: memory in use and Claude's part, how busy the processor is and Claude's part, the disk's and the
-    // network's speed, looked at every few seconds while work runs. The second's tick redraws it as the figures move
-    await read($, tick)
+    // network's speed, looked at every few seconds while work runs. New figures redraw it
+    await read($, figuresAt)
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
