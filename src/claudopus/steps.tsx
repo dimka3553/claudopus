@@ -123,16 +123,16 @@ const lookInOnHelpers = async ($: EngineInterface) => {
     if (isQuiet && helper.quietTold !== last) {
       const running = helper.running ? `${helper.running.what} for ${took(now - helper.running.at)}` : ''
       told.push({ to: parent.id, line: QUIET_HELPER(titleOf(helper), helper.id, Math.round((now - last) / 60_000), running) })
-      await update($, todos, all => all.map(one => (one.id === helper.id ? { ...one, quietTold: last } : one)))
+      await changeTodos($, all => all.map(one => (one.id === helper.id ? { ...one, quietTold: last } : one)))
     }
     const seen = stepsSeen.get(helper.id)
     if (seen && seen.steps >= SERIAL_STEPS && seen.singles / seen.steps >= SERIAL_SHARE && !helper.serialTold) {
       told.push({ to: parent.id, line: SERIAL_HELPER(titleOf(helper), helper.id, seen.steps) })
-      await update($, todos, all => all.map(one => (one.id === helper.id ? { ...one, serialTold: true } : one)))
+      await changeTodos($, all => all.map(one => (one.id === helper.id ? { ...one, serialTold: true } : one)))
     }
   }
   // Each card with helpers running keeps when they were last looked at and how many were quiet; one with none running keeps nothing
-  await update($, todos, all => {
+  await changeTodos($, all => {
     const changed = all.some(one => (looked.get(one.id)?.quiet ?? -1) !== (one.lookedIn?.quiet ?? -1) || (looked.get(one.id)?.running ?? -1) !== (one.lookedIn?.running ?? -1))
     return changed || looked.size ? all.map(one => ({ ...one, lookedIn: looked.get(one.id) ?? (one.lookedIn && one.status === 'working' ? undefined : one.lookedIn) })) : all
   })

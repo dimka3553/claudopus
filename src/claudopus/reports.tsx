@@ -167,7 +167,7 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
   }
   await $.fs.write(`${dir}/reports/${id}/meta.json`, `${JSON.stringify(report, null, 2)}\n`)
   // Its report holds them now: the work's next round records what still waits afresh
-  if (one.waits?.length) await update($, todos, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
+  if (one.waits?.length) await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, waits: undefined } : card)))
   await loadReports($)
 }
 

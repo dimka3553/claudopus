@@ -63,7 +63,7 @@ if within "[ -e '$tmp/started' ]" 15; then
   args=$(cat "$tmp/started")
   case "$args" in *"--bg --resume $s -n Face from video (kept on this Mac) --remote-control Face from video (kept on this Mac) --model claude-opus-5-5 --effort high --permission-mode auto --setting-sources user,project,local --plugin-dir $tmp/work"*) ok "cut off with work at work, the chat is started again here as it ran" ;; *) no "cut off with work at work, the chat is started again here as it ran: $args" ;; esac
 else no "cut off with work at work, the chat is started again here as it ran"; fi
-grep -q '"cutAt":[0-9]*,"movedAt":[0-9]*,"copy":"1a2b3c4d"' "$mem/keep/$s.state" && ok "its state says when it was cut off and when it went on" || no "its state says when it was cut off and when it went on: $(cat "$mem/keep/$s.state")"
+within "grep -q '\"cutAt\":[0-9]*,\"movedAt\":[0-9]*,\"copy\":\"1a2b3c4d\"' '$mem/keep/$s.state' 2>/dev/null" 5 && ok "its state says when it was cut off and when it went on" || no "its state says when it was cut off and when it went on: $(cat "$mem/keep/$s.state")"
 
 # 4. The app starts the chat again while the copy runs: the copy is stopped at once, and the state says when
 touch "$tmp/ccd-cli/engine.run"; "$tmp/ccd-cli/engine" --resume=$s & app=$!

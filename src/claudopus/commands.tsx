@@ -16,11 +16,18 @@ const commandHooks = (on: On) => {
   // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
+      // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
+      if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
     }
     return next(e)
   })
+  // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
+  on('ui.scroll', async ($, e, next) => {
+    if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
+    return next(e)
+  }).catch(($, e, next) => next(e))
   // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts
   on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)))
   // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice

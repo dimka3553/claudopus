@@ -1,26 +1,5 @@
 // The admin gate: an admin command waits for the person's press on its work's card
 
-const ADMIN = '/plug/claudopus/bin/admin'
-const GRANTS = `${MEMORY}/admin-grants/`
-const ALLOWED = `${MEMORY}/admin-allowed.json`
-// A piece of work under way in a chat of Sam's, and the panel
-const gated = async ($: Parameters<TestBody>[0], on: On, config: Record<string, unknown> = {}, options: Parameters<typeof world>[1] = {}) => {
-  const w = world(on, options)
-  w.files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', ...config }))
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'fix the hosts file', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Fix the hosts file', prompt: 'fix the hosts file' } as never)
-  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
-  const bash = (id: string, command: string, agentId = 'a1', more: Record<string, unknown> = {}) => $.tool.call({ tool: 'Bash', tool_use_id: id, command, agentId, ...more } as never)
-  const labels = async () => (await list.findAll({ type: 'Button' })).map(one => String(one.props.label ?? ''))
-  // The call is held once its buttons are on the card
-  const held = async (id: string) => until(async () => keyed(list, `gate-${id}-0-deny`))
-  const grants = () => [...w.files.keys()].filter(path => path.startsWith(GRANTS))
-  // A press on a card's gate, and the second after which the held call reads it
-  const press = async (key: string) => (await pressed(list, key), w.wake())
-  return { ...w, holding: w.held, list, bash, labels, held, grants, press }
-}
-
 test('an admin command is held however the runner is reached, and nothing else is taken for one', async ($, on) => {
   const { press, bash, held, admins, list } = await gated($, on)
   let n = 0
@@ -520,12 +499,13 @@ test('in the terminal, a password box that comes while a reply is being typed le
   const inputs = async () => (await list.findAll({ type: 'Input' } as never)).map(one => ({ key: one.key ?? '', focus: Boolean(one.props.autoFocus) }))
   const reply = await until(async () => (await inputs()).find(one => one.focus))
   await list.input({ key: reply?.key ?? '', text: 'Not y', kind: 'change' } as never)
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never).catch(() => undefined)
+  void w.keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never))
   const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98'
   w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }))
   await w.clock.advance(1000)
   expect(await until(async () => ((await inputs()).some(one => one.key.startsWith('box-')) ? true : undefined))).toBe(true)
   expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([reply?.key])
+  await w.settle()
 })
 
 test('in the terminal, an ask that comes while a password is being typed leaves the keys with the password box', async ($, on) => {
@@ -534,7 +514,7 @@ test('in the terminal, an ask that comes while a password is being typed leaves 
   await $.prompt.submit({ text: 'two things', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never).catch(() => undefined)
+  void w.keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never))
   const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98'
   w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }))
   await w.clock.advance(1000)
@@ -544,6 +524,7 @@ test('in the terminal, an ask that comes while a password is being typed leaves 
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
   expect(await until(async () => ((await inputs()).some(one => one.key.startsWith('ask-')) ? true : undefined))).toBe(true)
   expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([box?.key])
+  await w.settle()
 })
 
 // Five pieces of work, the fourth asking: the 15 Nov "Release it" on an ended ask took the card from the top to the very end of a long

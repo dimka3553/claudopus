@@ -2,8 +2,6 @@
 // the runners hold (F-006, F-008, F-009, F-017, F-018) are tested in mods/claudopus/bin/admin.test.sh too, on a real keychain or keyring
 
 const SEC_NOW = 1_700_000_000_000
-// Whether a call is still held after a moment: a held call never answers in that time
-const isHeldStill = async (call: Promise<unknown>) => (await Promise.race([call.then(() => 'answered'), new Promise(done => setTimeout(() => done('held'), 300))])) === 'held'
 
 test("F-001 · an admin command in the chat's own thread is refused before it is held: nothing asks, and no grant is left behind", async ($, on) => {
   const { list, grants, admins } = await gated($, on)
@@ -46,7 +44,7 @@ test('F-004 F-013 · an answer left in a file reaches no work, even one for the 
   expect(files.get(`${MEMORY}/log.md`) ?? '').toContain('put away unread')
 })
 
-test('F-007 F-017 · a runner run with another home or data folder, or with Claude Code\'s mark taken away, is refused, typed or in a script', async ($, on) => {
+test('F-007 F-017 · a runner run with another home or data folder, or with Claude Code\'s mark taken away, is refused, typed or in a script', SLOW, async ($, on) => {
   const { bash, files, grants, list } = await gated($, on)
   files.set('/repo/rel.sh', 'unset CLAUDECODE\n/plug/claudopus/bin/release\n')
   for (const command of [
@@ -57,13 +55,21 @@ test('F-007 F-017 · a runner run with another home or data folder, or with Clau
     `XDG_DATA_HOME=/tmp/d ${ADMIN} here 'id -u'`,
     `env -i PATH=/usr/bin ${ADMIN} here 'id -u'`,
     'bash /repo/rel.sh',
+    // What the release's own shell runs, the GitHub checks' verdict among it, set by the caller: a startup file, the PATH, git's
+    // settings, functions, a script sourced first, or a shell of the caller's choosing
+    'BASH_ENV=/tmp/e.sh /plug/claudopus/bin/release',
+    'cd /repo/wt && PATH=/tmp/x:$PATH /plug/claudopus/bin/release',
+    'export GIT_CONFIG_COUNT=1; /plug/claudopus/bin/release',
+    'export -f perl; /plug/claudopus/bin/release',
+    'source /tmp/e.sh && /plug/claudopus/bin/release',
+    'bash /plug/claudopus/bin/release',
   ])
     expect(((await bash(`h${command.length}`, command)) as { deny?: string }).deny).toContain("Claudopus's runners")
   expect(grants()).toEqual([])
   // The mod's own release runner (here a copy of it), which pushes main itself and names the grants folder, is not read as a script of
   // work's: it is held
   const runner = 'unset X\nRELEASE_PUSH=1 git push -q "$REMOTE" "HEAD:refs/heads/$MAIN"\nls "$HOME/.claude/claudopus/admin-grants"\n'
-  files.set(`${new URL('..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')}/bin/release`, runner)
+  files.set(`${PLUGIN}/bin/release`, runner)
   files.set('/plug/claudopus/bin/release', runner)
   files.set('git:top', '/repo/wt')
   files.set('git:branch', 'fix-it')
@@ -214,7 +220,7 @@ test('F-021 · a write to the rules that lands after its call returned (a comman
   expect(touch.deny).toBeDefined()
 })
 
-test('F-021 · a kept copy written, taken away or broken by work never decides what the rules hold: they move aside to a copy of their own and are offered', async ($, on) => {
+test('F-021 · a kept copy written, taken away or broken by work never decides what the rules hold: they move aside to a copy of their own and are offered', SLOW, async ($, on) => {
   const { files, bash, list, clock } = await gated($, on)
   const rules = `${MEMORY}/rules/CLAUDE.md`
   ownSet(files, 'rules/CLAUDE.md', 'my rules')
@@ -243,7 +249,8 @@ test('F-021 · a kept copy written, taken away or broken by work never decides w
   files.set(rules, 'PLANTED-LOAD')
   // Looked at again a moment later, as another chat may be writing it just then
   const loading = $.session.start(start)
-  await until(async () => undefined)
+  // (a real half second, as the load's first look runs: the length the wait for nothing took before it went by the clock)
+  await new Promise<void>(resolve => setTimeout(() => resolve(), 500))
   await clock.advance(1_000)
   await loading
   expect(files.has(rules)).toBe(false)
@@ -353,7 +360,7 @@ test('F-004 F-012 F-013 F-014 F-020 · work never writes what chats answer one a
 })
 
 test('F-011 · a box is drawn only for a request of this chat while a runner of its own runs, never one dated ahead, and says which command asked', async ($, on) => {
-  const { files, clock, logged } = world(on)
+  const { keep, settle, files, clock, logged } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const boxes = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')).map(one => (one.key ?? '').slice(4, 6))
@@ -365,18 +372,19 @@ test('F-011 · a box is drawn only for a request of this chat while a runner of 
   await clock.advance(7000)
   expect(await boxes()).toEqual([])
   // A runner of this chat's runs: the request of now is drawn with the command that asked; the one dated a day ahead never is
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold ${ADMIN} here 'id -u'` } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold ${ADMIN} here 'id -u'` } as never))
   await clock.advance(1000)
   expect(await until(async () => ((await boxes()).length ? await boxes() : undefined))).toEqual(['8f'])
   expect(await list.find({ type: 'Text', text: `Asked by this chat's command: hold ${ADMIN} here 'id -u'` })).toBeDefined()
   void logged
+  await settle()
 })
 
 test('F-009 · an admin password typed in the panel goes only sealed to the key of the runner that asked: never as typed into the keychain, and a request whose key changed is drawn nowhere', async ($, on) => {
-  const { files, clock, keychain } = world(on)
+  const { keep, settle, files, clock, keychain } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold ${ADMIN} m4 'id -u'` } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold ${ADMIN} m4 'id -u'` } as never))
   const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: SEC_NOW }))
   await clock.advance(1000)
@@ -394,6 +402,7 @@ test('F-009 · an admin password typed in the panel goes only sealed to the key 
   files.set(`${MEMORY}/boxes/${swapped}.json`, JSON.stringify({ id: swapped, kind: 'admin', host: 'm4', key: `${BOX_PUBLIC.slice(0, -8)}AAAAAAAA`, chat: 'engine-id', at: SEC_NOW + 1000 }))
   await clock.advance(1000)
   expect(await until(async () => ((await list.findAll({ type: 'Input' } as never)).some(one => (one.key ?? '').startsWith(`box-${swapped}-field`)) ? undefined : true))).toBe(true)
+  await settle()
 })
 
 test('F-012 F-015 · a Yes left in a file for a held prompt answers nothing; only a press in its own chat does', async ($, on) => {

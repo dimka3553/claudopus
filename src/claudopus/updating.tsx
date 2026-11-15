@@ -249,6 +249,8 @@ const freshPage = async ($: EngineInterface, version: string, step: 'download' |
 }
 // Download, pressed for the version the notice showed: the newest the page names now is what is fetched
 let downloadProgress: { version: string; pct: number; got: number; phase: string } | undefined
+// What the download's last drawing showed, and when
+const progressDrawn = { shown: '', phase: '', at: 0 }
 const downloadPress = ($: EngineInterface, version: string) => {
   presses += 1
   void atStep($, async () => {
@@ -268,7 +270,14 @@ const downloadPress = ($: EngineInterface, version: string) => {
       downloadProgress = { version: page.version, ...p }
       const at = await $.clock.now()
       if (at - wrote >= 1000) ((wrote = at), await writeSteps($, { version: page.version, stage: 'downloading', step: 'download', at, pct: p.pct, got: p.got, from: loaded }))
-      redraw($)
+      // Each drawing makes the panel's buttons new, and a click on one just replaced is lost: the figures move every 2 s, and not
+      // while the person is using the panel, unless the download moves to its next phase
+      const shown = `${Math.round(p.pct)}|${p.got ? sizeText(p.got) : ''}|${p.phase}`
+      const isPhase = p.phase !== progressDrawn.phase
+      if (shown !== progressDrawn.shown && (isPhase || (at - progressDrawn.at >= 2000 && at - engagedAt >= ENGAGED))) {
+        Object.assign(progressDrawn, { shown, phase: p.phase, at })
+        redraw($)
+      }
     })
     downloadProgress = undefined
     const at = await $.clock.now()
