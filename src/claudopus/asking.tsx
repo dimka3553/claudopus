@@ -123,7 +123,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, [...gatePressed.keys()], [...askPressed]])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -167,7 +167,7 @@ const readDrafts = async ($: EngineInterface) => {
 }
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
-type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean; isCard?: boolean }
+type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -208,6 +208,16 @@ const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = fals
 const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
   !isReply || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
+// The asks a press answered, by card, as `${at}:${text}`: the panel draws the card answered from the press itself, its buttons and box
+// gone in the press's own drawing, before the answer is written; the mark goes once the card's file no longer carries the ask
+const askPressed = new Map<string, string>()
+// A card as the panel draws it: an ask or a gate already pressed is not drawn as still waiting
+const asPressed = (one: Todo): Todo => {
+  const isAnswered = Boolean(one.ask && askPressed.get(one.id) === `${one.ask.at}:${one.ask.text}`)
+  const admins = one.admins?.filter(gate => !gatePressed.has(gate.id))
+  if (!isAnswered && admins?.length === one.admins?.length) return one
+  return { ...one, ask: isAnswered ? undefined : one.ask, admins: admins?.length ? admins : undefined }
+}
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
   if (one.chat) return
@@ -221,18 +231,41 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const asked = `${one.id}:${ask.at}:${ask.text}`
   if (answeredAsks.has(asked)) return
   answeredAsks.add(asked)
-  const at = await $.clock.now()
+  // Answered in the press's own drawing, before anything is awaited: what was pressed, on its way
+  const mark = `${ask.at}:${ask.text}`
+  askPressed.set(one.id, mark)
+  const line = lineOf(one)
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at: Infinity, line, isCard: true })
+  if (isReply) freeTimes($)
+  redraw($)
   let isCleared = false
-  await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
-  )
-  if (!isCleared) return
+  let isOnWay = false
+  try {
+    const at = await $.clock.now()
+    await update($, todos, list =>
+      list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
+    )
+    if (askPressed.get(one.id) === mark) askPressed.delete(one.id)
+    // The work has since asked something else, or it was answered elsewhere: nothing went, and the card shows what it carries now
+    if (!isCleared) return void (sentReplies.get(one.id)?.to === 'sending' && sentReplies.delete(one.id), redraw($))
+    isOnWay = await answerCleared($, one, ask, said, isReply, target, at, line)
+  } catch (err) {
+    // It did not reach the work: the card says so, and its buttons come back to be pressed again
+    if (askPressed.get(one.id) === mark) askPressed.delete(one.id)
+    if (isOnWay) throw err
+    answeredAsks.delete(asked)
+    if (isCleared) await update($, todos, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask } : card))).catch(() => undefined)
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true })
+    redraw($)
+    throw err
+  }
+}
+// The rest of an answer once its ask is cleared from the card's file: to the work, or to wake it. True once it is on its way
+const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, isReply: boolean, target: string, at: number, line: string) => {
   answeredAt.set(one.id, ask.at)
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
-  if (isReply) freeTimes($)
-  const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at, line, isCard: true })
   redraw($)
   void askGone($, one, said)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
@@ -240,8 +273,12 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
   // Marked on its way once written, so a step that began before it never counts as reading it
   const told = working ? await tell($, target, to) : undefined
-  if (told && !told.deny) return void (writtenIn(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true }), redraw($))
-  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true })
+  if (told && !told.deny) {
+    writtenIn(target, one.id)
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
+    redraw($)
+  } else await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true })
+  return true
 }
 // A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
 // and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its
@@ -439,11 +476,13 @@ const sentLine = (one: Todo, now: number) => {
   const replied = one.ask?.replied
   if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You replied “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · it is acting on it' : '; it still asks this'}`
   if (!sent) return ''
+  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}” did not reach the work. Press it again` : ''
   if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}”. That Mac could not be reached; answer it in its own chat` : ''
   const newer = lineOf(one) !== sent.line
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
   const how = {
+    sending: 'on its way to the work',
     work: 'it reads this at its next step',
     read: 'it has read it',
     chat: 'left in the chat, which carries the work on',

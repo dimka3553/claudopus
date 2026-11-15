@@ -85,7 +85,8 @@ const panelHooks = (on: On) => {
     }
     const { isFinishedOpen = false } = await read($, view)
     // Every piece of work this chat keeps; its own are the ones the chat's thread started, the rest are their helpers
-    const all = await read($, todos)
+    // A card whose ask or gate was just pressed is drawn answered, from the press itself (asPressed)
+    const all = (await read($, todos)).map(asPressed)
     const own = all.filter(one => !one.parentId)
     // The work of the other chats, by chat; an ask answered here leaves its card at once
     const otherChats = await read($, others)
