@@ -118,6 +118,11 @@ const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => 
   if (JSON.stringify(next) === before) return now
   return update($, todos, list => (JSON.stringify(list) === before ? next : fn(list)))
 }
+// When the list was last given an older drawing again (held), and last drawn afresh: work that ended between the two was not seen
+let listHeldAt = 0
+let listFreshAt = 0
+// The titles of work in its moment at the top, as last drawn: the line above the prompt points at them when the list is scrolled away
+let finishedAtTop: string[] = []
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
 // they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them

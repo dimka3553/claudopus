@@ -1155,3 +1155,135 @@ test('the same words as a card answer still go when they answer a newer question
   expect((second as { deny?: unknown }).deny).toBeUndefined()
   await list.unmount()
 })
+
+// A dozen cards, one in the middle finishing: before, it went green where it was, among the others, and went under Finished two
+// seconds later, so with ten or more running it went by unseen. Now it comes to the top under what waits, outlined green, for its
+// two seconds, then goes under Finished; stopped or failed work is not brought up
+const dozen = async ($: Parameters<TestBody>[0], on: On, asking = false) => {
+  const w = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'twelve things', wait: false, origin: composer })
+  for (let n = 1; n <= 12; n += 1) await $.agent.spawn({ ...spawn, description: `Piece ${n}`, prompt: `piece ${n}` } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  if (asking) await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  await w.clock.advance(5000)
+  const order = async () => (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(one => /^Piece \d+$/.test(one)).filter((one, n, all) => all.indexOf(one) === n)
+  const green = async () => (await list.findAll({ type: 'Box' })).filter(b => b.props.borderStyle === 'round' && b.props.borderColor === 'success').length
+  const fold = async () => (await list.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))?.props.label
+  const end = (agentId: string, reason = 'answer') => $.turn.complete({ answer: reason === 'answer' ? 'Done.' : '', durationMs: 1, isAborted: false, turnId: `t-${agentId}`, reason, agentId } as never)
+  return { ...w, list, order, green, fold, end }
+}
+const others = (but: number[]) => Array.from({ length: 12 }, (_, n) => n + 1).filter(n => !but.includes(n)).map(n => `Piece ${n}`)
+
+test('a finished card in the middle of a dozen comes to the top at once, outlined green, for two seconds on time, then goes under Finished', async ($, on) => {
+  const { list, order, green, fold, end, clock } = await dozen($, on)
+  expect(await order()).toEqual(others([]))
+  await end('a7')
+  expect(await order()).toEqual(['Piece 7', ...others([7])])
+  expect(await green()).toBe(1)
+  expect((await list.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
+  await clock.advance(1_900)
+  expect(await order()).toEqual(['Piece 7', ...others([7])])
+  expect(await green()).toBe(1)
+  // The two seconds end on time, by the clock alone: no card is left green, and it is the newest under Finished
+  await clock.advance(150)
+  expect(await green()).toBe(0)
+  expect(await order()).toEqual(others([7]))
+  expect(await fold()).toBe('▸ Finished 1')
+})
+
+test('two that finish close together stack at the top newest first, each for its own two seconds', async ($, on) => {
+  const { order, green, end, clock } = await dozen($, on)
+  await end('a4')
+  await clock.advance(800)
+  await end('a9')
+  expect(await order()).toEqual(['Piece 9', 'Piece 4', ...others([4, 9])])
+  expect(await green()).toBe(2)
+  await clock.advance(1_300)
+  expect(await order()).toEqual(['Piece 9', ...others([4, 9])])
+  expect(await green()).toBe(1)
+  await clock.advance(800)
+  expect(await green()).toBe(0)
+  expect(await order()).toEqual(others([4, 9]))
+})
+
+test('a finish while an ask waits goes right under the ask, never above it', async ($, on) => {
+  const { order, green, end, clock } = await dozen($, on, true)
+  expect(await order()).toEqual(['Piece 3', ...others([3])])
+  await end('a7')
+  expect(await order()).toEqual(['Piece 3', 'Piece 7', ...others([3, 7])])
+  expect(await green()).toBe(1)
+  await clock.advance(2_100)
+  expect(await order()).toEqual(['Piece 3', ...others([3, 7])])
+})
+
+test('stopped and failed work is not brought up nor green: it pauses in its place, failed in red', async ($, on) => {
+  const { list, order, green, end, clock } = await dozen($, on)
+  await list.press({ key: 'stop-a5' })
+  await end('a8', 'error')
+  expect(await order()).toEqual(others([]))
+  expect(await green()).toBe(0)
+  expect((await list.find({ type: 'Text', text: 'Stopped by you' }))?.props.dimColor).toBe(true)
+  const failed = await list.find({ type: 'Text', text: '✕ Stopped by an error' })
+  expect(failed?.props.color).toBe('error')
+  expect((await list.findAll({ type: 'Box' })).some(b => b.props.backgroundColor === 'error')).toBe(true)
+  await clock.advance(2_100)
+  expect(await order()).toEqual(others([5, 8]))
+})
+
+test('a finish while a reply is being typed still shows at the top in green, under the ask being typed into, its words kept', async ($, on) => {
+  const { list, order, green, end, clock } = await dozen($, on, true)
+  const box = ((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).find(one => /-reply-/.test(one.key ?? ''))?.key ?? ''
+  await list.input({ key: box, text: 'Not y', kind: 'change' } as never)
+  await end('a7')
+  expect(await until(async () => ((await green()) ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 3', 'Piece 7', ...others([3, 7])])
+  expect(((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).map(one => one.key)).toContain(box)
+  await clock.advance(2_100)
+  expect(await green()).toBe(0)
+})
+
+test('scrolled down, a finish at the top is pointed at in green above the prompt for its two seconds, beside what waits', async ($, on) => {
+  const w = world(on, { panes: ['claudopus'] })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'twelve things', wait: false, origin: composer })
+  for (let n = 1; n <= 12; n += 1) await $.agent.spawn({ ...spawn, description: `Piece ${n}`, prompt: `piece ${n}` } as never)
+  const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface: 'desktop' } as never)
+  await w.clock.advance(1000)
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't7', reason: 'answer', agentId: 'a7' } as never)
+  const mark = await until(async () => band.find({ type: 'Text', text: /finished, at the top of the panel/ }))
+  expect(mark?.text).toBe('↑ Piece 7 finished, at the top of the panel')
+  expect(mark?.props.color).toBe('success')
+  await w.clock.advance(2_100)
+  expect(await band.find({ type: 'Text', text: /finished/ })).toBeUndefined()
+  // With an ask waiting, the amber line says both
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't9', reason: 'answer', agentId: 'a9' } as never)
+  expect((await until(async () => band.find({ type: 'Text', text: /just finished/ })))?.text).toBe('↑ 1 waits for you at the top of the panel · 1 just finished')
+  await band.unmount()
+  await down.unmount()
+})
+
+test('a finished card that left something running stays at the top after its moment, with its Stop it, never back among the running', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const { clock } = world(on, { agents, kinds })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'run the site and more', wait: false, origin: composer })
+  for (let n = 1; n <= 4; n += 1) await $.agent.spawn({ ...spawn, description: `Piece ${n}`, prompt: `piece ${n}` } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const order = async () => (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? '')).filter(one => /^Piece \d+$/.test(one)).filter((one, n, all) => all.indexOf(one) === n)
+  const call = (tool: string, id: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, tool_use_id: id, agentId: 'a3', ...input } as never)
+  kinds.a3 = 'general-purpose'
+  await call('mcp__claudopus__todo', 't1', { item: 'Start the site', state: 'doing' })
+  await call('Bash', 'b1', { command: 'npm run dev', description: 'Serve the site', run_in_background: true })
+  await call('mcp__claudopus__todo', 't2', { item: 'Start the site', state: 'done' })
+  await call('SubagentHandback', 'h1', { message: 'The site runs at http://localhost:3000.' })
+  agents.a3 = 'waiting'
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w3', reason: 'answer', agentId: 'a3' } as never)
+  expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4'])
+  await clock.advance(20_000)
+  expect(await list.find({ type: 'Text', text: /^It left something running in the background, / })).toBeDefined()
+  expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4'])
+})

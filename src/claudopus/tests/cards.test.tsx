@@ -786,7 +786,7 @@ test('the stop button of a to-do stops its work', async ($, on) => {
   await pane.unmount()
 })
 
-test('work that ends pauses in its place for two seconds: two at once, one ended while the panel was closed, one that reports twice', async ($, on) => {
+test('work that finishes comes to the top for two seconds: two at once, one ended while the panel was closed, one that reports twice', async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
@@ -797,11 +797,12 @@ test('work that ends pauses in its place for two seconds: two at once, one ended
   const titles = async () => (await pane.findAll({ type: 'Text' })).filter(one => one.props.bold && /nose|ears|eyes/.test(one.text)).map(one => one.text)
   const fold = async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished/.test(String(b.props.label)))?.props.label
 
-  // Two that end at once both stay green in their places, the one still working between them; neither is under Finished yet
+  // Two that end together both go to the top, green, the newer first, over the one still working; neither is under Finished yet
   await clock.advance(400)
   await end('a1', 't1')
+  await clock.advance(100)
   await end('a3', 't3')
-  expect(await titles()).toEqual(['Fix the nose', 'Check the ears', 'Draw the eyes'])
+  expect(await titles()).toEqual(['Draw the eyes', 'Fix the nose', 'Check the ears'])
   expect(await pane.findAll({ type: 'Text', text: '✓ Finished' })).toHaveLength(2)
   expect((await pane.find({ type: 'Text', text: /^Working on/ }))?.text).toBe('Working on 1 thing')
   expect(await fold()).toBeUndefined()
