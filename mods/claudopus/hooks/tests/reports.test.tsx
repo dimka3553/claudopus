@@ -459,6 +459,21 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   // A command a test holds running until it lets it go, with what it then prints: `held.get(id)?.(text)`
   const held = new Map<string, (text: string) => void>()
+  // A call a test starts and leaves running, kept so its test can end it: `keep(call)`, then `await settle()` as the test ends.
+  // Left running, the call ends after its test, and the look the mod takes as a call ends runs against a later test's files
+  const kept: Promise<unknown>[] = []
+  const keep = <T,>(call: Promise<T>) => (kept.push(call.catch(() => undefined)), call)
+  // Lets every held command go and every wait for a second end, until each kept call has ended
+  const settle = async () => {
+    let isDone = false
+    const all = Promise.all(kept.splice(0)).then(() => (isDone = true))
+    for (let n = 0; n < 2000 && !isDone; n++) {
+      for (const [id, go] of [...held]) (held.delete(id), go(''))
+      wake()
+      await Promise.race([all, new Promise<void>(resolve => setTimeout(() => resolve(), 5))])
+    }
+    if (!isDone) throw new Error('a call the test kept did not end')
+  }
   on('tool.call', async (_, e) => {
     if (e.tool === 'Agent') agentModels.push((e as { model?: string }).model)
     const command = String((e as { command?: string }).command ?? '')
@@ -539,7 +554,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two

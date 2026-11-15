@@ -1,7 +1,7 @@
 // Work that stops moving: its card says so, the chat is told once, a long step shows on its row, and the log stays plain text
 
 test('work and its helpers that get nothing new back for 12 minutes are flagged on the card and told to the chat once; news clears it, and a wait that only prints a new number is no news', SLOW, async ($, on) => {
-  const { clock, held, logged } = world(on)
+  const { keep, settle, clock, held, logged } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'one merger for all pushes', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'One merger for all pushes', prompt: 'one merger' } as never)
@@ -31,27 +31,28 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(1)
 
   // Something new comes back: the flag goes at the next look
-  void bash('h1', 'hold release', 'b3')
+  void keep(bash('h1', 'hold release', 'b3'))
   const letRelease = await until(async () => held.get('release'))
   letRelease?.('released Thing 0.1.1')
   expect(await stuck()).toBeDefined()
   await clock.advance(25_000)
   expect(await stuck()).toBeUndefined()
   // A poll that prints what it printed before, a new count aside, is no news: twelve minutes on it is flagged again
-  void bash('h1', 'hold poll', 'b4')
+  void keep(bash('h1', 'hold poll', 'b4'))
   const letPoll = await until(async () => held.get('poll'))
   letPoll?.('released Thing 0.1.7')
   await clock.advance(13 * 60_000)
   expect(await stuck()).toBeDefined()
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(2)
+  await settle()
 })
 
 test('a step that runs for minutes says so on its row, with its time, and the flag names what keeps waiting', SLOW, async ($, on) => {
-  const { clock, held } = world(on)
+  const { keep, settle, clock, held } = world(on)
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Lay out the rows', prompt: 'lay out' } as never)
   await $.agent.spawn({ ...spawn, description: 'How the app draws panes', prompt: 'look', parentAgentId: 'a1', resume: { agentId: 'h1' } } as never)
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'h1', command: 'hold search' } as never)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'h1', command: 'hold search' } as never))
   const rows = async () => {
     const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
     // The command a helper waits on is a row under it, in its own words, after the word that says it is a command
@@ -68,18 +69,19 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
   letSearch?.('found it')
   await clock.advance(1_000)
   expect(await rows()).toEqual([])
+  await settle()
 })
 
 test('work sent a message after a long rest, and work only held by what it left running after its report, are not flagged', SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
   const kinds: Record<string, string> = { a2: 'general-purpose' }
-  const { clock, logged, held } = world(on, { agents, kinds })
+  const { keep, settle, clock, logged, held } = world(on, { agents, kinds })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' } as never)
   // Its first run, moving all along, takes longer than the stuck check waits; then it rests
   for (const part of ['left ear', 'right ear', 'lobes']) {
     await clock.advance(5 * 60_000)
-    void $.tool.call({ tool: 'Bash', tool_use_id: `e-${part}`, agentId: 'a1', command: `hold ${part}` } as never)
+    void keep($.tool.call({ tool: 'Bash', tool_use_id: `e-${part}`, agentId: 'a1', command: `hold ${part}` } as never))
     const letGo = await until(async () => held.get(part))
     letGo?.(`drew the ${part}`)
   }
@@ -102,6 +104,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   await clock.advance(13 * 60_000)
   expect(await look()).toBeUndefined()
   expect(logged.filter(line => line.includes('has had nothing new'))).toEqual([])
+  await settle()
 })
 
 test('work asking the person something waits on them and is never flagged', SLOW, async ($, on) => {

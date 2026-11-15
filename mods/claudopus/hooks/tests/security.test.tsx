@@ -459,6 +459,21 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   // A command a test holds running until it lets it go, with what it then prints: `held.get(id)?.(text)`
   const held = new Map<string, (text: string) => void>()
+  // A call a test starts and leaves running, kept so its test can end it: `keep(call)`, then `await settle()` as the test ends.
+  // Left running, the call ends after its test, and the look the mod takes as a call ends runs against a later test's files
+  const kept: Promise<unknown>[] = []
+  const keep = <T,>(call: Promise<T>) => (kept.push(call.catch(() => undefined)), call)
+  // Lets every held command go and every wait for a second end, until each kept call has ended
+  const settle = async () => {
+    let isDone = false
+    const all = Promise.all(kept.splice(0)).then(() => (isDone = true))
+    for (let n = 0; n < 2000 && !isDone; n++) {
+      for (const [id, go] of [...held]) (held.delete(id), go(''))
+      wake()
+      await Promise.race([all, new Promise<void>(resolve => setTimeout(() => resolve(), 5))])
+    }
+    if (!isDone) throw new Error('a call the test kept did not end')
+  }
   on('tool.call', async (_, e) => {
     if (e.tool === 'Agent') agentModels.push((e as { model?: string }).model)
     const command = String((e as { command?: string }).command ?? '')
@@ -539,7 +554,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -696,6 +711,14 @@ test('F-007 F-017 · a runner run with another home or data folder, or with Clau
     `XDG_DATA_HOME=/tmp/d ${ADMIN} here 'id -u'`,
     `env -i PATH=/usr/bin ${ADMIN} here 'id -u'`,
     'bash /repo/rel.sh',
+    // What the release's own shell runs, the GitHub checks' verdict among it, set by the caller: a startup file, the PATH, git's
+    // settings, functions, a script sourced first, or a shell of the caller's choosing
+    'BASH_ENV=/tmp/e.sh /plug/claudopus/bin/release',
+    'cd /repo/wt && PATH=/tmp/x:$PATH /plug/claudopus/bin/release',
+    'export GIT_CONFIG_COUNT=1; /plug/claudopus/bin/release',
+    'export -f perl; /plug/claudopus/bin/release',
+    'source /tmp/e.sh && /plug/claudopus/bin/release',
+    'bash /plug/claudopus/bin/release',
   ])
     expect(((await bash(`h${command.length}`, command)) as { deny?: string }).deny).toContain("Claudopus's runners")
   expect(grants()).toEqual([])
@@ -993,7 +1016,7 @@ test('F-004 F-012 F-013 F-014 F-020 · work never writes what chats answer one a
 })
 
 test('F-011 · a box is drawn only for a request of this chat while a runner of its own runs, never one dated ahead, and says which command asked', async ($, on) => {
-  const { files, clock, logged } = world(on)
+  const { keep, settle, files, clock, logged } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const boxes = async () => (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')).map(one => (one.key ?? '').slice(4, 6))
@@ -1005,18 +1028,19 @@ test('F-011 · a box is drawn only for a request of this chat while a runner of 
   await clock.advance(7000)
   expect(await boxes()).toEqual([])
   // A runner of this chat's runs: the request of now is drawn with the command that asked; the one dated a day ahead never is
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold ${ADMIN} here 'id -u'` } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold ${ADMIN} here 'id -u'` } as never))
   await clock.advance(1000)
   expect(await until(async () => ((await boxes()).length ? await boxes() : undefined))).toEqual(['8f'])
   expect(await list.find({ type: 'Text', text: `Asked by this chat's command: hold ${ADMIN} here 'id -u'` })).toBeDefined()
   void logged
+  await settle()
 })
 
 test('F-009 · an admin password typed in the panel goes only sealed to the key of the runner that asked: never as typed into the keychain, and a request whose key changed is drawn nowhere', async ($, on) => {
-  const { files, clock, keychain } = world(on)
+  const { keep, settle, files, clock, keychain } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold ${ADMIN} m4 'id -u'` } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold ${ADMIN} m4 'id -u'` } as never))
   const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: SEC_NOW }))
   await clock.advance(1000)
@@ -1034,6 +1058,7 @@ test('F-009 · an admin password typed in the panel goes only sealed to the key 
   files.set(`${MEMORY}/boxes/${swapped}.json`, JSON.stringify({ id: swapped, kind: 'admin', host: 'm4', key: `${BOX_PUBLIC.slice(0, -8)}AAAAAAAA`, chat: 'engine-id', at: SEC_NOW + 1000 }))
   await clock.advance(1000)
   expect(await until(async () => ((await list.findAll({ type: 'Input' } as never)).some(one => (one.key ?? '').startsWith(`box-${swapped}-field`)) ? undefined : true))).toBe(true)
+  await settle()
 })
 
 test('F-012 F-015 · a Yes left in a file for a held prompt answers nothing; only a press in its own chat does', async ($, on) => {

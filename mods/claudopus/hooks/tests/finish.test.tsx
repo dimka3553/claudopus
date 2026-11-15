@@ -459,6 +459,21 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   // A command a test holds running until it lets it go, with what it then prints: `held.get(id)?.(text)`
   const held = new Map<string, (text: string) => void>()
+  // A call a test starts and leaves running, kept so its test can end it: `keep(call)`, then `await settle()` as the test ends.
+  // Left running, the call ends after its test, and the look the mod takes as a call ends runs against a later test's files
+  const kept: Promise<unknown>[] = []
+  const keep = <T,>(call: Promise<T>) => (kept.push(call.catch(() => undefined)), call)
+  // Lets every held command go and every wait for a second end, until each kept call has ended
+  const settle = async () => {
+    let isDone = false
+    const all = Promise.all(kept.splice(0)).then(() => (isDone = true))
+    for (let n = 0; n < 2000 && !isDone; n++) {
+      for (const [id, go] of [...held]) (held.delete(id), go(''))
+      wake()
+      await Promise.race([all, new Promise<void>(resolve => setTimeout(() => resolve(), 5))])
+    }
+    if (!isDone) throw new Error('a call the test kept did not end')
+  }
   on('tool.call', async (_, e) => {
     if (e.tool === 'Agent') agentModels.push((e as { model?: string }).model)
     const command = String((e as { command?: string }).command ?? '')
@@ -539,7 +554,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -956,11 +971,12 @@ test('work that answers a question while a copy of its own still runs, with that
   // The copy itself is a row on its tree: what it is in its own words, and how long it has run
   const job = async () => (await pane.find({ type: 'Text', text: /^Command · Send the four/ })) ?? (await pane.findAll({ type: 'Button' })).find(b => /^Command · Send the four/.test(String(b.props.label)))
   expect(await job()).toBeDefined()
-  // Forty minutes with nothing new is a long copy, not stuck work
-  await clock.advance(40 * 60_000)
+  // Nothing new past the twelve minutes that flag other work (STUCK_AFTER) is a long copy, not stuck work. Only a minute past it:
+  // each second the clock moves runs the panel's every-second look, so forty minutes here took 5 to 20 s on GitHub's runner
+  await clock.advance(13 * 60_000)
   expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(0)
-  expect(await pane.find({ type: 'Text', text: '40m 00s' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '13m 00s' })).toBeDefined()
 
   // The chat passes on "has everything already been copied?": it answers with SubagentHandback while the copy still runs
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Has everything already been copied?' } as never)

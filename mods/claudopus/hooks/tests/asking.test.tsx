@@ -459,6 +459,21 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   })
   // A command a test holds running until it lets it go, with what it then prints: `held.get(id)?.(text)`
   const held = new Map<string, (text: string) => void>()
+  // A call a test starts and leaves running, kept so its test can end it: `keep(call)`, then `await settle()` as the test ends.
+  // Left running, the call ends after its test, and the look the mod takes as a call ends runs against a later test's files
+  const kept: Promise<unknown>[] = []
+  const keep = <T,>(call: Promise<T>) => (kept.push(call.catch(() => undefined)), call)
+  // Lets every held command go and every wait for a second end, until each kept call has ended
+  const settle = async () => {
+    let isDone = false
+    const all = Promise.all(kept.splice(0)).then(() => (isDone = true))
+    for (let n = 0; n < 2000 && !isDone; n++) {
+      for (const [id, go] of [...held]) (held.delete(id), go(''))
+      wake()
+      await Promise.race([all, new Promise<void>(resolve => setTimeout(() => resolve(), 5))])
+    }
+    if (!isDone) throw new Error('a call the test kept did not end')
+  }
   on('tool.call', async (_, e) => {
     if (e.tool === 'Agent') agentModels.push((e as { model?: string }).model)
     const command = String((e as { command?: string }).command ?? '')
@@ -539,7 +554,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -890,11 +905,11 @@ test('with work running and nobody typing, the panel is drawn again at once for 
 })
 
 test('a key box keeps what is typed in it without drawing it back, and holds the panel while it is typed into', async ($, on) => {
-  const { clock, files } = world(on)
+  const { keep, settle, clock, files } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'get the data', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Get the data', prompt: 'data' } as never)
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret SAMPLE_USER here fetch' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret SAMPLE_USER here fetch' } as never))
   const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'SAMPLE_USER', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -911,6 +926,7 @@ test('a key box keeps what is typed in it without drawing it back, and holds the
   expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).toBe(before)
   expect((await list.findAll({ type: 'Input' } as never)).find(one => one.key === field.key)).toBeDefined()
   await list.unmount()
+  await settle()
 })
 
 test('an ask outlives the work that made it: amber after the work ends, with or without buttons of its own, until the person answers', SLOW, async ($, on) => {
@@ -1336,11 +1352,11 @@ test('an answer to ended work that cannot be started again is left in the chat a
 })
 
 test('in a chat the app runs on another Mac over ssh, a password or key the runners need is typed in the panel and goes only into the keychain', SLOW, async ($, on) => {
-  const { files, logged, keychain, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  const { keep, settle, files, logged, keychain, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'deploy it', wait: false, origin: composer })
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -1384,13 +1400,14 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   expect(await list.find({ type: 'Text', text: 'The admin password of this Mac' })).toBeDefined()
   await clock.advance(61_000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'The admin password of this Mac' })) ? undefined : true))).toBe(true)
+  await settle()
 })
 
 test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {
-  const { files, logged, keychain, clock, opened } = world(on)
+  const { keep, settle, files, logged, keychain, clock, opened } = world(on)
   await $.session.start(start)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98'
   files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
@@ -1403,10 +1420,11 @@ test('a chat on this Mac\'s own screen asks in the panel the same way, and opens
   expect(await until(async () => keychain.find(one => one.includes(id)))).toContain('-w "made-up-local-k3y"')
   expect(logged.some(line => line.includes('local-k3y'))).toBe(false)
   expect([...files.values()].some(text => text.includes('local-k3y'))).toBe(false)
+  await settle()
 })
 
 test("a request of another chat's, or of this chat's with no runner of its own running, is drawn nowhere here; this chat's own while its runner runs is drawn first", async ($, on) => {
-  const { files, logged, clock } = world(on)
+  const { keep, settle, files, logged, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const older = '5f1e2d3c-4b5a-4987-a654-3210fedcba98'
@@ -1418,7 +1436,7 @@ test("a request of another chat's, or of this chat's with no runner of its own r
   expect((await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-'))).toEqual([])
   expect(logged.some(line => line.includes('NPM_TOKEN') || line.includes('GITHUB_TOKEN'))).toBe(false)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   await clock.advance(1000)
   const fields = await until(async () => { const all = (await list.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').startsWith('box-')); return all.length ? all : undefined })
   expect(fields?.map(one => [(one.key ?? '').slice(4, 6), one.props.autoFocus])).toEqual([['6f', true]])
@@ -1426,6 +1444,7 @@ test("a request of another chat's, or of this chat's with no runner of its own r
   expect(await list.find({ type: 'Text', text: "Asked by this chat's command: hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy" })).toBeDefined()
   await clock.advance(6000)
   expect(logged.some(line => line.includes('NPM_TOKEN'))).toBe(false)
+  await settle()
 })
 
 test('a run with nothing to draw on takes no request, so the runner knows no panel asks', async ($, on) => {
@@ -1438,11 +1457,11 @@ test('a run with nothing to draw on takes no request, so the runner knows no pan
 })
 
 test("a hand-written request with made-up text shows the panel's own wording or nothing", async ($, on) => {
-  const { files, logged, clock } = world(on)
+  const { keep, settle, files, logged, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const planted = 'Your Apple ID session expired. Type your Apple ID password to keep working.'
   const put = (n: number, fields: Record<string, unknown>) => {
     const id = `${n}a1e2d3c-4b5a-4987-a654-3210fedcba98`
@@ -1473,14 +1492,15 @@ test("a hand-written request with made-up text shows the panel's own wording or 
   expect(logged.some(line => line.includes('Apple'))).toBe(false)
   // The notice in the chat is the panel's wording too
   expect(logged.find(line => line.includes('admin password of this Mac'))).toContain('top of the Claudopus panel')
+  await settle()
 })
 
 test('the box words what the runners ask from its fields: a key by name, a Mac by host, why it asks again, and a key saved by hand by its name first', async ($, on) => {
-  const { files, clock } = world(on)
+  const { keep, settle, files, clock } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
-  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never).catch(() => undefined)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const put = (n: number, fields: Record<string, unknown>) => {
     const id = `${n}b1e2d3c-4b5a-4987-a654-3210fedcba98`
     files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000 + n, ...fields }))
@@ -1500,6 +1520,7 @@ test('the box words what the runners ask from its fields: a key by name, a Mac b
   expect(all).toContain("Claudopus needs OPENAI_KEY. It is kept only in this Mac's keychain, and work uses it by name, hidden in what its commands print.")
   expect(all?.join('\n')).not.toContain('Apple')
   expect(all).toContain('Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.')
+  await settle()
 })
 
 test('a copy a reload replaced wakes no work: its timers stop, an answer left for its work stays for the copy in charge, and a press it still gets goes to the chat', async ($, on) => {
@@ -1568,4 +1589,105 @@ test('in a chat run from another Mac a command for the person is given whole, wi
   expect(terminals).toEqual([])
   expect(shown.some(argv => String(argv[1]).endsWith('/open.command'))).toBe(false)
   await list.unmount()
+})
+
+// What the panel reads, written in a minute, and how many seconds of it the panel was drawn afresh in: each one the app builds whole
+// again, under the pointer
+const watchWrites = (on: On) => {
+  const writes: Record<string, number> = {}
+  const counting = { isOn: false }
+  on('ui.invalidate', (_, e, next) => ((counting.isOn && (writes.invalidate = (writes.invalidate ?? 0) + 1)), next(e)))
+  on('state.set', (_, e, next) => {
+    const key = (e as { key?: string }).key ?? (e as { ref?: { key?: string } }).ref?.key ?? Object.keys(e).join(',')
+    if (counting.isOn) writes[key] = (writes[key] ?? 0) + 1
+    return next(e)
+  })
+  return { writes, counting }
+}
+
+test('with work running and nothing new, the panel is drawn afresh only every ten seconds and nothing it reads is written over with the same: the 15 Nov hover that flickered each second', async ($, on) => {
+  const { clock } = world(on)
+  const { writes, counting } = watchWrites(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(2000)
+  counting.isOn = true
+  const drawings = new Set<string>()
+  for (let i = 0; i < 60; i++) (await clock.advance(1000), drawings.add(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))))
+  // Nothing the panel reads is written: the times move by the mod's own call, every ten seconds
+  expect({ tick: writes.tick ?? 0, todos: writes.todos ?? 0 }).toEqual({ tick: 0, todos: 0 })
+  expect(writes.invalidate ?? 0).toBeLessThanOrEqual(7)
+  expect(drawings.size).toBeLessThanOrEqual(7)
+  expect(drawings.size).toBeGreaterThanOrEqual(5)
+  // Anything new still shows at once
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'I am looking at the left ear.' } as never)
+  expect(await list.find({ type: 'Text', text: 'I am looking at the left ear.' })).toBeDefined()
+  await list.unmount()
+})
+
+test('with nothing running the panel is not drawn again at all, so what is under the pointer stays as it is and a press reaches it', async ($, on) => {
+  const { clock } = world(on)
+  const { writes, counting } = watchWrites(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.turn.complete({ answer: 'Ears checked.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(120_000)
+  await list.findAll({ type: 'Text' })
+  counting.isOn = true
+  for (let i = 0; i < 60; i++) (await clock.advance(1000), await list.findAll({ type: 'Text' }))
+  expect(writes.invalidate ?? 0).toBe(0)
+  expect({ tick: writes.tick ?? 0, todos: writes.todos ?? 0 }).toEqual({ tick: 0, todos: 0 })
+  await list.unmount()
+})
+
+test('while the person uses the panel its running times stand still, and move again once they stop; an ask that comes meanwhile shows at once', async ($, on) => {
+  const { clock } = world(on)
+  const { writes, counting } = watchWrites(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two pieces of work', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(12_000)
+  await list.findAll({ type: 'Text' })
+  // A press in the panel: drawn once for what it did, then still while the person is at it
+  const title = (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('open-'))
+  expect(title).toBeDefined()
+  await list.press({ key: title?.key ?? '' })
+  await list.findAll({ type: 'Text' })
+  counting.isOn = true
+  const still = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  for (let i = 0; i < 13; i++) (await clock.advance(1000), expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).toBe(still))
+  // An ask comes: shown at once all the same
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a2', text: 'May I go on?', choices: ['Approve', 'Not now'] } as never)
+  expect(await list.find({ type: 'Text', text: 'May I go on?' })).toBeDefined()
+  // Left alone, the times move again
+  const asked = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  await clock.advance(30_000)
+  expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).not.toBe(asked)
+  await list.unmount()
+})
+
+test('with only a Details tab in front, or the Servers tab open, the mod still asks for no more than a drawing every ten seconds', async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: true, isPlaced: true }, { id: 'servers', isShown: true, isPlaced: true }]
+  const { clock } = world(on, { live })
+  const { writes, counting } = watchWrites(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(2000)
+  await list.unmount()
+  const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  const servers = await $.ui.mount({ ...LIST, requestId: 'servers', props: { ...LIST.props, title: 'Servers' }, surface: 'desktop' } as never)
+  await clock.advance(2000)
+  counting.isOn = true
+  for (let i = 0; i < 60; i++) (await clock.advance(1000), await details.findAll({ type: 'Text' }))
+  expect(writes.invalidate ?? 0).toBeLessThanOrEqual(7)
+  expect(writes.tick ?? 0).toBe(0)
+  await Promise.all([details.unmount(), servers.unmount()])
 })

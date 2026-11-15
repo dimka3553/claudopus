@@ -1116,9 +1116,13 @@ test('every run under a card says how it stands: a command held open shows its p
   await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'tail -n0 -F sheet.log', description: 'Azure jobs finishing' } as never)
   heldAt = now
   const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Download the CT scans (about 3 min)' } as never)
-  // Five minutes in, past half as long again as the three it said: a held call that lives much longer in real time than this
-  // outlives the engine's budget for a hook on a slow runner, and is dropped
-  for (let n = 0; n < 15; n++) await advance(20_000)
+  // The mod takes as the command held open only a shell started within 20 s of when the call began, as its hook saw it: the clock
+  // moves only once the call is running, else on a slow machine (GitHub's) the hook ran a few steps late and no shell matched
+  expect(await until(async () => held.has('dl') || undefined)).toBe(true)
+  // Five minutes, past the 1.5 times its three minutes where it turns amber, in steps of 5 s: the stand-in ps ages the shell from
+  // `now`, which runs a step ahead of the clock while a step's timers fire. No longer: each second the clock moves runs the
+  // panel's every-second look, and on GitHub's Mac nine minutes took past the time the kit lets a held call run, which ended it
+  for (let n = 0; n < 60; n++) await advance(5_000)
   const texts = async () => {
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
     // (a run's name is a button, as a press opens its output)

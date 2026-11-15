@@ -315,11 +315,12 @@ test('work that answers a question while a copy of its own still runs, with that
   // The copy itself is a row on its tree: what it is in its own words, and how long it has run
   const job = async () => (await pane.find({ type: 'Text', text: /^Command · Send the four/ })) ?? (await pane.findAll({ type: 'Button' })).find(b => /^Command · Send the four/.test(String(b.props.label)))
   expect(await job()).toBeDefined()
-  // Forty minutes with nothing new is a long copy, not stuck work
-  await clock.advance(40 * 60_000)
+  // Nothing new past the twelve minutes that flag other work (STUCK_AFTER) is a long copy, not stuck work. Only a minute past it:
+  // each second the clock moves runs the panel's every-second look, so forty minutes here took 5 to 20 s on GitHub's runner
+  await clock.advance(13 * 60_000)
   expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(0)
-  expect(await pane.find({ type: 'Text', text: '40m 00s' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '13m 00s' })).toBeDefined()
 
   // The chat passes on "has everything already been copied?": it answers with SubagentHandback while the copy still runs
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Has everything already been copied?' } as never)
