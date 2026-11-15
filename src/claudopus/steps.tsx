@@ -171,7 +171,8 @@ const stepHooks = (on: On) => {
     const calls = e.tool_calls.map(call => ({ tool: call.tool_name, input: call.tool_input, tookMs: now - (callStarts.get(call.tool_use_id) ?? now) }))
     for (const call of e.tool_calls) callStarts.delete(call.tool_use_id)
     const card = (await read($, todos)).find(one => one.id === agent)
-    const lines = stepLines(agent, calls, waitCommand($, agent), !card?.parentId)
+    const again = await rulesAgain($, agent).catch(err => (void log($, `rules not handed again: ${String(err)}`), ''))
+    const lines = [...stepLines(agent, calls, waitCommand($, agent), !card?.parentId), ...(again ? [again] : [])]
     if (!lines.length) return r
     await log($, `work ${agent} told of its step: ${lines.map(line => line.slice(0, 40)).join(' / ')}`)
     return { ...r, additionalContext: [...(r.additionalContext ?? []), ...lines] }

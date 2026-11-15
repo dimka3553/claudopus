@@ -17,7 +17,8 @@ import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUD
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
-import type { Proc } from './jobs'
+import { leftoversOf, memOf, leftName, PS_COLUMNS } from './jobs'
+import type { OpenCall, Proc, Span } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
 import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
@@ -7698,6 +7699,9 @@ const chatHooks = (on: On) => {
     const isChat = (await read($, me)).isChat && !isOff
     const r = await next({ ...e, instructions: [e.instructions, KEEP, isChat ? KEEP_AGENTS : ''].filter(Boolean).join('\n') })
     if (e.agentId === undefined && e.trigger !== 'precompute') await update($, me, m => ({ ...m, needsContext: true }))
+    // A piece of work compacted loses the rules it was handed after its brief: it is handed them again at its next step
+    const agent = e.agentId
+    if (agent !== undefined && e.trigger !== 'precompute' && dir) await update($, todos, list => (list.some(one => one.id === agent && !one.parentId) ? list.map(one => (one.id === agent ? { ...one, rulesDue: true } : one)) : list))
 
     return r
   })
@@ -7941,7 +7945,7 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; mem?: string; isUntold?: boolean; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -8043,7 +8047,7 @@ const lookJobs = async ($: EngineInterface) => {
   const owned = [
     // A watch's output is its events, read as any other
     ...list.flatMap(one => (one.bg ?? []).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
-    ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid }))),
+    ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid, isUntold: Boolean(d.isLeft && !d.log) }))),
     ...held.flatMap(h => (callFiles.get(h.id) ? [{ owner: h.owner, id: h.id, file: callFiles.get(h.id)?.file ?? '', pid: undefined as string | undefined }] : [])),
   ]
   for (const id of jobLog.keys()) if (!owned.some(o => o.id === id) && !held.some(h => h.id === id)) jobLog.delete(id)
@@ -8068,14 +8072,15 @@ const lookJobs = async ($: EngineInterface) => {
       }
     }
   }
-  if (!owned.length && !unfound.length) return
+  await pruneSpans($, now)
+  if (!owned.length && !unfound.length && !spans.length) return
   const sid = await $.session.id().catch(() => '')
   if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
   if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
     tasksDir = await findTasks($)
     if (!tasksDir) tasksMissedAt = now
   }
-  const asked = owned.filter(o => o.file || tasksDir)
+  const asked = owned.filter(o => !('isUntold' in o && o.isUntold) && (o.file || tasksDir))
   const files = asked.map(o => o.file || `${tasksDir}/${o.id}.output`)
   jobFiles.clear()
   asked.forEach((o, n) => jobFiles.set(o.id, files[n] ?? ''))
@@ -8092,12 +8097,14 @@ const lookJobs = async ($: EngineInterface) => {
   // run, and now and then every process with its state
   const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
   const home = 'case $f in "~/"*) f="$HOME/${f#\\~/}";; esac'
-  const script = `n=$1; shift; i=0; for f; do i=$((i+1)); o=$f; ${home}; ${mtime}; if [ $i -le $n ]; then printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; else printf '\\n@@AT@@ %s %s' "$m" "$o"; fi; done; printf '\\n@@ALIVE@@'; for p in ${pids.map(p => p.replace(/\D/g, '')).join(' ')}; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; printf '\\n'${isPs ? "; printf '@@PS@@\\n'; ps -axww -o pid=,ppid=,stat=,etime=,command=" : ''}`
+  const script = `n=$1; shift; i=0; for f; do i=$((i+1)); o=$f; ${home}; ${mtime}; if [ $i -le $n ]; then printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; else printf '\\n@@AT@@ %s %s' "$m" "$o"; fi; done; printf '\\n@@ALIVE@@'; for p in ${pids.map(p => p.replace(/\D/g, '')).join(' ')}; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; printf '\\n'${isPs ? `; printf '@@PS@@\\n'; ps -axww -o ${PS_COLUMNS}` : ''}`
   const r = await $.process.run(['sh', '-c', script, 'sh', String(files.length), ...files, ...targets], { timeoutMs: 5000 }).catch(() => undefined)
   if (!r) return
   const [body = '', tail = ''] = r.stdout.split('\n@@ALIVE@@')
   const [aliveText = '', psText] = tail.split('@@PS@@\n')
   if (psText !== undefined) ((jobProcs = procsOf(psText, now)), (jobProcsAt = now))
+  // What a command left going, however it was started, becomes a run of its card as soon as the processes show it
+  if (psText !== undefined && spans.length) await adoptLeft($, jobProcs, now).catch(err => log($, `left runs not followed: ${String(err)}`))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
   // A detached job whose process ended leaves its card, kept as ended (how its process ended is not known)
@@ -8156,13 +8163,22 @@ const lookJobs = async ($: EngineInterface) => {
     const wait = waits.find(w => w.id === id)
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
-    const next: Seen = { ...seen, tail: tailOf(text), ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
+    const next: Seen = { ...seen, ...memSeen(job?.pid), tail: tailOf(text), ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.mem === next.mem && was?.tail?.join('\n') === next.tail?.join('\n')
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true
     const owner = job?.owner
     if (seen.latest && owner && was && was.latest !== seen.latest && now - (jobNews.get(owner) ?? 0) >= JOB_NEWS) moved.add(owner)
+  }
+  // A left run whose output goes nowhere it can be read runs with no progress given, with its memory
+  for (const o of owned) {
+    if (!('isUntold' in o && o.isUntold) || gone.includes(o.id)) continue
+    const was = jobLog.get(o.id)
+    const next: Seen = { latest: '', isUntold: true, ...memSeen(o.pid), ...(states.has(o.id) ? { isPaused: states.get(o.id) } : {}) }
+    if (was?.isUntold && was.mem === next.mem && was.isPaused === next.isPaused) continue
+    jobLog.set(o.id, next)
+    isChanged = true
   }
   // A background command that has ended, by the engine's last line on its output or as no shell runs it, leaves its card
   if (ended.length) {
@@ -8173,6 +8189,87 @@ const lookJobs = async ($: EngineInterface) => {
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await update($, todos, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
   if (isChanged) $.ui.invalidate('ui.render')
+}
+
+// The memory a followed process and all it started hold, as the processes were last listed
+const memSeen = (pid?: string) => {
+  const mem = pid && jobProcs.length ? memOf(treeOf(jobProcs, pid)) : undefined
+  return mem ? { mem } : {}
+}
+
+// Each piece of work's commands, by the process numbers handed out while each ran, kept a while so what one leaves going is
+// found when the processes show it: at once for a command that has ended, later for one sent to the background whose shell ends
+// A command that has ended is looked at once more after a while; one sent to the background until a little after it ends
+type KeptSpan = Span & { agent: string; what: string; bgId?: string }
+let spans: KeptSpan[] = []
+const SPANS_KEPT = 300
+const SPAN_KEPT_FOR = 2 * 60_000
+// The commands of work still running, by their call, and every process already made a run, so none is added twice
+const openCalls = new Map<string, OpenCall>()
+const adopted = new Set<string>()
+const pruneSpans = async ($: EngineInterface, now: number) => {
+  // One sent to the background is open until its row has left every card
+  const list = spans.some(s => s.bgId && s.until === undefined) ? await read($, todos) : []
+  spans = spans.map(s => (s.bgId && s.until === undefined && !list.some(one => one.bg?.some(b => b.id === s.bgId)) ? { ...s, until: now } : s))
+  if (spans.some(s => s.until !== undefined && now - s.until > SPAN_KEPT_FOR)) spans = spans.filter(s => s.until === undefined || now - s.until <= SPAN_KEPT_FOR)
+}
+// The newest process number on this Mac, as a shell started now is handed it; 0 where it cannot be told
+const pidNow = async ($: EngineInterface) => {
+  const r = await $.process.run(['sh', '-c', 'echo $$ # pid now'], { timeoutMs: 3000 }).catch(() => undefined)
+  const n = Number(r?.stdout.trim())
+  return Number.isInteger(n) && n > 1 ? n : 0
+}
+// A piece of work's Bash call has ended (or gone to the background): kept by the numbers handed out while it ran, and what a
+// command that has ended left going is followed at once
+const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string; command?: unknown; description?: unknown; tool_use_id?: unknown; run_in_background?: unknown }, from: number, at: number, result?: unknown) => {
+  if (call.tool !== 'Bash' || !from) return
+  const to = await pidNow($)
+  openCalls.delete(String(call.tool_use_id ?? ''))
+  if (!to) return
+  const now = await $.clock.now()
+  const command = String(call.command ?? '')
+  // Started on another Mac over ssh, what it leaves runs there
+  if (/^\s*(\S*\/)?ssh\b/.test(command)) return
+  const bgId = (result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
+  const isBackground = Boolean(call.run_in_background) && typeof bgId === 'string'
+  const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 400), from, to, at, endAt: now, ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
+  spans = [...spans.filter(s => s.id !== span.id), span].slice(-SPANS_KEPT)
+  if (call.run_in_background) return
+  const r = await $.process.run(['sh', '-c', `printf '@@LEFT@@\\n'; ps -axww -o ${PS_COLUMNS}`], { timeoutMs: 5000 }).catch(() => undefined)
+  if (!r || r.exitCode !== 0 || !r.stdout.includes('@@LEFT@@')) return
+  const procs = procsOf(r.stdout.split('@@LEFT@@\n')[1] ?? '', now)
+  // Among every command kept, so a run held back while another ran goes to its own
+  await adoptLeft($, procs, now)
+}
+// What commands left going becomes runs on their cards: each topmost process, with its command's words when it left one, else
+// its own program and script; its log where its output goes to a file, so its progress line is read as any other
+const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: KeptSpan[]) => {
+  const list = await read($, todos)
+  // A process number gone from the list may be handed out again: it no longer stands for a run made already
+  for (const pid of adopted) if (!procs.some(p => p.pid === pid)) adopted.delete(pid)
+  const known = new Set([...adopted, ...list.flatMap(one => (one.detached ?? []).flatMap(d => (d.pid ? [d.pid] : [])))])
+  const left = leftoversOf(procs, only ?? spans, known, [...openCalls.values()])
+  if (!left.length) return
+  const fd = await $.process
+    .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...left.map(l => l.top.pid)], { timeoutMs: 5000 })
+    .catch(() => undefined)
+  const logs = new Map((fd?.stdout.split('\n') ?? []).map(line => [line.split(' ')[0] ?? '', line.split(' ').slice(1).join(' ').trim()]))
+  const added = new Map<string, NonNullable<Todo['detached']>>()
+  for (const one of left) {
+    const span = spans.find(s => s.id === one.span) ?? only?.find(s => s.id === one.span)
+    if (!span || !list.some(card => card.id === span.agent)) continue
+    const file = logs.get(one.top.pid) ?? ''
+    const log = file.startsWith('/') && !file.startsWith('/dev/') ? file : ''
+    const several = left.filter(l => l.span === one.span).length > 1
+    const what = several || !span.what ? leftName(one.top.command) : span.what
+    adopted.add(one.top.pid)
+    added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true }])
+  }
+  if (!added.size) return
+  await update($, todos, cards => cards.map(one => (added.has(one.id) ? { ...one, detached: [...(one.detached ?? []).filter(d => !added.get(one.id)?.some(a => a.id === d.id)), ...(added.get(one.id) ?? [])].slice(-BG_KEPT) } : one)))
+  for (const [agent, runs] of added) await log($, `work ${agent} left ${runs.length} run(s) going: ${runs.map(r => r.what).join(' / ').slice(0, 160)}`)
+  jobsLookedAt = 0
+  $.ui.invalidate('ui.render')
 }
 
 // A short time since, for a row's side: seconds, minutes, or hours and minutes
@@ -8382,7 +8479,8 @@ const stepHooks = (on: On) => {
     const calls = e.tool_calls.map(call => ({ tool: call.tool_name, input: call.tool_input, tookMs: now - (callStarts.get(call.tool_use_id) ?? now) }))
     for (const call of e.tool_calls) callStarts.delete(call.tool_use_id)
     const card = (await read($, todos)).find(one => one.id === agent)
-    const lines = stepLines(agent, calls, waitCommand($, agent), !card?.parentId)
+    const again = await rulesAgain($, agent).catch(err => (void log($, `rules not handed again: ${String(err)}`), ''))
+    const lines = [...stepLines(agent, calls, waitCommand($, agent), !card?.parentId), ...(again ? [again] : [])]
     if (!lines.length) return r
     await log($, `work ${agent} told of its step: ${lines.map(line => line.slice(0, 40)).join(' / ')}`)
     return { ...r, additionalContext: [...(r.additionalContext ?? []), ...lines] }
@@ -9024,6 +9122,26 @@ const touchesKeyring = (e: { tool: string }) => {
   })
 }
 
+// The rules every piece of work a chat starts is handed after its brief, as they stand now: where the chat's words are, the work's
+// own rules, and its panel's
+const workRules = async ($: EngineInterface) => {
+  const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).trim()
+  const words = `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md`
+  return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
+}
+// Work its rules no longer reach is handed them again at its next step: work started before they changed, and work whose context
+// was compacted, which keeps only a summary of its brief (on 15 Nov work compacted after two hours kept "long ones detached with
+// nohup" and lost the rest, then started 8 drawings at once on this Mac that its card never showed)
+const rulesAgain = async ($: EngineInterface, agent: string) => {
+  const card = (await read($, todos)).find(one => one.id === agent)
+  if (!card || card.parentId || !(await read($, me)).isChat) return ''
+  const rules = await workRules($)
+  if (!card.rulesDue && card.rulesSent === hashOf(rules)) return ''
+  await update($, todos, list => list.map(one => (one.id === agent ? { ...one, rulesSent: hashOf(rules), rulesDue: undefined } : one)))
+  await log($, `work ${agent} handed its rules again${card.rulesDue ? ' after a compaction' : ' as they changed'}`)
+  return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every piece of work follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}`
+}
+
 const workHooks = (on: On) => {
 
   // A chat's own thread reads, starts agents and talks to them; the work runs in the agents, which carry an agent id
@@ -9125,12 +9243,19 @@ const workHooks = (on: On) => {
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
     const next = async (call: typeof e) => {
-      const r = await run(call)
+      // A piece of work's command is known by the process numbers handed out while it runs, so what it leaves going is found
+      const isSpanned = Boolean(dir) && !isOff && e.agentId !== undefined && call.tool === 'Bash'
+      const spanAt = isSpanned ? await $.clock.now() : 0
+      const from = isSpanned ? await pidNow($) : 0
+      if (from) openCalls.set(String(call.tool_use_id ?? ''), { from, at: spanAt })
+      const r = await run(call).finally(() => openCalls.delete(String(call.tool_use_id ?? '')))
       if (woken && !r.deny && !r.isError) await update($, todos, list => list.map(one => (one.id === woken && one.answeredAt ? { ...one, answeredAt: undefined } : one)))
       // Ended work a message starts again is at work from now: its card leaves Finished while it acts on the message
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
       if (dir && e.agentId !== undefined && !r.deny && !r.isError && !(call as { run_in_background?: unknown }).run_in_background) await keepDetached($, e.agentId, call as never, r.result).catch(err => log($, `detached work not followed: ${String(err)}`))
+      // (one that failed may still have left something going)
+      if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result).catch(err => log($, `left runs not looked for: ${String(err)}`))
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       return hideKept($, call, r)
     }
@@ -9411,10 +9536,9 @@ const workHooks = (on: On) => {
     const isTold = isOwn && Boolean(dir) && !isOff && !e.resume && !e.workflow && (await read($, me)).isChat
     // and is handed, after its brief, the rules every piece of work follows and where the chat's words are, so the brief stays short
     // and where the runner is that does an admin command with a Mac's kept password
-    const work = isTold ? named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).trim() : ''
-    const words = isTold ? `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md` : ''
+    const rules = isTold ? await workRules($) : ''
     const isBackground = isHelperSpawn(e)
-    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : isBackground ? { ...e, background: true } : e)
+    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
     if (r.model) seeModel(r.model)
     // A resumed agent keeps the model it first started on, or none: the model it resumes on may be one the app moved it to after a flag. A
@@ -9434,7 +9558,7 @@ const workHooks = (on: On) => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
       const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
-      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model) }])
+      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}) }])
     })
     if (isOwn) await openList($)
     if (!isOwn) await writeRolls($, true).catch(err => log($, `helpers not written: ${String(err)}`))
@@ -10519,6 +10643,8 @@ const panelHooks = (on: On) => {
         job.isPaused ? ['paused', 'paused', true]
         : job.kind === 'wait' && (job.target || !job.wroteAt || job.isEmpty) ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
         : job.kind === 'watch' ? (job.wroteAt && !job.isEmpty ? [`last event ${shortAgo(quiet)} ago`, `event ${shortAgo(quiet)} ago`, false] : ['no event yet', 'no event', false])
+        // A run left going whose output goes to no file: it runs, and gives no progress (nothing is warned of, as it was never told)
+        : job.isUntold ? ['running, no progress given', 'no progress given', false]
         : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
         // (a server prints only when asked, so its quiet is no warning)
         : job.wroteAt && quiet >= JOB_QUIET && job.kind !== 'server' ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
@@ -10536,7 +10662,9 @@ const panelHooks = (on: On) => {
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
       // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
-      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
+      // the memory it holds, where it is known, until the line has no room for it
+      const mem = job.mem ? [job.mem] : []
+      const text = firstFit([[...full, ...pct, ...rate, ...left, state, ...mem], [...full, ...pct, ...rate, ...left, short, ...mem], [...full, ...pct, ...left, short, ...mem], [...compact, ...pct, ...left, short, ...mem], [...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
       return { text, isWarn: warn }
     }
     // A job's two lines: what it is, in the work's own words, with its time; and under it how it stands, then the latest line it

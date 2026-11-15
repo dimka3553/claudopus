@@ -20,7 +20,7 @@ const PARTS = [
   'panel.tsx', 'tabs.tsx', 'register.tsx',
 ]
 const TEST_PARTS = [
-  'world.tsx', 'chat.test.tsx', 'cards.test.tsx', 'finish.test.tsx', 'notify.test.tsx', 'commands.test.tsx', 'servers.test.tsx',
+  'world.tsx', 'chat.test.tsx', 'cards.test.tsx', 'left.test.tsx', 'finish.test.tsx', 'notify.test.tsx', 'commands.test.tsx', 'servers.test.tsx',
   'reports.test.tsx', 'pictures.test.tsx', 'memory.test.tsx', 'workflows.test.tsx', 'tabs.test.tsx', 'settings.test.tsx',
   'asking.test.tsx', 'welcome.test.tsx', 'sharing.test.tsx', 'prompts.test.tsx', 'macs.test.tsx', 'stuck.test.tsx', 'term-art.test.tsx', 'terminal-look.test.tsx', 'gate.test.tsx', 'security.test.tsx', 'steps.test.tsx', 'keep.test.tsx', 'keys.test.tsx', 'usage.test.tsx', 'updating.test.tsx',
 ]

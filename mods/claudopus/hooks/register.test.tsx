@@ -39,7 +39,7 @@ const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my pri
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string; startedOn?: Record<string, string> } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string> } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -225,8 +225,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const asked = rest.slice(4, 4 + n).map(String)
       const pids = [...String(rest[1]).matchAll(/for p in ([\d ]*); do kill/g)].flatMap(m => (m[1] ?? '').trim().split(/\s+/).filter(Boolean))
       const ps = String(rest[1]).includes('@@PS@@') && options.jobs.ps ? `@@PS@@\n${options.jobs.ps()}\n` : ''
-      return ok(`${asked.map(file => `\n@@JOB@@ ${Math.floor((options.jobs?.wroteAt(file) ?? 0) / 1000)} ${file}\n${options.jobs?.output(file) ?? ''}`).join('')}\n@@ALIVE@@${pids.map(p => ` ${p}`).join('')}\n${ps}`)
+      return ok(`${asked.map(file => `\n@@JOB@@ ${Math.floor((options.jobs?.wroteAt(file) ?? 0) / 1000)} ${file}\n${options.jobs?.output(file) ?? ''}`).join('')}\n@@ALIVE@@${pids.filter(p => options.jobs?.alive?.(p) ?? true).map(p => ` ${p}`).join('')}\n${ps}`)
     }
+    // The newest process number, as a shell started now gets it, and the processes as a command that has just ended leaves them
+    if (options.jobs?.pid && tool === 'sh' && String(rest[1]).includes('# pid now')) return ok(`${options.jobs.pid()}\n`)
+    if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@LEFT@@')) return ok(`@@LEFT@@\n${options.jobs.ps()}\n`)
     if (options.jobs?.fd && tool === 'sh' && String(rest[1]).includes('/proc/$p/fd/1')) return ok(options.jobs.fd())
     // The engine's tasks folder, where the test reads jobs
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('"$1"/tasks')) return ok('/tmp/claude-501/x/s1/tasks\n')
@@ -2469,6 +2472,171 @@ test("a run's second line starts under its name, with the tree's lines carried d
   // and one under a helper, with less room, keeps its count beside it
   expect(tight).toContain('10/40 · ~6m left')
   await narrow.unmount()
+})
+
+// What a piece of work leaves running, however it started it, is a run under its card with what it is for, how far it is and the
+// memory it holds, and leaves the card as it ends (on 15 Nov a launcher started with nohup but no `echo $!` drew 8 pages at once
+// with 56 GB and its card showed no run at all)
+
+// A process as `ps -axww -o pid=,ppid=,pgid=,stat=,etime=,rss=,command=` lists it, its memory in KB
+const psLine = (pid: number, ppid: number, pgid: number, command: string, rssKb = 1_000_000, etime = '00:01') => `${pid} ${ppid} ${pgid} S ${etime} ${rssKb} ${command}`
+
+// A world where the work's command is handed process numbers from 5000 to 5100 (the probe before it gets 5000, the one after 5100),
+// and the test lays the processes on this Mac, which of them still run, and where each writes
+const leftWorld = (on: On, procs: { list: string[]; logs: Record<string, string>; outputs?: Record<string, string> }) => {
+  let pid = 4900
+  const now = { at: 1_700_000_000_000 }
+  const w = world(on, {
+    jobs: {
+      output: file => procs.outputs?.[file] ?? '',
+      wroteAt: () => now.at - 2_000,
+      ps: () => procs.list.join('\n'),
+      fd: () => Object.entries(procs.logs).map(([p, f]) => `${p} ${f}`).join('\n'),
+      pid: () => String((pid += 100)),
+      alive: p => procs.list.some(line => line.trim().startsWith(`${p} `)),
+    },
+  })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now.at += ms), await w.clock.advance(ms))
+  return { ...w, advance }
+}
+const leftTexts = async ($: Parameters<NonNullable<Parameters<typeof test>[2]>>[0], columns = 140) => {
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: columns }, surface: 'terminal' } as never)
+  const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
+  await list.unmount()
+  return all
+}
+const leftStart = async ($: Parameters<NonNullable<Parameters<typeof test>[2]>>[0]) => {
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'draw the pages', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Draw the pages', prompt: 'draw the pages' } as never)
+}
+
+test('a launcher that starts 8 drawings and exits leaves 8 runs under its card, each with its progress and memory, and each leaves as it ends', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs: {} as Record<string, string> }
+  const { advance } = leftWorld(on, procs)
+  await leftStart($)
+  // The launcher's shell was 5050: its 8 children run on in its group once it has gone
+  for (let k = 0; k < 8; k++) {
+    procs.list.push(psLine(5060 + k, 1, 5050, `/u/.venvs/ct/bin/python fig4.py page PMC closed ${k}`, 7_000_000))
+    procs.logs[String(5060 + k)] = `/s/figlog/page-${k}.log`
+    procs.outputs[`/s/figlog/page-${k}.log`] = `progress: ${k}/16 eyes drawn (PMC closed ${k})\n`
+  }
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'l1', agentId: 'a1', command: 'cd /w && ~/.venvs/ct/bin/python launch.py 8', description: 'Run the drawing of all 25 pages, eight at a time (about 20 min)' } as never)
+  await advance(20_000)
+  const shown = await until(async () => {
+    const all = await leftTexts($)
+    return all.some(text => text.includes('python fig4.py page PMC')) ? all : undefined
+  })
+  expect(shown?.some(text => /^Run python fig4\.py page PMC closed \d/.test(text))).toBe(true)
+  expect(shown?.some(text => /\d of 16 eyes/.test(text))).toBe(true)
+  expect(shown?.some(text => text.includes('6.7 GB'))).toBe(true)
+  // As they end, they leave, and the card counts them as ended
+  procs.list = []
+  await advance(20_000)
+  expect(await until(async () => ((await leftTexts($)).every(text => !text.includes('fig4.py page')) || undefined))).toBe(true)
+  expect((await leftTexts($)).some(text => /8 runs ended/.test(text))).toBe(true)
+})
+
+test('a shell loop that sends scripts off with & leaves its runs under the card', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs: {} as Record<string, string> }
+  const { advance } = leftWorld(on, procs)
+  await leftStart($)
+  for (let i = 0; i < 4; i++) {
+    procs.list.push(psLine(5060 + i, 1, 5050, `/u/bin/python batch.py ${i} 12 /s/batch_${i}.json`))
+    procs.logs[String(5060 + i)] = `/s/batch_${i}.log`
+    procs.outputs[`/s/batch_${i}.log`] = 'progress: 81/91 eyes\n'
+  }
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'l2', agentId: 'a1', command: 'for i in 0 1 2 3; do nohup python batch.py $i 12 /s/batch_$i.json > /s/batch_$i.log 2>&1 & done; echo started', description: 'Run the new mesh on a third of the eyes (about 3 min)' } as never)
+  await advance(20_000)
+  const shown = await until(async () => {
+    const all = await leftTexts($)
+    return all.some(text => text.includes('python batch.py')) ? all : undefined
+  })
+  expect(shown?.some(text => /81 of 91 eyes/.test(text))).toBe(true)
+})
+
+test('a launcher started with nohup but no echo $! is a run under the card in the work\'s own words, read from its log', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs: {} as Record<string, string> }
+  const { advance } = leftWorld(on, procs)
+  await leftStart($)
+  // The launcher runs on, with xargs and its drawings under it
+  procs.list.push(psLine(5060, 1, 5050, '/bin/zsh /s/figs.sh /s', 2_000), psLine(5061, 5060, 5050, 'xargs -P 8 -L 1 sh -c ...', 1_000), psLine(5062, 5061, 5050, '/u/bin/python fig4.py page PMC closed 0', 7_000_000))
+  procs.logs['5060'] = '/s/figs.out'
+  procs.outputs['/s/figs.out'] = 'progress: 3/25 pages drawn (page-PMC-closed-2)\n'
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'l3', agentId: 'a1', command: 'S="/s"; rm -f "$S"/figlog/*.log; nohup "$S/figs.sh" "$S" > "$S/figs.out" 2>&1 &\nsleep 1; echo started', description: 'Run the drawing of all 25 picture pages again in the background, eight at a time (about 35 min, prints pages done of 25)' } as never)
+  await advance(20_000)
+  const shown = await until(async () => {
+    const all = await leftTexts($)
+    return all.some(text => text.startsWith('Run the drawing of all 25 picture pages')) ? all : undefined
+  })
+  expect(shown?.some(text => /3 of 25 pages/.test(text))).toBe(true)
+  expect(shown?.some(text => text.includes('6.7 GB'))).toBe(true)
+})
+
+test('xargs -P sending its output nowhere is a run that says it runs and gives no progress, with its memory', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string> }
+  const { advance } = leftWorld(on, procs)
+  await leftStart($)
+  procs.list.push(psLine(5060, 1, 5050, 'xargs -P 8 -n 1 /u/bin/python draw.py', 1_000), ...[0, 1, 2].map(k => psLine(5070 + k, 5060, 5050, `/u/bin/python draw.py ${k}`, 2_000_000)))
+  procs.logs['5060'] = '/dev/null'
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'l4', agentId: 'a1', command: 'ls jobs | xargs -P 8 -n 1 python draw.py > /dev/null 2>&1 &', description: 'Run every drawing eight at a time (about 10 min)' } as never)
+  await advance(20_000)
+  const shown = await until(async () => {
+    const all = await leftTexts($)
+    return all.some(text => text.includes('running, no progress given')) ? all : undefined
+  })
+  expect(shown?.some(text => text.startsWith('Run every drawing eight at a time'))).toBe(true)
+  expect(shown?.some(text => text.includes('5.7 GB'))).toBe(true)
+})
+
+test('a Python pool left running is one run with its workers\' memory added up', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs: {} as Record<string, string> }
+  const { advance } = leftWorld(on, procs)
+  await leftStart($)
+  procs.list.push(psLine(5060, 1, 5050, '/u/bin/python pool.py', 500_000), ...[0, 1, 2, 3].map(k => psLine(5070 + k, 5060, 5050, '/u/bin/python -c from multiprocessing.spawn import spawn_main', 1_000_000)))
+  procs.logs['5060'] = '/w/pool.log'
+  procs.outputs['/w/pool.log'] = 'progress: 10/40 tiles\n'
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'l5', agentId: 'a1', command: 'cd /w && (python pool.py > pool.log 2>&1 &)', description: 'Run the tiles in a pool of four (about 5 min)' } as never)
+  await advance(20_000)
+  const shown = await until(async () => {
+    const all = await leftTexts($)
+    return all.some(text => text.startsWith('Run the tiles in a pool of four')) ? all : undefined
+  })
+  expect(shown?.some(text => /10 of 40 tiles/.test(text))).toBe(true)
+  expect(shown?.some(text => text.includes('4.3 GB'))).toBe(true)
+  // one run, not one per worker
+  expect(shown?.filter(text => text.startsWith('Run the tiles in a pool of four')).length).toBe(1)
+})
+
+test('a background command whose shell ends leaving its scripts running hands them to its card as runs', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs: {} as Record<string, string> }
+  const { advance } = leftWorld(on, procs)
+  await leftStart($)
+  // While its shell runs, the background command is its own row; nothing is taken from it
+  procs.list.push(psLine(5050, 900, 5050, "/bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'python launch.py 4' < /dev/null"), ...[0, 1].map(k => psLine(5060 + k, 5050, 5050, `/u/bin/python render.py ${k}`)))
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'l6', agentId: 'a1', command: 'python launch.py 4', description: 'Run the renders (about 8 min)', run_in_background: true } as never)
+  await advance(20_000)
+  expect((await leftTexts($)).some(text => text.includes('python render.py'))).toBe(false)
+  // Its shell ends; the renders run on
+  procs.list = [0, 1].map(k => psLine(5060 + k, 1, 5050, `/u/bin/python render.py ${k}`))
+  for (const k of [0, 1]) ((procs.logs[String(5060 + k)] = `/w/r${k}.log`), (procs.outputs[`/w/r${k}.log`] = 'progress: 2/9 frames\n'))
+  await advance(20_000)
+  expect(await until(async () => ((await leftTexts($)).some(text => /^Run python render\.py [01]/.test(text)) || undefined))).toBe(true)
+})
+
+test('a script that starts a session of its own while its command runs is still that command\'s run; the system\'s own programs never are', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string> }
+  const { advance } = leftWorld(on, procs)
+  await leftStart($)
+  procs.list.push(psLine(5060, 1, 5060, '/u/bin/python daemon.py --serve-tiles'), psLine(5070, 1, 5070, '/System/Library/CoreServices/mdworker_shared'))
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'l7', agentId: 'a1', command: 'python daemon.py --serve-tiles', description: 'Run the tile daemon' } as never)
+  await advance(20_000)
+  const shown = await until(async () => {
+    const all = await leftTexts($)
+    return all.some(text => text.startsWith('Run the tile daemon')) ? all : undefined
+  })
+  expect(shown?.some(text => text.includes('mdworker'))).toBe(false)
 })
 
 // Finished work: the happy green octopus and its pause
@@ -8234,6 +8402,30 @@ test('a helper that already answered holds nothing, a report given lets the end 
   // Stopped from its card or by the chat, the work's running helpers are stopped with it
   await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
   expect(stopped).toEqual(expect.arrayContaining(['a1', 'a3']))
+})
+
+test('work whose context was compacted is handed its rules again at its next step, once; work started before the rules changed is handed the new ones', async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'draw the eyes', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'draw them' } as never)
+  // Started with the rules: nothing more at its steps
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))).not.toContain('These are the rules now')
+  await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: [{ role: 'user', text: 'one', toolUses: [] }] } as never)
+  const told = await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))
+  expect(told).toContain('Your context was compacted')
+  expect(told).toContain('What follows is told to every piece of work')
+  expect(told).toContain('Keep it true as you work')
+  expect(await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))).not.toContain('These are the rules now')
+  // The rules change under it, saved in Config: the new text reaches it
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  await pressed(config, 'config-text-work-edit')
+  await config.input({ key: 'config-text-work-input', text: '- Every run says how far it is.' })
+  expect(files.get(`${MEMORY}/roles/work.md`)).toBe('- Every run says how far it is.\n')
+  await config.unmount()
+  const changed = await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))
+  expect(changed).toContain('have changed since you started')
+  expect(changed).toContain('Every run says how far it is.')
 })
 
 // Work that goes on when the chat's process ends: what the keeper reads, the keeper started, cut-off work marked and started again
