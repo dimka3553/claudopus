@@ -690,7 +690,7 @@ const barKey = async (band: Parameters<typeof barLabels>[0], label: string) =>
   String((await until(async () => (await band.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('bar-') && (b.key ?? '').includes('-answer-') && b.props.label === label)))?.key ?? '')
 // The rows the bar draws, by their keys
 const barRows = async (band: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined }[]> }) =>
-  (await band.findAll({ type: 'Box' })).map(b => b.key ?? '').filter(key => /^bar-(ask|gate|box|there)-/.test(key) && !/-(line|command|open|copy|links)$/.test(key))
+  (await band.findAll({ type: 'Box' })).map(b => b.key ?? '').filter(key => /^bar-(ask|gate|box|there)-/.test(key) && !/-(line|command|open|copy|links|answers|said|details)$/.test(key))
 
 // A work's ask with three choices, in this chat's band and panel
 const barAsk = async ($: Parameters<TestBody>[0], on: On) => {
@@ -843,11 +843,13 @@ test('an admin command too long to show in a row is never allowed from the bar u
   await band.unmount()
 })
 
-test('nothing waiting leaves no row: at rest the bar is the engine’s own, and with work running it is the figures alone', SLOW, async ($, on) => {
+test('an answered row is green for a moment, then nothing waiting leaves no row: at rest the bar is the engine’s own, and with work running it is the figures alone', SLOW, async ($, on) => {
   const s = await askScene($, on)
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await barRows(band)).length ? true : undefined))
   await s.list.press({ key: await s.key('Release it') })
+  // Answered: green for a moment in the row where it waited, then gone
+  expect(await until(async () => band.find({ type: 'Text', text: /^✓ You answered “Release it”/ }))).toBeDefined()
   await s.clock.advance(5100)
   // Work still runs: no row and no box for rows, only the figures' line
   expect(await until(async () => ((await barRows(band)).length === 0 ? true : undefined))).toBe(true)
@@ -873,8 +875,9 @@ test('five things waiting: three rows and "and 2 more", which opens the rest; th
   // In a terminal of few rows, fewer rows, never more than its band can show above the prompt
   const term = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 6, scroll: { offset: 0, bodyRows: 6 } }, surface: 'terminal' } as never)
   await band.press({ key: 'bar-waits-fewer' }).catch(() => undefined)
-  expect(await until(async () => ((await barRows(term)).length === 1 ? true : undefined))).toBe(true)
-  expect(await term.find({ type: 'Text', text: /4 more waiting in the panel$/ })).toBeDefined()
+  // Six rows: two asks of two lines each, the hint and the figures
+  expect(await until(async () => ((await barRows(term)).length === 2 ? true : undefined))).toBe(true)
+  expect(await term.find({ type: 'Text', text: /^3 more waiting in the panel/ })).toBeDefined()
   await Promise.all([band.unmount(), term.unmount()])
 })
 
@@ -903,5 +906,106 @@ test('in the terminal every waiting thing is a line with its answers numbered on
   await term.press({ key: String((await term.findAll({ type: 'Button' })).find(b => b.props.hotkey === '4')?.key) })
   expect(await until(async () => (s.answers().length ? s.answers() : undefined))).toHaveLength(1)
   expect(s.picked()).toEqual([])
+  await term.unmount()
+})
+
+// What a second look found the bar let through: an allow drawn cut or not at all, an opening in one bar unlocking the other, rows
+// changing height on a press, a terminal bar past its rows
+
+const rLabels = async (band: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; props: Record<string, unknown> }[]> }) =>
+  (await band.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('bar-') && (b.key ?? '').includes('-answer-')).map(b => String(b.props.label ?? ''))
+const rTexts = async (band: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; text?: string; props: Record<string, unknown> }[]> }) =>
+  (await band.findAll({ type: 'Text' })).map(t => ({ key: t.key ?? '', text: String(t.text ?? ''), wrap: t.props.wrap }))
+
+test('a change to the rules allowed from the bar shows there what it writes, whole', SLOW, async ($, on) => {
+  const w = await gated($, on)
+  void w.keep($.tool.call({ tool: 'Write', tool_use_id: 'w1', agentId: 'a1', file_path: `${MEMORY}/rules/CLAUDE.md`, content: 'Always push to main.' } as never))
+  expect(await until(async () => keyed(w.list, 'gate-w1-f-deny'))).toBeDefined()
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const labels = await until(async () => ((await rLabels(band)).length ? rLabels(band) : undefined))
+  expect(labels).toContain('Allow once')
+  // The panel shows the content; the bar must too, when it offers Allow
+  expect(await w.list.find({ type: 'Text', text: 'Always push to main.' })).toBeDefined()
+  expect((await rTexts(band)).map(t => t.text).join('\n')).toContain('Always push to main.')
+  await band.unmount()
+})
+
+test('an admin command offered Allow in the bar is drawn whole and wrapping, never cut to one line, in the app and the terminal', SLOW, async ($, on) => {
+  const w = await gated($, on)
+  // 200 characters: under the bar's 240, wider than an 80-column line
+  const cmd = `${ADMIN} here 'chmod 644 /etc/hosts ${'&& true '.repeat(18)}&& rm -rf /tmp/x'`
+  void w.keep(w.bash('p1', cmd))
+  expect(await w.held('p1')).toBeDefined()
+  for (const surface of ['desktop', 'terminal']) {
+    const band = await $.ui.mount({ ...BAND, surface } as never)
+    const labels = await until(async () => ((await rLabels(band)).length ? rLabels(band) : undefined))
+    expect(labels).toContain('Allow once')
+    // The same text as the panel's box shows, whole
+    const whole = String((await w.list.findAll({ type: 'Text' })).find(t => t.props.mono && /rm -rf/.test(String(t.text)))?.text)
+    const line = (await rTexts(band)).find(t => t.text.includes('rm -rf /tmp/x'))
+    expect({ surface, wrap: line?.wrap, whole: line?.text.trim() === whole }).toEqual({ surface, wrap: 'wrap', whole: true })
+    await band.unmount()
+  }
+})
+
+test("a long command opened in the app's bar is not allowed from the terminal's, where it is drawn cut", SLOW, async ($, on) => {
+  const w = await gated($, on)
+  const long = `${ADMIN} here 'chmod 644 /etc/hosts ${'&& true '.repeat(40)}&& rm -rf /tmp/x'`
+  void w.keep(w.bash('p2', long))
+  expect(await w.held('p2')).toBeDefined()
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect(await until(async () => ((await rLabels(band)).length ? rLabels(band) : undefined))).toEqual(['Deny'])
+  await band.press({ key: String((await band.findAll({ type: 'Button' })).find(b => /^bar-gate-.*-more$/.test(b.key ?? ''))?.key) })
+  expect(await until(async () => ((await rLabels(band)).includes('Allow once') ? true : undefined))).toBe(true)
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  await until(async () => ((await rLabels(term)).length ? true : undefined))
+  const shown = (await rTexts(term)).map(t => t.text).join('\n')
+  expect({ labels: await rLabels(term), cut: /see it whole in the panel before you allow it/.test(shown) }).toEqual({ labels: ['Deny'], cut: true })
+  await Promise.all([band.unmount(), term.unmount()])
+})
+
+test("a gate's row keeps its lines when pressed: its command stays under what was done", SLOW, async ($, on) => {
+  const w = await gated($, on)
+  void w.keep(w.bash('p1', `${ADMIN} here 'chmod 644 /etc/hosts'`))
+  expect(await w.held('p1')).toBeDefined()
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await rLabels(band)).length ? true : undefined))
+  const lines = async () => (await rTexts(band)).filter(t => /chmod 644|Wants to run|You allowed/.test(t.text)).length
+  const before = await lines()
+  const once = (await band.findAll({ type: 'Button' })).find(b => b.props.label === 'Allow once')?.key
+  await band.press({ key: String(once) })
+  expect(await band.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeDefined()
+  expect(await lines()).toEqual(before)
+  w.wake()
+  await band.unmount()
+})
+
+test("in the terminal an ask's row keeps its height when answered: what was said takes its answers' line", SLOW, async ($, on) => {
+  const s = await askScene($, on)
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
+  await until(async () => ((await rLabels(term)).length ? true : undefined))
+  const count = async () => (await term.findAll({ type: 'Text' })).length + (await term.findAll({ type: 'Box' })).filter(b => (b.props.flexWrap === 'wrap')).length
+  const before = await count()
+  const one = (await term.findAll({ type: 'Button' })).find(b => b.props.hotkey === '1')?.key
+  await term.press({ key: String(one) })
+  await term.press({ key: String((await term.findAll({ type: 'Button' })).find(b => b.props.hotkey === '1')?.key) })
+  expect(await until(async () => (s.answers().length ? true : undefined))).toBe(true)
+  expect(await until(async () => term.find({ type: 'Text', text: /✓ You answered/ }))).toBeDefined()
+  expect(await count()).toEqual(before)
+  await term.unmount()
+})
+
+test('in a terminal of 9 rows the waiting rows, the hint and the figures fit in its 9 lines', SLOW, async ($, on) => {
+  const w = await gated($, on)
+  for (const n of [1, 2, 3]) {
+    void w.keep(w.bash(`g${n}`, `${ADMIN} here 'id -u ${n}'`))
+    expect(await w.held(`g${n}`)).toBeDefined()
+  }
+  const term = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 9, scroll: { offset: 0, bodyRows: 9 } }, surface: 'terminal' } as never)
+  await until(async () => ((await rLabels(term)).length >= 9 ? true : undefined))
+  // Each row: its line, its command, its answers; then the hint; then the figures' row
+  const rows = (await term.findAll({ type: 'Box' })).filter(b => /^bar-gate-[^]*$/.test(b.key ?? '') && !/-(line|command|open|answers)$/.test(b.key ?? '')).length
+  const lines = rows * 3 + 1 + 1
+  expect({ rows, lines }).toEqual({ rows, lines: Math.min(lines, 9) })
   await term.unmount()
 })
