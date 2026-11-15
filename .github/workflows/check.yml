@@ -1,7 +1,8 @@
 name: Check
 on:
+  # main, and the very commit a release is to make main, on a release-check/ branch of its own before main moves
   push:
-    branches: [main]
+    branches: [main, "release-check/**"]
   pull_request:
 jobs:
   # Every check on Linux and on a Mac: Claudopus runs on both

@@ -255,6 +255,47 @@ expect "a person's own release at a terminal, answered no: refused" 6 "$RELEASE_
 expect "a person's own release at a terminal, answered yes: released" 0 'released' -- at_terminal y
 n=$((n + 1))
 [ "$(git -C "$r/origin.git" show main:file)" = three ] && echo "ok $n - main has the person's release" || { echo "NOT OK $n - main does not have the person's release"; failed=1; }
+
+# GitHub's checks: with GITHUB_CHECKS in main's .release, main moves only once every check GitHub runs on the very commit it is to
+# become has passed. A gh of its own answers from $r/checks (one "name<tab>status<tab>conclusion<tab>url" line each), or from
+# $r/checks.later once it has been asked twice, and keeps the commit it was asked about
+mkdir -p "$r/gh"
+cat >"$r/gh/gh" <<EOF
+#!/bin/bash
+case "\$1 \$2" in
+  "auth status") exit 0 ;;
+  api\ repos/*/commits/*/check-runs*)
+    sha=\${2#*/commits/}; printf '%s\n' "\${sha%%/*}" >"$r/asked"
+    n=\$(( \$(cat "$r/asks" 2>/dev/null || echo 0) + 1 )); echo \$n >"$r/asks"
+    if [ \$n -gt 2 ] && [ -e "$r/checks.later" ]; then cat "$r/checks.later"; else cat "$r/checks"; fi ;;
+  *) exit 1 ;;
+esac
+EOF
+chmod +x "$r/gh/gh"
+(cd "$r/work" && git checkout -q main && git pull -q origin main && printf 'CHECK=true\nGITHUB_CHECKS="check (ubuntu-latest), check (macos-latest)"\n' >.release && git commit -q -am "checks on GitHub" && git push -q origin main && git checkout -q -b gh-checks && echo four >file && git commit -q -am four)
+checks() { printf "$@" >"$r/checks"; rm -f "$r/checks.later" "$r/asks" "$r/asked"; }
+gh_release() { release_grant "rel-$1" release-grant gh-checks; (cd "$r/work" && PATH="$r/gh:$PATH" RELEASE_CHECK_EVERY=1 RELEASE_CHECK_WAIT=1 "$here/release"); }
+main_was=$(git -C "$r/origin.git" rev-parse main)
+unmoved() { n=$((n + 1)); [ "$(git -C "$r/origin.git" rev-parse main)" = "$main_was" ] && echo "ok $n - $1: main was not moved" || { echo "NOT OK $n - $1: main moved"; failed=1; }; }
+no_candidate() { n=$((n + 1)); [ -z "$(git -C "$r/origin.git" for-each-ref refs/heads/release-check)" ] && echo "ok $n - $1: its release-check branch is gone" || { echo "NOT OK $n - $1: its release-check branch was left"; failed=1; }; }
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tfailure\thttps://github.com/run/2\n'
+expect 'a red check on GitHub: refused, naming the check' 3 'failed on main with gh-checks.*check (macos-latest) (failure) https://github.com/run/2' -- gh_release red
+unmoved 'a red check'; no_candidate 'a red check'
+n=$((n + 1)); [ -n "$(cat "$r/asked" 2>/dev/null)" ] && git -C "$r/origin.git" cat-file -e "$(cat "$r/asked")" 2>/dev/null && echo "ok $n - the checks read were of the commit pushed for GitHub to check" || { echo "NOT OK $n - the checks read were of no commit pushed"; failed=1; }
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tin_progress\t\tu2\n'
+expect 'a check still running when the wait runs out: refused, saying which' 3 'did not end within 1 minutes.*check (macos-latest) running' -- gh_release running
+unmoved 'a check still running'; no_candidate 'a check still running'
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\n'
+expect 'a named check GitHub never started: refused, saying which' 3 'check (macos-latest) not started' -- gh_release missing
+unmoved 'a named check missing'
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tsuccess\tu2\nother\tcompleted\tcancelled\tu3\n'
+expect 'any other check on the commit that did not pass: refused' 3 'other (cancelled)' -- gh_release other
+unmoved 'another check cancelled'
+checks 'check (ubuntu-latest)\tqueued\t\tu1\ncheck (macos-latest)\tin_progress\t\tu2\n'
+printf 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tsuccess\tu2\n' >"$r/checks.later"
+expect 'checks running, then green: released once they pass, after saying what it waits for' 0 "waiting for GitHub's checks: check (ubuntu-latest) running, check (macos-latest) running" -- gh_release green
+n=$((n + 1)); [ "$(git -C "$r/origin.git" rev-parse main)" = "$(cat "$r/asked")" ] && echo "ok $n - main is the very commit GitHub checked" || { echo "NOT OK $n - main is not the commit GitHub checked"; failed=1; }
+no_candidate 'a green release'
 unset CLAUDECODE
 expect 'forgetting a password needs no grant' 0 'No password was kept' -- "$admin" here --forget
 expect 'with no command it says how it is used' 2 'usage' -- "$admin" here
