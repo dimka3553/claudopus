@@ -40,33 +40,87 @@ test('work never starts as a copy of the chat: a fork or an agent with no model 
   expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`)
 })
 
-test('no agent is started on an older model or on Haiku, by the chat or by a piece of work; the three aliases and their newest versions pass', async ($, on) => {
-  const { files } = world(on)
+test('no agent is started on an older model or on Haiku, by the chat or by a piece of work: one named so starts on its family\'s newest; the aliases and their newest versions pass as named', async ($, on) => {
+  const { files, agentModels } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
-  const call = (model: string, agentId?: string) => $.tool.call({ tool: 'Agent', tool_use_id: `m-${model}-${agentId ?? ''}`, prompt: 'fix the nose', subagent_type: 'general-purpose', model, ...(agentId ? { agentId } : {}) } as never)
+  const call = async (model: string, agentId?: string) => {
+    const r = await $.tool.call({ tool: 'Agent', tool_use_id: `m-${model}-${agentId ?? ''}`, prompt: 'fix the nose', subagent_type: 'general-purpose', model, ...(agentId ? { agentId } : {}) } as never)
+    return { deny: (r as { deny?: string }).deny, model: agentModels.at(-1) }
+  }
 
   // A newer version than the mod knows is no older model; nor is an id with a date, a window or a provider around it
-  for (const model of ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5.5', 'claude-opus-5-6', 'claude-opus-6', 'claude-fable-5-3', 'claude-sonnet-6', 'claude-opus-5-5-20261001', 'opus[1m]', 'us.anthropic.claude-opus-5-5-v1:0', 'inherit']) expect((await call(model)).deny).toBeUndefined()
-  for (const model of ['haiku', 'claude-haiku-5-5', 'claude-opus-4-8', 'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-3-5-sonnet-20241022', 'claude-sonnet-4-5-20250929']) expect((await call(model)).deny).toContain('No work runs on')
-  expect((await call('claude-opus-4-8')).deny).toBe(
-    'No work runs on Opus 4.8. Name the model by its alias: "opus" for most work, "sonnet" for long legwork, "fable" only for heavy or really complicated work, "opus" or "fable" for checking what was built, never weaker than what built it. Never an older version, never Haiku.',
-  )
+  for (const model of ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5.5', 'claude-opus-5-6', 'claude-opus-6', 'claude-fable-5-3', 'claude-sonnet-6', 'claude-opus-5-5-20261001', 'opus[1m]', 'us.anthropic.claude-opus-5-5-v1:0', 'inherit']) expect(await call(model)).toEqual({ deny: undefined, model })
+  // An older version, a full id or not, starts on its family's newest by its alias, and Haiku on Sonnet
+  for (const [model, alias] of [['haiku', 'sonnet'], ['claude-haiku-5-5', 'sonnet'], ['claude-opus-4-8', 'opus'], ['claude-opus-5', 'opus'], ['claude-sonnet-5', 'sonnet'], ['claude-fable-5-1', 'fable'], ['claude-3-5-sonnet-20241022', 'sonnet'], ['claude-sonnet-4-5-20250929', 'sonnet'], ['claude-opus-4-8[1m]', 'opus']]) expect(await call(model!)).toEqual({ deny: undefined, model: alias })
   // A helper a piece of work starts is held to the same, and one that names no model keeps its work's
-  expect((await call('haiku', 'a1')).deny).toContain('No work runs on Haiku')
-  expect((await call('claude-opus-4-8', 'a1')).deny).toContain('No work runs on Opus 4.8')
-  expect((await call('sonnet', 'a1')).deny).toBeUndefined()
+  expect(await call('haiku', 'a1')).toEqual({ deny: undefined, model: 'sonnet' })
+  expect(await call('claude-opus-4-8', 'a1')).toEqual({ deny: undefined, model: 'opus' })
+  expect(await call('sonnet', 'a1')).toEqual({ deny: undefined, model: 'sonnet' })
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'h0', prompt: 'look it up', subagent_type: 'general-purpose', agentId: 'a1' } as never)).deny).toBeUndefined()
-  expect(files.get(`${MEMORY}/log.md`)).toContain('refused an Agent call on Opus 4.8')
+  expect(files.get(`${MEMORY}/log.md`)).toContain('an Agent call on Opus 4.8 starts on Opus 5.5')
+})
+
+test('every start is held to a current model: an older id, a parent on an older model, a checker weaker than its builder, a workflow agent and a copy', async ($, on) => {
+  const { asked, files } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  const go = (e: Record<string, unknown>) => $.agent.spawn({ ...spawn, prompt: 'p', parentModel: 'claude-opus-5-5', ...e } as never) as Promise<{ deny?: string; agentId?: string }>
+  // Named older, by a full id the Agent tool's own check never saw (a workflow script's, a hook's): its family's newest
+  await go({ model: 'claude-opus-4-8', parentAgentId: 'a0' })
+  expect(asked.at(-1)).toBe('claude-opus-5-5')
+  await go({ model: 'claude-haiku-4-5', parentAgentId: 'a0' })
+  expect(asked.at(-1)).toBe('claude-sonnet-5-5')
+  // No model, under a parent the app moved to an older model: not left to inherit it
+  await go({ parentModel: 'claude-opus-4-8', parentAgentId: 'a0', description: 'Search the docs' })
+  expect(asked.at(-1)).toBe('claude-opus-5-5')
+  await go({ model: 'inherit', parentModel: 'claude-sonnet-5', parentAgentId: 'a0', description: 'Search the docs' })
+  expect(asked.at(-1)).toBe('claude-sonnet-5-5')
+  // No model under a current parent is left to the engine: the kind's own model, then the parent's
+  await go({ parentAgentId: 'a0', description: 'Search the docs' })
+  expect(asked.at(-1)).toBeUndefined()
+  // A check of what was built never runs weaker than what built it, nor below Opus
+  await go({ model: 'sonnet', parentAgentId: 'a0', description: 'Second look at the CT scans page' })
+  expect(asked.at(-1)).toBe('claude-opus-5-5')
+  await go({ model: 'opus', parentModel: 'claude-fable-5-2', parentAgentId: 'a0', description: 'Check the page for faults' })
+  expect(asked.at(-1)).toBe('claude-fable-5-2')
+  await go({ parentModel: 'claude-sonnet-5-5', parentAgentId: 'a0', description: 'Review what was built' })
+  expect(asked.at(-1)).toBe('claude-opus-5-5')
+  await go({ model: 'fable', parentAgentId: 'a0', description: 'Second look at the page' })
+  expect(asked.at(-1)).toBe('fable')
+  // A workflow script's agent is held to the same
+  await go({ model: 'claude-sonnet-4-5', workflow: { runId: 'wf_1', agentIndex: 1 }, description: 'Index the photos' })
+  expect(asked.at(-1)).toBe('claude-sonnet-5-5')
+  await go({ model: 'sonnet', workflow: { runId: 'wf_1', agentIndex: 2 }, description: 'Verify the fix' })
+  expect(asked.at(-1)).toBe('claude-opus-5-5')
+  // A copy of an agent on an older model cannot be moved, so it is refused with why
+  expect((await go({ fork: true, parentModel: 'claude-opus-4-8', parentAgentId: 'a0' })).deny).toContain('No work runs on Opus 4.8. Start a fresh agent')
+  expect((await go({ fork: true, parentAgentId: 'a0' })).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain('a workflow agent asked to run on Sonnet 4.5 starts on Sonnet 5.5')
+})
+
+test('what counts as current follows the newest model the engine offers, never a version written into the mod', async ($, on) => {
+  const { asked, agentModels } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  // The engine starts work on a newer Opus by its alias: from then on Opus 5.5 is an older model, and the card's choice offers the newer one
+  await $.agent.spawn({ ...spawn, prompt: 'p', model: 'opus', parentModel: 'claude-opus-6' } as never)
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-6', messageCount: 2, agentId: 'a1' })) void _
+  await $.agent.spawn({ ...spawn, prompt: 'p', model: 'claude-opus-5-5', parentModel: 'claude-opus-6', parentAgentId: 'a1' } as never)
+  expect(asked.at(-1)).toBe('claude-opus-6')
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'n1', prompt: 'p', subagent_type: 'general-purpose', model: 'claude-opus-5-5', agentId: 'a1' } as never)
+  expect(agentModels.at(-1)).toBe('opus')
 })
 
 test('with Haiku named in the settings for a kind of work, an agent on Haiku is let through; an older model still is not', async ($, on) => {
-  const { files } = world(on)
+  const { files, agentModels } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ models: { legwork: 'haiku' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'haiku' } as never)).deny).toBeUndefined()
-  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)).deny).toContain('No work runs on Opus 4.8')
+  expect(agentModels.at(-1)).toBe('haiku')
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)
+  expect(agentModels.at(-1)).toBe('opus')
 })
 
 test('with the handing-over switched off the mod refuses no model and moves no step', async ($, on) => {

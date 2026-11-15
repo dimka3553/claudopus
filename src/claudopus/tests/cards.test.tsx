@@ -580,13 +580,15 @@ test("a card's title, its line of facts and every line under them start at one l
   await expectOneEdge(4)
 })
 
-test('work the app moves to an older model or to Haiku stays on it and its card says so; a helper whose own kind starts on Haiku runs on Sonnet', async ($, on) => {
-  const { stepped, files } = world(on, { model: 'claude-fable-5-2', startedOn: { 'Look it up': 'claude-haiku-5-5' } })
+test('work a safety flag would move to an older model is ended with a report that says so, never run there; an agent whose own kind starts it on an older model or Haiku runs on the newest', async ($, on) => {
+  const { stepped, files } = world(on, { model: 'claude-fable-5-2', startedOn: { 'Look it up': 'claude-haiku-5-5', 'Old kind': 'claude-opus-4-1' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
   const step = async (index: number, model: string, agentId: string | undefined = 'a1') => {
-    for await (const _ of $.turn.step({ turnId: 'turn-2', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) void _
+    const chunks: { kind: string; name?: string; json?: string; text?: string }[] = []
+    for await (const c of $.turn.step({ turnId: 'turn-2', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) chunks.push(c as never)
+    return chunks
   }
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const line = async () => (await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')
@@ -594,49 +596,57 @@ test('work the app moves to an older model or to Haiku stays on it and its card 
   // On the model it was started on, nothing is changed and the card says nothing more
   await step(0, 'claude-opus-5-5')
   expect(stepped).toEqual(['claude-opus-5-5'])
-  expect(await line()).not.toContain('by the app')
+  expect(await line()).not.toContain('safety flag')
 
-  // The app's safeguards flagged a message and the app sends the next steps to Opus 4.8: they stay there, and the card says so
-  await step(1, 'claude-opus-4-8')
-  await step(2, 'claude-opus-4-8')
-  expect(stepped).toEqual(['claude-opus-5-5', 'claude-opus-4-8', 'claude-opus-4-8'])
-  expect(await line()).toContain('moved to Opus 4.8 by the app')
-  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was sent to Opus 4.8 by the app: its steps stay there').length).toBe(2)
+  // The app's safeguards flagged a message and the app would send the next step to Opus 4.8: no request is made there; the work
+  // hands back a report that says why, and its card says so
+  const flagged = await step(1, 'claude-opus-4-8')
+  expect(stepped).toEqual(['claude-opus-5-5'])
+  expect(flagged.find(c => c.kind === 'tool')?.name).toBe('SubagentHandback')
+  expect(JSON.parse(flagged.find(c => c.kind === 'input')?.json ?? '{}').message).toContain('Start what is left again on the current model, leaving out what was flagged')
+  expect(await line()).toContain('ended after a safety flag, not carried on on Opus 4.8')
+  // Where the handback does not end it, a step after is a plain last answer, and still nothing runs on the older model
+  const again = await step(2, 'claude-opus-4-8')
+  expect(stepped).toEqual(['claude-opus-5-5'])
+  expect(again.find(c => c.kind === 'text')?.text).toContain('an older model no work runs on')
+  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was flagged and the app would send it to Opus 4.8').length).toBe(2)
 
-  // Once the app sends its steps to a right model again, a newer one too, nothing is changed and the card no longer says so
-  await step(3, 'claude-opus-5-6')
-  expect(stepped.at(-1)).toBe('claude-opus-5-6')
-  expect(await line()).not.toContain('by the app')
-  await step(4, 'claude-opus-4-8')
-  expect(await line()).toContain('moved to Opus 4.8 by the app')
-
-  // A helper of an agent type the app runs on Haiku runs on Sonnet 5.5; an older Sonnet the app moved it to stays
+  // A helper of an agent type that starts on Haiku runs on Sonnet 5.5; an older Sonnet the app moves it to is not run either
   await $.agent.spawn({ ...spawn, description: 'Look it up', prompt: 'look it up', parentAgentId: 'a1' } as never)
   await step(0, 'claude-haiku-5-5', 'a2')
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
   await step(1, 'claude-sonnet-5', 'a2')
-  expect(stepped.slice(-2)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5'])
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  expect(stepped.length).toBe(2)
+
+  // An agent whose own kind names an older Opus runs on the newest Opus, step after step
+  await $.agent.spawn({ ...spawn, description: 'Old kind', prompt: 'look again', parentAgentId: 'a1' } as never)
+  await step(0, 'claude-opus-4-1', 'a3')
+  await step(1, 'claude-opus-4-1', 'a3')
+  expect(stepped.slice(-2)).toEqual(['claude-opus-5-5', 'claude-opus-5-5'])
 
   // The chat's own thread runs on the model the person picked for it, whichever that is
   await step(0, 'claude-opus-4-8', '')
   expect(stepped.at(-1)).toBe('claude-opus-4-8')
 
-  // A model the person picks on the card is used for the steps the app sends to a right model, never in place of the app's move
-  await pressed(pane, 'model-a1')
-  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
-  await step(5, 'claude-opus-5-5')
-  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
-  await step(6, 'claude-opus-4-8')
-  expect(stepped.at(-1)).toBe('claude-opus-4-8')
-  expect(await line()).toContain('moved to Opus 4.8 by the app')
-
-  // F-003: a step of work that started on another model, which the app sends to Haiku, stays there too, and the card says so
-  await step(7, 'claude-haiku-5-5')
-  expect(stepped.at(-1)).toBe('claude-haiku-5-5')
-  expect(await line()).toContain('moved to Haiku 5.5 by the app')
   // An agent whose start the mod did not see (a workflow's, before this copy loaded) is left where the app sent it, Haiku too
   await step(0, 'claude-haiku-5-5', 'w1')
   expect(stepped.at(-1)).toBe('claude-haiku-5-5')
   expect(files.get(`${MEMORY}/log.md`)).toContain('work w1 was sent to Haiku 5.5 by the app: its steps stay there')
+})
+
+test('work the person moved to a model of their own is ended too when a safety flag would move it to an older model', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'model-a1')
+  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
+  expect(stepped).toEqual(['claude-sonnet-5-5'])
+  for await (const _ of $.turn.step({ turnId: 't', index: 1, model: 'claude-opus-4-8', messageCount: 2, agentId: 'a1' })) void _
+  expect(stepped).toEqual(['claude-sonnet-5-5'])
 })
 
 test('work that answers from an older model all the same says so on its card', async ($, on) => {

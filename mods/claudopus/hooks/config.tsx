@@ -67,7 +67,7 @@ const notLegwork = (m: Models) => (m.legwork !== checkWork(m) && m.legwork !== c
 const checkRule = (m: Models) => `Work that checks or verifies what was built runs on ${checkers(m)}: never on a model weaker than the one that built it${notLegwork(m)}.`
 // The chat's rule for which model each piece of work runs on, from the settings
 export const modelsRule = (m: Models) =>
-  `Most work runs on ${name(m.work)}, \`model: "${m.work}"\`. Long legwork such as indexing runs on ${name(m.legwork)}, \`model: "${m.legwork}"\`. ${name(m.heavy)}, \`model: "${m.heavy}"\`, is only for heavy or really complicated work. ${checkRule(m)}${noHaiku(m) ? ' Never Haiku.' : ''} A model is named by these aliases, never by an older version: an agent named an older model is refused.`
+  `Most work runs on ${name(m.work)}, \`model: "${m.work}"\`. Long legwork such as indexing runs on ${name(m.legwork)}, \`model: "${m.legwork}"\`. ${name(m.heavy)}, \`model: "${m.heavy}"\`, is only for heavy or really complicated work. ${checkRule(m)}${noHaiku(m) ? ' Never Haiku.' : ''} A model is named by these aliases, never by an older version: an agent named an older model starts on its newest.`
 // The same said short, as the chat is reminded when it tried to copy itself
 export const modelsShort = (m: Models) => `"${m.work}" for most work, "${m.legwork}" for long legwork, "${m.heavy}" only for heavy or really complicated work, ${checkHeavy(m) ? `"${checkWork(m)}" or "${m.heavy}"` : `"${checkWork(m)}"`} for checking what was built, never weaker than what built it`
 export const fillModels = (text: string, m: Models) =>

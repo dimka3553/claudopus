@@ -42,6 +42,8 @@ export type Todo = {
   chosen?: string
   // The older model, or Haiku, the app sent its steps to, which the mod sent to a model work runs on instead: "Opus 4.8"
   moved?: string
+  // The older model the app would have carried it on after a safety check flagged a message, which it was ended rather than run on
+  flagged?: string
   // How many tool steps it has made
   steps?: number
   // How many of them since it last touched its to-dos or said where it stands

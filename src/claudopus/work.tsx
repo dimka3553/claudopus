@@ -301,11 +301,14 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       return r
     }
-    // No agent, the chat's or a work's helper, is started on an older model or on Haiku
-    if (!isOff && e.tool === 'Agent' && rightModel(String((e as { model?: unknown }).model ?? ''))) {
-      const wrong = String((e as { model?: unknown }).model)
-      await log($, `refused an Agent call on ${modelName(wrong)}`)
-      return { deny: WRONG_MODEL(wrong) }
+    // No agent, the chat's or a work's helper, is started on an older model or on Haiku: one named so starts on its family's newest
+    // (Haiku's is Sonnet), by its alias, which the Agent tool takes
+    const askedModel = !isOff && e.tool === 'Agent' && (e as { subagent_type?: unknown }).subagent_type !== 'fork' ? String((e as { model?: unknown }).model ?? '') : ''
+    const better = askedModel ? rightModel(askedModel) : undefined
+    if (better) {
+      const alias = (modelName(better).split(' ')[0] ?? '').toLowerCase()
+      await log($, `an Agent call on ${modelName(askedModel)} starts on ${modelName(better)}`)
+      return next({ ...e, model: alias } as typeof e)
     }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
@@ -362,13 +365,37 @@ const workHooks = (on: On) => {
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-    // A step the app sends to an older model or to Haiku (it moves work there after its safeguards flag a message) is left where the
-    // app sent it, even for work the person moved to a model of their own, and the card says which model it runs on now. Only a
-    // helper whose own kind started it on Haiku (as Explore is), which the person never wants, has its Haiku steps go to Sonnet, or to
-    // the model the person picked: a step of it on Haiku is where it started, not where the app moved it
+    // A step the app sends to an older model or to Haiku after its safeguards flag a message is not moved back past the flag: the
+    // work is ended there with a report that says so (FLAGGED), so its parent starts what is left again on a current model. An agent
+    // that started on an older model or on Haiku itself (its own kind's model, or an alias the settings point at an older version)
+    // has its steps go to that family's newest, or to the model the person picked. An agent whose start the mod did not see is left
+    // where the app sent it, and its card says so
     const own = id !== undefined ? startedOn.get(id) : undefined
-    const isOwnHaiku = /haiku/i.test(e.model) && /haiku/i.test(own ?? '')
-    const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnHaiku
+    const isOwnOlder = own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
+    const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
+    if (isMovedByApp && own !== undefined && id !== undefined) {
+      const n = (flaggedSteps.get(id) ?? 0) + 1
+      flaggedSteps.set(id, n)
+      if (n === 1) await log($, `work ${id} was flagged and the app would send it to ${modelName(e.model)}: it is ended with a report instead`)
+      if (dir) {
+        await update($, todos, list => list.map(one => (one.id === id ? { ...one, flagged: modelName(e.model), moved: undefined } : one)))
+        await stopHelpers($, id).catch(() => undefined)
+      }
+      // Its report goes back through the handback tool; where that does not end it, a plain last answer, and past a few the work is
+      // stopped as a press on Stop would
+      if (n > 3) void $.tool.call({ tool: 'TaskStop', task_id: id }).catch(() => undefined)
+      const text = FLAGGED(e.model)
+      if (n === 1) {
+        const call = `toolu_flagged_${id}`
+        yield { kind: 'tool', index: 0, id: call, name: 'SubagentHandback' }
+        yield { kind: 'input', index: 0, json: JSON.stringify({ message: text }) }
+        yield { kind: 'stop', stopReason: 'tool_use', usage: null }
+        return { turnId: e.turnId, index: e.index, answer: '', toolUses: [{ name: 'SubagentHandback', input: { message: text } }], stopReason: 'tool_use', usage: null }
+      }
+      yield { kind: 'text', index: 0, text }
+      yield { kind: 'stop', stopReason: 'end_turn', usage: null }
+      return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn', usage: null }
+    }
     const instead = id !== undefined && !isOff && !isMovedByApp && !chosen ? rightModel(e.model) : undefined
     if (id !== undefined && (isMovedByApp || instead) && !sentElsewhere.has(`${id} ${e.model}`)) {
       sentElsewhere.add(`${id} ${e.model}`)
@@ -381,6 +408,7 @@ const workHooks = (on: On) => {
     const r = yield* next(to ? { ...e, model: to } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
+    if (model) seeModel(model)
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)
     if (id !== undefined && tokens && dir) await update($, todos, list => list.map(one => (one.id === id ? { ...one, tokens, model: one.chosen ?? (modelName(model ?? '') ? model : one.model) } : one)))
 
@@ -401,11 +429,22 @@ const workHooks = (on: On) => {
     return r
   })
 
-  on('agent.spawn', async ($, e, next) => {
-    agentStarted($, e.tool_use_id)
+  on('agent.spawn', async ($, asked, next) => {
+    agentStarted($, asked.tool_use_id)
+    // Every agent starts on a current model: one named an older model or Haiku on its family's newest, a copy of an agent on an
+    // older model not at all, and one left to its parent's model, when that is older, on that family's newest. A check of what was
+    // built, by a helper or a workflow's agent, runs on a model never weaker than its parent's, and at least on Opus
+    const start = isOff || asked.resume ? undefined : startModel(asked)
+    if (start?.deny) {
+      await log($, `refused a copy of an agent on ${modelName(String(asked.parentModel ?? ''))}`)
+      return { deny: start.deny }
+    }
+    if (start?.model) await log($, `${asked.workflow ? 'a workflow agent' : 'an agent'} asked to run on ${modelName(asked.model ?? '') || `its parent's ${modelName(String(asked.parentModel ?? '')) || 'model'}`} starts on ${modelName(start.model)}`)
+    const e = start?.model ? { ...asked, model: start.model } : asked
     // An agent a workflow's script starts belongs to its run's blue card, not a card of its own
     if (e.workflow) {
       const r = await next(e)
+      if (r.model) seeModel(r.model)
       if (r.agentId && r.model) startedOn.set(r.agentId, r.model)
       if (r.agentId && dir) await flowSpawned($, e.workflow.runId, r.agentId, modelName(r.model ?? '') ? r.model : e.model || r.model || '', e.description ?? '').catch(err => log($, `workflow agent not kept: ${String(err)}`))
       return r
@@ -422,6 +461,7 @@ const workHooks = (on: On) => {
     const isBackground = isHelperSpawn(e)
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
+    if (r.model) seeModel(r.model)
     if (r.agentId && r.model) startedOn.set(r.agentId, r.model)
     if (!dir || !r.agentId) return r
     const id = r.agentId
