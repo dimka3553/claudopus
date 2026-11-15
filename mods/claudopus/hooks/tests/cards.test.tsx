@@ -840,7 +840,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   // It is one folded row, "Finished", under the running cards; unfolded, a card as running work has, with Details and no Stop
   const buttons = await pane.findAll({ type: 'Button' })
   expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', '▸ Finished 1'])
-  await pane.press({ key: String(buttons[5]?.key) })
+  await pane.press({ key: String(buttons.find(b => b.props.label === '▸ Finished 1')?.key) })
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.wrap).toBe('truncate-end')
   expect((await pane.find({ type: 'Text', text: /^Finished ·/ }))?.text).toBe('Finished · 1 of 7 done · 2m 00s')
   expect(await pane.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
