@@ -270,7 +270,7 @@ const focusMoved = (element: string | undefined, requestId: string) => {
 }
 // Each press, by its element, as the press hook found it before anything it does draws the pane again: whether its pane held still,
 // and on the desktop whether the person's focus came onto it just before
-let pressSteady = new Map<string, 'steady' | 'moved' | 'unfocused'>()
+let pressSteady = new Map<string, 'steady' | 'unproven' | 'moved' | 'unfocused'>()
 // Off only in the terminal, whose buttons are pressed by keys alone. A focus move counts for one press only
 const pressSeen = (element: string, requestId: string, surface: string, at: number) => {
   if (pressSteady.size > 50) pressSteady = new Map()
@@ -279,7 +279,10 @@ const pressSeen = (element: string, requestId: string, surface: string, at: numb
   if (isNewSurface) focusSurfaces.add(surface)
   const isFocused = surface === 'terminal' || !focusSurfaces.has(surface) || isMatched
   focusSeen = undefined
-  pressSteady.set(element, at - (paneMovedAt.get(requestId) ?? -Infinity) < STEADY ? 'moved' : isFocused ? 'steady' : 'unfocused')
+  // On a surface not yet seen to move the focus on a click, a press may be a key: it counts, but is held to be taken back as an
+  // approving one is
+  const isUnproven = surface !== 'terminal' && !focusSurfaces.has(surface)
+  pressSteady.set(element, at - (paneMovedAt.get(requestId) ?? -Infinity) < STEADY ? 'moved' : !isFocused ? 'unfocused' : isUnproven ? 'unproven' : 'steady')
   return isNewSurface
 }
 // The reply box each pane last drew for each work's ask, so a press that did not count gives the keys back to it
@@ -303,7 +306,7 @@ const answerPress = ($: EngineInterface, one: Todo, choice: string, press: { ele
   if (press?.element !== undefined) pressSteady.delete(press.element)
   return answerAsk($, one, choice, false, seen, press?.requestId)
 }
-const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = false, seen: 'steady' | 'moved' | 'unfocused' = 'steady', paneId?: string) => {
+const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = false, seen: 'steady' | 'unproven' | 'moved' | 'unfocused' = 'steady', paneId?: string) => {
   const run = answerNow($, one, choice, isReply, seen, paneId)
   if (one.chat) return run
   answersOnWay.add(run)
@@ -315,7 +318,7 @@ const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = fals
 const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
   !isReply || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
-const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false, seen: 'steady' | 'moved' | 'unfocused' = 'steady', paneId?: string) => {
+const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false, seen: 'steady' | 'unproven' | 'moved' | 'unfocused' = 'steady', paneId?: string) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
   if (one.chat) return
   const ask = one.ask
@@ -325,7 +328,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const asked = `${one.id}:${ask.at}:${ask.text}`
   // A press counts only on a pane that held still, and never over a reply typed in its ask's box: it is said on the card instead
   if (!isReply && !answeredAsks.has(asked)) {
-    const why = (drafts.get(draftOf(one.id, ask)) ?? '').trim() ? 'typed' : seen === 'steady' ? undefined : seen
+    const why = (drafts.get(draftOf(one.id, ask)) ?? '').trim() ? 'typed' : seen === 'steady' || seen === 'unproven' ? undefined : seen
     if (why) {
       const at = await $.clock.now()
       pressRefused.set(one.id, { why, choice: said, askAt: ask.at, at })
@@ -347,7 +350,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   pressRefused.delete(one.id)
   // An answer that releases, allows or approves something is said back on the card and waits HOLD, with a press to take it back
   let isTakenOver = false
-  if (!isReply && APPROVING.test(said)) {
+  if (!isReply && (APPROVING.test(said) || seen === 'unproven')) {
     const isKept = await new Promise<boolean>(resolve => {
       const held = { choice: said, askAt: ask.at, settle: (kept: boolean, isAnsweredElse = false) => (answerHeld.get(one.id) === held && answerHeld.delete(one.id), (isTakenOver = isAnsweredElse), resolve(kept)) }
       answerHeld.set(one.id, held)

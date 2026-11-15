@@ -558,7 +558,7 @@ test('Release it on an ended ask leaves its card where it was, saying the answer
 
 const answeredStays = async ($: Parameters<TestBody>[0], on: On, how: 'press' | 'reply') => {
   const { list, order, clock } = await askingFourth($, on)
-  if (how === 'press') await pressed(list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
+  if (how === 'press') await answer(clock, list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
   else await list.input({ key: ((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).find(one => /-reply-/.test(one.key ?? ''))?.key ?? '', text: 'It is pasted' })
   expect(await until(async () => list.find({ type: 'Text', text: /You answered/ } as never))).toBeDefined()
   expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5'])
@@ -578,7 +578,7 @@ test('answering one of two asks at the top leaves both cards where they were, so
   expect(await until(async () => ((await order())[0] === 'Piece 2' ? true : undefined))).toBe(true)
   expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
   // The older ask, second at the top, is answered: it stays second, the newer ask above it, and it still says the answer under the line its work then writes
-  await pressed(list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
+  await answer(clock, list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
   expect(await until(async () => list.find({ type: 'Text', text: /You answered “Done”/ } as never))).toBeDefined()
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n4', agentId: 'a4', text: 'Now doing the next part' } as never)
   await clock.advance(5000)

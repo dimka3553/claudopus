@@ -82,7 +82,11 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await list.input({ key: again?.key ?? '', text: '', kind: 'change' } as never)
   const done = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Done')?.key ?? ''
   await clock.advance(1000)
-  await Promise.all([list.press({ key: done }), list.press({ key: done }).catch(() => undefined)])
+  const both = Promise.all([list.press({ key: done }), list.press({ key: done }).catch(() => undefined)])
+  // A press on a surface not yet seen to move the focus on a click is said back first, to be taken back
+  expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => one.text.startsWith('You answered: “Done”')))).toBeDefined()
+  await clock.advance(5000)
+  await both
   expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"Done"')))).toContain('Submit new. Done?')
   expect(appended.filter(line => line.startsWith('a2: ') && line.includes('"Done"'))).toHaveLength(1)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'It is under Manage, then Submit new. Done?' })) ? undefined : true))).toBe(true)
