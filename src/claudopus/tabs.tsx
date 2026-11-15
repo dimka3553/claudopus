@@ -8,7 +8,7 @@ const tabHooks = (on: On) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
-    if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1), await engage($))
+    if (e.plugin === 'claudopus') (freeTimes($), scrollEnds(), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>
@@ -23,6 +23,7 @@ const tabHooks = (on: On) => {
   })
   // and so does a reply typed in a card's box
   on('ui.input', async ($, e, next) => {
+    if (e.plugin === 'claudopus' && e.kind === 'submit') scrollEnds()
     const r = await next(e)
     if (e.plugin !== 'claudopus' || e.kind !== 'submit') return r
     // A box sent is gone: the pull back to it no longer applies (commands.tsx)

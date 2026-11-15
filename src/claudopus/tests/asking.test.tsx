@@ -1132,6 +1132,13 @@ test("a page of the panel scrolled for half a minute is never drawn anew under t
   await clock.advance(1000)
   expect(writes.invalidate ?? 0).toBeGreaterThanOrEqual(1)
   expect(await list.find({ type: 'Text', text: 'May I go on?' })).toBeDefined()
+  // A press a moment after a scroll ends it: what the press did shows at once, not when the scroll would have rested
+  const toList = (offset: number) =>
+    ($.ui as unknown as { scroll: (e: unknown) => Promise<unknown> }).scroll({ component: 'Pane', requestId: 'claudopus', offset, by: 1, bodyRows: 20, contentRows: 400, origin: { kind: 'person' } }).catch(() => undefined)
+  await toList(1)
+  await clock.advance(150)
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key ?? '' })
+  expect(await list.find({ type: 'Text', text: 'May I go on?' })).toBeUndefined()
   await Promise.all([list.unmount(), results.unmount()])
 })
 

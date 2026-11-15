@@ -164,14 +164,20 @@ let isRestWatched = false
 let isScrollHoldOff = false
 const isScrolling = async ($: EngineInterface) => !isScrollHoldOff && (await $.clock.now()) - scrolledAt < SCROLL_REST
 const scrolled = async ($: EngineInterface) => void (scrolledAt = await $.clock.now())
+// A press, a pick, a reply sent or the focus moved by the person ends the scroll at once, so what they did shows at once
+const scrollEnds = () => void (scrolledAt = 0)
 const owe = ($: EngineInterface, why: string) => {
   if (!isOwed) recordEvent($, why)
   isOwed = true
   if (isRestWatched) return
   isRestWatched = true
   const look = async () => {
-    const left = SCROLL_REST - ((await $.clock.now()) - scrolledAt)
-    if (left > 0 && !isScrollHoldOff) return void $.clock.after(left + 20, () => void look())
+    try {
+      const left = SCROLL_REST - ((await $.clock.now()) - scrolledAt)
+      if (left > 0 && !isScrollHoldOff) return void $.clock.after(left + 20, () => void look())
+    } catch {
+      // Whatever failed, the owed drawing is not lost: it is drawn now
+    }
     isRestWatched = false
     if (!isOwed) return
     isOwed = false
@@ -182,7 +188,7 @@ const owe = ($: EngineInterface, why: string) => {
 }
 // The last drawing of each pane of the mod's, by its size: under a scroll the app's asks are given it again, so its rows and height
 // stay as they are; anything that moved meanwhile is drawn once the scroll rests
-const scrollDrawings = new Map<string, unknown>()
+const scrollDrawings = new Map<string, { key: string; drawing: unknown }>()
 const scrollKey = (e: { requestId?: string; surface?: string; props: { scroll: { offset: number; bodyRows: number }; placement?: string; isFocused?: boolean } }) =>
   `${e.requestId ?? ''}|${e.surface ?? ''}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}`
 // The panes the mod draws: the list, a work's or workflow's Details, its tabs and a result or memory file opened in a tab

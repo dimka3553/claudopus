@@ -585,10 +585,7 @@ const recorderHooks = (on: On) => {
     await recordLine($, { ev: 'scroll', id: e.requestId, origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows, answer: (r as { offset?: number })?.offset, followEnd: (r as { followEnd?: boolean })?.followEnd })
     return r
   })
-  on('ui.focus', { plugin: 'claudopus' }, async ($, e, next) => {
-    if (isModPane(e.requestId) && await isRecording($)) await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element) })
-    return next(e)
-  })
+  // Focus is recorded in commandHooks' own focus hook, which sees a focus leaving the panes too
   // Typing as a count by box: the value is never read
   on('ui.input', { requestId: LIST }, async ($, e, next) => {
     // A key box's typing is not recorded at all, not even as a count: a password's length is the password's
@@ -5399,14 +5396,20 @@ let isRestWatched = false
 let isScrollHoldOff = false
 const isScrolling = async ($: EngineInterface) => !isScrollHoldOff && (await $.clock.now()) - scrolledAt < SCROLL_REST
 const scrolled = async ($: EngineInterface) => void (scrolledAt = await $.clock.now())
+// A press, a pick, a reply sent or the focus moved by the person ends the scroll at once, so what they did shows at once
+const scrollEnds = () => void (scrolledAt = 0)
 const owe = ($: EngineInterface, why: string) => {
   if (!isOwed) recordEvent($, why)
   isOwed = true
   if (isRestWatched) return
   isRestWatched = true
   const look = async () => {
-    const left = SCROLL_REST - ((await $.clock.now()) - scrolledAt)
-    if (left > 0 && !isScrollHoldOff) return void $.clock.after(left + 20, () => void look())
+    try {
+      const left = SCROLL_REST - ((await $.clock.now()) - scrolledAt)
+      if (left > 0 && !isScrollHoldOff) return void $.clock.after(left + 20, () => void look())
+    } catch {
+      // Whatever failed, the owed drawing is not lost: it is drawn now
+    }
     isRestWatched = false
     if (!isOwed) return
     isOwed = false
@@ -5417,7 +5420,7 @@ const owe = ($: EngineInterface, why: string) => {
 }
 // The last drawing of each pane of the mod's, by its size: under a scroll the app's asks are given it again, so its rows and height
 // stay as they are; anything that moved meanwhile is drawn once the scroll rests
-const scrollDrawings = new Map<string, unknown>()
+const scrollDrawings = new Map<string, { key: string; drawing: unknown }>()
 const scrollKey = (e: { requestId?: string; surface?: string; props: { scroll: { offset: number; bodyRows: number }; placement?: string; isFocused?: boolean } }) =>
   `${e.requestId ?? ''}|${e.surface ?? ''}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}`
 // The panes the mod draws: the list, a work's or workflow's Details, its tabs and a result or memory file opened in a tab
@@ -10455,7 +10458,10 @@ const commandHooks = (on: On) => {
   // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
   // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
+    if (isModPane(e.requestId) && (await isRecording($))) await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element) })
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
+      // The person's own move in a pane ends a scroll there: what it does is drawn at once (scrollRest)
+      if (e.plugin === 'claudopus') scrollEnds()
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
@@ -10469,7 +10475,7 @@ const commandHooks = (on: On) => {
   // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
   // Every pane of the mod's counts, its tabs too: Results, Memory and Keys were drawn anew under a scroll and stopped it (scrollRest)
   on('ui.scroll', async ($, e, next) => {
-    if (e.origin.kind === 'person' && isModPane(e.requestId)) (await engage($), await scrolled($))
+    if (e.origin.kind === 'person' && isModPane(e.requestId)) await engage($)
     // The app pulling the pane back to the box the person types in, reported as their move, is refused: the window stays where
     // they scrolled it (scrolls.ts)
     if (e.origin.kind === 'person') {
@@ -10477,6 +10483,8 @@ const commandHooks = (on: On) => {
       if (!isPullGuardOff && isPulledBack(lastMoves.get(e.requestId), move, boxFocused.has(e.requestId), pulledTo.get(e.requestId)))
         return (Math.abs(e.by) >= PULL_MARKS && pulledTo.set(e.requestId, e.offset), recordEvent($, 'pull-refused', { by: e.by, to: e.offset }), {})
       lastMoves.set(e.requestId, move)
+      // Only a move let through counts as a scroll in progress: the app's pull back refused above does not keep it going
+      if (isModPane(e.requestId)) await scrolled($)
     }
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -10485,15 +10493,16 @@ const commandHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const id = e.requestId ?? ''
     if (!isModPane(id)) return next(e)
+    // Only the drawing on screen is held: one of another size, focus or side of the top is drawn afresh
     const key = `${scrollKey(e)}|${e.props.scroll.offset > 0 ? 1 : 0}`
     const r = await next(e)
-    const last = scrollDrawings.get(key)
-    if (last !== undefined && last !== r && (await isScrolling($))) return (owe($, 'drawing-held'), last as typeof r)
-    scrollDrawings.set(key, r)
+    const last = scrollDrawings.get(`${id}|${e.surface}`)
+    if (last && last.key === key && last.drawing !== r && (await isScrolling($))) return (owe($, 'drawing-held'), last.drawing as typeof r)
+    scrollDrawings.set(`${id}|${e.surface}`, { key, drawing: r })
     return r
   })
   // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts
-  on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)))
+  on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), scrollEnds(), next(e)))
   // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
   on('ui.close', async ($, e, next) => {
     const r = await next(e)
@@ -12819,7 +12828,7 @@ const tabHooks = (on: On) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
-    if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1), await engage($))
+    if (e.plugin === 'claudopus') (freeTimes($), scrollEnds(), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>
@@ -12834,6 +12843,7 @@ const tabHooks = (on: On) => {
   })
   // and so does a reply typed in a card's box
   on('ui.input', async ($, e, next) => {
+    if (e.plugin === 'claudopus' && e.kind === 'submit') scrollEnds()
     const r = await next(e)
     if (e.plugin !== 'claudopus' || e.kind !== 'submit') return r
     // A box sent is gone: the pull back to it no longer applies (commands.tsx)

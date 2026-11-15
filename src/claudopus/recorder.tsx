@@ -120,10 +120,7 @@ const recorderHooks = (on: On) => {
     await recordLine($, { ev: 'scroll', id: e.requestId, origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows, answer: (r as { offset?: number })?.offset, followEnd: (r as { followEnd?: boolean })?.followEnd })
     return r
   })
-  on('ui.focus', { plugin: 'claudopus' }, async ($, e, next) => {
-    if (isModPane(e.requestId) && await isRecording($)) await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element) })
-    return next(e)
-  })
+  // Focus is recorded in commandHooks' own focus hook, which sees a focus leaving the panes too
   // Typing as a count by box: the value is never read
   on('ui.input', { requestId: LIST }, async ($, e, next) => {
     // A key box's typing is not recorded at all, not even as a count: a password's length is the password's
