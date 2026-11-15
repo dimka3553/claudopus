@@ -48,7 +48,7 @@ const drawingMark = (pane: string, shown: unknown[]) => {
   drawings.set(pane, { look, n })
   return String(n)
 }
-const redraw = ($: EngineInterface) => $.ui.invalidate('ui.render')
+const redraw = ($: EngineInterface) => drawAgain($)
 // Opens a pane from a press, in front: the app leaves a pane already open where it is, behind another tab, so one open but not
 // shown is opened again
 // The tabs as the engine lists them, one word each: id, then s shown, f holding the keyboard, p drawn, for the log

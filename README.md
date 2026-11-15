@@ -70,7 +70,7 @@ That is all. It is on in every chat from then on, and it keeps itself up to date
 | **Passwords and keys** | A key is asked for once in a box at the top of the panel, kept in the macOS keychain (on Linux, in a file only you can read), never put in a chat; an admin password is asked for each time and never kept. The box words itself and work is kept out of its files: this stops slips and common tricks, and is no wall. |
 | **Admin commands ask first** | Before work runs a command as administrator, its card shows the exact command and the Mac with Allow once, Always allow this command and Deny. Config chooses each time, once per piece of work or never, and lists what you always allow. Or let macOS ask for the password each time and keep none. |
 | **One release at a time** | Work changes a repo only in its own worktree and branch, and reaches main only through one release command that takes its turn, numbers the version, builds, checks and pushes. A push to main by hand is refused. |
-| **Tabs** | Results, Stats (tokens, cost at API prices, time saved), Config and About; Memory opens the memory folder. `/claudopus` reopens a closed panel, `/servers` lists the local servers your chats started. |
+| **Tabs** | Results, Stats (tokens, cost at API prices, time saved), Config and About; Memory opens the memory folder, and Keys the list of keys you have given, by name and where each is kept, never a value, which work reads before asking for one. `/claudopus` reopens a closed panel, `/servers` lists the local servers your chats started. |
 
 Every detail is in the [full guide](mods/claudopus/docs/guide.md#what-you-see).
 

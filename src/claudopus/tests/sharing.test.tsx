@@ -257,8 +257,9 @@ test("while the person types a reply into an ask, work finishing here and in ano
   expect(await drawn(list)).toContain('happy')
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
-  // The half reply is still in its box
-  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('Not ye')
+  // The half reply is still in its box: while typing the box holds the letters itself, and once typing stops it is drawn with them
+  await clock.advance(31_000)
+  expect(await until(async () => ((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value === 'Not ye' ? true : undefined))).toBe(true)
   await list.unmount()
 })
 

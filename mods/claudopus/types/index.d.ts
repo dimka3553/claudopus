@@ -95,7 +95,11 @@ export type Todo = {
   leftSince?: number
   // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
   // in its own words, and since when, with the command itself. Dropped as it ends or is stopped
-  bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string }[]
+  bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string; expiresAt?: number }[]
+  // What it ran in the background or detached that has ended, newest last: its words, when it began and ended, and how it ended
+  // (finished, failed with its exit code, killed, timed out at the engine's limit, stopped by the work, or ended as far as the mod
+  // can tell). Its card sums these up in a row, and Details lists them
+  endedRuns?: { id: string; what: string; at: number; endedAt: number; how: 'finished' | 'failed' | 'killed' | 'timed out' | 'stopped' | 'ended'; code?: string }[]
   // In another chat's file only: how each of its jobs stands as that chat last read it (its latest line, how far, its last lines),
   // by the job's id, so its Details shows them as that chat's own does
   seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[] }>
@@ -267,6 +271,6 @@ export type Flow = {
 
 declare module 'claude-code' {
   interface PluginState {
-    claudopus: { me: Shaped<Me>; todos: Shaped<Todo[]>; view: Shaped<View>; servers: Shaped<Server[]>; tick: Shaped<number>; drawn: Shaped<number>; shown: Shaped<boolean>; reports: Shaped<Report[]>; flows: Shaped<Flow[]>; others: Shaped<Shared[]>; ran: Shaped<string>; load: string }
+    claudopus: { me: Shaped<Me>; todos: Shaped<Todo[]>; view: Shaped<View>; servers: Shaped<Server[]>; tick: Shaped<number>; drawn: Shaped<number>; shown: Shaped<boolean>; reports: Shaped<Report[]>; flows: Shaped<Flow[]>; others: Shaped<Shared[]>; ran: Shaped<string>; drafts: Shaped<Record<string, string>>; load: string }
   }
 }
