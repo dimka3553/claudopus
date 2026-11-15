@@ -10,17 +10,6 @@ var __assign = (this && this.__assign) || function () {
     };
     return __assign.apply(this, arguments);
 };
-var __rest = (this && this.__rest) || function (s, e) {
-    var t = {};
-    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
-        t[p] = s[p];
-    if (s != null && typeof Object.getOwnPropertySymbols === "function")
-        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
-            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
-                t[p[i]] = s[p[i]];
-        }
-    return t;
-};
 var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
         if (ar || !(i in from)) {
@@ -31,8 +20,8 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     return to.concat(ar || Array.prototype.slice.call(from));
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.BRIDGE_ID = exports.macName = exports.isMac = exports.clockOf = exports.opensOf = exports.openTake = exports.OPEN_MARK = exports.OPEN_KEPT = exports.OPEN_EVERY = exports.tripOf = exports.stuckOf = exports.APP_LOG_LOOK = exports.offOf = exports.OFF_LOOK = exports.trip = exports.pushHead = exports.pushOf = exports.isAnswerName = exports.keyOf = exports.isKey = exports.ANSWER_MARK = exports.OUTBOX = exports.PUSHED = exports.fetchedOf = exports.MARK = exports.answerOf = exports.ANSWER_KEPT = exports.chatSide = exports.chatName = exports.ordered = exports.helpersOf = exports.cardsOf = exports.remoteId = exports.REMOTE = exports.fetchedOpen = exports.openChatOf = exports.sharedOf = exports.promptsOf = exports.signOf = exports.shareableHelpers = exports.shareable = exports.ENDED_FOR = exports.ENDED_SHARED = exports.FETCH_EVERY = exports.LOOK_EVERY = exports.STALE = exports.BEAT = exports.MACS = exports.ANSWERS = exports.LIVE_DIR = void 0;
-exports.headMood = exports.headLine = exports.openUrl = exports.linkOf = exports.APP_ID = void 0;
+exports.linkOf = exports.APP_ID = exports.BRIDGE_ID = exports.macName = exports.isMac = exports.clockOf = exports.opensOf = exports.openTake = exports.OPEN_MARK = exports.OPEN_KEPT = exports.OPEN_EVERY = exports.tripOf = exports.stuckOf = exports.APP_LOG_LOOK = exports.offOf = exports.OFF_LOOK = exports.trip = exports.pushHead = exports.pushOf = exports.isAnswerName = exports.keyOf = exports.isKey = exports.ANSWER_MARK = exports.OUTBOX = exports.PUSHED = exports.fetchedOf = exports.MARK = exports.answerOf = exports.ANSWER_KEPT = exports.chatSide = exports.chatName = exports.ordered = exports.cardsOf = exports.remoteId = exports.REMOTE = exports.fetchedOpen = exports.openChatOf = exports.sharedOf = exports.promptsOf = exports.signOf = exports.shareable = exports.ENDED_FOR = exports.ENDED_SHARED = exports.FETCH_EVERY = exports.LOOK_EVERY = exports.STALE = exports.BEAT = exports.MACS = exports.ANSWERS = exports.LIVE_DIR = void 0;
+exports.headMood = exports.headLine = exports.openUrl = void 0;
 // ---- Every chat's work in every panel: each chat keeps its running work in a small file of its own, the others read it ----
 // ~/.claude/claudopus/live/<chat id>.json, written only by that chat; an answer to one of its asks from another chat's panel is
 // left for it in live/answers/<chat id>/, which it reads and acts on as if pressed in its own panel
@@ -50,13 +39,6 @@ exports.FETCH_EVERY = 10000;
 // What one card carries to other chats: enough for its small card and its Details, not its whole log
 var ITEMS_SHARED = 30;
 var WORDS_SHARED = 1200;
-// What it reported when it ended, as far as its Details shows it
-var ANSWER_SHARED = 1500;
-// Its helpers, the newest first, so its Details lists them as its own chat's does
-var HELPERS_SHARED = 24;
-var HELPER_ITEMS = 12;
-// Text cut short says so
-var upTo = function (text, most) { return (text.length > most ? "".concat(text.slice(0, most - 1).trimEnd(), "\u2026") : text); };
 // Work that ended is shown in other chats' panels too, where it turns happy and folds into Finished as in its own: the newest few
 // that ended in the last hours, while its chat is open
 exports.ENDED_SHARED = 10;
@@ -68,33 +50,12 @@ var shareable = function (list, now) {
     return list
         .filter(function (one) { return !one.parentId && !one.chat; })
         .filter(function (one, _, all) { var _a, _b; return one.status === 'working' || Boolean((_b = (_a = one.ask) === null || _a === void 0 ? void 0 : _a.choices) === null || _b === void 0 ? void 0 : _b.length) || (one.endedAt > now - exports.ENDED_FOR && all.filter(function (other) { return other.status !== 'working' && other.endedAt > one.endedAt; }).length < exports.ENDED_SHARED); })
-        .map(function (one) { return (__assign(__assign({}, one), { words: one.words.slice(0, WORDS_SHARED), items: one.items.slice(-ITEMS_SHARED), entries: __spreadArray([], one.entries, true).reverse().filter(function (entry) { return entry.kind !== 'steer'; }).slice(0, 1), answer: upTo(one.answer, ANSWER_SHARED) })); });
+        .map(function (one) { return (__assign(__assign({}, one), { words: one.words.slice(0, WORDS_SHARED), items: one.items.slice(-ITEMS_SHARED), entries: __spreadArray([], one.entries, true).reverse().filter(function (entry) { return entry.kind !== 'steer'; }).slice(0, 1), answer: '' })); });
 };
 exports.shareable = shareable;
-// The helpers under the work a chat shares, however deep, cut as their work is: another chat's Details lists them, and opens each
-var shareableHelpers = function (list, shared) {
-    var ids = new Set(shared.map(function (one) { return one.id; }));
-    var topOf = function (one) {
-        var at = one;
-        for (var n = 0; at.parentId && n < 10; n += 1) {
-            var up = list.find(function (other) { return other.id === at.parentId; });
-            if (!up)
-                return '';
-            at = up;
-        }
-        return at.id;
-    };
-    return list
-        .filter(function (one) { return one.parentId && !one.chat && ids.has(topOf(one)); })
-        // Those at work first, so a busy chat never drops a running helper behind ended ones
-        .sort(function (a, b) { return Number(b.status === 'working') - Number(a.status === 'working') || b.startedAt - a.startedAt; })
-        .slice(0, HELPERS_SHARED)
-        .map(function (one) { return (__assign(__assign({}, one), { words: '', items: one.items.slice(-HELPER_ITEMS), entries: __spreadArray([], one.entries, true).reverse().filter(function (entry) { return entry.kind !== 'steer'; }).slice(0, 1), answer: upTo(one.answer, ANSWER_SHARED / 2) })); });
-};
-exports.shareableHelpers = shareableHelpers;
 // What tells one shared state from another, the running times aside: a file is written again when it changes or its beat is due
 var signOf = function (cards) {
-    return JSON.stringify(cards.map(function (one) { var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q; return [one.id, one.status, one.title, one.model, one.tokens, one.items, (_b = (_a = one.entries.at(-1)) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '', (_d = (_c = one.ask) === null || _c === void 0 ? void 0 : _c.text) !== null && _d !== void 0 ? _d : '', (_f = (_e = one.ask) === null || _e === void 0 ? void 0 : _e.at) !== null && _f !== void 0 ? _f : 0, (_h = (_g = one.ask) === null || _g === void 0 ? void 0 : _g.copy) !== null && _h !== void 0 ? _h : '', (_k = (_j = one.ask) === null || _j === void 0 ? void 0 : _j.choices) !== null && _k !== void 0 ? _k : [], (_o = (_m = (_l = one.ask) === null || _l === void 0 ? void 0 : _l.replied) === null || _m === void 0 ? void 0 : _m.at) !== null && _o !== void 0 ? _o : 0, Boolean((_q = (_p = one.ask) === null || _p === void 0 ? void 0 : _p.replied) === null || _q === void 0 ? void 0 : _q.isWaking)]; }));
+    return JSON.stringify(cards.map(function (one) { var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k; return [one.id, one.status, one.title, one.model, one.tokens, one.items, (_b = (_a = one.entries.at(-1)) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '', (_d = (_c = one.ask) === null || _c === void 0 ? void 0 : _c.text) !== null && _d !== void 0 ? _d : '', (_f = (_e = one.ask) === null || _e === void 0 ? void 0 : _e.at) !== null && _f !== void 0 ? _f : 0, (_h = (_g = one.ask) === null || _g === void 0 ? void 0 : _g.copy) !== null && _h !== void 0 ? _h : '', (_k = (_j = one.ask) === null || _j === void 0 ? void 0 : _j.choices) !== null && _k !== void 0 ? _k : []]; }));
 };
 exports.signOf = signOf;
 // The prompts a chat's file carries, as far as they are whole: at most a few, each cut short
@@ -104,13 +65,7 @@ var promptsOf = function (list) {
         .filter(function (one) { return Boolean(one && typeof one.id === 'string' && one.id && typeof one.text === 'string' && one.text && typeof one.at === 'number'); })
         .filter(function (one, i, all) { return all.findIndex(function (other) { return other.id === one.id; }) === i; })
         .slice(0, PROMPTS_SHARED)
-        .map(function (one) {
-        var words = function (key, max) {
-            var _a;
-            return (typeof one[key] === 'string' && plain(one[key]) ? (_a = {}, _a[key] = plain(one[key]).slice(0, max), _a) : {});
-        };
-        return __assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign({ id: one.id.slice(0, 80), text: plain(one.text).slice(0, 200) }, (typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {})), { at: one.at }), (one.kind === 'allow' || one.kind === 'question' || one.kind === 'plan' ? { kind: one.kind } : {})), words('detail', 400)), words('yes', 200)), words('no', 200)), words('done', 60)), (one.answered === 'yes' || one.answered === 'no' || one.answered === 'stopped' ? { answered: one.answered } : {})), (one.isRunning === true ? { isRunning: true } : {})), (one.isCut === true ? { isCut: true } : {})), (one.isHeld === true ? { isHeld: true } : {})), (typeof one.endedAt === 'number' ? { endedAt: one.endedAt } : {}));
-    });
+        .map(function (one) { return (__assign(__assign({ id: one.id.slice(0, 80), text: plain(one.text).slice(0, 200) }, (typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {})), { at: one.at })); });
 };
 exports.promptsOf = promptsOf;
 // Text from another chat's file with no control characters, so nothing in it can move or colour the terminal
@@ -127,21 +82,13 @@ var sharedOf = function (text, now, host) {
         if (now - one.at > exports.STALE)
             return undefined;
         // Running work under `cards`, ended work apart under `ended`, so a version that reads `cards` alone never shows ended work as running
-        var isCard = function (card) { return typeof card === 'object' && card !== null && 'id' in card && typeof card.id === 'string' && Boolean(card.id) && 'items' in card && Array.isArray(card.items) && 'entries' in card && Array.isArray(card.entries); };
-        var cards = __spreadArray(__spreadArray([], one.cards, true), (Array.isArray(one.ended) ? one.ended : []), true).filter(isCard);
-        // Their helpers apart, under `helpers`, so a version that reads `cards` alone never lists a helper as work of its own
-        var helpers = (Array.isArray(one.helpers) ? one.helpers : []).filter(isCard).filter(function (card) { return typeof card.parentId === 'string' && Boolean(card.parentId); });
+        var cards = __spreadArray(__spreadArray([], one.cards, true), (Array.isArray(one.ended) ? one.ended : []), true).filter(function (card) { return Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)); });
         // A chat waiting on its own prompt is listed whether or not it has work
-        var prompts = (0, exports.promptsOf)(one.prompts).map(function (_a) {
-            var _answered = _a.answered, _running = _a.isRunning, _cut = _a.isCut, _ended = _a.endedAt, open = __rest(_a, ["answered", "isRunning", "isCut", "endedAt"]);
-            return open;
-        });
-        // Prompts answered there lately, said for a minute, so a chat is listed for them too
-        var answeredPrompts_1 = (0, exports.promptsOf)(one.answeredPrompts).filter(function (p) { return p.answered; });
-        if (!cards.length && !prompts.length && !answeredPrompts_1.length)
+        var prompts_1 = (0, exports.promptsOf)(one.prompts);
+        if (!cards.length && !prompts_1.length)
             return undefined;
         var link = (0, exports.linkOf)(one.link);
-        return __assign(__assign(__assign(__assign({ chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards: cards }, (helpers.length ? { helpers: helpers } : {})), (prompts.length ? { prompts: prompts } : {})), (answeredPrompts_1.length ? { answeredPrompts: answeredPrompts_1 } : {})), (link ? { link: link } : {}));
+        return __assign(__assign({ chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards: cards }, (prompts_1.length ? { prompts: prompts_1 } : {})), (link ? { link: link } : {}));
     }
     catch (_a) {
         return undefined;
@@ -177,19 +124,13 @@ var cardsOf = function (list) {
     return list.flatMap(function (s) { return s.cards.map(function (one) { return (__assign(__assign({}, one), { id: (0, exports.remoteId)(s, one.id), chat: { id: s.chat, title: s.title, folder: s.folder, host: s.host, agent: one.id } })); }); });
 };
 exports.cardsOf = cardsOf;
-// Their helpers the same way, each under its work's id here: listed only in a Details tab, never as cards of their own
-var helpersOf = function (list) {
-    return list.flatMap(function (s) { var _a; return ((_a = s.helpers) !== null && _a !== void 0 ? _a : []).map(function (one) { return (__assign(__assign({}, one), { id: (0, exports.remoteId)(s, one.id), parentId: (0, exports.remoteId)(s, one.parentId), chat: { id: s.chat, title: s.title, folder: s.folder, host: s.host, agent: one.id } })); }); });
-};
-exports.helpersOf = helpersOf;
 // The other chats in the order the panel shows them: those that wait on the person first (an open prompt, which holds its chat up,
 // before an ask), then the one whose running work began first, then the open chats with none running, by name
 var firstStart = function (s) {
     var running = s.cards.filter(function (one) { return one.status === 'working' || one.ask; });
     return running.length ? Math.min.apply(Math, running.map(function (one) { return one.startedAt; })) : Number.MAX_SAFE_INTEGER;
 };
-// An ask whose work is at work on the person's reply to it does not wait on them
-var waits = function (s) { var _a; return (((_a = s.prompts) === null || _a === void 0 ? void 0 : _a.length) ? 2 : s.cards.some(function (one) { return one.ask && !(one.ask.replied && (one.status === 'working' || one.ask.replied.isWaking)); }) ? 1 : 0); };
+var waits = function (s) { var _a; return (((_a = s.prompts) === null || _a === void 0 ? void 0 : _a.length) ? 2 : s.cards.some(function (one) { return one.ask; }) ? 1 : 0); };
 var ordered = function (list) {
     return __spreadArray([], list, true).sort(function (a, b) { return waits(b) - waits(a) || firstStart(a) - firstStart(b) || (0, exports.chatName)(a).localeCompare((0, exports.chatName)(b)); });
 };

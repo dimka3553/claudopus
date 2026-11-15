@@ -334,7 +334,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
       if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))
       // Every service and account a value is kept under, never a value: the keys laid as secret:<name> and keychain-entry:<service>\t<account>
-      if (rest[0] === 'entries') return ok([...files.keys()].flatMap(one => (one.startsWith('secret:') ? [`claudopus-secret\t${one.slice(7)}\n`] : one.startsWith('keychain-entry:') ? [`${one.slice(15)}\n`] : [])).join(''))
+      // (a keychain that does not answer, where the test lays keyring:refused, fails it)
+      if (rest[0] === 'entries' && files.has('keyring:refused')) return ok('', 1)
+      if (rest[0] === 'entries') return ok([...files.keys()].flatMap(one => (one.startsWith('secret:') && one !== 'secret:refused' ? [`claudopus-secret\t${one.slice(7)}\n`] : one.startsWith('keychain-entry:') ? [`${one.slice(15)}\n`] : [])).join(''))
       return ok('', 2)
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
@@ -8034,14 +8036,19 @@ const keysLaid = (files: Map<string, string>) => {
   // An account named by what is in fact a kept value, as a slip could leave it: hidden in the list like any other
   files.set('keychain-entry:other-api\tkg-made-up-value-0002', '')
   files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n- Render | /repo/render |  | going | Renders\n')
-  files.set('/repo/render/.env.local', 'export OPENAI_API_KEY=env-made-up-value-0003\nVOICE_ID=abc\nDB_PASSWORD = env-made-up-value-0004\n')
+  files.set('/repo/render/.env.local', 'export OPENAI_API_KEY=env-made-up-value-0003\nVOICE_ID=abc\nDB_PASSWORD = env-made-up-value-0004\nNEXT_PUBLIC_STRIPE_KEY=pk_made_up\n')
   files.set('/repo/render/.env.example', 'EXAMPLE_TOKEN=x\n')
   files.set('sbos:secrets', JSON.stringify([
     { name: 'elevenlabs-key', label: 'ElevenLabs API key', put_in: false, value: 'sbos-made-up-value-0005' },
     { name: 'github-token', label: 'GitHub read-only token', put_in: true, secret: 'sbos-made-up-value-0006' },
+    { name: 'labs', label: "Labs' production database", database: true, put_in: true },
+    // labels that carry a kept value, as a slip could leave them: one with a | in it, one long enough to be cut
+    { name: 'odd-one', label: `pipe ${'pp|made-up-value-0009'} and ${'x'.repeat(70)} long-made-up-value-0010`, put_in: false },
   ]))
+  files.set('secret:PIPE_KEY', 'pp|made-up-value-0009')
+  files.set('secret:LONG_KEY', 'long-made-up-value-0010')
 }
-const VALUES = ['el-made-up-value-0001', 'kg-made-up-value-0002', 'env-made-up-value-0003', 'env-made-up-value-0004', 'sbos-made-up-value-0005', 'sbos-made-up-value-0006']
+const VALUES = ['el-made-up-value-0001', 'kg-made-up-value-0002', 'env-made-up-value-0003', 'env-made-up-value-0004', 'sbos-made-up-value-0005', 'sbos-made-up-value-0006', 'made-up-value-0009', 'long-made-up', 'pk_made_up']
 
 test('the list of keys holds every store\'s names and never a value, and the Keys button shows it in a tab', SLOW, async ($, on) => {
   const { files, tabs, logged } = world(on)
@@ -8056,14 +8063,19 @@ test('the list of keys holds every store\'s names and never a value, and the Key
   expect(opened).toBeDefined()
   const tab = await $.ui.mount({ ...LIST, requestId: (opened ?? '').split(':')[0], surface: 'desktop' } as never)
   const shown = String((await tab.find({ type: 'Markdown' }))?.props.text)
-  for (const name of ['ELEVENLABS_API_KEY', 'KAGGLE_KEY', "Claudopus's keychain", 'elevenlabs-api / sam', 'OPENAI_API_KEY', 'DB_PASSWORD', '/repo/render/.env.local', 'elevenlabs-key', 'asked, not given', 'github-token', 'SBOS secrets'])
+  for (const name of ['ELEVENLABS_API_KEY', 'KAGGLE_KEY', "Claudopus's keychain", '| elevenlabs-api |', 'OPENAI_API_KEY', 'DB_PASSWORD', '/repo/render/.env.local', 'elevenlabs-key', 'asked, not given', 'github-token', 'SBOS secrets'])
     expect(shown).toContain(name)
   // Not a key: an app's own storage, a variable that holds none, and an example file
-  for (const name of ['Chrome', 'VOICE_ID', 'EXAMPLE_TOKEN']) expect(shown).not.toContain(name)
+  for (const name of ['Chrome', 'VOICE_ID', 'EXAMPLE_TOKEN', 'NEXT_PUBLIC_STRIPE_KEY']) expect(shown).not.toContain(name)
+  // Another app's account that is not a name stays out of the list
+  expect(shown).not.toContain('/ sam')
+  // A database in SBOS is used through its query
+  expect(shown).toMatch(/\| labs \|[^\n]*`query`/)
   // No value anywhere: the list, its state, the log, what the work was told
   const everything = [...files].filter(([key]) => key.startsWith(MEMORY)).map(([key, text]) => `${key}\n${text}`).join('\n') + logged.join('\n')
   for (const value of VALUES) expect(everything).not.toContain(value)
-  expect(files.get(`${MEMORY}/keys.md`)).toContain('[hidden KAGGLE_KEY]')
+  // A kept value in a label is hidden before the label is cut
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('pipe [hidden PIPE_KEY] and')
 })
 
 test('a key taken out of a store goes from the list, and nothing is written when the list cannot be checked for kept values', async ($, on) => {
@@ -8082,6 +8094,11 @@ test('a key taken out of a store goes from the list, and nothing is written when
   files.set('sbos:secrets', '[]')
   await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's2', agentId: 'w1' } as never)
   expect(files.get(`${MEMORY}/keys.md`)).not.toContain('github-token')
+  // A keychain that does not answer is not read as an empty one: what was known of it stays
+  files.set('keyring:refused', 'yes')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b4', agentId: 'w1', command: '/plug/bin/secret ELEVENLABS_API_KEY here true' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('| ELEVENLABS_API_KEY |')
+  files.delete('keyring:refused')
   // A hiding that fails leaves the list as it was
   const before = files.get(`${MEMORY}/keys.md`)
   files.set('secret:refused', 'yes')
@@ -8116,6 +8133,24 @@ test('an ask for a key the list has is refused with where it is; a key not kept 
   expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'f5', agentId: 'w1', name: 'elevenlabs-key', label: 'x', agent: 'bot' } as never)).deny).toBeUndefined()
   // An ask made leaves its name in the list as asked, not given
   expect(files.get(`${MEMORY}/keys.md`)).toMatch(/\| stripe-customers-key \|[^\n]*asked, not given/)
+  // No false refusals: a name inside another word, a database of SBOS's, a key with other words in its name
+  for (const text of ['Paste the Replicate API token for the FaceIQ Labs app', 'Paste the Clipify webhook secret', 'Paste your Labs login key'])
+    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `n-${text.length}`, agentId: 'w1', text } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'w1', command: "/plug/bin/secret GITHUB_PAT here 'gh x'" } as never)).deny).toBeUndefined()
+  // The most specific kept key is the one named
+  files.set('secret:KAGGLE_USERNAME', 'kgu-made-up')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n2', agentId: 'w1', command: '/plug/bin/secret KAGGLE_USERNAME here true' } as never)
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'n3', agentId: 'w1', text: 'Type your Kaggle username for the login' } as never)).deny).toContain('KAGGLE_USERNAME')
+  // What it is about counts when the ask is to paste something; asked again on purpose, naming the kept key as it is, it is shown
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd1', agentId: 'w1', text: 'Paste the key in the box', details: 'It is your ElevenLabs API key.' } as never)).deny).toContain('ELEVENLABS_API_KEY')
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd2', agentId: 'w1', text: 'Paste your ElevenLabs API key', details: 'The kept ELEVENLABS_API_KEY is refused by ElevenLabs: 401.' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'd3', agentId: 'w1', name: 'elevenlabs-key', label: 'x', for: 'ELEVENLABS_API_KEY in the keychain answers 401' } as never)).deny).toBeUndefined()
+  // The runner by other paths to it
+  for (const command of ["cd /plug/bin && ./secret ELEVENLABS_KEY here 'x'", "/plug/bin//secret ELEVENLABS_KEY here 'x'"])
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `p-${command.length}`, agentId: 'w1', command } as never)).deny).toContain('ELEVENLABS_API_KEY')
+  // An ask in SBOS for one it holds leaves it held
+  await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'h1', agentId: 'w1', name: 'github-token', label: 'GitHub', for: 'github-token answers 401' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toMatch(/\| github-token \|[^\n]*present/)
 })
 
 test('work never writes the list of keys itself, by any tool', async ($, on) => {

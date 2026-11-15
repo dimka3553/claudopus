@@ -327,7 +327,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
       if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))
       // Every service and account a value is kept under, never a value: the keys laid as secret:<name> and keychain-entry:<service>\t<account>
-      if (rest[0] === 'entries') return ok([...files.keys()].flatMap(one => (one.startsWith('secret:') ? [`claudopus-secret\t${one.slice(7)}\n`] : one.startsWith('keychain-entry:') ? [`${one.slice(15)}\n`] : [])).join(''))
+      // (a keychain that does not answer, where the test lays keyring:refused, fails it)
+      if (rest[0] === 'entries' && files.has('keyring:refused')) return ok('', 1)
+      if (rest[0] === 'entries') return ok([...files.keys()].flatMap(one => (one.startsWith('secret:') && one !== 'secret:refused' ? [`claudopus-secret\t${one.slice(7)}\n`] : one.startsWith('keychain-entry:') ? [`${one.slice(15)}\n`] : [])).join(''))
       return ok('', 2)
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch

@@ -27,7 +27,9 @@ usage() { echo "usage: keyring get|has|delete SERVICE ACCOUNT | set SERVICE ACCO
 # The names only: the keychain's listing without -d holds no value, and on Linux the folders and files are the names
 if [ "$what" = entries ]; then
   if [ "$(uname -s)" = Darwin ]; then
-    security dump-keychain 2>/dev/null | awk '
+    # A keychain that does not answer fails the listing, so it is never read as an empty one
+    listing=$(security dump-keychain 2>/dev/null) || exit 1
+    printf '%s\n' "$listing" | awk '
       function out() { if (genp && svc != "") print svc "\t" acct; genp = 0; svc = ""; acct = "" }
       /^keychain:/ { out() }
       /^class: "genp"/ { genp = 1 }
