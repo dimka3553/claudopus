@@ -1,7 +1,7 @@
 // Made by src/claudopus/build.mjs from the parts in src/claudopus/tests: change them there and build again, never this file. Its tests run with the engine's plugin test.
 import { expect, mock, test as kitTest } from 'claude-code/testing'
-import type { TestBody } from 'claude-code/testing'
-import type { On, Plugin } from 'claude-code'
+import type { Plugin, TestBody } from 'claude-code/testing'
+import type { On } from 'claude-code'
 import { headLine, headMood, OFF_LOOK, offOf, openTake, opensOf, shareable, stuckOf, trip } from '../shared'
 import { timelineRows } from '../stats'
 
@@ -1247,7 +1247,7 @@ test('answering one of two asks at the top leaves both cards where they were, so
 // 15 Nov, the cause itself: every call of every piece of work waits its turn for the look over the person's files as it begins.
 // That wait counted against the hook's own ten seconds: with the files slow to read, a hook that waited that long ran out of time,
 // Claude Code went on without it and ran it again, and a hook that went on waiting past its signal twice in a row got the mod
-// ended as a runaway, every call it held killed. The wait no longer counts against the hook's own time. While the test lays /slow, the plugin above makes the kept copy of the files eight seconds slow to read
+// ended as a runaway, every call it held killed. The wait no longer counts against the hook's own time. While the test lays /slow, the plugin above makes the kept copy of the files six seconds slow to read
 const SLOW_READS: Plugin = {
   name: 'slow-reads',
   tier: 'prepend',
@@ -1256,7 +1256,7 @@ const SLOW_READS: Plugin = {
     on('fs.read', async ($, e, next) => {
       if (String((e as { path?: unknown }).path).endsWith('/admin-known.json') && (await $.fs.read('/slow').then(() => true, () => false))) {
         await $.fs.write('/slow-reads', String((reads += 1)))
-        await new Promise<void>(done => void setTimeout(done, 8_000))
+        await new Promise<void>(done => void setTimeout(done, 6_000))
       }
       return next(e)
     })

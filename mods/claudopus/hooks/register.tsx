@@ -459,14 +459,19 @@ const sips = ($: EngineInterface) => (isLinux ? `${$.plugin.root}/bin/sips` : 's
 // Waiting on another call's work (a look over the person's files, a write in its turn) counts against a hook's own ten seconds, as
 // only the engine's own calls do not. On a busy Mac with many pieces of work, a hook that waited its turn that long ran out of time,
 // and one still waiting past its signal twice in a row had Claude Code end the mod as a runaway, killing every call it held. So
-// the wait is made beside a sleep the engine runs, which stops that count, half a second at a time
+// the wait is made beside a sleep the engine runs, which stops that count. The other call's end wakes it at once, so the sleep is
+// long, to start few processes; one that comes back at once (a spawn refused) is followed by a short pause, so it never spins
 const waitOn = async ($: EngineInterface, other: Promise<unknown>) => {
   let isDone = false
   const done = other.then(
     () => void (isDone = true),
     () => void (isDone = true),
   )
-  while (!isDone) await Promise.race([done, $.process.run(['/bin/sleep', '0.5'], { timeoutMs: 10_000 }).catch(() => undefined)])
+  while (!isDone) {
+    const at = await $.clock.now()
+    await Promise.race([done, $.process.run(['/bin/sleep', '5'], { timeoutMs: 15_000 }).catch(() => undefined)])
+    if (!isDone && (await $.clock.now()) - at < 1_000) await Promise.race([done, $.clock.sleep(200).catch(() => undefined)])
+  }
 }
 
 // What chats and work are told: the brief rule, refusals, the work's panel rule, steers and reminders
@@ -7204,7 +7209,8 @@ const knownWrite = async ($: EngineInterface, known: Map<string, string | null>,
 // One chat's changes to it at a time, so two never lose each other's
 let knownQueue: Promise<unknown> = Promise.resolve()
 const knownSet = ($: EngineInterface, change: (known: Map<string, string | null>) => void) => {
-  const step = knownQueue.then(async () => {
+  // Each waits for the changes before it beside an engine sleep, so the wait does not use up its hook's own time
+  const step = waitOn($, knownQueue).then(async () => {
     // A copy that is not sealed right is built on what this chat last knew, never on what it says
     const known = (await knownRead($)) ?? new Map(knownSeen?.files ?? [])
     change(known)

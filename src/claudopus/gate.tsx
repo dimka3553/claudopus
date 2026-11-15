@@ -563,7 +563,8 @@ const knownWrite = async ($: EngineInterface, known: Map<string, string | null>,
 // One chat's changes to it at a time, so two never lose each other's
 let knownQueue: Promise<unknown> = Promise.resolve()
 const knownSet = ($: EngineInterface, change: (known: Map<string, string | null>) => void) => {
-  const step = knownQueue.then(async () => {
+  // Each waits for the changes before it beside an engine sleep, so the wait does not use up its hook's own time
+  const step = waitOn($, knownQueue).then(async () => {
     // A copy that is not sealed right is built on what this chat last knew, never on what it says
     const known = (await knownRead($)) ?? new Map(knownSeen?.files ?? [])
     change(known)

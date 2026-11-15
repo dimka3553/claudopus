@@ -1,7 +1,7 @@
 // Made by src/claudopus/build.mjs from the parts in src/claudopus/tests: change them there and build again, never this file. Its tests run with the engine's plugin test.
 import { expect, mock, test as kitTest } from 'claude-code/testing'
-import type { TestBody } from 'claude-code/testing'
-import type { On, Plugin } from 'claude-code'
+import type { Plugin, TestBody } from 'claude-code/testing'
+import type { On } from 'claude-code'
 import { headLine, headMood, OFF_LOOK, offOf, openTake, opensOf, shareable, stuckOf, trip } from '../shared'
 import { timelineRows } from '../stats'
 
