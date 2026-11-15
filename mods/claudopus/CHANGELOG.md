@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.130 · 15 November 2026
+- Work that finishes comes to the top of the panel at once, right under anything that waits for you, outlined in green for its two seconds, then goes under Finished as before; several finishing together stack there newest first, each for its own two seconds
+- Scrolled down the panel, the line above the prompt says which work just finished at the top, in green, for those two seconds
+- Work that finished but left something running stays at the top after its moment, with its Stop it, instead of going back among the running cards
+- Work that was stopped or stopped by an error is not brought up: it pauses in its place as before, and an error now shows in red, on its edge too
+
 ## 0.2.129 · 15 November 2026
 - Work is told to add a test only when no test already covers what it changes, to show each new test fails without the change, and to remove tests a change makes redundant.
 
