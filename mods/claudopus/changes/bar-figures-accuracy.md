@@ -1,0 +1,3 @@
+- The battery card now shows what the whole Mac draws, what the processors and the graphics processor each draw, and Claude's part of each; Claude's graphics power is marked as estimated, and the card says what "Claude" covers and that the screen, memory and storage count only in the whole.
+- Claude's watts, disk and network now count work a chat left running after its command ended, and processes that started between two readings, which were missed before.
+- The graphics card says busy is time at work at any speed, shows what the graphics processor draws, and lists who uses it most, with macOS drawing the screen named as such.

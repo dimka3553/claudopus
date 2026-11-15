@@ -83,7 +83,8 @@ const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
 // More of each figure, for a pointer resting on it: a heading with the figure in full, then rows of a name and its value (Claude's
 // part, the parts of a speed, who uses the most), and for the battery its state in words. Only what the looks gave: a part that is
 // not known is left out
-type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][] }
+// foot: what the figures above it cover, under them
+type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][]; foot?: string }
 const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
   const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? top.map(([name, n]): [string, string] => [name, text(n)]) : undefined)
   const b = f.battery
@@ -95,24 +96,36 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
       rows: [...(f.ncpu && f.ncpu > 1 ? [['Cores', `${f.ncpu}`] as [string, string]] : []), ['Claude and what it started', `${pctText(f.cpuClaude ?? 0)}%`]],
       most: most(f.cpuTop, n => `${pctText(n)}%`),
     },
+    // Busy is time at work at any speed, so a busy graphics processor can draw little; drawing the screen is macOS's own
+    // (WindowServer), for every app's window, Claude's too, so it is no one's part
     gpu: f.gpu === undefined ? undefined : {
       title: 'Graphics processor',
       value: `${pctText(f.gpu)}% busy`,
+      note: 'Time at work, at any speed',
       rows: [
         ...(f.gpuClaude !== undefined ? [['Claude and what it started', `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
+        ...(f.wattsGpu !== undefined ? [['Drawing', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
         ...(f.gpuMem !== undefined ? [['Graphics memory in use', f.gpuMemTotal ? `${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB` : `${gbText(f.gpuMem)} GB`] as [string, string]] : []),
       ],
+      most: most(f.gpuTop?.map(([name, n]): [string, number] => [name === 'WindowServer' ? 'macOS drawing the screen' : name, n]), n => `${pctText(n)}%`),
     },
     battery: !b ? undefined : {
       title: 'Battery',
       value: `${batteryShown(b).pct}%`,
       note: upperFirst(batteryNote(b)),
-      // The strain on it: what the whole Mac draws, and what Claude's processors draw of that (the Mac counts no process's graphics
-      // or screen power)
+      // The strain on it: what the whole Mac draws, the processors and the graphics processor each, and Claude's part of each. The
+      // Mac counts each process's own processor energy, not its graphics power: Claude's graphics is its share of the graphics
+      // processor's time times what that draws, and says it is estimated. The screen, memory and storage are no one's part
       rows: [
-        ...(f.watts !== undefined ? [['The Mac is drawing', `${wattText(f.watts)} W`] as [string, string]] : []),
-        ...(f.wattsClaude !== undefined ? [["Claude's processors draw", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.watts !== undefined ? [['The whole Mac draws', `${wattText(f.watts)} W`] as [string, string]] : []),
+        ...(f.wattsCpu !== undefined ? [['Processors, every program', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [[f.wattsCpu !== undefined ? 'Claude of that' : "Claude's processes on the processors", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.wattsGpu !== undefined ? [['Graphics, every program', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
+        ...(f.wattsGpuClaude !== undefined ? [['Claude of that, estimated', `${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
       ],
+      ...(f.wattsClaude !== undefined || f.wattsGpuClaude !== undefined
+        ? { foot: `Claude: the app, its chats and all their work.${f.wattsGpuClaude === undefined ? ' Graphics is not in its watts.' : ''} The screen, memory and storage count only in the whole.` }
+        : {}),
     },
     disk: f.disk === undefined ? undefined : {
       title: 'Disk',
@@ -161,6 +174,7 @@ const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
           {card.most.map(([name, value], n) => row(name, value, n, 'most'))}
         </Box>
       ) : null}
+      {card.foot ? <Text key={`${key}-card-foot`} dimColor>{card.foot}</Text> : null}
     </Box>
   )
 }
