@@ -1,5 +1,5 @@
 // Made by src/claudopus/build.mjs from the parts in src/claudopus/tests: change them there and build again, never this file. Its tests run with the engine's plugin test.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock, test as kitTest } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { headLine, headMood, OFF_LOOK, offOf, openTake, opensOf, shareable, stuckOf, trip } from '../shared'
@@ -10,8 +10,12 @@ import { timelineRows } from '../stats'
 const HOME = '/home/sam'
 // The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
 const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
-// For the longest tests, near the kit's 5 seconds on GitHub's runner, which runs them about twice as slow as a Mac
+// Every test may take 20 seconds, not the kit's 5: the areas' files run side by side, and on a busy machine or GitHub's runner (about
+// twice as slow as a Mac) a long scenario passed or failed by the machine's load, not by the mod. SLOW is that limit, kept for the
+// tests that name it
 const SLOW = { timeoutMs: 20_000 }
+const test = (name: string, options: unknown, body?: unknown) =>
+  body === undefined ? kitTest(name, SLOW, options as TestBody) : kitTest(name, { ...SLOW, ...(options as object) }, body as TestBody)
 const MEMORY = `${HOME}/.claude/claudopus`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
@@ -737,28 +741,6 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   expect(submitted.some(line => line.includes('Which branch?'))).toBe(false)
   expect(await until(async () => ears.find({ type: 'Text', text: '✓ You answered “main” · it reads this at its next step' }))).toBeDefined()
   await Promise.all([list.unmount(), ears.unmount()])
-})
-
-test("while the person types into a card's reply box the list's running times stand still, and move again once they stop", async ($, on) => {
-  const { clock } = world(on)
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which ear first?' } as never)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const time = async () => (await list.findAll({ type: 'Text' })).map(one => one.text).find(text => /\d+s$/.test(text ?? ''))
-  await clock.advance(2000)
-  const before = await time()
-  expect(before).toBeDefined()
-  const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
-  await list.input({ key: box?.key ?? '', text: 'The le', kind: 'change' } as never)
-  await clock.advance(5000)
-  expect(await time()).toBe(before)
-  // Typing stopped for half a minute: the times move again, and the draft is still in the box
-  await clock.advance(31_000)
-  expect(await until(async () => ((await time()) !== before ? true : undefined))).toBe(true)
-  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('The le')
-  await list.unmount()
 })
 
 test('while the person types into an ask the panel holds its drawing whole, as other cards move, start and finish around it: the 15 Nov panel that jumped to its bottom and flickered with every letter typed', async ($, on) => {

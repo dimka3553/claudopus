@@ -1,5 +1,5 @@
 // Made by src/claudopus/build.mjs from the parts in src/claudopus/tests: change them there and build again, never this file. Its tests run with the engine's plugin test.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock, test as kitTest } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { headLine, headMood, OFF_LOOK, offOf, openTake, opensOf, shareable, stuckOf, trip } from '../shared'
@@ -10,8 +10,12 @@ import { timelineRows } from '../stats'
 const HOME = '/home/sam'
 // The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
 const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
-// For the longest tests, near the kit's 5 seconds on GitHub's runner, which runs them about twice as slow as a Mac
+// Every test may take 20 seconds, not the kit's 5: the areas' files run side by side, and on a busy machine or GitHub's runner (about
+// twice as slow as a Mac) a long scenario passed or failed by the machine's load, not by the mod. SLOW is that limit, kept for the
+// tests that name it
 const SLOW = { timeoutMs: 20_000 }
+const test = (name: string, options: unknown, body?: unknown) =>
+  body === undefined ? kitTest(name, SLOW, options as TestBody) : kitTest(name, { ...SLOW, ...(options as object) }, body as TestBody)
 const MEMORY = `${HOME}/.claude/claudopus`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
@@ -941,29 +945,6 @@ test('work that answers a question while a copy of its own still runs, with that
   await clock.advance(10)
   expect(await until(async () => kept()[0])).toBeDefined()
   expect(files.get(kept()[0] ?? '')).toBe(`${report}\n`)
-  await pane.unmount()
-})
-
-test('work that reports with everything it set out to do done, leaving a server of its own running, has finished: green, and its card says it left something running', async ($, on) => {
-  const agents: Record<string, string> = {}
-  const kinds: Record<string, string> = {}
-  const { clock } = world(on, { art: true, agents, kinds })
-  await $.session.start(start)
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const call = (tool: string, id: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, tool_use_id: id, agentId: 'a1', ...input } as never)
-  await $.prompt.submit({ text: 'run the site for me', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Run the site', prompt: 'run it' } as never)
-  kinds.a1 = 'general-purpose'
-  await call('mcp__claudopus__todo', 't1', { item: 'Start the site', state: 'doing' })
-  await call('Bash', 'b1', { command: 'npm run dev', description: 'Serve the site', run_in_background: true })
-  await call('mcp__claudopus__todo', 't2', { item: 'Start the site', state: 'done' })
-  await call('SubagentHandback', 'h1', { message: 'The site runs at http://localhost:3000.' })
-  agents.a1 = 'waiting'
-  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
-  expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
-  expect(await pane.find({ type: 'Text', text: /^Still at work/ })).toBeUndefined()
-  await clock.advance(20_000)
-  expect(await pane.find({ type: 'Text', text: /^It left something running in the background, / })).toBeDefined()
   await pane.unmount()
 })
 

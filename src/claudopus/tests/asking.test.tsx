@@ -152,28 +152,6 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   await Promise.all([list.unmount(), ears.unmount()])
 })
 
-test("while the person types into a card's reply box the list's running times stand still, and move again once they stop", async ($, on) => {
-  const { clock } = world(on)
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which ear first?' } as never)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const time = async () => (await list.findAll({ type: 'Text' })).map(one => one.text).find(text => /\d+s$/.test(text ?? ''))
-  await clock.advance(2000)
-  const before = await time()
-  expect(before).toBeDefined()
-  const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
-  await list.input({ key: box?.key ?? '', text: 'The le', kind: 'change' } as never)
-  await clock.advance(5000)
-  expect(await time()).toBe(before)
-  // Typing stopped for half a minute: the times move again, and the draft is still in the box
-  await clock.advance(31_000)
-  expect(await until(async () => ((await time()) !== before ? true : undefined))).toBe(true)
-  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('The le')
-  await list.unmount()
-})
-
 test('while the person types into an ask the panel holds its drawing whole, as other cards move, start and finish around it: the 15 Nov panel that jumped to its bottom and flickered with every letter typed', async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)

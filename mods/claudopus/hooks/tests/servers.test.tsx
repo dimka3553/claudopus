@@ -1,5 +1,5 @@
 // Made by src/claudopus/build.mjs from the parts in src/claudopus/tests: change them there and build again, never this file. Its tests run with the engine's plugin test.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock, test as kitTest } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { headLine, headMood, OFF_LOOK, offOf, openTake, opensOf, shareable, stuckOf, trip } from '../shared'
@@ -10,8 +10,12 @@ import { timelineRows } from '../stats'
 const HOME = '/home/sam'
 // The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
 const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
-// For the longest tests, near the kit's 5 seconds on GitHub's runner, which runs them about twice as slow as a Mac
+// Every test may take 20 seconds, not the kit's 5: the areas' files run side by side, and on a busy machine or GitHub's runner (about
+// twice as slow as a Mac) a long scenario passed or failed by the machine's load, not by the mod. SLOW is that limit, kept for the
+// tests that name it
 const SLOW = { timeoutMs: 20_000 }
+const test = (name: string, options: unknown, body?: unknown) =>
+  body === undefined ? kitTest(name, SLOW, options as TestBody) : kitTest(name, { ...SLOW, ...(options as object) }, body as TestBody)
 const MEMORY = `${HOME}/.claude/claudopus`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
