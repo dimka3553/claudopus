@@ -7725,7 +7725,7 @@ const BATTERIES: { name: string; extra: string; desk: string[]; term: RegExp; al
   { name: 'on battery with a time left', extra: `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`, desk: ['37%', '85% 4:12 left'], term: / gpu[▰▱]{3} 37% bat 85% 4:12 disk/, alt: 'Battery: 85%, 4:12 left' },
   { name: 'on battery while the system still estimates', extra: batt('64%; discharging; (no estimate)'), desk: ['64%'], term: / bat 64% disk/, alt: 'Battery: 64%, on battery' },
   { name: 'charging', extra: batt('62%; charging; 1:05 remaining'), desk: ['62% 1:05 to full'], term: / bat 62% ↑1:05 disk/, alt: 'Battery: 62%, charging, 1:05 to full' },
-  { name: 'fully charged on power', extra: `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t100%; charged; 0:00 remaining present: true`, desk: ['100% on power'], term: / bat 100% ac disk/, alt: 'Battery: 100%, on power' },
+  { name: 'fully charged on power', extra: `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t100%; charged; 0:00 remaining present: true`, desk: ['100%'], term: / bat 100% ac disk/, alt: 'Battery: 100%, on power' },
   { name: 'low on battery', extra: batt('12%; discharging; 0:41 remaining'), desk: ['12% 0:41 left'], term: / bat 12% 0:41 disk/, alt: 'Battery: 12%, 0:41 left' },
 ]
 for (const one of BATTERIES)
@@ -7743,7 +7743,7 @@ for (const one of BATTERIES)
     const drawings = await desk.findAll({ type: 'Svg' })
     expect(drawings.find(d => String(d.props.alt).startsWith('Battery'))?.props.alt).toBe(one.alt)
     // Never a figure the system did not give
-    if (!one.extra.includes(':') || one.extra.includes('no estimate')) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
+    if (/no estimate|charged/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
     if (one.name === 'low on battery') expect((await desk.find({ type: 'Text', text: /^12% 0:41 left$/ }))?.props.color).toBe('#E5A50A')
     await desk.unmount()
     const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
@@ -7783,8 +7783,8 @@ test('a pointer resting on a figure shows more of it in a line above: who uses t
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
   const more: Record<string, string> = {
-    memory: 'Memory 29 of 64 GB in use · Claude 3.3 GB · most: Claude 3.3 GB, Safari 0.4 GB',
-    cpu: 'Processor 50% busy across 10 cores · Claude 20% · most: Safari 30%, Claude 20%',
+    memory: 'Memory 29 of 64 GB in use · Claude with what it started 3.3 GB · most: Claude 3.3 GB, Safari 0.4 GB',
+    cpu: 'Processor 50% busy across 10 cores · Claude with what it started 20% · most: Safari 30%, Claude 20%',
     gpu: 'Graphics processor 37% busy · 1.2 GB of memory in use',
     battery: 'Battery 85% · on battery, 4:12 left as the system estimates it',
     disk: 'Disk 63 MB/s read and written · disk0',
@@ -7801,6 +7801,27 @@ test('a pointer resting on a figure shows more of it in a line above: who uses t
   const band = boxes.find(b => b.props.flexDirection === 'column' && b.text.endsWith('1 MB/s'))
   expect(band?.text.startsWith('Memory 29')).toBe(true)
   await desk.unmount()
+})
+
+test('in a narrow terminal a figure that does not fit is left out whole, the network and the disk first, never the battery cut', async ($, on) => {
+  let n = 0
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const line = async (bodyColumns: number) => {
+    const term = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns }, surface: 'terminal' } as never)
+    await until(async () => ((await term.find({ type: 'Text', text: /^mem/ })) ? true : undefined))
+    const text = (await term.find({ type: 'Text', text: /^mem/ }))?.text ?? ''
+    await term.unmount()
+    return text
+  }
+  // A phone's 50 columns: memory, the processor and the battery whole; a little more room, the graphics processor too
+  expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 85% 4:12$/)
+  expect(await line(56)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4:12$/)
+  expect(await line(80)).toMatch(/bat 85% 4:12 disk 63M\/s net 1M\/s$/)
 })
 
 // F-019 and F-020 of the security review, for the hourly look: it only reads the version page and shows a newer version with Install;

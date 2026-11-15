@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { batteryOfLinux, batteryOfMac, gpuOf, leftText, claudeOf, figuresOf, footprintOf, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, rawOfLinux, rawOfMac, secondsOfTime, usageMac, usageSvg, USAGE_AMBER, USAGE_PURPLE } from './usage'
+import { appOf, batteryOfLinux, batteryOfMac, gpuOf, leftText, claudeOf, figuresOf, footprintOf, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, rawOfLinux, rawOfMac, secondsOfTime, usageMac, usageSvg, USAGE_AMBER, USAGE_PURPLE } from './usage'
 
 const GiB = 1024 ** 3
 // A figure to six places, as two sums of tenths rarely meet exactly
@@ -177,6 +177,9 @@ test('the battery is taken as the system says it: the Mac own battery only, a ti
   expect(batteryOfMac(mac('100%; charged; 0:00 remaining'))).toEqual({ pct: 100, state: 'plugged' })
   expect(batteryOfMac(mac('80%; AC attached; not charging'))).toEqual({ pct: 80, state: 'plugged' })
   expect(batteryOfMac(mac('0%; charging; (no estimate)'))).toEqual({ pct: 0, state: 'charging' })
+  // A wording not known here is told by where the power comes from
+  expect(batteryOfMac(mac('70%; some new word; (no estimate)'))).toEqual({ pct: 70, state: 'battery' })
+  expect(batteryOfMac(` -InternalBattery-0 (id=1)\t70%; some new word; 1:00 remaining present: true`)).toEqual({ pct: 70, state: 'unknown' })
   // A desktop: no battery, and a UPS it is plugged into is not its own
   expect(batteryOfMac("Now drawing from 'AC Power'\n")).toBeUndefined()
   expect(batteryOfMac("Now drawing from 'AC Power'\n -CP1500PFCLCDa (id=1)\t100%; charged; 0:00 remaining present: true\n")).toBeUndefined()
@@ -186,6 +189,9 @@ test('the battery is taken as the system says it: the Mac own battery only, a ti
   expect(batteryOfLinux(sys({ AC: { type: 'Mains' }, BAT0: { type: 'Battery', capacity: '57', status: 'Discharging' } }))).toEqual({ pct: 57, state: 'battery' })
   expect(batteryOfLinux(sys({ BAT1: { type: 'Battery', capacity: '40', status: 'Charging' } }))).toEqual({ pct: 40, state: 'charging' })
   expect(batteryOfLinux(sys({ BAT0: { type: 'Battery', capacity: '100', status: 'Full' } }))).toEqual({ pct: 100, state: 'plugged' })
+  // A state the system does not name is not taken as on power; two batteries read as one
+  expect(batteryOfLinux(sys({ BAT0: { type: 'Battery', capacity: '70', status: 'Unknown' } }))).toEqual({ pct: 70, state: 'unknown' })
+  expect(batteryOfLinux(sys({ BAT0: { type: 'Battery', capacity: '10', status: 'Not charging' }, BAT1: { type: 'Battery', capacity: '90', status: 'Discharging' } }))).toEqual({ pct: 50, state: 'battery' })
   // A server, and a wireless mouse's battery
   expect(batteryOfLinux('')).toBeUndefined()
   expect(batteryOfLinux(sys({ 'hidpp_battery_0': { type: 'Battery', scope: 'Device', capacity: '90', status: 'Discharging' } }))).toBeUndefined()
@@ -197,4 +203,12 @@ test('the graphics processor: the Mac busiest accelerator, Linux GPUs on average
   expect(gpuOf('40\n80\n', true)).toBe(0.6)
   expect(gpuOf('[N/A]\n', true)).toBeUndefined()
   expect(gpuOf('', true)).toBeUndefined()
+})
+
+test('programs are named as a person knows them: the app, Claude Code\'s engine under its version number as Claude', async () => {
+  expect(appOf('/Applications/Safari.app/Contents/MacOS/Safari')).toBe('Safari')
+  expect(appOf('/Users/sam/.local/share/claude/versions/2.1.325')).toBe('Claude')
+  expect(appOf('2.1.325')).toBe('Claude')
+  expect(appOf('/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper')).toBe('Claude')
+  expect(appOf('/usr/bin/python3')).toBe('python3')
 })

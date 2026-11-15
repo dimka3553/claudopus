@@ -17,7 +17,7 @@ export const usageMac = (isTop: boolean) =>
   `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`
 // One look on Linux, from /proc and /sys, and nvidia-smi where the machine has one (bounded, as a GPU with no driver kept loaded is slow to answer)
 export const USAGE_LINUX =
-  "echo \"@@SELF@@ $PPID\"; echo @@STAT@@; grep -H '' /proc/[0-9]*/stat 2>/dev/null; echo @@STATM@@; grep -H '' /proc/[0-9]*/statm 2>/dev/null; echo @@SYS@@; getconf PAGESIZE; getconf CLK_TCK; head -n 1 /proc/stat; echo @@MEM@@; cat /proc/meminfo; echo @@DISK@@; cat /proc/diskstats; echo @@NET@@; cat /proc/net/dev; echo @@GPU@@; if command -v nvidia-smi >/dev/null 2>&1; then timeout 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; else cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null; fi; echo @@BATT@@; grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status 2>/dev/null; true"
+  "echo \"@@SELF@@ $PPID\"; echo @@STAT@@; grep -H '' /proc/[0-9]*/stat 2>/dev/null; echo @@STATM@@; grep -H '' /proc/[0-9]*/statm 2>/dev/null; echo @@SYS@@; getconf PAGESIZE; getconf CLK_TCK; head -n 1 /proc/stat; echo @@MEM@@; cat /proc/meminfo; echo @@DISK@@; cat /proc/diskstats; echo @@NET@@; cat /proc/net/dev; echo @@GPU@@; asleep=; for d in /sys/bus/pci/devices/*; do case \"$(cat $d/vendor 2>/dev/null)\" in 0x10de|0x1002) [ \"$(cat $d/power/runtime_status 2>/dev/null)\" = suspended ] && asleep=1;; esac; done; if [ -n \"$asleep\" ]; then :; elif command -v nvidia-smi >/dev/null 2>&1; then timeout 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; else cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null; fi; echo @@BATT@@; grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status 2>/dev/null; true"
 
 // A process: its parent, its processor time in seconds, its memory in bytes, its name
 export type UsageProc = { pid: string; ppid: string; cpu: number; mem: number; name: string }
@@ -25,7 +25,7 @@ export type UsageProc = { pid: string; ppid: string; cpu: number; mem: number; n
 // bytes moved since it started, by each disk and port, so one that comes or goes between looks moves no speed
 // The battery as the system reports it: its charge in percent, whether it runs on it, charges, or sits on power, and the time left
 // (to empty on battery, to full while charging) in minutes, only when the system gives one
-export type UsageBattery = { pct: number; state: 'battery' | 'charging' | 'plugged'; left?: number }
+export type UsageBattery = { pct: number; state: 'battery' | 'charging' | 'plugged' | 'unknown'; left?: number }
 // The programs that use the most, by name, for the detail a pointer on a figure shows: [name, bytes] or [name, part of the processor]
 export type UsageTop = [string, number][]
 export type UsageRaw = { names?: Record<string, string>; memTop?: UsageTop; gpuMem?: number; gpuMemTotal?: number; netIn?: number; netOut?: number; gpu?: number; battery?: UsageBattery; at: number; cpu: Record<string, number>; claude: string[]; claudeMem: number; memUsed: number; memTotal: number; ncpu: number; disk: Record<string, number>; net: Record<string, number>; busy?: number; all?: number }
@@ -87,7 +87,8 @@ export const gpuMemOf = (text: string, isLinux: boolean): { used: number; total?
 export const appOf = (name: string) => {
   const app = /([^/]+)\.app\//.exec(name)?.[1]
   const own = app ?? name.split('/').pop() ?? name
-  return /^claude$/i.test(own) ? 'Claude' : own
+  // Claude Code's own engine is kept under its version's number (claude/versions/2.1.325)
+  return /^claude$/i.test(own) || /\/claude\/versions\/[^/]+$/.test(name) || /^\d+\.\d+\.\d+$/.test(own) ? 'Claude' : own
 }
 // The programs that use the most, each app's processes together, largest first
 export const topOf = (amounts: [string, number][], count = 3): UsageTop => {
@@ -102,9 +103,11 @@ export const batteryOfMac = (text: string): UsageBattery | undefined => {
   if (!m || /present:\s*false/.test(m[3] ?? '')) return undefined
   const pct = Number(m[1])
   const said = (m[2] ?? '').trim().toLowerCase()
-  const state = said === 'discharging' ? 'battery' : said === 'charging' || said === 'finishing charge' ? 'charging' : 'plugged'
+  // A wording not known here is told by where the power comes from, and is none when that is not said either
+  const from = /Now drawing from '([^']+)'/.exec(text)?.[1] ?? ''
+  const state = said === 'discharging' ? 'battery' : said === 'charging' || said === 'finishing charge' ? 'charging' : said === 'charged' || said === 'ac attached' ? 'plugged' : from === 'Battery Power' ? 'battery' : from === 'AC Power' ? 'plugged' : 'unknown'
   const t = /(\d+):(\d\d) remaining/.exec(m[3] ?? '')
-  const left = t && state !== 'plugged' ? Number(t[1]) * 60 + Number(t[2]) : 0
+  const left = t && (state === 'battery' || state === 'charging') ? Number(t[1]) * 60 + Number(t[2]) : 0
   return { pct, state, ...(left > 0 ? { left } : {}) }
 }
 // /sys/class/power_supply: a supply of type Battery that powers the machine (not a mouse's, whose scope is Device). Linux gives
@@ -112,10 +115,13 @@ export const batteryOfMac = (text: string): UsageBattery | undefined => {
 export const batteryOfLinux = (text: string): UsageBattery | undefined => {
   const by = new Map<string, Record<string, string>>()
   for (const m of text.matchAll(/^\/sys\/class\/power_supply\/([^/]+)\/(type|scope|capacity|status):(.*)$/gm)) by.set(m[1] ?? '', { ...(by.get(m[1] ?? '') ?? {}), [m[2] ?? '']: (m[3] ?? '').trim() })
-  const one = [...by.values()].find(b => b.type === 'Battery' && b.scope !== 'Device' && /^\d+$/.test(b.capacity ?? ''))
-  if (!one) return undefined
-  const state = one.status === 'Discharging' ? 'battery' : one.status === 'Charging' ? 'charging' : 'plugged'
-  return { pct: Number(one.capacity), state }
+  const all = [...by.values()].filter(b => b.type === 'Battery' && b.scope !== 'Device' && /^\d+$/.test(b.capacity ?? ''))
+  if (!all.length) return undefined
+  // Two batteries (some laptops have them) read as one: their charge on average, discharging or charging if either is
+  const pct = Math.round(all.reduce((sum, b) => sum + Number(b.capacity), 0) / all.length)
+  const has = (status: string) => all.some(b => b.status === status)
+  const state = has('Discharging') ? 'battery' : has('Charging') ? 'charging' : all.every(b => b.status === 'Full' || b.status === 'Not charging') ? 'plugged' : 'unknown'
+  return { pct, state }
 }
 
 // The bytes in and out by themselves, over the same ports the speed counts
@@ -263,6 +269,8 @@ export const figuresOf = (prev: UsageRaw | undefined, cur: UsageRaw): UsageFigur
     ...(cpuTop.length ? { cpuTop } : {}),
     disk: movedOf(prev.disk ?? {}, cur.disk) / span,
     net: movedOf(prev.net ?? {}, cur.net) / span,
+    ports: Object.keys(cur.net).filter(name => typeof prev.net?.[name] === 'number' && (cur.net[name] ?? 0) > (prev.net[name] ?? 0)),
+    disks: Object.keys(cur.disk).filter(name => typeof prev.disk?.[name] === 'number' && (cur.disk[name] ?? 0) > (prev.disk[name] ?? 0)),
     ...(split ? { netIn: ((cur.netIn ?? 0) - (prev.netIn ?? 0)) / span, netOut: ((cur.netOut ?? 0) - (prev.netOut ?? 0)) / span } : {}),
   }
 }
@@ -367,7 +375,7 @@ export const usageSvg = (icon: keyof typeof icons, meter?: { claude: number; use
 // The battery: its body filled to the charge (amber when low), a bolt before it while charging, a plug while it sits on power
 export const batterySvg = (b: UsageBattery) => {
   const color = isBatteryLow(b) ? USAGE_AMBER : ICON_GREY
-  const mark = b.state === 'battery' ? 0 : 8
+  const mark = b.state === 'charging' || b.state === 'plugged' ? 8 : 0
   const x = mark
   const fill = Math.max(b.pct > 0 ? 1 : 0, Math.round((Math.min(100, Math.max(0, b.pct)) / 100) * 13))
   const bolt = `<path d="M4.2 2.5L1 8.6h2.6L2.8 13.5L6.4 7.2H3.8z" fill="${USAGE_PURPLE}"/>`

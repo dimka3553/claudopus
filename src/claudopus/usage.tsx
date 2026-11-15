@@ -59,9 +59,9 @@ const usageWords = (f: UsageFigures) => ({
   battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
 })
 const batteryWords = (b: UsageBattery) =>
-  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging') : 'on power'
+  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
 // What follows the charge: the time left, the time to full, or that it is on power; nothing while the system still estimates
-const batteryAfter = (b: UsageBattery) => (b.state === 'plugged' ? ' on power' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : '')
+const batteryAfter = (b: UsageBattery) => (b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : '')
 
 // More of each figure, for a pointer resting on it: who uses the most, Claude's part, the parts of a speed, and the battery's state
 // in full. Only what the looks gave; a part that is not known is left out
@@ -69,10 +69,10 @@ const usageMore = (f: UsageFigures) => {
   const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? ` · most: ${top.map(([name, n]) => `${name} ${text(n)}`).join(', ')}` : '')
   const b = f.battery
   return {
-    memory: `Memory ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use · Claude ${gbText(f.memClaude)} GB${most(f.memTop, n => `${gbText(n)} GB`)}`,
-    cpu: f.cpu === undefined ? '' : `Processor ${pctText(f.cpu)}% busy${f.ncpu && f.ncpu > 1 ? ` across ${f.ncpu} cores` : ''} · Claude ${pctText(f.cpuClaude ?? 0)}%${most(f.cpuTop, n => `${pctText(n)}%`)}`,
+    memory: `Memory ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use · Claude with what it started ${gbText(f.memClaude)} GB${most(f.memTop, n => `${gbText(n)} GB`)}`,
+    cpu: f.cpu === undefined ? '' : `Processor ${pctText(f.cpu)}% busy${f.ncpu && f.ncpu > 1 ? ` across ${f.ncpu} cores` : ''} · Claude with what it started ${pctText(f.cpuClaude ?? 0)}%${most(f.cpuTop, n => `${pctText(n)}%`)}`,
     gpu: f.gpu === undefined ? '' : `Graphics processor ${pctText(f.gpu)}% busy${f.gpuMem === undefined ? '' : f.gpuMemTotal ? ` · ${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB of its memory in use` : ` · ${gbText(f.gpuMem)} GB of memory in use`}`,
-    battery: !b ? '' : `Battery ${b.pct}% · ${b.state === 'battery' ? (b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : 'on battery, the system is still estimating the time left') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging, the time to full still being estimated') : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'}`,
+    battery: !b ? '' : `Battery ${b.pct}% · ${b.state === 'battery' ? (b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : 'on battery, the system is still estimating the time left') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging, the time to full still being estimated') : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'}`,
     disk: f.disk === undefined ? '' : `Disk ${rateText(f.disk).join(' ')} read and written${f.disks?.length ? ` · ${f.disks.join(', ')}` : ''}`,
     net: f.net === undefined ? '' : `Network ${rateText(f.net).join(' ')}${f.netIn !== undefined && f.netOut !== undefined ? ` · in ${rateText(f.netIn).join(' ')}, out ${rateText(f.netOut).join(' ')}` : ''}${f.ports?.length ? ` · ${f.ports.join(', ')}` : ''}`,
   }
@@ -117,8 +117,19 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
 }
 // The line as text, for the terminal, in a phone's 50 columns with the octopus: a word for each, units cut to G and M/s, and three-cell meters with Claude's cells purple
 const USAGE_CELLS = 3
-const usageText = (ui: Ui, f: UsageFigures) => {
+// Given the room, a figure that does not fit is left out whole, never cut in the middle: the network first, then the disk, then the
+// graphics processor, so memory, the processor and the battery stay
+const usageText = (ui: Ui, f: UsageFigures, room = Infinity) => {
   const { Text } = ui
+  const rate = (n: number) => rateText(n).join('').replace('B/s', '/s')
+  const widths = {
+    gpu: f.gpu === undefined ? 0 : ` gpu${'▱'.repeat(USAGE_CELLS)} ${pctText(f.gpu)}%`.length,
+    disk: f.disk === undefined ? 0 : ` disk ${rate(f.disk)}`.length,
+    net: f.net === undefined ? 0 : ` net ${rate(f.net)}`.length,
+  }
+  let width = `mem${'▱'.repeat(USAGE_CELLS)} ${gbText(f.memUsed)}G`.length + (f.cpu === undefined ? 0 : ` cpu${'▱'.repeat(USAGE_CELLS)} ${pctText(f.cpu)}%`.length) + (f.battery ? batteryAfterText(f.battery).length + ` bat ${f.battery.pct}%`.length : 0) + widths.gpu + widths.disk + widths.net
+  const shown = { gpu: true, disk: true, net: true }
+  for (const one of ['net', 'disk', 'gpu'] as const) if (width > room && widths[one]) (shown[one] = false), (width -= widths[one])
   const isHigh = isMemoryHigh(f)
   const meter = (claude: number, used: number, color?: string) => {
     const { mine, rest } = meterOf(claude, used, USAGE_CELLS)
@@ -136,10 +147,10 @@ const usageText = (ui: Ui, f: UsageFigures) => {
       <Text color={amber}>{` ${gbText(f.memUsed)}`}</Text>
       <Text color={amber} dimColor={!amber}>G</Text>
       {f.cpu === undefined ? null : [<Text key="c" dimColor>{' cpu'}</Text>, ...meter(f.cpuClaude ?? 0, f.cpu), <Text key="cv">{` ${pctText(f.cpu)}`}</Text>, <Text key="cu" dimColor>%</Text>]}
-      {f.gpu === undefined ? null : [<Text key="g" dimColor>{' gpu'}</Text>, ...meter(0, f.gpu), <Text key="gv">{` ${pctText(f.gpu)}`}</Text>, <Text key="gu" dimColor>%</Text>]}
+      {f.gpu === undefined || !shown.gpu ? null : [<Text key="g" dimColor>{' gpu'}</Text>, ...meter(0, f.gpu), <Text key="gv">{` ${pctText(f.gpu)}`}</Text>, <Text key="gu" dimColor>%</Text>]}
       {f.battery ? batteryText(ui, f.battery) : null}
-      {f.disk === undefined ? null : [<Text key="d" dimColor>{' disk '}</Text>, <Text key="dv">{rateText(f.disk)[0]}</Text>, <Text key="du" dimColor>{rateText(f.disk)[1].replace('B/s', '/s')}</Text>]}
-      {f.net === undefined ? null : [<Text key="n" dimColor>{' net '}</Text>, <Text key="nv">{rateText(f.net)[0]}</Text>, <Text key="nu" dimColor>{rateText(f.net)[1].replace('B/s', '/s')}</Text>]}
+      {f.disk === undefined || !shown.disk ? null : [<Text key="d" dimColor>{' disk '}</Text>, <Text key="dv">{rateText(f.disk)[0]}</Text>, <Text key="du" dimColor>{rateText(f.disk)[1].replace('B/s', '/s')}</Text>]}
+      {f.net === undefined || !shown.net ? null : [<Text key="n" dimColor>{' net '}</Text>, <Text key="nv">{rateText(f.net)[0]}</Text>, <Text key="nu" dimColor>{rateText(f.net)[1].replace('B/s', '/s')}</Text>]}
     </Text>
   )
 }
@@ -147,7 +158,7 @@ const usageText = (ui: Ui, f: UsageFigures) => {
 const batteryText = (ui: Ui, b: UsageBattery) => {
   const { Text } = ui
   const low = isBatteryLow(b) ? USAGE_AMBER : undefined
-  const after = b.state === 'plugged' ? ' ac' : b.state === 'charging' ? ` ↑${b.left ? leftText(b.left) : ''}` : b.left ? ` ${leftText(b.left)}` : ''
+  const after = batteryAfterText(b)
   return [
     <Text key="b" color={low} dimColor={!low}>{' bat '}</Text>,
     <Text key="bv" color={low}>{`${b.pct}`}</Text>,
@@ -155,6 +166,7 @@ const batteryText = (ui: Ui, b: UsageBattery) => {
     after ? <Text key="ba" color={b.state === 'charging' ? USAGE_PURPLE : low} dimColor={!low && b.state !== 'charging'}>{after}</Text> : null,
   ]
 }
+const batteryAfterText = (b: UsageBattery) => (b.state === 'plugged' ? ' ac' : b.state === 'charging' ? ` ↑${b.left ? leftText(b.left) : ''}` : b.left ? ` ${leftText(b.left)}` : '')
 // A short mark of a drawing, so a new drawing is a new picture to the app
 const hashOf = (text: string) => {
   let h = 0
