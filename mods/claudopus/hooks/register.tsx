@@ -5667,7 +5667,7 @@ const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, lines: str
   </ui.Box>
 )
 const doneNotesPart = (ui: Ui, at: number) =>
-  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [[one.head, one.what].filter(Boolean).join(' · ')]))
+  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
 // What a box asks for, in a few words, for its note once answered
 const boxHead = (text: string) => {
   const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]

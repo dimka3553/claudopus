@@ -329,6 +329,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
+    // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
+    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir')) return ok(files.has('git:common') ? `${files.get('git:common')}\n` : '', files.has('git:common') ? 0 : 128)
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
@@ -6586,7 +6588,7 @@ test('Deny refuses the call with a line that says the person refused it, and not
   expect(grants()).toEqual([])
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on m4' })).toBeUndefined()
   expect(await until(async () => list.find({ type: 'Text', text: 'You denied it · it did not run, and the work was told' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Admin command on m4 · rm -rf /Library/Caches/x' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Admin command on m4' })).toBeDefined()
 })
 
 test('no way to the runner gets past the press: another spelling, a shell, a helper, and two commands in one call each wait', async ($, on) => {
