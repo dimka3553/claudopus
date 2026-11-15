@@ -5169,7 +5169,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : ''])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed]])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -5213,7 +5213,7 @@ const readDrafts = async ($: EngineInterface) => {
 }
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
-type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number }
+type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -5254,6 +5254,16 @@ const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = fals
 const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
   !isReply || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
+// The asks a press answered, by card, as `${at}:${text}`: the panel draws the card answered from the press itself, its buttons and box
+// gone in the press's own drawing, before the answer is written; the mark goes once the card's file no longer carries the ask
+const askPressed = new Map<string, string>()
+// A card as the panel draws it: an ask or a gate already pressed is not drawn as still waiting
+const asPressed = (one: Todo): Todo => {
+  const isAnswered = Boolean(one.ask && askPressed.get(one.id) === `${one.ask.at}:${one.ask.text}`)
+  const admins = one.admins?.filter(gate => !gatePressed.has(gate.id))
+  if (!isAnswered && admins?.length === one.admins?.length) return one
+  return { ...one, ask: isAnswered ? undefined : one.ask, admins: admins?.length ? admins : undefined }
+}
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
   if (one.chat) return
@@ -5267,29 +5277,60 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const asked = `${one.id}:${ask.at}:${ask.text}`
   if (answeredAsks.has(asked)) return
   answeredAsks.add(asked)
-  const at = await $.clock.now()
+  // Answered in the press's own drawing, before anything is awaited: what was pressed, on its way
+  const mark = `${ask.at}:${ask.text}`
+  askPressed.set(one.id, mark)
+  const line = lineOf(one)
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at: Infinity, line, isCard: true, askAt: ask.at })
+  if (isReply) freeTimes($)
+  redraw($)
   let isCleared = false
-  await update($, todos, list =>
-    list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
-  )
-  if (!isCleared) return
+  let steerAt = 0
+  try {
+    const at = await $.clock.now()
+    steerAt = at
+    await update($, todos, list =>
+      list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
+    )
+    if (askPressed.get(one.id) === mark) askPressed.delete(one.id)
+    // The work has since asked something else, or it was answered elsewhere: nothing went, and the card shows what it carries now
+    if (!isCleared) return void (sentReplies.get(one.id)?.to === 'sending' && sentReplies.delete(one.id), redraw($))
+    await answerCleared($, one, ask, said, isReply, target, at, line)
+  } catch (err) {
+    // It did not reach the work: the card says so, and its buttons come back to be pressed again, with nothing of the answer left
+    if (askPressed.get(one.id) === mark) askPressed.delete(one.id)
+    answeredAsks.delete(asked)
+    if (answeredAt.get(one.id) === ask.at) answeredAt.delete(one.id)
+    if (pending.get(target) === one.id) pending.delete(target)
+    const isBack = !isCleared || (await update($, todos, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: card.entries.filter(entry => !(entry.kind === 'steer' && entry.at === steerAt)) } : card))).then(() => true).catch(() => false))
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true })
+    // and when even that could not be written, the chat is told, so the ask is not lost unseen
+    if (!isBack) $.ui.log(`The answer “${cut(said, 120)}” to "${titleOf(one)}" (${ask.text}) did not reach it, and its ask could not be put back on its card. Type your answer in this chat instead.`)
+    redraw($)
+    throw err
+  }
+}
+// The rest of an answer once its ask is cleared from the card's file: to the work, or to wake it
+const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, isReply: boolean, target: string, at: number, line: string) => {
   answeredAt.set(one.id, ask.at)
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
-  if (isReply) freeTimes($)
-  const line = lineOf(one)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at })
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at, line, isCard: true, askAt: ask.at })
   redraw($)
   // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
-  void askGone($, one, said)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
   // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
   // Marked on its way once written, so a step that began before it never counts as reading it
   const told = working ? await tell($, target, to) : undefined
-  if (told && !told.deny) return void (writtenIn(target, one.id), sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at }), redraw($))
-  await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
+  if (told && !told.deny) {
+    writtenIn(target, one.id)
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at })
+    redraw($)
+  } else await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
+  // Said in the chat only once the answer is on its way
+  void askGone($, one, said)
 }
 // A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
 // and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its
@@ -5496,11 +5537,13 @@ const sentLine = (one: Todo, now: number) => {
   const replied = one.ask?.replied
   if (replied && !(sent && sent.ask === one.ask?.text && (sent.text === replied.text || sent.isHeld))) return `✓ You replied “${cut(replied.text, 60)}”${isActingOnReply(one) ? ' · it is acting on it' : '; it still asks this'}`
   if (!sent) return ''
+  if (sent.to === 'failed') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}” did not reach the work. Press it again` : ''
   if (sent.to === 'lost') return one.ask?.text === sent.ask ? `Not sent: “${cut(sent.text, 60)}”. That Mac could not be reached; answer it in its own chat` : ''
   const newer = lineOf(one) !== sent.line
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
   const how = {
+    sending: 'on its way to the work',
     work: 'it reads this at its next step',
     read: 'it has read it',
     chat: 'left in the chat, which carries the work on',
@@ -6305,6 +6348,9 @@ const isNoteShown = (one: DoneNote, at: number) =>
 // The calls that have ended, so a note made after its call ended (a runner sent to the background) is over from the start
 const callsEnded = new Set<string>()
 const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
+  // Drawn from the press itself: in the list before anything is awaited, shown until the clock dates it a moment later
+  doneNotes = [...doneNotes.filter(one => one.id !== note.id), { ...note, at: Infinity }]
+  drawAgain($)
   const at = await $.clock.now()
   const made = { ...note, at, ...(note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}) }
   doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), made].slice(-6)
@@ -6504,6 +6550,8 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled �
   boxSent.add(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
+  // The box goes in the press's own drawing, before its request is removed
+  drawAgain($)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
   // Cancelled, nothing more comes of it: it is over at once
   if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call, endedAt: 0 } : {}), head: boxHead(one.text), said, what: '' })
@@ -6802,6 +6850,8 @@ const clearGates = async ($: EngineInterface) => {
 const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, gate: Gate, top: string): Promise<GateSaid | 'gone' | 'late' | 'blind'> => {
   if (!(await $.session.surfaces().catch(() => [])).length) return 'blind'
   gateHeld.add(gate.id)
+  // A gate held afresh waits for a press of its own: a mark an earlier one of the same id left never hides it
+  gatePressed.delete(gate.id)
   await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
   await openList($).catch(() => undefined)
   const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
@@ -6825,15 +6875,48 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
     gateSaid.delete(gate.id)
     await setGates($, top, list => list.filter(one => one.id !== gate.id)).catch(() => undefined)
   }
+  // A press the wait did not take (it stopped waiting as the press came) is said as such where its note was
+  const pressed = gatePressed.get(gate.id)
+  gatePressed.delete(gate.id)
+  if (pressed && pressed !== said) await gateNoteFailed($, gate, top, `It had stopped waiting when your press came · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}`)
   await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
   return said
+}
+// What a gate's note heads with: the kind of thing it let through, and where
+const gateHead = (gate: Gate) => (gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host} into ${gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`)
+const gateWhatLine = (gate: Gate) => (gate.kind === 'release' && gate.folder ? `from ${shortPath(gate.folder)}` : gate.kind === 'file' ? '' : cut(oneLine(gate.command), 200))
+// The gates pressed and not yet let go by their wait, with what was pressed: the panel draws each answered from the press itself,
+// before the wait (a one-second sleep the engine runs) reads it, which kept the amber box and its buttons up to a second after the
+// press (15 Nov). Only the first press counts: a second, on a drawing a moment old, sends nothing
+const gatePressed = new Map<string, GateSaid>()
+// What a gate's note says when what it said was allowed did not come about, in the same place, grey: never a false "allowed"
+const gateNoteFailed = ($: EngineInterface, gate: Gate, card: string, said: string) =>
+  doneNotes.some(one => one.id === `gate-${gate.id}`)
+    ? noteDone($, { id: `gate-${gate.id}`, ...(gate.call ? { call: gate.call } : {}), ...(card ? { card } : {}), endedAt: 0, head: gateHead(gate), said, what: gateWhatLine(gate), isOn: false }).catch(() => undefined)
+    : Promise.resolve()
+// A call refused after a press, by another of its commands denied or not let through: nothing in it runs, so a gate of it already
+// allowed says so in grey, never green
+const callRefused = async ($: EngineInterface, call: string) => {
+  for (const one of doneNotes.filter(note => note.call === call && note.isOn && note.id.startsWith('gate-'))) {
+    const { at: _at, ...rest } = one
+    await noteDone($, { ...rest, endedAt: 0, isOn: false, said: 'It did not run: another part of the same command was refused, so nothing in it ran' }).catch(() => undefined)
+  }
 }
 // `card` names the work whose card the gate is on: what was done is said in that card, where the gate was
 const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') => {
   presses += 1
   const id = gate.id
-  if (gate.isUndone) return void answerUndone($, gate, said).then(() => redraw($)).catch(err => log($, `undone change not answered: ${String(err)}`))
-  if (gateHeld.has(id)) {
+  // A put-back goes from the panel in the press's own drawing too, and comes back only if it could not be answered
+  if (gate.isUndone) {
+    if (gatePressed.has(id)) return
+    gatePressed.set(id, said)
+    redraw($)
+    return void answerUndone($, gate, said)
+      .catch(err => log($, `undone change not answered: ${String(err)}`))
+      .finally(() => (gatePressed.delete(id), redraw($)))
+  }
+  if (gateHeld.has(id) && !gatePressed.has(id)) {
+    gatePressed.set(id, said)
     gateSaid.set(id, said)
     void noteDone($, {
       id: `gate-${id}`,
@@ -6841,7 +6924,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
       ...(card ? { card } : {}),
       // Refused, nothing runs: what it says is over at once
       ...(said === 'deny' ? { endedAt: 0 } : {}),
-      head: gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host} into ${gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
+      head: gateHead(gate),
       said:
         said === 'deny'
           ? `You denied it · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}, and the work was told`
@@ -6852,7 +6935,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
             : gate.isWork
               ? "You allowed this work's admin commands · it runs now"
               : 'You allowed it once · it runs now',
-      what: gate.kind === 'release' && gate.folder ? `from ${shortPath(gate.folder)}` : gate.kind === 'file' ? '' : cut(oneLine(gate.command), 200),
+      what: gateWhatLine(gate),
       isOn: said !== 'deny',
     }).catch(() => undefined)
   }
@@ -6880,11 +6963,17 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
         await dropGrants($, grants)
         return { deny: said === 'deny' ? GATE_DENIED() : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
       }
-      if (said === 'always') await allowAlways($, call).catch(err => log($, `admin command not always allowed: ${String(err)}`))
+      if (said === 'always')
+        await allowAlways($, call).catch(async err => {
+          await log($, `admin command not always allowed: ${String(err)}`)
+          const gate = { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }
+          if (doneNotes.some(one => one.id === `gate-${gate.id}`)) await noteDone($, { id: `gate-${gate.id}`, call: e.tool_use_id, ...(card ? { card: top } : {}), head: gateHead(gate), said: 'You allowed it once · it runs now, but it could not be kept as always allowed', what: gateWhatLine(gate), isOn: true })
+        })
       if (isWork) workAllowed.add(top)
     }
     const grant = await issueGrant($, `${e.tool_use_id}-${n}`, call)
     if (!grant) {
+      await gateNoteFailed($, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }, card ? top : '', 'It could not be sealed · it did not run, and the work was told')
       await dropGrants($, grants)
       return { deny: GATE_UNSEALED(), grants: [] }
     }
@@ -6971,6 +7060,7 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     }
     const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
     if (!grant) {
+      await gateNoteFailed($, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: 0 }, card ? top : '', 'It could not be sealed · nothing was released, and the work was told')
       await dropGrants($, grants)
       return { deny: GATE_UNSEALED(), grants: [] }
     }
@@ -7278,6 +7368,7 @@ const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, na
   // Nothing waits on it: the card offers it until pressed, and the press itself makes the change again
   undoneOffers.set(id, { name, text, top: card ? top : '' })
   gateHeld.add(id)
+  gatePressed.delete(id)
   await setGates($, card ? top : '', gates => [...gates.filter(one => one.id !== id), { id, kind: 'file', isUndone: true, ...(by ? {} : { isOutside: true }), host: what, command: cut(text ?? '(the file taken away)', 2000), at, ...(by?.agentId ? { from: by.agentId } : {}) }])
   await openList($).catch(() => undefined)
   $.ui.log(`${card ? `A command of the work "${titleOf(card)}" changed` : by ? 'A command changed' : 'Something outside Claudopus changed'} ${what}, and it was put back · Press Allow once ${card ? 'on its card' : 'at the top'} in the Claudopus panel to make the change again, or Deny.`)
@@ -7340,14 +7431,14 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
 )
 // The gates on a work's card, and once one is answered, what was done in the same place, outlined green (grey once refused)
 const adminBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number) =>
-  one.admins?.length || cardNotesOf(one.id, at).length ? (
+  one.admins?.some(gate => !gatePressed.has(gate.id)) || cardNotesOf(one.id, at).length ? (
     <ui.Box key={key} flexDirection="column" gap={1}>
-      {(one.admins ?? []).map(gate => gateRow($, ui, gate, `gate-${gate.id}`, Boolean(one.chat), one.chat ? '' : one.id))}
+      {(one.admins ?? []).filter(gate => !gatePressed.has(gate.id)).map(gate => gateRow($, ui, gate, `gate-${gate.id}`, Boolean(one.chat), one.chat ? '' : one.id))}
       {cardNotesPart(ui, one.id, at)}
     </ui.Box>
   ) : null
 // A gate with no card, at the top of the panel
-const gatesPart = ($: EngineInterface, ui: Ui) => looseGates.map(gate => gateRow($, ui, gate, `gate-${gate.id}`, false))
+const gatesPart = ($: EngineInterface, ui: Ui) => looseGates.filter(gate => !gatePressed.has(gate.id)).map(gate => gateRow($, ui, gate, `gate-${gate.id}`, false))
 // A path in one line: the home folder as ~, and the middle left out past `room` characters, keeping its last folders
 const shortPath = (path: string, room = 44) => {
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
@@ -9560,11 +9651,12 @@ const workHooks = (on: On) => {
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
-      if (gated.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: gated.deny })
+      if (gated.deny) return (await callRefused($, e.tool_use_id), await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: gated.deny })
       grants = gated.grants
       const released = await gateRelease($, e, raw as never)
       if (released.deny) {
         await dropGrants($, grants)
+        await callRefused($, e.tool_use_id)
         await noteCallEnded($, e.tool_use_id).catch(() => undefined)
         return { deny: released.deny }
       }
@@ -9574,7 +9666,7 @@ const workHooks = (on: On) => {
     }
     if (!isRefusedHere) {
       const fileSaid = await gateOwnFile($, e, raw as never)
-      if (fileSaid) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: fileSaid })
+      if (fileSaid) return (await dropGrants($, grants), await callRefused($, e.tool_use_id), await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: fileSaid })
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
@@ -10597,7 +10689,8 @@ const panelHooks = (on: On) => {
     }
     const { isFinishedOpen = false } = await read($, view)
     // Every piece of work this chat keeps; its own are the ones the chat's thread started, the rest are their helpers
-    const all = await read($, todos)
+    // A card whose ask or gate was just pressed is drawn answered, from the press itself (asPressed)
+    const all = (await read($, todos)).map(asPressed)
     const own = all.filter(one => !one.parentId)
     // The work of the other chats, by chat; an ask answered here leaves its card at once
     const otherChats = await read($, others)

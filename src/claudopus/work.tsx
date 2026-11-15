@@ -167,11 +167,12 @@ const workHooks = (on: On) => {
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
-      if (gated.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: gated.deny })
+      if (gated.deny) return (await callRefused($, e.tool_use_id), await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: gated.deny })
       grants = gated.grants
       const released = await gateRelease($, e, raw as never)
       if (released.deny) {
         await dropGrants($, grants)
+        await callRefused($, e.tool_use_id)
         await noteCallEnded($, e.tool_use_id).catch(() => undefined)
         return { deny: released.deny }
       }
@@ -181,7 +182,7 @@ const workHooks = (on: On) => {
     }
     if (!isRefusedHere) {
       const fileSaid = await gateOwnFile($, e, raw as never)
-      if (fileSaid) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: fileSaid })
+      if (fileSaid) return (await dropGrants($, grants), await callRefused($, e.tool_use_id), await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: fileSaid })
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
