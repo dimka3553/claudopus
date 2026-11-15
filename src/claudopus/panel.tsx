@@ -539,7 +539,7 @@ const panelHooks = (on: On) => {
       // guess: only the work's own line, which counts the whole run (a tool's bar starts again at each epoch, package or phase),
       // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
       const share = Number.parseFloat(job.pct ?? '') / 100
-      const guess = !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? leftText((ran / 1000) * ((1 - share) / share)) : undefined
+      const guess = !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
       const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
