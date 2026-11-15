@@ -1,2 +1,0 @@
-- Typing in a reply box no longer pulls the panel back down: while the box had the focus, every scroll up was undone by the app moving the panel back to the box, and the mod now refuses that move, so the panel stays where you scrolled it.
-- The panel can be recorded for a few minutes to find faults only the real app shows (off unless asked for; it keeps no letter typed, and nothing typed into a key box).
