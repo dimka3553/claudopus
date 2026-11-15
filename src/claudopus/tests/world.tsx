@@ -463,7 +463,14 @@ const ownSet = (files: Map<string, string>, name: string, text: string) => {
   })()
   const known = { ...kept, [name]: text }
   if (!files.has('keychain:known')) files.set('keychain:known', 'key-known')
-  files.set(`${MEMORY}/admin-known.json`, JSON.stringify({ files: known, seal: fakeSeal(files.get('keychain:known') ?? '', `known\n${JSON.stringify(known)}`) }))
+  const count = (() => {
+    try {
+      return Number((JSON.parse(files.get(`${MEMORY}/admin-known.json`) ?? '{}') as { count?: number }).count ?? 0) + 1
+    } catch {
+      return 1
+    }
+  })()
+  files.set(`${MEMORY}/admin-known.json`, JSON.stringify({ files: known, count, seal: fakeSeal(files.get('keychain:known') ?? '', `known\n${count}\n${JSON.stringify(known)}`) }))
   files.set(`${MEMORY}/${name}`, text)
 }
 // A button of the open card by its key less the count of presses the card adds to it

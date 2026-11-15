@@ -215,7 +215,7 @@ test('F-021 · a write to the rules that lands after its call returned (a comman
 })
 
 test('F-021 · a kept copy written, taken away or broken by work never decides what the rules hold: they move aside to a copy of their own and are offered', async ($, on) => {
-  const { files, bash, list } = await gated($, on)
+  const { files, bash, list, clock } = await gated($, on)
   const rules = `${MEMORY}/rules/CLAUDE.md`
   ownSet(files, 'rules/CLAUDE.md', 'my rules')
   await bash('s0', 'ls')
@@ -241,7 +241,11 @@ test('F-021 · a kept copy written, taken away or broken by work never decides w
   // As the mod loads with no sealed copy where one was made, nothing own is in force: each is moved aside and offered
   files.delete(`${MEMORY}/admin-known.json`)
   files.set(rules, 'PLANTED-LOAD')
-  await $.session.start(start)
+  // Looked at again a moment later, as another chat may be writing it just then
+  const loading = $.session.start(start)
+  await until(async () => undefined)
+  await clock.advance(1_000)
+  await loading
   expect(files.has(rules)).toBe(false)
   expect(putBack()).toContain('PLANTED-LOAD')
   expect(files.has(`${MEMORY}/config.json`)).toBe(false)
@@ -278,7 +282,7 @@ test('F-021 · what a chat or work is told, the gate and a Config press read the
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', sound: false })
 })
 
-test('F-021 · an old kept copy put back with the old file is not sealed right any more, and a keychain that does not answer is said, not passed over', async ($, on) => {
+test('F-021 · an old kept copy put back with the old file is not taken by a chat that saw a newer one, and a keychain that does not answer is said, not passed over', async ($, on) => {
   const { files, bash, list, logged } = await gated($, on)
   const config = `${MEMORY}/config.json`
   // A Mac the person had, then removed in Config: work kept a copy of both files from before

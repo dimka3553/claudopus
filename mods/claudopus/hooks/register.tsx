@@ -5925,7 +5925,7 @@ fi
 for m in "$@"; do
   printf '%s\\n%s' "$k" "$m" | /usr/bin/perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m // "", $k), "\\n"' || exit 1
 done`
-const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-new', messages: string[]) => {
+const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-make', messages: string[]) => {
   const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
   const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
@@ -6259,7 +6259,7 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
 // What this does not stop: a program running as the person that reads the gate's key (F-007) and seals a copy of its own
 const PERSON_FILES = ['config.json', 'rules/CLAUDE.md', 'roles/chat.md', 'roles/work.md', 'admin-allowed.json']
 const knownPath = () => `${dir}/admin-known.json`
-const knownMessage = (files: Record<string, string | null>) => `known\n${JSON.stringify(files)}`
+const knownMessage = (files: Record<string, string | null>, count: number) => `known\n${count}\n${JSON.stringify(files)}`
 // A file's text, null when there is none, undefined when it could not be read (then it is left alone)
 const personRead = async ($: EngineInterface, name: string): Promise<string | null | undefined> => {
   const path = `${dir}/${name}`
@@ -6275,17 +6275,19 @@ const personNow = async ($: EngineInterface) => {
   }
   return now
 }
-// What this chat last found sealed, or sealed itself: the kept copy is checked again only when its text changed
-let knownSeen: { text: string; files: Map<string, string | null> } | undefined
+// What this chat last found sealed, or sealed itself: the kept copy is checked again only when its text changed. Each copy carries
+// a count one past the copy it replaced, and a copy counting less than one this chat has seen (an older copy put back) is not taken
+let knownSeen: { text: string; files: Map<string, string | null>; count: number } | undefined
 // What each file is known to hold: undefined when no sealed copy is there (missing, changed by hand, or never made)
 const knownRead = async ($: EngineInterface): Promise<Map<string, string | null> | undefined> => {
   const text = await $.fs.read(knownPath()).catch(() => '')
   if (knownSeen && knownSeen.text === text) return new Map(knownSeen.files)
   try {
-    const kept = JSON.parse(text) as { files?: Record<string, unknown>; seal?: unknown }
+    const kept = JSON.parse(text) as { files?: Record<string, unknown>; count?: unknown; seal?: unknown }
     const files = Object.fromEntries(Object.entries(kept.files ?? {}).filter(([name, one]) => PERSON_FILES.includes(name) && (one === null || typeof one === 'string'))) as Record<string, string | null>
-    if (typeof kept.seal !== 'string' || (await sealed($, 'known-read', [knownMessage(files)]))?.[0] !== kept.seal) return undefined
-    knownSeen = { text, files: new Map(Object.entries(files)) }
+    const count = typeof kept.count === 'number' && Number.isSafeInteger(kept.count) ? kept.count : -1
+    if (count < (knownSeen?.count ?? 0) || typeof kept.seal !== 'string' || (await sealed($, 'known-read', [knownMessage(files, count)]))?.[0] !== kept.seal) return undefined
+    knownSeen = { text, files: new Map(Object.entries(files)), count }
     return new Map(knownSeen.files)
   } catch {
     return undefined
@@ -6304,17 +6306,17 @@ const knownWarn = ($: EngineInterface, why: string) => {
   isKnownWarned = true
   $.ui.log(`Claudopus could not use its key in ${keptWhere()} (${why}), so a change made to your settings, principles or rules outside Claudopus is not put back in this chat until it can. Unlock the keychain, or start a new chat once it is unlocked.`)
 }
-// Each copy is sealed under a new key, so no copy kept from before (a copy of the file put back later) is sealed right any more
-const knownWrite = async ($: EngineInterface, known: Map<string, string | null>) => {
+const knownWrite = async ($: EngineInterface, known: Map<string, string | null>, after: number) => {
   const files = Object.fromEntries(known)
-  const seal = (await sealed($, 'known-new', [knownMessage(files)]))?.[0]
+  const count = after + 1
+  const seal = (await sealed($, 'known-make', [knownMessage(files, count)]))?.[0]
   if (!seal) {
     knownWarn($, 'it could not be sealed')
     throw new Error(`the kept copy could not be sealed in ${keptWhere()}`)
   }
-  const text = `${JSON.stringify({ files, seal }, null, 2)}\n`
+  const text = `${JSON.stringify({ files, count, seal }, null, 2)}\n`
   await $.fs.write(knownPath(), text)
-  knownSeen = { text, files: new Map(known) }
+  knownSeen = { text, files: new Map(known), count }
 }
 // One chat's changes to it at a time, so two never lose each other's
 let knownQueue: Promise<unknown> = Promise.resolve()
@@ -6323,7 +6325,7 @@ const knownSet = ($: EngineInterface, change: (known: Map<string, string | null>
     // A copy that is not sealed right is built on what this chat last knew, never on what it says
     const known = (await knownRead($)) ?? new Map(knownSeen?.files ?? [])
     change(known)
-    await knownWrite($, known)
+    await knownWrite($, known, knownSeen?.count ?? 0)
   })
   knownQueue = step.catch(() => undefined)
   return step
@@ -6361,11 +6363,16 @@ const personCheck = async ($: EngineInterface, by?: ToolCallInput): Promise<stri
 }
 const personLook = async ($: EngineInterface, by?: ToolCallInput): Promise<string[]> => {
   await knownQueue
-  const sealedKnown = await knownRead($)
-  const now = await personNow($)
+  let sealedKnown = await knownRead($)
   // No sealed copy, and this Mac never made one (no key of its own): the first load of a version that keeps one, and what is there
   // is the person's
   const key = !sealedKnown && !knownSeen ? await knownKey($) : 'yes'
+  // Not sealed right as this chat first looks, where a key is: once more a moment later, as another chat may be writing it just now
+  if (!sealedKnown && !knownSeen && key === 'yes') {
+    await $.clock.sleep(300)
+    sealedKnown = await knownRead($)
+  }
+  const now = await personNow($)
   // The keychain did not answer (locked, or refusing): nothing can be told apart, so the files are left as they are, and said
   if (key === 'error') {
     knownWarn($, 'the keychain did not answer')
