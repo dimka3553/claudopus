@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.114 · 15 November 2026
+- Work and helpers start only on the newest models: one asked to run on an older model or on Haiku starts on its family's newest instead of being refused, and so does a helper left to a parent on an older model, a workflow's agent, or an agent whose own kind names an older model.
+- A helper that checks what was built runs on a model no weaker than the work that started it, and at least on Opus.
+- When a safety check flags a message and the app would carry the work on on an older model (as it carried a second look on Opus 4.8), the work is ended there with a report saying so, and its card says "ended after a safety flag"; the work above it starts what is left again on the current model.
+- What counts as the newest follows the newest model the engine starts work on, not a version written into the mod.
+
 ## 0.2.113 · 15 November 2026
 - Asks for your press (a release, an admin command, a change to your settings, a change put back, a password or key, Claude Code's own permission asks) are outlined boxes that name the kind of ask at the top, so they are no longer taken for one more piece of work.
 - What you pressed is now one quiet line with a tick or a cross, not a card, and it goes as soon as what it reports has finished, rather than staying a minute.
