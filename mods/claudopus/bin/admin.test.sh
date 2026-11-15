@@ -277,9 +277,9 @@ case "\$*" in
     sha=\$(cat "$r/asked"); at=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
     { printf '{"id":77,"display_title":"Release check %s","head_branch":"main","head_sha":"%s","path":".github/workflows/check.yml","event":"workflow_dispatch","created_at":"%s"}\n' "\$sha" "\$(git -C "$r/origin.git" rev-parse main)" "\$at"
       [ -e "$r/runs.extra" ] && sed "s/SHA/\$sha/g; s/NOW/\$at/g" "$r/runs.extra"; } | jq -s '{workflow_runs: (reverse)}' | jq -r "\$filter" ;;
-  "api repos/"*"/actions/runs/77 --jq"*) jobs | awk -F'\t' '\$2 != "completed" { busy = 1 } \$2 == "completed" && \$3 !~ /^(success|skipped|neutral)\$/ { red = 1 } END { print (busy ? "in_progress\t" : red ? "completed\tfailure" : "completed\tsuccess") }' ;;
+  "api repos/"*"/actions/runs/77 --jq"*) n=\$(( \$(cat "$r/asks" 2>/dev/null || echo 0) + 1 )); echo \$n >"$r/asks"; jobs | awk -F'\t' '\$2 != "completed" { busy = 1 } \$2 == "completed" && \$3 !~ /^(success|skipped|neutral)\$/ { red = 1 } END { print (busy ? "in_progress\t" : red ? "completed\tfailure" : "completed\tsuccess") }' ;;
   "api repos/"*"/actions/runs/"*" --jq"*) printf 'completed\tsuccess\n' ;;
-  "api --paginate repos/"*"/actions/runs/77/jobs"*) n=\$(( \$(cat "$r/asks" 2>/dev/null || echo 0) + 1 )); echo \$n >"$r/asks"; jobs ;;
+  "api --paginate repos/"*"/actions/runs/77/jobs"*) jobs ;;
   "api --paginate repos/"*"/actions/runs/"*"/jobs"*) printf 'check (ubuntu-latest)\tcompleted\tsuccess\tu\ncheck (macos-latest)\tcompleted\tsuccess\tu\n' ;;
   *) echo "gh: not answered here: \$*" >&2; exit 1 ;;
 esac
@@ -288,7 +288,7 @@ chmod +x "$r/gh/gh"
 # (main of this test's own repo is pushed past the guard the release put in, as the test runs with CLAUDECODE set)
 (cd "$r/work" && git fetch -q origin && git checkout -q -B main origin/main && printf 'CHECK=true\nGITHUB_CHECKS="check (ubuntu-latest), check (macos-latest)"\n' >.release && git commit -q -am "checks on GitHub" && RELEASE_PUSH=1 git push -q origin main && git checkout -q -b gh-checks && echo four >file && git commit -q -am four) || { echo "NOT OK - the repo for GitHub's checks was not set up"; failed=1; }
 checks() { printf "$@" >"$r/checks"; rm -f "$r/checks.later" "$r/asks" "$r/asked" "$r/runs.extra"; }
-gh_release() { release_grant "rel-$1" release-grant gh-checks; (cd "$r/work" && RELEASE_CHECK_EVERY=1 RELEASE_CHECK_WAIT=4 "$here/release"); }
+gh_release() { release_grant "rel-$1" release-grant gh-checks; (cd "$r/work" && RELEASE_CHECK_EVERY=1 RELEASE_CHECK_WAIT=${WAIT:-4} "$here/release"); }
 main_was=$(git -C "$r/origin.git" rev-parse main)
 unmoved() { n=$((n + 1)); [ "$(git -C "$r/origin.git" rev-parse main)" = "$main_was" ] && echo "ok $n - $1: main was not moved" || { echo "NOT OK $n - $1: main moved"; failed=1; }; }
 no_candidate() { n=$((n + 1)); [ -z "$(git -C "$r/origin.git" for-each-ref refs/release-check refs/heads/release-check)" ] && echo "ok $n - $1: the commit put up for GitHub to check is taken down" || { echo "NOT OK $n - $1: the commit put up for GitHub to check was left"; failed=1; }; }
@@ -318,7 +318,10 @@ expect 'two runs on main named for the same commit: refused' 3 'more than one ru
 unmoved 'two runs for one commit'
 checks 'check (ubuntu-latest)\tqueued\t\tu1\ncheck (macos-latest)\tin_progress\t\tu2\n'
 printf 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tsuccess\tu2\n' >"$r/checks.later"
+# (a wait long enough for a slow runner: it ends as soon as the checks pass)
+WAIT=60
 expect 'checks running, then green: released once they pass, after saying what it waits for' 0 "waiting for GitHub's checks: check (ubuntu-latest) running, check (macos-latest) running" -- gh_release green
+WAIT=
 n=$((n + 1)); [ "$(git -C "$r/origin.git" rev-parse main)" = "$(cat "$r/asked")" ] && echo "ok $n - main is the very commit GitHub checked" || { echo "NOT OK $n - main is not the commit GitHub checked"; failed=1; }
 no_candidate 'a green release'
 unset CLAUDECODE
