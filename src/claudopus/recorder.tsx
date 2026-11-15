@@ -6,6 +6,9 @@
 // an input's text, a reply's, a key's, is not read, and an element's key is kept only in the mod's own shape of keys
 const RECORD_FOR = 180_000
 const RECORD_SWITCH = 'record-panel.on'
+const RECORD_FRESH = 60_000
+// Set only while a recording asked for it: the pull back to a typed box let through (commands.tsx)
+let isPullGuardOff = false
 let recording: { path: string; until: number; lines: string[]; written: number; started: number } | undefined
 let recordLooked = 0
 let typedCount = new Map<string, number>()
@@ -18,19 +21,27 @@ const isRecording = async ($: EngineInterface) => {
     if (at < recording.until) return true
     await recordFlush($)
     recording = undefined
+    isPullGuardOff = false
     return false
   }
   if (!dir || at - recordLooked < 2000) return false
   recordLooked = at
   const on = `${dir}/${RECORD_SWITCH}`
-  if (!(await $.fs.exists(on).catch(() => false))) return false
+  const stat = await $.fs.stat(on).catch(() => undefined)
+  if (!stat) return false
+  // A switch left from long ago, its removal failed or its chat gone, starts nothing: it goes
+  if (at - stat.mtimeMs > RECORD_FRESH) return void (await $.process.run(['rm', '-f', on]).catch(() => undefined)), false
+  // A switch that says "unguarded" records with the pull back let through, to compare with and without it
+  isPullGuardOff = /unguarded/.test(await readOr($, on))
   const chat = (await $.session.id().catch(() => '')).slice(0, 8) || 'chat'
   recording = { path: `${dir}/panel-record/${chat}-${new Date(at).toISOString().replace(/[:.]/g, '-')}.jsonl`, until: at + RECORD_FOR, lines: [], written: 0, started: at }
   typedCount = new Map()
   // The switch stays for the other chats to see for a few seconds, then goes, so a recording never runs on by itself
   $.clock.after(6000, () => void $.process.run(['rm', '-f', on]).catch(() => undefined))
   const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
-  await recordLine($, { ev: 'start', version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
+  const flushing = () => $.clock.after(2000, () => void (recording ? recordFlush($).then(() => (recording && ((void isRecording($)), flushing()))) : undefined))
+  flushing()
+  await recordLine($, { ev: 'start', isPullGuardOff, version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
   return true
 }
 // One event, with its time from the start
@@ -47,7 +58,7 @@ const recordFlush = async ($: EngineInterface) => {
 // An event, when recording: called from the mod's own redraws and scrolls with what asked for it
 const recordEvent = ($: EngineInterface, ev: string, extra: Record<string, unknown> = {}) => {
   if (!recording) return
-  void recordLine($, { ev, ...extra, from: callerOf() })
+  void $.clock.now().then(at => void (recording && at < recording.until && recordLine($, { ev, ...extra, from: callerOf() })))
 }
 // Where in the mod a call came from: the function names on the way, from the stack, without paths
 const callerOf = () =>
@@ -66,14 +77,14 @@ const drawingShape = (drawing: unknown) => {
   const walk = (node: unknown, depth: number) => {
     if (!node || typeof node !== 'object' || nodes > 5000) return
     if (Array.isArray(node)) return void node.forEach(child => walk(child, depth))
-    const el = node as { type?: unknown; key?: unknown; props?: Record<string, unknown> }
+    const el = node as { type?: unknown; key?: unknown; props?: Record<string, unknown>; children?: unknown }
     if (!el.props && el.key === undefined) return
     nodes += 1
     const type = typeof el.type === 'string' ? el.type : typeof el.type === 'function' ? (el.type as { name?: string }).name ?? '' : ''
     const key = keyShown(el.key ?? el.props?.key)
     if (/Input/i.test(type) || /-reply-|-field/.test(key ?? '')) inputs.push({ key, before: nodes })
     if (key && depth <= 6) keys.push(key)
-    walk(el.props?.children, depth + 1)
+    walk(el.children ?? el.props?.children, depth + 1)
   }
   walk(drawing, 0)
   return { nodes, inputs, keys: keys.slice(0, 120), sign: [...keys.join(',')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36) }
@@ -108,7 +119,8 @@ const recorderHooks = (on: On) => {
   })
   // Typing as a count by box: the value is never read
   on('ui.input', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) {
+    // A key box's typing is not recorded at all, not even as a count: a password's length is the password's
+    if (!/^box-.*-field/.test(e.element) && (await isRecording($))) {
       const key = keyShown(e.element) ?? ''
       typedCount.set(key, (typedCount.get(key) ?? 0) + 1)
       await recordLine($, { ev: 'input', id: e.requestId, element: key, kind: e.kind, count: typedCount.get(key) })

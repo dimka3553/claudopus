@@ -1049,7 +1049,15 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
   await list.input({ key: (await box())?.key ?? '', text: 'Zebra quartz 7731', kind: 'change' } as never)
   await clock.advance(3000)
   expect(recorded()).toEqual([])
+  // A switch left from long ago starts nothing, and goes
   files.set(`${MEMORY}/record-panel.on`, '')
+  await clock.advance(3000)
+  await list.input({ key: (await box())?.key ?? '', text: 'Zebra quartz 7731 more', kind: 'change' } as never)
+  await clock.advance(7000)
+  expect(recorded()).toEqual([])
+  expect(files.has(`${MEMORY}/record-panel.on`)).toBe(false)
+  files.set(`${MEMORY}/record-panel.on`, '')
+  files.set(`mtime:${MEMORY}/record-panel.on`, String(1_700_000_016_000))
   await clock.advance(3000)
   await box()
   for (const text of ['Q', 'Qu', 'Quiet lynx 4419']) await list.input({ key: (await box())?.key ?? '', text, kind: 'change' } as never)
@@ -1061,6 +1069,8 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
   const text = files.get(path ?? '') ?? ''
   const events = text.trim().split('\n').map(line => JSON.parse(line) as { ev: string; count?: number })
   expect(events.some(one => one.ev === 'render')).toBe(true)
+  // The reply box is found in the drawing, by its key and where it sits among the drawing's elements
+  expect(events.some(one => (one as { inputs?: { key: string }[] }).inputs?.some(input => /-reply-/.test(input.key)))).toBe(true)
   expect(events.filter(one => one.ev === 'input').map(one => one.count)).toEqual([1, 2, 3])
   for (const typed of ['Quiet', 'lynx', '4419', 'Zebra', 'quartz', '7731', 'Qu"']) expect(text.includes(typed)).toBe(false)
   expect(files.has(`${MEMORY}/record-panel.on`)).toBe(false)
