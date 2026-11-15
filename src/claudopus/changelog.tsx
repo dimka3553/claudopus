@@ -93,6 +93,12 @@ const closeScreen = async ($: EngineInterface, version: string) => {
   if (!isNewer(seenIn(await readOr($, seenPath())), version)) await writeSeen($, version)
   drawAgain($)
 }
+// The first sentence of a change, short: up to its first full stop, colon or semicolon, cut at a word near 110 characters
+const firstClause = (text: string) => {
+  const plain = text.replace(/`/g, '').replace(/\s+/g, ' ').trim()
+  const first = /^(.{20,}?[.;:])(\s|$)/.exec(plain)?.[1] ?? plain
+  return first.length <= 110 ? first.replace(/[.;:]$/, '') : `${first.slice(0, 107).replace(/\s+\S*$/, '')}…`
+}
 // The note a chat shows once it moved to a newer version whose changes the person has not seen on this Mac: one quiet box in the
 // header, where the update's steps were, saying what it moved from and how many versions that covers, with What's new (the
 // Changelog tab) and Close, which marks it seen for every chat. Nothing in a copy a newer load of this chat replaced
@@ -112,7 +118,7 @@ const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, _asks: n
         </ui.Box>
         <ui.Text dimColor wrap="truncate-end">{`· from v${seen}${count > 1 ? `, ${count} versions` : ''}`}</ui.Text>
       </ui.Box>
-      {shown[0]?.changes[0] ? <ui.Text key="update-what" dimColor wrap="wrap">{shown[0].changes[0].length > 140 ? `${shown[0].changes[0].slice(0, 137).replace(/\s+\S*$/, '')}…` : shown[0].changes[0]}</ui.Text> : null}
+      {shown[0]?.changes[0] ? <ui.Text key="update-what" dimColor wrap="wrap">{firstClause(shown[0].changes[0])}</ui.Text> : null}
       <ui.Box key="update-done-buttons" flexDirection="row" flexWrap="wrap" columnGap={2}>
         <ui.Button key={`update-new-${presses}`} label="What's new" onPress={() => void ((presses += 1), closeScreen($, loaded).then(() => openChangelog($))).catch(err => log($, `changelog not opened: ${String(err)}`))} />
         <ui.Button key={`update-close-${presses}`} label="Close" plain dimColor onPress={() => void closeScreen($, loaded).catch(err => log($, `update note not closed: ${String(err)}`))} />

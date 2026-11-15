@@ -170,7 +170,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       const ready = await folderReady(io, repo)
       return done({
         src: { kind: 'folder', repo, sub: 'mods/claudopus', runs: 'copy', record },
-        cannot: ready.ok ? undefined : { what: `Claude Code installs it from ${ready.what} at ${homeShort(repo)}`, why: ready.why },
+        cannot: ready.ok ? undefined : { what: `Claude Code installs it from ${ready.what}`, why: ready.why },
         where: `Claude Code's installed copy, made from the folder ${homeShort(repo)}`,
       })
     }
@@ -205,7 +205,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
   const sub = top && root.startsWith(`${top}/`) ? root.slice(top.length + 1) : 'mods/claudopus'
   return done({
     src: { kind: 'folder', repo: top || root, sub, runs: 'folder', ...(marketplace && scope ? { record: { plugins, marketplace, plugin: 'claudopus', scope } } : {}) },
-    cannot: ready.ok ? undefined : { what: `This chat runs from ${ready.what} at ${homeShort(top || root)}`, why: ready.why },
+    cannot: ready.ok ? undefined : { what: `This chat runs from ${ready.what}`, why: ready.why },
     where: `the folder ${homeShort(root)}${ready.ok ? ", Claudopus's own checkout on main" : `, ${ready.what}`}`,
   })
 }
@@ -319,6 +319,8 @@ const laterPress = async ($: EngineInterface, version: string) => {
 const skipPress = async ($: EngineInterface, version: string) => {
   presses += 1
   await setConfig($, dir, 'skipVersion', version)
+  // What Check now said last is about the version just skipped
+  Object.assign(updateCheck, { said: '', isError: false })
   await loadSettings($)
   redraw($)
 }
@@ -353,6 +355,25 @@ const noticeNow = async ($: EngineInterface, loaded: string, installed: string):
   })
 }
 
+// Where updating stands, as far as the panel's drawing changes with it: a step, a look, a press put off or skipped, what the Mac has,
+// the seen record of the note after a move, and this chat's own progress and presses, so a held drawing is never shown past it
+const updateShape = async ($: EngineInterface) =>
+  dir
+    ? JSON.stringify([
+        await readOr($, lookedPath()),
+        await readOr($, stepsPath()),
+        await readOr($, laterPath()),
+        await readOr($, `${dir}/seen.json`),
+        (await readConfig($, dir)).skipVersion ?? '',
+        await installedNow($).catch(() => ''),
+        pageRead?.page.version ?? '',
+        downloadProgress ? Math.round(downloadProgress.pct) : -1,
+        isStepping,
+        busyAt,
+        isReloadRefused,
+      ])
+    : ''
+
 // The notice: a small grey outlined box in the header, under the version this chat runs, never a demand as the amber boxes are.
 // What is out and, in a line, what is new; the three steps and where they stand; the one press that comes next, Not now and Skip
 const NOTICE_EDGE = '#80808070'
@@ -365,9 +386,9 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   const { src } = known
   const isFolder = src.kind === 'folder'
   const folder = isFolder ? homeShort(src.repo) : ''
-  const track = (at: number) => (
+  const track = (at: number, isFailed = false) => (
     <ui.Text key="update-track" dimColor wrap="truncate-end">
-      {STEPS.map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${i === 0 && isFolder ? 'Fetch' : i === 1 && isFolder ? 'Move forward' : one}`).join('   ')}
+      {STEPS.map((one, i) => `${i < at ? '✓' : i === at ? (isFailed ? '✗' : '●') : '○'} ${i === 0 && isFolder ? 'Fetch' : i === 1 && isFolder ? 'Move forward' : one}`).join('   ')}
     </ui.Text>
   )
   const quiet = (key: string, version: string, withSkip = true) => [
@@ -406,14 +427,13 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const more = missed.reduce((sum, one) => sum + 1 + one.more, 0) - 1
     const count = n.kind === 'available' ? n.count : missed.length || 1
     const what = newest?.line ? `${newest.line}${more > 0 ? ` · and ${more} more ${more === 1 ? 'change' : 'changes'}` : ''}` : ''
-    const head = title(`Claudopus ${v} is out`, count > 1 ? `· ${count} versions since v${loaded}` : '')
-    if (n.kind === 'cannot') return box('cannot', [head, what ? line('what', what) : null, line('why', `${n.what}: ${n.why}.`)], quiet('cannot', v))
+    const head = title(`Claudopus ${v} is out`, count > 1 ? `· ${count} versions since yours` : '')
+    if (n.kind === 'cannot') return box('cannot', [head, line('why', `${n.what}: ${n.why}.`)], quiet('cannot', v))
     return box(
       'available',
-      [head, what ? line('what', what) : null, track(0)],
+      [head, what ? line('what', what) : null],
       [
-        <ui.Button key={`update-download-${presses}`} label={isFolder ? 'Fetch' : 'Download'} onPress={() => downloadPress($, v)} />,
-        page?.size ? <ui.Text key="update-size" dimColor>{isFolder ? `into ${folder}` : sizeText(page.size)}</ui.Text> : isFolder ? <ui.Text key="update-size" dimColor>{`into ${folder}`}</ui.Text> : null,
+        <ui.Button key={`update-download-${presses}`} label={isFolder ? 'Fetch into the folder' : page?.size ? `Download · ${sizeText(page.size)}` : 'Download'} onPress={() => downloadPress($, v)} />,
         ...quiet('available', v),
       ],
     )
@@ -427,11 +447,11 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   }
   if (n.kind === 'downloaded') {
     const replaces = isFolder
-      ? `Install moves ${folder} forward from v${loaded} to v${v}, a fast-forward that never overwrites your own changes.`
-      : `Install replaces v${loaded} in Claude Code's installed copy. New chats start on v${v}.`
+      ? `Checked: it is what the release published. Move forward takes ${folder} from v${loaded} to v${v}, a fast-forward that never overwrites your own changes.`
+      : `Checked: it is what the release published. Install replaces v${loaded} in Claude Code's installed copy; new chats start on v${v}.`
     return box(
       'downloaded',
-      [title(`Claudopus ${v} ${isFolder ? 'fetched' : 'downloaded'}`, '· matches what the release published'), line('replaces', replaces), track(1)],
+      [title(`Claudopus ${v} ${isFolder ? 'fetched' : 'downloaded'}`), line('replaces', replaces), track(1)],
       [<ui.Button key={`update-install-${presses}`} label={isFolder ? 'Move forward' : 'Install'} onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
     )
   }
@@ -439,14 +459,14 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   if (n.kind === 'reload') {
     const who =
       isFolder && src.runs === 'folder'
-        ? `Every chat that runs from ${folder} switches only at its own reload; each one's panel offers it.`
-        : `Reload switches this chat only. New chats start on v${v}, and each open chat still on an older version offers its own Reload.`
+        ? `This chat still runs v${loaded}. Every chat run from ${folder} switches only at its own reload, which its panel offers.`
+        : `This chat still runs v${loaded}. Reload switches this chat only; new chats start on v${v}, and each open chat on an older version offers its own.`
     const typed = isRunFromAfar || isReloadRefused
     return box(
       'reload',
       [
-        title(`Claudopus ${v} is ${isFolder && src.runs === 'folder' ? 'in the folder' : 'installed'}`, `· this chat still runs v${loaded}`),
-        line('who', typed ? 'Type /reload-plugins in this chat to switch it.' : who),
+        title(`Claudopus ${v} is ${isFolder && src.runs === 'folder' ? 'in the folder' : 'installed'}`),
+        line('who', typed ? `This chat still runs v${loaded}. Type /reload-plugins in this chat to switch it.` : who),
         stepSaid.version === v && stepSaid.dirty ? line('dirty', 'The uncommitted changes in the folder stay, and a reload loads them on top.') : null,
         track(2),
       ],
@@ -455,11 +475,11 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   }
   // A step that failed: what failed, and that what this chat runs is as it was
   const detail = stepSaid.version === v && stepSaid.detail ? ` (${stepSaid.detail})` : ''
-  const which = n.step === 'download' ? (isFolder ? 'Fetching' : 'Downloading') : isFolder ? 'Moving the folder to' : 'Installing'
+  const which = n.step === 'download' ? (isFolder ? 'fetch' : 'download') : isFolder ? 'move the folder to' : 'install'
   const kept = n.fail === 'installed-mismatch' ? `Claude Code's record was put back, so new chats keep v${loaded}.` : `Nothing was changed: this chat still runs v${loaded}.`
   return box(
     'failed',
-    [title(`${which} Claudopus ${v} failed`), line('why', `${FAILS[n.fail].replace(/^./, c => c.toUpperCase())}${detail}.`), line('kept', kept), track(n.step === 'download' ? 0 : 1)],
+    [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${FAILS[n.fail].replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`), track(n.step === 'download' ? 0 : 1, true)],
     [<ui.Button key={`update-again-${presses}`} label="Try again" onPress={() => downloadPress($, v)} />, ...quiet('failed', v)],
   )
 }

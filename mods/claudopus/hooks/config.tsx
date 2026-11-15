@@ -309,7 +309,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           {item(
             'config-look',
             'Look for new versions',
-            'Reads the version page on claudopus.ai, and the panel says when a newer one is out. It never downloads or installs anything: each of Download, Install and Reload is your press in the panel.',
+            'Reads the version page on claudopus.ai; the panel says when a newer one is out. Nothing downloads or installs until you press it.',
             <Select
               key="config-look-pick"
               options={[...LOOK_CHOICES]}
