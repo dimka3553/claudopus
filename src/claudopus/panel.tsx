@@ -531,8 +531,10 @@ const panelHooks = (on: On) => {
       if (!job.expectText || !job.expect) return { time: took(ran), isPast: false }
       if (ran <= job.expect) return { time: `${took(ran)} of ~${job.expectText}`, isPast: false }
       const isFresh = !job.isPaused && Boolean(job.wroteAt) && at - (job.wroteAt ?? 0) < 60_000
-      const left = isFresh ? leftSeconds(job.left ?? guessLeft(job, ran)) : undefined
-      const fresh = left ? timeLeftText(ran / 1000 + left)?.replace(/ left$/, '') : undefined
+      // the time left is as of when it was printed, so it adds to the time it had run then
+      const printedAt = Math.min(ran, Math.max(0, (job.wroteAt ?? 0) - job.at))
+      const left = isFresh ? leftSeconds(job.left ?? guessLeft(job, printedAt)) : undefined
+      const fresh = left ? timeLeftText(Math.max(ran / 1000, printedAt / 1000 + left))?.replace(/ left$/, '') : undefined
       return fresh ? { time: `${took(ran)} of ~${fresh}`, isPast: false } : { time: `${took(ran)} · past ~${job.expectText}`, isPast: true }
     }
     const jobStand = (job: Job, width: number) => {
@@ -651,7 +653,7 @@ const panelHooks = (on: On) => {
     const treeUnder = (one: Todo) => {
       const under = underOf(all, one.id)
       const own = jobBranches(one)
-      const runs = endedRunsOf(one)
+      const runs = endedRunsOf(one, one.chat ? helpersThere : all)
       if (!under.length && !own.length && !runs.length) return []
       const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid, at).length > 0))]
       const twigs = twigsOf(branches, true)

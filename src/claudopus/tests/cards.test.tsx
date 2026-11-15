@@ -1132,7 +1132,7 @@ test('every run under a card says how it stands: a command held open shows its p
   // Named in the work's own form: its kind already said, how long it should take beside its time, in amber well past it
   expect(shown).toContain('Download the CT scans')
   // past it, the run's own time left makes a fresh expectation, never the old figure as if it held
-  expect(shown).toContain('9m 00s of ~9m 55s')
+  expect(shown).toContain('9m 00s of ~9m 53s')
   expect(shown.some(text => /of ~3m/.test(text))).toBe(false)
   expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated

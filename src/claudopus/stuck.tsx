@@ -160,7 +160,7 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
 const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
 // Background work that has ended or was stopped leaves every card that kept it at once, and is kept as ended with how it ended
 // (by its id, or one word for them all), so the card's summary counts it
-type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string }
+type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number }
 const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Record<string, EndAs> = 'ended') => {
   const now = await $.clock.now()
   const endOfId = (id: string) => {
@@ -175,9 +175,12 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
       if (bg?.length === one.bg?.length) return one
       const runs = (one.bg ?? []).filter(b => isGone(b.id)).map(b => {
         const end = endOfId(b.id)
-        // A watch the engine killed at or after the time limit it set ran out of time; one killed before it was killed
-        const how = end.how === 'killed' && b.expiresAt && now >= b.expiresAt - 60_000 ? 'timed out' : end.how
-        return { id: b.id, what: b.what, at: b.at, endedAt: now, how, ...(end.code ? { code: end.code } : {}) } as EndedRun
+        // It ended when its output last changed, where that is known, else as it was seen gone. A watch the engine killed at the
+        // time limit it set ran out of time (within a tenth of its limit, at most a minute, as its limit is counted from when the mod saw it start); one killed
+        // before it was killed
+        const endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now
+        const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how
+        return { id: b.id, what: b.what, at: b.at, endedAt, how, ...(end.code ? { code: end.code } : {}) } as EndedRun
       })
       return { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined, ...keepEnded(one, runs) }
     })

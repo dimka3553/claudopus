@@ -209,9 +209,10 @@ const lookJobs = async ($: EngineInterface) => {
     const job = asked[(n - 1) / 2]
     const id = job?.id ?? ''
     const text = (parts[n + 1] ?? '').split('\n@@AT@@ ')[0] ?? ''
-    const end = job?.pid ? undefined : runEndOf(text)
-    if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = end))
     const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
+    // One that ended, by the engine's last line on its output, and when: as that output last changed
+    const end = job?.pid ? undefined : runEndOf(text)
+    if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}) }))
     // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote (on
     // 15 Nov such rows read "updated 9m ago" for runs that sent all they printed elsewhere)
     const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }

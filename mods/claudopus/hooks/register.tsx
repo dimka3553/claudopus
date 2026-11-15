@@ -7775,7 +7775,7 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
 const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
 // Background work that has ended or was stopped leaves every card that kept it at once, and is kept as ended with how it ended
 // (by its id, or one word for them all), so the card's summary counts it
-type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string }
+type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number }
 const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Record<string, EndAs> = 'ended') => {
   const now = await $.clock.now()
   const endOfId = (id: string) => {
@@ -7790,9 +7790,12 @@ const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Re
       if (bg?.length === one.bg?.length) return one
       const runs = (one.bg ?? []).filter(b => isGone(b.id)).map(b => {
         const end = endOfId(b.id)
-        // A watch the engine killed at or after the time limit it set ran out of time; one killed before it was killed
-        const how = end.how === 'killed' && b.expiresAt && now >= b.expiresAt - 60_000 ? 'timed out' : end.how
-        return { id: b.id, what: b.what, at: b.at, endedAt: now, how, ...(end.code ? { code: end.code } : {}) } as EndedRun
+        // It ended when its output last changed, where that is known, else as it was seen gone. A watch the engine killed at the
+        // time limit it set ran out of time (within a tenth of its limit, at most a minute, as its limit is counted from when the mod saw it start); one killed
+        // before it was killed
+        const endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now
+        const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how
+        return { id: b.id, what: b.what, at: b.at, endedAt, how, ...(end.code ? { code: end.code } : {}) } as EndedRun
       })
       return { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined, ...keepEnded(one, runs) }
     })
@@ -8025,9 +8028,10 @@ const lookJobs = async ($: EngineInterface) => {
     const job = asked[(n - 1) / 2]
     const id = job?.id ?? ''
     const text = (parts[n + 1] ?? '').split('\n@@AT@@ ')[0] ?? ''
-    const end = job?.pid ? undefined : runEndOf(text)
-    if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = end))
     const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
+    // One that ended, by the engine's last line on its output, and when: as that output last changed
+    const end = job?.pid ? undefined : runEndOf(text)
+    if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}) }))
     // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote (on
     // 15 Nov such rows read "updated 9m ago" for runs that sent all they printed elsewhere)
     const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }
@@ -10020,8 +10024,10 @@ const panelHooks = (on: On) => {
       if (!job.expectText || !job.expect) return { time: took(ran), isPast: false }
       if (ran <= job.expect) return { time: `${took(ran)} of ~${job.expectText}`, isPast: false }
       const isFresh = !job.isPaused && Boolean(job.wroteAt) && at - (job.wroteAt ?? 0) < 60_000
-      const left = isFresh ? leftSeconds(job.left ?? guessLeft(job, ran)) : undefined
-      const fresh = left ? timeLeftText(ran / 1000 + left)?.replace(/ left$/, '') : undefined
+      // the time left is as of when it was printed, so it adds to the time it had run then
+      const printedAt = Math.min(ran, Math.max(0, (job.wroteAt ?? 0) - job.at))
+      const left = isFresh ? leftSeconds(job.left ?? guessLeft(job, printedAt)) : undefined
+      const fresh = left ? timeLeftText(Math.max(ran / 1000, printedAt / 1000 + left))?.replace(/ left$/, '') : undefined
       return fresh ? { time: `${took(ran)} of ~${fresh}`, isPast: false } : { time: `${took(ran)} · past ~${job.expectText}`, isPast: true }
     }
     const jobStand = (job: Job, width: number) => {
@@ -10140,7 +10146,7 @@ const panelHooks = (on: On) => {
     const treeUnder = (one: Todo) => {
       const under = underOf(all, one.id)
       const own = jobBranches(one)
-      const runs = endedRunsOf(one)
+      const runs = endedRunsOf(one, one.chat ? helpersThere : all)
       if (!under.length && !own.length && !runs.length) return []
       const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid, at).length > 0))]
       const twigs = twigsOf(branches, true)
