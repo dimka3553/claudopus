@@ -12,6 +12,13 @@ export type ScrollMove = { at: number; by: number }
 // way within this time is not seen
 export const PULL_BACK = 120
 
-// Whether a move reported as the person's is the app's pull back to the focused box: the other way from their last move, at once
-export const isPulledBack = (last: ScrollMove | undefined, move: ScrollMove, isBoxFocused: boolean) =>
-  isBoxFocused && last !== undefined && last.by !== 0 && move.by !== 0 && Math.sign(move.by) !== Math.sign(last.by) && move.at - last.at >= 0 && move.at - last.at < PULL_BACK
+// A move this many rows or more in one go, many times the person's last, is no wheel tick of theirs: theirs were at most 9 rows in
+// the recordings, while the app's pulls in the person's own direction were 50 to 62
+export const PULL_JUMP = 20
+
+// Whether a move reported as the person's is the app's pull back to the focused box: at once after their last move, either the other
+// way, or the same way but a jump many times as far
+export const isPulledBack = (last: ScrollMove | undefined, move: ScrollMove, isBoxFocused: boolean) => {
+  if (!isBoxFocused || last === undefined || last.by === 0 || move.by === 0 || move.at - last.at < 0 || move.at - last.at >= PULL_BACK) return false
+  return Math.sign(move.by) !== Math.sign(last.by) || (Math.abs(move.by) >= PULL_JUMP && Math.abs(move.by) >= 4 * Math.abs(last.by))
+}
