@@ -196,6 +196,17 @@ const workHooks = (on: On) => {
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       return hideKept($, call, r)
     }
+    // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
+    // no fresh agent for the same task, until their next message
+    if (dir && !isOff && (e.tool === 'SendMessage' || e.tool === 'Agent')) {
+      const call = e as unknown as { to?: unknown; resume?: unknown; description?: unknown; prompt?: unknown; subagent_type?: unknown }
+      const resume = e.tool === 'SendMessage' ? String(call.to ?? '') : String(call.resume ?? '')
+      const held = heldFor(await read($, todos), e.agentId ?? '', resume, String(call.description ?? ''), String(call.prompt ?? ''))
+      if (held) {
+        await log($, `refused ${e.tool} that would set going again ${held.id}, which the person stopped`)
+        return { deny: named(STOPPED_REFUSED(titleOf(held))) }
+      }
+    }
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
     // a line saying what it decided. It is kept by the card in their words. Any other message to work under way, a helper's reply,
     // one between pieces of work or the chat's own note, is told as its sender's
@@ -448,6 +459,14 @@ const workHooks = (on: On) => {
 
   on('agent.spawn', async ($, asked, next) => {
     agentStarted($, asked.tool_use_id)
+    // Nothing starts again work the person stopped, whoever asks: the chat, a work, or the mod's own wakes and carrying on
+    if (dir && !isOff && !asked.workflow) {
+      const held = heldFor(await read($, todos), asked.parentAgentId ?? helperCalls.get(asked.tool_use_id) ?? '', asked.resume?.agentId ?? '', asked.description ?? '', asked.resume ? '' : (asked.prompt ?? ''))
+      if (held) {
+        await log($, `refused to start again ${held.id}, which the person stopped`)
+        return { deny: named(STOPPED_REFUSED(titleOf(held))) }
+      }
+    }
     // Every agent starts on a current model: one named an older model or Haiku on its family's newest, a copy of an agent on an
     // older model not at all, and one left to its parent's model, when that is older, on that family's newest. A check of what was
     // built, by a helper or a workflow's agent, runs on a model never weaker than its parent's, and at least on Opus

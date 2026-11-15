@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.123 · 15 November 2026
+- A Stop you press on a card, or on a helper under it, now holds: the chat is told you stopped it, and it cannot start that work again, message it or start the same work afresh until you send a new message asking for it.
+- Nothing of Claudopus's own wakes stopped work: answers that were on their way to it are dropped, and it is not carried on after a cut-off.
+- The helpers and background commands of stopped work stop with it; anything it started detached is named to the chat as left running.
+- A card you stopped says "Stopped by you", keeps what it had done, and has Start again in its details.
+
 ## 0.2.122 · 15 November 2026
 - In the desktop app, resting the pointer on a figure above the prompt now really shows its card, one at a time, gone as the pointer leaves: who uses the most memory and processor, the battery in words, network download and upload
 - The cards show Claude's own part of the graphics processor, the disk and the network, and the strain on the battery: what the Mac draws and what Claude's processors draw, in watts
