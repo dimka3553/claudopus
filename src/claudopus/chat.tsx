@@ -274,7 +274,9 @@ const chatHooks = (on: On) => {
     await knowSession($)
     await loadFlows($).catch(err => log($, `workflows not read back: ${String(err)}`))
     everyLoad($, FLOW_EVERY, () => followFlows($).catch(err => log($, `workflows not followed: ${String(err)}`)))
-    // Claudopus never updates itself or reloads a chat by itself: Config's Check for updates and a typed /reload-plugins do
+    // Every hour one chat looks at the version page, and only looks: an update is installed, and a chat reloaded to it, only by a press
+    afterLoad($, UPDATE_AFTER, () => void lookForNew($).catch(err => log($, `update not looked for: ${String(err)}`)))
+    everyLoad($, UPDATE_LOOK, () => lookForNew($).catch(err => log($, `update not looked for: ${String(err)}`)))
     if (isRunFromAfar) {
       await holdOldCopies($).catch(() => undefined)
       everyLoad($, HOLD_EVERY, () => holdOldCopies($).catch(err => log($, `old copies not held: ${String(err)}`)))

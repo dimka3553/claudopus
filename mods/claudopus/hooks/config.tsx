@@ -25,7 +25,8 @@ export type Models = Record<Role, string>
 export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: 'Sonnet 5.5', fable: 'Fable 5.2', haiku: 'Haiku 5.5' }
 // `admin`: when the person is asked before an admin command runs: "each" time (as shipped), once for a piece of "work", or "never".
 // "work" and "never" count only with `adminSealed`, the seal a press in this tab makes; without it every command asks.
-// `adminPassword` and `updates` are read no more: no admin password is kept, and Claudopus never installs an update by itself
+// `updates`: false turns off the hourly look at the version page (it only looks; an update installs only at a press)
+// `adminPassword` is read no more: no admin password is kept
 export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; models?: Partial<Models>; admin?: string; adminSealed?: string; adminPassword?: string }
 export const ADMIN_MODES = [
   { value: 'each', label: 'Ask each time' },
@@ -141,11 +142,10 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       {below}
     </Box>
   )
-  // On and Off side by side, the one in force filled. Each is on as shipped but automatic updates, which are off until turned on
-  const isOffShipped = (key: string) => key === 'updates'
-  const setTo = (key: 'agents' | 'sound' | 'notifications' | 'updates', value: boolean) => (isOffShipped(key) ? (value ? true : undefined) : value ? undefined : false)
+  // On and Off side by side, the one in force filled; each is on as shipped, so Off is written as false and On takes the key out
+  const setTo = (_key: 'agents' | 'sound' | 'notifications' | 'updates', value: boolean) => (value ? undefined : false)
   const onOff = (key: 'agents' | 'sound' | 'notifications' | 'updates') => {
-    const isOn = isOffShipped(key) ? config[key] === true : config[key] !== false
+    const isOn = config[key] !== false
     return (
       // The terminal has no fill to mark the one in force: there it is a filled dot before it, an empty one before the other
       'isTerminal' in ui ? (
@@ -290,10 +290,15 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         'Updates',
         '',
         <Box flexDirection="column" gap={1}>
+          {toggle(
+            'updates',
+            'Look for new versions',
+            "Every hour one chat reads claudopus.ai's version page, and the panel says when a newer one is out, with Install. Nothing is downloaded or installed until you press it. Off, nothing looks.",
+          )}
           {item(
             'config-check',
             shown.version ? `This chat runs v${shown.version}` : 'Check for updates',
-            'Looks for a newer release now and gets it, through Claude Code\'s own update steps; type /reload-plugins in a chat to switch it. Claudopus never installs one by itself.',
+            'Looks for a newer release now and gets it, through Claude Code\'s own update steps; type /reload-plugins in a chat to switch it.',
             shown.check.isChecking ? (
               <Text key="config-check-checking" dimColor>Checking…</Text>
             ) : (
