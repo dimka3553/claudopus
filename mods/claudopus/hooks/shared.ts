@@ -195,7 +195,7 @@ export const fetchedOf = (text: string, host: string, fetchedAt = 0): Shared[] =
   return files
     .map(one => sharedOf(one, now, host))
     .filter((one): one is Shared => one !== undefined)
-    .map(one => ({ ...one, at: moved(one.at), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt) })), ...(one.prompts ? { prompts: one.prompts.map(p => ({ ...p, at: moved(p.at) })) } : {}) }))
+    .map(one => ({ ...one, at: moved(one.at), cards: one.cards.map(card => ({ ...card, startedAt: moved(card.startedAt), endedAt: moved(card.endedAt), ...(card.begunAt ? { begunAt: moved(card.begunAt) } : {}) })), ...(one.prompts ? { prompts: one.prompts.map(p => ({ ...p, at: moved(p.at) })) } : {}) }))
 }
 
 // ---- The same trip the other way: a Mac that reaches another over ssh hands it its own chats, so that Mac's panels list them with
