@@ -103,8 +103,9 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
     },
   }
 }
-// The card, the app's own hover card: a Box placed absolutely and drawn hidden inside the figure's keyed Box, shown while the pointer
-// rests on the figure. The app lifts it above the bar, gives it its own surface, edge and shadow, and keeps it in the window
+// The card, in the bar's own column above the figures: drawn hidden, and shown while the pointer rests on its figure through the
+// figure's hover group. The app's lifted hover cards (an absolute Box under a keyed one) were tried and left cards open after the
+// pointer had gone on to the next figure; a group is lit and put out by the pointer itself, so one card shows at a time
 const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
   const { Box, Text } = ui
   const row = (name: string, value: string, n: number, kind: string) => (
@@ -114,8 +115,7 @@ const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
     </Box>
   )
   return (
-    // No key of its own: a hidden keyed Box would be its own hover scope, which the pointer can never be over
-    <Box position="absolute" top={-1} left={0} display="none" hover={{ display: 'flex' }} flexDirection="column" gap={1}>
+    <Box key={`${key}-card`} display="none" hover={{ scope: key, display: 'flex' }} flexDirection="column" gap={1} alignSelf="flex-start" borderStyle="round" borderDimColor paddingX={1} marginBottom={1}>
       <Box key={`${key}-card-head`} flexDirection="row" justifyContent="space-between" gap={3}>
         <Text bold>{card.title}</Text>
         <Text bold>{card.value}</Text>
@@ -133,7 +133,7 @@ const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
 }
 
 // The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
-// for the disk and the network. Each figure is a keyed Box, so the pointer resting on it shows its card and a faint fill
+// for the disk and the network. The pointer resting on a figure lights its group: a faint fill under it, and its card above
 const usageDrawn = (ui: Ui, f: UsageFigures) => {
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const { Box, Text } = ui
@@ -143,13 +143,13 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
   const words = usageWords(f)
   const cards = usageCards(f)
   const one = (key: string, card: UsageCard | undefined, svg: { source: string; width: number; height: number }, alt: string, value: string, unit: string, color?: string) => (
-    <Box key={`usage-${key}`} flexDirection="row" flexShrink={0} alignItems="center" hover={{ backgroundColor: FILL }}>
+    // A member of a group must change how it looks, or the desktop app never wires it to the pointer: hence the fill
+    <Box key={`usage-${key}`} flexDirection="row" flexShrink={0} alignItems="center" hover={{ scope: `usage-${key}`, backgroundColor: FILL }}>
       <Svg key={`usage-${key}-${svg.source.length}-${hashOf(svg.source)}`} source={svg.source} alt={alt} width={svg.width} height={svg.height} />
       <Text color={color} wrap="truncate-end">
         {value}
         <Text dimColor={!color} color={color}>{unit}</Text>
       </Text>
-      {card ? usageCardDrawn(ui, `usage-${key}`, card) : null}
     </Box>
   )
   return [
@@ -161,6 +161,9 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
     f.net === undefined ? null : one('net', cards.net, usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
   ]
 }
+// The cards above the figures, one for each figure drawn, all hidden until the pointer rests on their figure
+const usageCardsDrawn = (ui: Ui, f: UsageFigures) =>
+  (Object.entries(usageCards(f)) as [string, UsageCard | undefined][]).map(([key, card]) => (card ? usageCardDrawn(ui, `usage-${key}`, card) : null))
 // The line as text, for the terminal, in a phone's 50 columns with the octopus: a word for each, units cut to G and M/s, and three-cell meters with Claude's cells purple
 const USAGE_CELLS = 3
 // Given the room, a figure that does not fit is left out whole, never cut in the middle: the network first, then the disk, then the

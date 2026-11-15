@@ -8191,18 +8191,29 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
   const textOf = (node: unknown): string[] => (typeof node === 'string' ? [node] : !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(textOf) : kids(node as El).flatMap(textOf))
   for (const [key, parts] of Object.entries(cards)) {
     const figure = find(drawn, `usage-${key}`)
-    // The figure lights a faint fill under a resting pointer: a hover the app draws, so it is no bare group name
-    expect(Object.keys(figure?.hover ?? {})).toEqual(['backgroundColor'])
-    // Its card is the app's own hover card: placed absolutely inside the figure's keyed Box, hidden, shown on hover, and in no group,
-    // which the app would leave in the bar's own line instead of lifting it over the chat
-    const card = figure && kids(figure).find(k => k.props?.position === 'absolute')
-    expect(card?.props?.position).toBe('absolute')
+    // The figure lights its group and a faint fill under a resting pointer: a group member whose hover changes nothing is never wired
+    // to the pointer by the desktop app
+    expect(figure?.hover?.scope).toBe(`usage-${key}`)
+    expect(Object.keys(figure?.hover ?? {}).sort()).toEqual(['backgroundColor', 'scope'])
+    // Its card waits hidden in the bar's column above the figures and shows while the group is lit, so one shows at a time and goes
+    // as the pointer leaves; not an absolute Box, which the app lifts as a card of its own that stayed open
+    const card = find(drawn, `usage-${key}-card`)
     expect(card?.props?.display).toBe('none')
-    expect(card?.hover).toEqual({ display: 'flex' })
+    expect(card?.props?.position).toBeUndefined()
+    expect(card?.hover).toEqual({ scope: `usage-${key}`, display: 'flex' })
     for (const part of parts) expect(textOf(card)).toContain(part)
   }
-  // The bar stays one line: nothing is added above the figures
-  expect(find(drawn, 'usage-more-memory')).toBeUndefined()
+  // Above the figures, so they stay where they are when one shows
+  const parentOf = (node: unknown, key: string): El | undefined => {
+    if (!node || typeof node !== 'object') return undefined
+    if (Array.isArray(node)) return node.map(n => parentOf(n, key)).find(Boolean)
+    const el = node as El
+    return kids(el).some(k => k.props?.key === key) ? el : kids(el).map(k => parentOf(k, key)).find(Boolean)
+  }
+  const column = parentOf(drawn, 'band-row')
+  expect(column?.props?.flexDirection).toBe('column')
+  expect(kids(column ?? {}).at(-1)?.props?.key).toBe('band-row')
+  expect(kids(column ?? {}).filter(k => k.props?.key?.endsWith('-card')).length).toBe(6)
   await desk.unmount()
 })
 
