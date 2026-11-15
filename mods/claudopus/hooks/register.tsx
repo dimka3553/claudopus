@@ -4277,8 +4277,9 @@ const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask'
 // Updates as the person asks for them. A look only reads the version page on claudopus.ai, on its own as often as Config says or
 // only at Config's Check now, and the panel's header then says a newer version is out, quietly, in one small box. Each step is a
 // press: Download fetches the release and checks it is what the release published, Install puts it in place (Claude Code's own
-// steps for an installed copy), Reload switches this chat. A chat run from a folder of the code has one press, Update, for both:
-// the fetch, its check, then a fast-forward only once the check holds; then Reload. Not now and Skip this version keep it quiet.
+// steps for an installed copy). A chat run from a folder of the code has one press, Update, for both: the fetch, its check, then a
+// fast-forward only once the check holds. Then the header says, beside the version, to type /reload-plugins, which switches the
+// chat. Not now and Skip this version keep it quiet.
 // The pure parts are in hooks/update.ts
 
 // ---- One at a time, under a lock the other chats see ----
@@ -4608,23 +4609,6 @@ const installStep = async ($: EngineInterface, version: string, commit: string) 
   if (!got.ok && got.detail) await log($, `Claudopus ${version} install failed (${got.fail}): ${got.detail}`)
   await writeSteps($, got.ok ? { version, stage: 'installed', step: 'install', commit, tree: page.tree, at, from: loaded } : { version, stage: 'failed', step: 'install', fail: got.fail, commit, at, from: loaded })
 }
-// Reload: this chat switches with Claude Code's own /reload-plugins. A chat run from another Mac is never sent one (the engine
-// refuses it there), nor one whose reload the engine refused: it says to type it
-let isReloadRefused = false
-const reloadPress = async ($: EngineInterface, version: string) => {
-  presses += 1
-  const loaded = (await versionsOf($)).version
-  if (isRunFromAfar || isReloadRefused) return void ((isReloadRefused = true), redraw($))
-  // The mark lets the next load know what it moved from, so the header shows the moment
-  await $.fs.write(`${dir}/reloads/${await $.session.id()}.json`, JSON.stringify({ version, from: loaded, at: await $.clock.now() }))
-  await log($, `Claudopus reloading this chat from ${loaded} to ${version}, at the panel's Reload`)
-  const said = await $.command.run({ command: 'reload-plugins' }).catch(err => ({ text: String(err) }))
-  if (/isn't available|not available|refused/i.test(String((said as { text?: unknown } | undefined)?.text ?? ''))) {
-    isReloadRefused = true
-    await log($, `Claudopus not reloaded to ${version}: the engine refused it; the panel says to type /reload-plugins`)
-    redraw($)
-  }
-}
 // Not now: quiet for a day, for this version; Skip this version: quiet until a newer one, kept as the person's own setting
 const laterPress = async ($: EngineInterface, version: string) => {
   presses += 1
@@ -4706,16 +4690,15 @@ const updateShape = async ($: EngineInterface) =>
         downloadProgress ? Math.round(downloadProgress.pct) : -1,
         isStepping,
         busyAt,
-        isReloadRefused,
       ])
     : ''
 
 // The notice: a small grey outlined box in the header, under the version this chat runs, never a demand as the amber boxes are.
 // What is out and, in a line, what is new; the steps and where they stand; the one press that comes next, Not now and Skip. A chat
-// run from Claudopus's own checkout has two steps, Update and Reload, and is told nothing of where it loads from (Config says)
+// run from Claudopus's own checkout has one, Update, and is told nothing of where it loads from (Config says)
 const NOTICE_EDGE = '#80808070'
-const STEPS = ['Download', 'Install', 'Reload'] as const
-const ONE_PRESS_STEPS = ['Update', 'Reload'] as const
+// The last step, switching this chat, is no press: the header says to type /reload-plugins
+const STEPS = ['Download', 'Install'] as const
 // Why Update could not move this chat's checkout forward, in Update's own words; the rest are FAILS'
 const ONE_PRESS_FAILS: Partial<Record<Fail, string>> = {
   'own-commits': "main has commits of its own that this version doesn't have, so it can't move forward",
@@ -4736,9 +4719,11 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   // A copy Claude Code installs from a folder of the code: its Install moves that folder's main, and its card says so
   const isCopy = isFolder && !isOne
   const folder = isFolder ? homeShort(src.repo) : ''
-  const track = (at: number) => (
+  // Update is one press: it has no steps to show
+  const track = (at: number) =>
+    isOne ? null : (
     <ui.Text key="update-track" dimColor wrap="truncate-end">
-      {(isOne ? ONE_PRESS_STEPS : STEPS).map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${isCopy && i === 0 ? 'Fetch' : isCopy && i === 1 ? 'Move forward' : one}`).join('   ')}
+      {STEPS.map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${isCopy && i === 0 ? 'Fetch' : isCopy && i === 1 ? 'Move forward' : one}`).join('   ')}
     </ui.Text>
   )
   const quiet = (key: string, version: string, withSkip = true) => [
@@ -4814,20 +4799,8 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     )
   }
   if (n.kind === 'installing') return box('installing', [title(`${isCopy ? 'Moving the folder to' : 'Installing'} Claudopus ${v}…`), track(1)], [])
-  if (n.kind === 'reload') {
-    const who = isOne ? `This chat still runs v${loaded}. Each open chat switches at its own Reload.` : `This chat still runs v${loaded}. Reload switches this chat only; new chats start on v${v}.`
-    const typed = isRunFromAfar || isReloadRefused
-    return box(
-      'reload',
-      [
-        title(`Claudopus ${v} is ${isOne ? 'ready' : 'installed'}`),
-        line('who', typed ? `This chat still runs v${loaded}. Type /reload-plugins in this chat to switch it.` : who),
-        stepSaid.version === v && stepSaid.dirty ? line('dirty', 'Your uncommitted changes stay, and Reload loads them on top.') : null,
-        track(isOne ? 1 : 2),
-      ],
-      [typed ? null : <ui.Button key={`update-reload-${presses}`} label="Reload this chat" onPress={() => void reloadPress($, v).catch(err => log($, `chat not reloaded: ${String(err)}`))} />, ...quiet('reload', v, false)],
-    )
-  }
+  // The Mac has it and this chat still runs the older one: the header says so beside the version, and to type /reload-plugins
+  if (n.kind === 'reload') return null
   // A step that failed: what failed, and that what this chat runs is as it was
   const detail = ''
   const which = isOne ? 'update' : n.step === 'download' ? (isCopy ? 'fetch' : 'download') : isCopy ? 'move the folder to' : 'install'
@@ -5271,7 +5244,7 @@ const sideSign = () =>
   JSON.stringify([
     waiting.map(one => [one.agent, one.tool, one.seen ?? 0, one.isPressedNo ?? false]), asked.length, answeredPrompts.length, [...promptSaid], [...promptHeld],
     [...gateHeld], [...gateSaid.keys()], looseGates.map(one => one.id), [...undoneOffers.keys()], boxes.map(one => one.id), doneNotes.length, [...boxSaid], [...boxSent], boxPresses,
-    [...pictureIn.keys()], isUpdating, isReloadRefused, updatedMoment ?? null, presses, loadMark, freshness,
+    [...pictureIn.keys()], isUpdating, updatedMoment ?? null, presses, loadMark, freshness,
   ])
 // While the person uses the panel (scrolls it, moves the focus in it, presses in it, or types) its running times stand still: they
 // move again ENGAGED after the person's last move
@@ -12326,7 +12299,10 @@ const panelHooks = (on: On) => {
                     <Box flexShrink={0}>
                       <Text bold>Claudopus</Text>
                     </Box>
-                    {versions.version ? <Text key="head-version" dimColor wrap="truncate-end">{`v${versions.version}`}</Text> : null}
+                    {/* The Mac has a newer copy than this chat runs: said beside the version, with what to type to switch to it */}
+                    {versions.version ? (
+                      <Text key="head-version" dimColor wrap={versions.isWaiting ? 'wrap' : 'truncate-end'}>{`v${versions.version}${versions.isWaiting ? ` · v${versions.installed} ready, type /reload-plugins` : ''}`}</Text>
+                    ) : null}
                   </Box>
                 )}
                 <Text dimColor={!head.asks} color={head.asks ? NEEDS : undefined} wrap={e.surface === 'terminal' ? 'wrap' : 'truncate-end'}>{headLine(head)}</Text>

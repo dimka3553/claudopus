@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.133 · 15 November 2026
+- After Update (or Install) there is no Reload button: the header says beside the version that the new one is ready and to type /reload-plugins.
+
 ## 0.2.132 · 15 November 2026
 - In the desktop app, a figure's card above the prompt now floats over the chat, just above its figure: showing it no longer pushes the chat up or makes it spring back, and the row of figures stays in view, so you can move straight to the next one.
 - Only the card under the pointer shows: moving along the figures or the bar updating no longer leaves an earlier card up over the next.
