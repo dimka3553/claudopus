@@ -106,6 +106,7 @@ const chatHooks = (on: On) => {
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
     await readOthers($).catch(() => undefined)
+    keysOnStart($)
 
     await $.tool.register({
       name: 'update',

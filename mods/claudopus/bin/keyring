@@ -6,6 +6,7 @@
 #   keyring set SERVICE ACCOUNT LABEL  keeps the value read from stdin (one line), replacing a kept one
 #   keyring delete SERVICE ACCOUNT     removes it; 1 when none was kept
 #   keyring list SERVICE               the accounts kept under SERVICE, one a line, never their values
+#   keyring entries                    every service and account a password is kept under, a tab between them, never a value
 #
 # On a Mac each is the keychain's own `security` command, as the runners used before. Linux has no keychain a runner can use
 # without a desktop signed in, so there each value is a file of its own under ~/.local/share/claudopus/keyring (never
@@ -22,7 +23,25 @@ own_home=$(/usr/bin/perl -e 'print((getpwuid($<))[7] // "")' 2>/dev/null)
 HOME=$own_home
 export HOME
 what=${1:-} service=${2:-} account=${3:-}
-usage() { echo "usage: keyring get|has|delete SERVICE ACCOUNT | set SERVICE ACCOUNT LABEL | list SERVICE" >&2; exit 2; }
+usage() { echo "usage: keyring get|has|delete SERVICE ACCOUNT | set SERVICE ACCOUNT LABEL | list SERVICE | entries" >&2; exit 2; }
+# The names only: the keychain's listing without -d holds no value, and on Linux the folders and files are the names
+if [ "$what" = entries ]; then
+  if [ "$(uname -s)" = Darwin ]; then
+    # A keychain that does not answer fails the listing, so it is never read as an empty one
+    listing=$(security dump-keychain 2>/dev/null) || exit 1
+    printf '%s\n' "$listing" | awk '
+      function out() { if (genp && svc != "") print svc "\t" acct; genp = 0; svc = ""; acct = "" }
+      /^keychain:/ { out() }
+      /^class: "genp"/ { genp = 1 }
+      /"svce"<blob>="/ { s = $0; sub(/.*"svce"<blob>="/, "", s); sub(/"$/, "", s); svc = s }
+      /"acct"<blob>="/ { a = $0; sub(/.*"acct"<blob>="/, "", a); sub(/"$/, "", a); acct = a }
+      END { out() }' | sort -u
+  else
+    root=$own_home/.local/share/claudopus/keyring
+    [ -d "$root" ] && for one in "$root"/*/*; do [ -f "$one" ] && printf '%s\t%s\n' "$(basename "$(dirname "$one")")" "$(basename "$one")"; done
+  fi
+  exit 0
+fi
 # Names are plain: a service or account never climbs out of its folder
 plain() { [[ $1 =~ ^[A-Za-z0-9_.@-]+$ ]] && [ "$1" != . ] && [ "$1" != .. ]; }
 [ -n "$what" ] && plain "$service" || usage
