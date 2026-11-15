@@ -1,3 +1,4 @@
 - A press on Allow once, Always allow, Deny or an ask's buttons shows its answer at once: the amber box and its buttons go in the same moment, where before they stayed up to a second until the waiting command noticed the press.
 - If what you allowed then does not come about (its command had stopped waiting, or could not be sealed), the box says so in grey instead of staying green; an answer to an ask that could not be written says "Not sent" and brings its buttons back.
 - A second press before the first is taken sends nothing more.
+- A command with two things to allow, one allowed and the other refused, now says in grey that nothing in it ran, where before the first stayed green.
