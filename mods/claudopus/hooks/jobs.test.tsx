@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { commandName, describedOf, detachedOf, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
+import { commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
 import type { Job } from './jobs'
 
 test('a job is told by its command: a server with its port, a download, else a script; its latest line is what a progress bar shows last', async () => {
@@ -256,4 +256,17 @@ test('a description is read only as far as it is sure: a count in brackets is no
   expect(describedOf('Watch the queue (about 1h)')).toMatchObject({ kind: 'watch', expectText: '1h' })
   // a curl in a loop that keeps its files is still a download
   expect(jobKindOf('for i in 1 2; do curl -o f$i.bin https://e.com/f$i.bin; done', 'Get two files')).toBe('download')
+})
+
+test('how a run ended, from the last line the engine writes on its output: finished, failed with its code, killed (15 Nov watches ended [killed]), or still going', async () => {
+  expect(endOf('done\n\n[exited with code 0]\n')).toEqual({ how: 'finished' })
+  expect(endOf('Traceback\n\n[exited with code 137]\n')).toEqual({ how: 'failed', code: '137' })
+  expect(endOf('\n[killed]\n')).toEqual({ how: 'killed' })
+  expect(endOf('progress: 3/6 steps\n')).toBeUndefined()
+  expect(endOf('it printed [killed] mid-line and goes on\n')).toBeUndefined()
+  expect(isOutputEnded('\n[killed]\n')).toBe(true)
+  expect(expiresIn('Monitor started (task b0zhjoyke, expires in 30m unless the source ends first')).toBe(1_800_000)
+  expect(expiresIn('expires in 26m 40s unless')).toBe(1_600_000)
+  expect(leftSeconds('1h 05m left')).toBe(3900)
+  expect(leftSeconds('55s left')).toBe(55)
 })

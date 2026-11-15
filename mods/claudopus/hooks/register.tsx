@@ -16,7 +16,7 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isUpdateDue, loo
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSaid, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
+import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
@@ -124,6 +124,9 @@ const view = atom({ plugin: 'claudopus', key: 'view' } as const, { openId: '' },
 const servers = atom({ plugin: 'claudopus', key: 'servers' } as const, [], { shape: 'servers-2' })
 // Counts the passes that bring the screen up to date: each one redraws what reads it
 const tick = atom({ plugin: 'claudopus', key: 'tick' } as const, 0, { shape: 'tick-1' })
+// When the figures above the prompt last changed: the band redraws on that alone, never each second, since each redraw of it closes
+// and opens again a hover card the pointer rests on, and can leave one open after the pointer has gone on to the next figure
+const figuresAt = atom({ plugin: 'claudopus', key: 'figures' } as const, 0, { shape: 'figures-1' })
 // Whether the panel was open when last looked: a reload of the mod closes it, and it comes back by itself if it was
 // When the panel was last drawn, kept through a reload (drawnNow, written by the timer each second, never read while drawing)
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
@@ -599,7 +602,7 @@ const pathOf = (path: string, home: string, folder: string) => {
 // with Edit or Write, so its card shows the change and waits for their press. A command is read as the boxes' guard reads it: a
 // command that only reads counts only for what it sends into a file with >; this stops slips and common tricks, as that guard does
 const MEMORY_READERS = [...BOX_READERS, 'cat', 'jq', 'diff', 'cmp', 'shasum', 'sha256sum', 'md5', 'md5sum']
-const MEMORY_OWN = ['live', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads']
+const MEMORY_OWN = ['live', 'keys.md', 'keys.json', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads']
 const MEMORY_PERSON = ['config.json', 'rules', 'roles']
 const namesMemory = (text: string, names: readonly string[]) => {
   const words = BOX_WORDS(text)
@@ -7439,6 +7442,7 @@ const chatHooks = (on: On) => {
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
     await readOthers($).catch(() => undefined)
+    keysOnStart($)
 
     await $.tool.register({
       name: 'update',
@@ -7940,8 +7944,8 @@ const runningLine = (one: Todo, at: number) => (one.status === 'working' && one.
 const BG_KEPT = 20
 // A command it sent to the background, or a watch it set, is kept by its card with its task id and its own words for it; one it
 // stops goes. A command the engine ends with its final response wakes nothing and is not kept
-const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown }, result: unknown) => {
-  if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')])
+const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown; timeout_ms?: unknown; persistent?: unknown }, result: unknown) => {
+  if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')], 'stopped')
   const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown }
   // A command the engine ends with the work's final response wakes nothing and is not kept (the engine does not always say that
   // one it keeps wakes its owner, so its silence is no sign)
@@ -7950,20 +7954,61 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
   const cmd = oneLine(String(call.command ?? '')).slice(0, 400)
   const now = await $.clock.now()
+  // A watch ends at the time limit the engine said as it started it ("expires in 30m"), or else the one it was given where that is
+  // within the engine's own 30 minutes; one kept for good has none
+  const said = typeof result === 'string' ? result : JSON.stringify(result ?? '')
+  const told = (result && typeof result === 'object' ? result : {}) as { timeoutMs?: unknown; persistent?: unknown }
+  const isForGood = [call.persistent, told.persistent].some(p => p === true || p === 'true')
+  const limit = call.tool !== 'Monitor' || isForGood ? undefined : Number(told.timeoutMs) > 0 ? Math.min(Number(told.timeoutMs), WATCH_MOST) : (expiresIn(said) ?? (Number(call.timeout_ms) > 0 ? Math.min(Number(call.timeout_ms), WATCH_MOST) : undefined))
   await update($, todos, list =>
-    list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(cmd ? { cmd } : {}), ...(call.tool === 'Monitor' ? { isWatch: true } : {}) }].slice(-BG_KEPT) } : one)),
+    list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(cmd ? { cmd } : {}), ...(call.tool === 'Monitor' ? { isWatch: true } : {}), ...(limit ? { expiresAt: now + limit } : {}) }].slice(-BG_KEPT) } : one)),
   )
 }
-// Background work that has ended or was stopped leaves every card that kept it
-const dropBackground = async ($: EngineInterface, ids: string[]) =>
-  update($, todos, list => {
+// The longest the engine lets a watch run before it ends it
+const WATCH_MOST = 30 * 60_000
+type EndedRun = NonNullable<Todo['endedRuns']>[number]
+// How a run ended, said plainly: on its card's summary and in Details
+const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => (run.how === 'failed' ? `failed${run.code ? ` (exit code ${run.code})` : ''}` : run.how === 'stopped' ? 'stopped by the work' : run.how)
+// The closing row under a card: how many helpers and runs have ended, then how many of the runs did not finish well, in words
+const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
+  const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
+  const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'run')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'run')} ended`
+  const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
+    const count = runs.filter(r => r.how === how).length
+    return count ? [`${count} ${how}`] : []
+  })
+  return bad.length ? `${head} · ${bad.join(', ')}` : head
+}
+// The runs a card has had end, kept so its summary row and Details can say how each ended
+const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
+// Background work that has ended or was stopped leaves every card that kept it at once, and is kept as ended with how it ended
+// (by its id, or one word for them all), so the card's summary counts it
+type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number }
+const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Record<string, EndAs> = 'ended') => {
+  const now = await $.clock.now()
+  const endOfId = (id: string) => {
+    const one = typeof how === 'string' || 'how' in how ? (how as EndAs) : ((how as Record<string, EndAs>)[id] ?? 'ended')
+    return typeof one === 'string' ? { how: one } : one
+  }
+  return update($, todos, list => {
     const isGone = (id: string) => ids.includes(id)
     if (!list.some(one => one.bg?.some(b => isGone(b.id)))) return list
     return list.map(one => {
       const bg = one.bg?.filter(b => !isGone(b.id))
-      return bg?.length === one.bg?.length ? one : { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined }
+      if (bg?.length === one.bg?.length) return one
+      const runs = (one.bg ?? []).filter(b => isGone(b.id)).map(b => {
+        const end = endOfId(b.id)
+        // It ended when its output last changed, where that is known, else as it was seen gone. A watch the engine killed at the
+        // time limit it set ran out of time (within a tenth of its limit, at most a minute, as its limit is counted from when the mod saw it start); one killed
+        // before it was killed
+        const endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now
+        const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how
+        return { id: b.id, what: b.what, at: b.at, endedAt, how, ...(end.code ? { code: end.code } : {}) } as EndedRun
+      })
+      return { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined, ...keepEnded(one, runs) }
     })
   })
+}
 
 // What work still at work says on its card while it waits for a command of its own: which, and how long it has run; only that it
 // waits when the command has its own row on the card's tree
@@ -7996,6 +8041,8 @@ let jobsLookedAt = 0
 let jobProcs: Proc[] = []
 let jobProcsAt = 0
 const JOB_PS = 15_000
+// How long past its time limit a watch is still waited for to say it ended, before it counts as ended anyway
+const WATCH_GRACE = 2 * 60_000
 const shellMissed = new Map<string, number>()
 // Where the engine writes this chat's background output, once found; and when it was last looked for in vain
 let tasksDir = ''
@@ -8144,10 +8191,11 @@ const lookJobs = async ($: EngineInterface) => {
   if (psText !== undefined) ((jobProcs = procsOf(psText, now)), (jobProcsAt = now))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
-  // A detached job whose process ended leaves its card
+  // A detached job whose process ended leaves its card, kept as ended (how its process ended is not known)
   const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
   if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
-    await update($, todos, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined } : one)))
+    const runsOf = (one: Todo) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' as const }))
+    await update($, todos, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined, ...keepEnded(one, runsOf(one)) } : one)))
     $.ui.invalidate('ui.render')
   }
   // Each background command's shell, found by its words among the engine's shells: paused when any of its processes is, and gone
@@ -8162,6 +8210,10 @@ const lookJobs = async ($: EngineInterface) => {
   }
   for (const o of owned) if (o.pid) states.set(o.id, treeOf(jobProcs, o.pid).some(isPausedProc))
   const ended = bgs.filter(b => (shellMissed.get(b.id) ?? 0) >= 2 && now - b.at >= 60_000).map(b => b.id)
+  // How each ended, where its output says: finished, failed with its code, or killed
+  const endedAs: Record<string, EndAs> = {}
+  // A watch well past the time limit the engine set it has ended, whether or not its last line was read
+  for (const one of list) for (const b of one.bg ?? []) if (b.isWatch && b.expiresAt && now - b.expiresAt >= WATCH_GRACE && !ended.includes(b.id)) (ended.push(b.id), (endedAs[b.id] = 'timed out'))
   // How what each wait waits for stands: a run it waits on paused or gone, a file it polls still for long
   const targetOf = (wait: NonNullable<ReturnType<typeof waitOf>>) => {
     const runs = wait.pattern
@@ -8184,8 +8236,10 @@ const lookJobs = async ($: EngineInterface) => {
     const job = asked[(n - 1) / 2]
     const id = job?.id ?? ''
     const text = (parts[n + 1] ?? '').split('\n@@AT@@ ')[0] ?? ''
-    if (!job?.pid && isOutputEnded(text)) ended.push(id)
     const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
+    // One that ended, by the engine's last line on its output, and when: as that output last changed
+    const end = job?.pid ? undefined : runEndOf(text)
+    if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}) }))
     // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote (on
     // 15 Nov such rows read "updated 9m ago" for runs that sent all they printed elsewhere)
     const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }
@@ -8203,7 +8257,7 @@ const lookJobs = async ($: EngineInterface) => {
   }
   // A background command that has ended, by the engine's last line on its output or as no shell runs it, leaves its card
   if (ended.length) {
-    await dropBackground($, ended)
+    await dropBackground($, ended, endedAs)
     for (const id of ended) (jobLog.delete(id), shellMissed.delete(id))
     isChanged = true
   }
@@ -8676,6 +8730,304 @@ const tellDevice = async ($: EngineInterface, text: string) => {
 const cutLine = (one: Todo) =>
   one.cutAt ? (one.backAt ? `Cut off at ${hhmm(one.cutAt)} as the chat's process ended; going again since ${hhmm(one.backAt)}.` : `Cut off at ${hhmm(one.cutAt)} as the chat's process ended; it could not be started again.`) : ''
 
+// The keys remembered: which keys, tokens and logins the person has given, and where each is kept, by name only, never a value.
+// It is made again from each store's own list of names (Claudopus's keychain, the rest of this Mac's keychain, the .env files in each
+// subject's folder) and from what SBOS last said it holds, so a key taken out of a store stops being listed. Work reads it in
+// keys.md in the memory folder, the Keys button shows it, and work that asks for a key it lists is told where that key is
+
+const KEYS_FILE = 'keys.md'
+const KEYS_STATE = 'keys.json'
+// How long the local stores' names are trusted before they are read again, for an ask checked against them
+const KEYS_MS = 60_000
+type KeyStore = 'claudopus' | 'keychain' | 'sbos' | 'env'
+// An SBOS secret is a key, a database (used through its `query`) or a login
+type SbosKind = 'database' | 'login'
+type KeyEntry = { name: string; store: KeyStore; where?: string; label?: string; kind?: SbosKind; isPresent: boolean; added: number; seen: number }
+type SbosName = { name: string; label?: string; kind?: SbosKind; isPresent: boolean }
+type KeysState = { at: number; sbosAt?: number; entries: KeyEntry[] }
+const STORE_NAMES: Record<KeyStore, string> = {
+  claudopus: "Claudopus's keychain",
+  keychain: "this Mac's keychain",
+  sbos: 'SBOS secrets',
+  env: 'a .env file',
+}
+// A name as it is kept: plain marks only, and short, so no text that is not a name can pass for one
+const plainName = (text: string) => (/^[\w .:@/+|-]{1,80}$/.test(text) ? text : '')
+// The words a key's name is made of, less those every key's name has: ELEVENLABS_API_KEY and elevenlabs-key are both "elevenlabs"
+const KEY_WORDS = new Set(['api', 'key', 'keys', 'token', 'tokens', 'secret', 'secrets', 'access', 'password', 'passwd', 'pat', 'auth', 'the'])
+const coreOf = (name: string) =>
+  name
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(word => word && !KEY_WORDS.has(word))
+const sameKey = (a: string, b: string) => {
+  const x = coreOf(a)
+  const y = coreOf(b)
+  return x.length > 0 && x.length === y.length && x.every(word => y.includes(word))
+}
+// A keychain entry that is a key someone gave by hand, not an app's own storage: its service names an API, a token or a key, or its
+// account is a name such as ELEVENLABS_API_KEY. The mod's own services are read as Claudopus's keychain or not at all
+const isKeyEntry = (service: string, account: string) =>
+  !service.startsWith('claudopus') &&
+  !/safe storage|^com\.apple\.|^apple/i.test(service) &&
+  ((/(?:^|[-_ .])(?:api|token|key)s?(?:$|[-_ .])/i.test(service)) || /^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(account))
+// A variable in a .env file that holds a key, by its name
+// (one a web page shows anyway, NEXT_PUBLIC_… or a publishable key, is none)
+const isKeyVariable = (name: string) => /(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|_PAT|CREDENTIALS?)(?:_|$)/.test(name) && !/^NEXT_PUBLIC_|PUBLISHABLE/.test(name)
+const ENV_NAME = /^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/
+
+let keys: KeysState = { at: 0, entries: [] }
+const keysRead = async ($: EngineInterface): Promise<KeysState> => {
+  try {
+    const kept = JSON.parse((await readOr($, `${dir}/${KEYS_STATE}`)) || '{}') as Partial<KeysState>
+    return { at: Number(kept.at) || 0, sbosAt: kept.sbosAt, entries: Array.isArray(kept.entries) ? kept.entries : [] }
+  } catch {
+    return { at: 0, entries: [] }
+  }
+}
+
+// The names each local store lists now; undefined for a store that could not be read, so what was known of it stays. Claudopus's
+// keychain is read from the same listing as the rest, which fails as a whole when the keychain does not answer, so a locked keychain
+// never reads as an empty one
+const localNames = async ($: EngineInterface) => {
+  const all = await $.process.run([`${$.plugin.root}/bin/keyring`, 'entries']).catch(() => undefined)
+  const pairs = all?.exitCode === 0 && !all.isStdoutTruncated ? all.stdout.split('\n').filter(Boolean).map(line => line.split('\t')) : undefined
+  const claudopus = pairs?.filter(([service]) => service === 'claudopus-secret').map(([, account = '']) => plainName(account)).filter(Boolean)
+  // Another app's account is shown only when it is a name such as ELEVENLABS_API_KEY: any other account (an email, an id, a token
+  // pasted there by mistake) stays out of the list
+  const keychain = pairs
+    ?.filter(([service = '', account = '']) => isKeyEntry(service, account))
+    .map(([service = '', account = '']) => ({ name: plainName(ENV_NAME.test(account) ? account : service), where: plainName(ENV_NAME.test(account) ? `${service} / ${account}` : service) }))
+    .filter(one => one.name && one.where)
+  // The top of each subject's folder: its .env files (plain files only), read for the names before each = and nothing after it
+  const env: { name: string; where: string }[] = []
+  const folders = [...new Set((await readIndex($).catch(() => [] as Stream[])).map(one => one.repo).filter(one => one.startsWith('/')))]
+  for (const folder of folders) {
+    const files = (await $.fs.list(folder).catch(() => [])).filter(one => one.kind === 'file' && !one.isLink).map(one => one.name).filter(name => /^\.env(?:\.[\w-]+)?$/.test(name) && !/\.(?:example|sample|template|dist)$/.test(name))
+    for (const file of files) {
+      const r = await $.process.run(['/usr/bin/grep', '-ohE', '^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=', `${folder}/${file}`]).catch(() => undefined)
+      for (const line of (r?.stdout ?? '').split('\n')) {
+        const name = line.replace(/^\s*(?:export\s+)?/, '').replace(/\s*=$/, '')
+        if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && isKeyVariable(name)) env.push({ name, where: `${folder}/${file}` })
+      }
+    }
+  }
+  return { claudopus, keychain, env }
+}
+
+// The list made again: each local store as it lists its names now, SBOS as it last said; what a store no longer lists goes
+const refreshKeys = async ($: EngineInterface, sbos?: SbosName[], isListed = true) => {
+  if (!dir) return keys
+  const now = await $.clock.now()
+  const before = await keysRead($)
+  const { claudopus, keychain, env } = await localNames($)
+  const old = (store: KeyStore, name: string, where?: string) => before.entries.find(one => one.store === store && one.name === name && one.where === where)
+  const made = (store: KeyStore, name: string, extra: Partial<KeyEntry> = {}): KeyEntry => ({ name, store, ...extra, isPresent: extra.isPresent ?? true, added: old(store, name, extra.where)?.added ?? now, seen: extra.isPresent === false ? (old(store, name, extra.where)?.seen ?? 0) : now })
+  const kept = (store: KeyStore, fresh: KeyEntry[] | undefined) => fresh ?? before.entries.filter(one => one.store === store)
+  const entries = [
+    ...kept('claudopus', claudopus?.map(name => made('claudopus', name))),
+    ...kept('keychain', keychain?.map(one => made('keychain', one.name, { where: one.where }))),
+    ...env.map(one => made('env', one.name, { where: one.where })),
+    ...kept('sbos', sbos?.map(one => made('sbos', one.name, { label: one.label, kind: one.kind, isPresent: one.isPresent }))),
+  ]
+  // Every kept value is hidden in each name, place and label as it came, before anything is cut or changed, so no part of one can be
+  // left: the texts alone go through, as one list of strings, so a value that is also a number or a word of the list's own shape changes
+  // nothing else. The list is made from what was hidden, and nothing is written when it could not be checked
+  const texts = entries.flatMap(one => [one.name, one.where ?? '', one.label ?? ''])
+  const back = await keysHidden($, JSON.stringify(texts))
+  let hidden: string[] | undefined
+  try {
+    hidden = back === undefined ? undefined : (JSON.parse(back) as string[])
+  } catch {}
+  if (!Array.isArray(hidden) || hidden.length !== texts.length || hidden.some(one => typeof one !== 'string')) return (await log($, 'the list of keys was not written: it could not be checked for kept values'), keys)
+  const seen = hidden
+  keys = {
+    at: now,
+    sbosAt: sbos && isListed ? now : before.sbosAt,
+    entries: entries.map((one, i) => ({ ...one, name: seen[i * 3] ?? '', ...(one.where ? { where: seen[i * 3 + 1] } : {}), ...(one.label ? { label: seen[i * 3 + 2] } : {}) })),
+  }
+  await $.fs.write(`${dir}/${KEYS_STATE}`, `${JSON.stringify(keys, null, 2)}\n`)
+  await $.fs.write(`${dir}/${KEYS_FILE}`, keysText($.plugin.root, keys))
+  return keys
+}
+// The text with every kept value hidden, as bin/secret hides a command's output; undefined when it could not be checked
+const keysHidden = async ($: EngineInterface, text: string) => {
+  const r = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json'], { stdin: text }).catch(() => undefined)
+  return r && r.exitCode === 0 && !r.isStdoutTruncated && r.stdout.trim() ? r.stdout : undefined
+}
+const keysFresh = async ($: EngineInterface) => {
+  const now = await $.clock.now()
+  if (!keys.at) keys = await keysRead($)
+  return now - keys.at < KEYS_MS ? keys : refreshKeys($)
+}
+
+const dayOf = (at: number) => (at ? new Date(at).toISOString().slice(0, 10) : '')
+// How work uses a key, by its store's own route; the value never passes through the work
+const routeOf = (root: string, one: KeyEntry) =>
+  one.store === 'claudopus'
+    ? `\`${root}/bin/secret ${one.name} here '<command using $${one.name}>'\``
+    : one.store === 'sbos' && one.kind === 'database'
+      ? `SBOS's \`query\` and \`tables\` with db ${one.name}`
+      : one.store === 'sbos' && one.kind === 'login'
+        ? 'a login kept in SBOS: its page there says how it is used'
+    : one.store === 'sbos'
+      ? one.isPresent
+        ? `SBOS by its name: \`send_with_secret\` with {{secret:${one.name}}}, or \`secret_link\` for a command`
+        : `asked in SBOS but never put in: ask for it in the secret runner instead`
+      : one.store === 'keychain'
+        ? `kept by another app (${one.where}): work cannot use it; {name} can paste it into Claudopus's keychain once`
+        : `in ${one.where}, which that project's own scripts load`
+const keysText = (root: string, state: KeysState) => {
+  const rows = [...state.entries]
+    .sort((a, b) => Number(b.isPresent) - Number(a.isPresent) || a.store.localeCompare(b.store) || a.name.localeCompare(b.name))
+    .map(one => `| ${one.name} | ${one.label ? oneLine(one.label).replace(/\|/g, '/').slice(0, 80) : ''} | ${STORE_NAMES[one.store]} | ${one.isPresent ? 'present' : 'asked, not given'} | ${dayOf(one.added)} | ${dayOf(one.seen)} | ${named(routeOf(root, one)).replace(/\|/g, '/')} |`)
+  return [
+    '# Keys',
+    '',
+    `The keys, tokens and logins ${who()} has given, by name and where each is kept: never a value. Made again from each store's own list of names on ${dayOf(state.at)}; SBOS's as it last listed them${state.sbosAt ? ` on ${dayOf(state.sbosAt)}` : ' (not yet listed: call its `secrets`)'}. A key taken out of a store goes from here.`,
+    '',
+    '| Name | For | Store | State | Added | Last seen | How work uses it |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+    ...rows,
+    '',
+  ].join('\n')
+}
+
+// SBOS's answer to `secrets`: its list of names, whose state says whether each was put in. Only the names, what each is for and that
+// state are taken; anything else in it is left
+const sbosListed = (result: unknown) => {
+  const texts: string[] = []
+  const walk = (x: unknown) => (typeof x === 'string' ? texts.push(x) : Array.isArray(x) ? x.forEach(walk) : x && typeof x === 'object' ? Object.values(x).forEach(walk) : undefined)
+  walk(result)
+  for (const text of texts) {
+    try {
+      const list = JSON.parse(text) as unknown
+      if (!Array.isArray(list)) continue
+      return list
+        .filter((one): one is { name: string; label?: unknown; put_in?: unknown; database?: unknown; login?: unknown } => Boolean(one) && typeof one === 'object' && typeof (one as { name?: unknown }).name === 'string')
+        // the label as it came, uncut (one too long to hide whole is left out): it is cut only once every kept value in it is hidden
+        .map((one): SbosName => ({ name: plainName(one.name), label: typeof one.label === 'string' && one.label.length <= 2000 ? one.label : undefined, ...(one.database === true ? { kind: 'database' as const } : one.login ? { kind: 'login' as const } : {}), isPresent: one.put_in === true }))
+        .filter(one => one.name)
+    } catch {}
+  }
+  return undefined
+}
+
+// The key an ask is for, when the list says it is kept where work can use it: what the ask is told back, or ''
+// A database in SBOS is no key anyone pastes, so it is never what an ask is for
+const usable = (one: KeyEntry) => one.isPresent && one.kind !== 'database' && (one.store === 'claudopus' || one.store === 'sbos')
+const KEY_KEPT = (root: string, one: KeyEntry, asked: string, again: string) =>
+  named(
+    `Not asked: {name} gave this key already. ${asked === one.name ? one.name : `"${asked}" is ${one.name}`}, kept in ${STORE_NAMES[one.store]}${one.seen ? ` and last seen there ${dayOf(one.seen)}` : ''}. Use it through ${routeOf(root, one)}. ${again} The list of keys is ${dir}/${KEYS_FILE}.`,
+  )
+// Asked again on purpose: the ask names the kept key exactly, as it is written, and says why it does not do
+const AGAIN_IN = (one: KeyEntry, field: string) => `If it no longer works, ask again with its name, ${one.name}, written as it is here, and why it does not do, in \`${field}\`.`
+const AGAIN_FORGET = (root: string, one: KeyEntry) => `If it no longer works, take it out first with \`${root}/bin/secret ${one.name} --forget\`; the next run asks for it.`
+// A name written whole in a text, as it is: not inside another word
+const namesWhole = (text: string, name: string) => new RegExp(`(?:^|[^A-Za-z0-9_-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[^A-Za-z0-9_-])`).test(text)
+// The kept key a text asks for: its whole name in it, in any case and with any dashes, or the words of its name in their order right
+// before a word for a key ("your ElevenLabs API key"), so "the Stripe webhook secret" or "the GitHub login email" is no ask for
+// STRIPE_SECRET_KEY or github-token. The key whose name has the most words found wins
+const askedIn = (text: string, listed: KeyEntry[]) => {
+  const flat = ` ${text.toLowerCase().replace(/[^a-z0-9]+/g, ' ')} `
+  return listed
+    .map(one => ({ one, core: coreOf(one.name), whole: flat.includes(` ${one.name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `) }))
+    .filter(({ core, whole }) => whole || (core.length > 0 && new RegExp(` ${core.join(' ')}(?: (?:api|access|secret|auth|personal))* (?:key|token|secret|password|pat|credentials?)s? `).test(flat)))
+    .sort((a, b) => b.core.length - a.core.length)[0]?.one
+}
+// The secret runner's calls in a text, by any path to it (bin/secret, ./secret from its folder, a doubled slash), each with the names
+// it takes and what it does with them; the word secret alone, as in a commit message or kubectl's, is none
+const SECRET_RUNS = /\/secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?(--add|--forget|[^\s'"-][^\s'"]*)/g
+const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
+  if (!dir) return ''
+  const input = e as { command?: unknown; name?: unknown; text?: unknown; copy?: unknown; details?: unknown; for?: unknown; agent?: unknown }
+  const root = $.plugin.root
+  const listed = async () => (await keysFresh($)).entries.filter(usable)
+  if (e.tool === 'mcp__sbos__ask_secret') {
+    // One asked for an autonomous agent of SBOS's is its own: the list holds the person's
+    if (typeof input.agent === 'string' && input.agent) return ''
+    const name = String(input.name ?? '')
+    const one = (await listed()).find(entry => entry.name === name || sameKey(entry.name, name))
+    return one && !namesWhole(String(input.for ?? ''), one.name) ? KEY_KEPT(root, one, name, AGAIN_IN(one, 'for')) : ''
+  }
+  if (e.tool === `${TOOLS}ask`) {
+    // What the ask tells the person to do (a word for a key, and a kept key's name or every word of it), or, when it asks them to
+    // paste or type something, what it is about
+    const said = `${String(input.text ?? '')} ${String(input.copy ?? '')}`
+    const about = String(input.details ?? '')
+    if (!/\b(?:key|token|password|secret|credentials?|login)s?\b/i.test(said) && !/[A-Z0-9]_[A-Z0-9]/.test(said)) return ''
+    const fresh = await listed()
+    const one = askedIn(said, fresh) ?? (/\b(?:paste|type|enter|give|send|add|put)\b/i.test(said) ? askedIn(about, fresh) : undefined)
+    return one && !namesWhole(about, one.name) ? KEY_KEPT(root, one, one.name, AGAIN_IN(one, 'details')) : ''
+  }
+  if (e.tool !== 'Bash') return ''
+  // The secret runner asked for a key under a name Claudopus's keychain does not keep while it keeps the same key under another, or
+  // asked to take a kept one in again: in the command, read as written and unquoted, and in each script it runs
+  const command = String(input.command ?? '')
+  const texts = [command, unquoted(command), ...(await scriptsRun($, command))]
+  // A command that runs no secret runner leaves the stores unread
+  if (!texts.some(text => [...text.matchAll(SECRET_RUNS)].length)) return ''
+  const mine = (await listed()).filter(entry => entry.store === 'claudopus')
+  for (const text of texts) {
+    for (const run of text.matchAll(SECRET_RUNS)) {
+      // a forget asks for nothing
+      if (run[2] === '--forget') continue
+      for (const name of (run[1] ?? '').split(',').filter(Boolean)) {
+        const kept = mine.find(entry => entry.name === name)
+        if (kept && run[2] === '--add') return KEY_KEPT(root, kept, name, AGAIN_FORGET(root, kept))
+        if (kept) continue
+        const one = mine.find(entry => sameKey(entry.name, name))
+        if (one) return KEY_KEPT(root, one, name, AGAIN_FORGET(root, one))
+      }
+    }
+  }
+  return ''
+}
+
+const openKeys = ($: EngineInterface) => {
+  presses += 1
+  void refreshKeys($)
+    .then(() => openMemory($, `${dir}/${KEYS_FILE}`))
+    .catch(err => log($, `keys not opened: ${String(err)}`))
+}
+const keysButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
+  <ui.Box key="keys-button" flexShrink={0}>
+    <ui.Button key={`keys-open-${presses}`} label="Keys" hotkey={isKeyed ? 'k' : undefined} plain={isKeyed ? true : undefined} onPress={() => openKeys($)} />
+  </ui.Box>
+)
+
+// What a call changed in a store: a key given or forgotten through the secret runner, or SBOS's list of names, makes the list again.
+// Run as each call ends, by the work's own hook on every call
+const keysLearn = async ($: EngineInterface, e: { tool: string }, r: { deny?: unknown; isError?: unknown; result?: unknown }) => {
+  if (!dir || r.deny) return
+  const command = e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
+  const isOwnAgent = !(e as { agent?: unknown }).agent
+  if (e.tool === 'mcp__sbos__secrets' && isOwnAgent && !r.isError) {
+    const listed = sbosListed(r.result)
+    if (listed) await refreshKeys($, listed)
+  } else if (/^mcp__sbos__(?:ask_secret|forget_secret)$/.test(e.tool) && isOwnAgent && !r.isError) {
+    // An ask leaves a name not put in yet, and a forget takes it out, until SBOS's next list
+    const name = plainName(String((e as { name?: unknown }).name ?? ''))
+    const label = (e as { label?: unknown }).label
+    const all = (await keysRead($)).entries.filter(one => one.store === 'sbos')
+    const was = all.find(one => one.name === name)
+    const sbos: SbosName[] = all.filter(one => one.name !== name).map(one => ({ name: one.name, label: one.label, kind: one.kind, isPresent: one.isPresent }))
+    // one SBOS already holds stays as it is
+    if (e.tool.endsWith('ask_secret') && name) sbos.push(was ? { name, label: was.label, kind: was.kind, isPresent: was.isPresent } : { name, label: typeof label === 'string' && label.length <= 2000 ? label : undefined, isPresent: false })
+    await refreshKeys($, sbos, false)
+  } else if ([...command.matchAll(SECRET_RUNS)].length) await refreshKeys($)
+}
+// As a chat starts, a list that is missing or a day old is made again a little later, so work that reads it finds one
+const KEYS_DAY = 24 * 60 * 60_000
+const keysOnStart = ($: EngineInterface) =>
+  $.clock.after(10_000, () =>
+    void (async () => {
+      const kept = await keysRead($)
+      if ((await $.clock.now()) - kept.at >= KEYS_DAY || !(await readOr($, `${dir}/${KEYS_FILE}`))) await refreshKeys($)
+    })().catch(err => log($, `keys not made again: ${String(err)}`)),
+  )
+
 // Work starting and running: the chat's own thread kept to reading and handing work over, how full the chat is, each step of work, and new
 // work's card
 
@@ -8813,6 +9165,12 @@ const workHooks = (on: On) => {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
     }
+    // An ask for a key the list of keys has is told where that key is
+    const keyKept = await keyAsked($, e).catch(() => '')
+    if (keyKept) {
+      await log($, `refused an ask for a key the list of keys has (${e.tool})`)
+      return { deny: keyKept }
+    }
     const ownFiles = await writesOwnFiles($, e)
     if (ownFiles) {
       await log($, `refused ${e.tool} writing the memory folder's own files`)
@@ -8865,6 +9223,7 @@ const workHooks = (on: On) => {
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
       if (dir && e.agentId !== undefined && !r.deny && !r.isError && !(call as { run_in_background?: unknown }).run_in_background) await keepDetached($, e.agentId, call as never, r.result).catch(err => log($, `detached work not followed: ${String(err)}`))
+      await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       return hideKept($, call, r)
     }
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
@@ -9010,7 +9369,7 @@ const workHooks = (on: On) => {
       if (!r.deny && stopId) {
         stoppedHere.add(stopId)
         await stopHelpers($, stopId)
-        await dropBackground($, [stopId])
+        await dropBackground($, [stopId], 'stopped')
         const now = await $.clock.now()
         await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
         await keepStoppedReports($, now)
@@ -9398,7 +9757,7 @@ const lookUsage = async ($: EngineInterface) => {
   try {
     const path = await usagePathOf($)
     const shared = keptOf(await $.fs.read(path).catch(() => ''))
-    if (shared && isFresh(shared.at)) return void (usageKept = shared)
+    if (shared && isFresh(shared.at)) return void (await keepUsage($, shared))
     const taking = Number(await $.fs.read(`${path}.taking`).catch(() => '0'))
     if (taking && now >= taking && now - taking < USAGE_EVERY / 2) return
     await $.fs.write(`${path}.taking`, String(now)).catch(() => undefined)
@@ -9410,11 +9769,17 @@ const lookUsage = async ($: EngineInterface) => {
     const r = await $.process.run(['sh', '-c', isLinux ? USAGE_LINUX : usageMac(isTop)], { timeoutMs: 5000 }).catch(() => undefined)
     const kept = r?.stdout ? nextKept(base, r.stdout, now, isLinux, isTop) : undefined
     if (!kept) return
-    usageKept = kept
+    await keepUsage($, kept)
     await $.fs.write(path, JSON.stringify(kept)).catch(() => undefined)
   } finally {
     usageBusy = false
   }
+}
+// New figures are kept, and the band that shows them redraws
+const keepUsage = async ($: EngineInterface, kept: UsageKept) => {
+  const isNew = kept.at !== usageKept?.at
+  usageKept = kept
+  if (isNew) await update($, figuresAt, () => kept.at)
 }
 // The figures to show, when a look has been had lately
 const usageNow = (now: number) => (usageKept && now - usageKept.at < USAGE_EVERY * 6 ? usageKept.figures : undefined)
@@ -9425,7 +9790,7 @@ const usageWords = (f: UsageFigures) => ({
   cpu: f.cpu === undefined ? '' : `Processor: ${pctText(f.cpu)}% busy, Claude ${pctText(f.cpuClaude ?? 0)}% of the whole`,
   disk: f.disk === undefined ? '' : `Disk: ${rateText(f.disk).join(' ')} read and written`,
   net: f.net === undefined ? '' : `Network: ${rateText(f.net).join(' ')} in and out`,
-  gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy`,
+  gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy${f.gpuClaude !== undefined ? `, Claude ${pctText(f.gpuClaude)}% of the whole` : ''}`,
   battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
 })
 // Each takes the battery as the bar shows it, so a charge the system calls full or empty has no time beside it
@@ -9444,33 +9809,93 @@ const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
       ? b.left ? `charging, ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge: the system calls it full and still tops it up' : 'charging: the system calls it full') : 'charging, the time to full still being estimated'
       : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'
 
-// More of each figure, for a pointer resting on it: who uses the most, Claude's part, the parts of a speed, and the battery's state
-// in full. Only what the looks gave; a part that is not known is left out
-const usageMore = (f: UsageFigures) => {
-  const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? ` · most: ${top.map(([name, n]) => `${name} ${text(n)}`).join(', ')}` : '')
+// More of each figure, for a pointer resting on it: a heading with the figure in full, then rows of a name and its value (Claude's
+// part, the parts of a speed, who uses the most), and for the battery its state in words. Only what the looks gave: a part that is
+// not known is left out
+type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][] }
+const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
+  const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? top.map(([name, n]): [string, string] => [name, text(n)]) : undefined)
   const b = f.battery
   return {
-    memory: `Memory ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use${most(f.memTop, n => `${gbText(n)} GB`)} · Claude with what it started ${gbText(f.memClaude)} GB`,
-    cpu: f.cpu === undefined ? '' : `Processor ${pctText(f.cpu)}% busy${f.ncpu && f.ncpu > 1 ? ` across ${f.ncpu} cores` : ''}${most(f.cpuTop, n => `${pctText(n)}%`)} · Claude with what it started ${pctText(f.cpuClaude ?? 0)}%`,
-    gpu: f.gpu === undefined ? '' : `Graphics processor ${pctText(f.gpu)}% busy${f.gpuMem === undefined ? '' : f.gpuMemTotal ? ` · ${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB of its memory in use` : ` · ${gbText(f.gpuMem)} GB of memory in use`}`,
-    battery: !b ? '' : `Battery ${b.pct}% · ${batteryNote(b)}`,
-    disk: f.disk === undefined ? '' : `Disk ${rateText(f.disk).join(' ')} read and written${f.disks?.length ? ` · ${f.disks.join(', ')}` : ''}`,
-    net: f.net === undefined ? '' : `Network ${rateText(f.net).join(' ')}${f.netIn !== undefined && f.netOut !== undefined ? ` · in ${rateText(f.netIn).join(' ')}, out ${rateText(f.netOut).join(' ')}` : ''}${f.ports?.length ? ` · ${f.ports.join(', ')}` : ''}`,
+    memory: { title: 'Memory', value: `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB`, rows: [['Claude and what it started', `${gbText(f.memClaude)} GB`]], most: most(f.memTop, n => `${gbText(n)} GB`) },
+    cpu: f.cpu === undefined ? undefined : {
+      title: 'Processor',
+      value: `${pctText(f.cpu)}% busy`,
+      rows: [...(f.ncpu && f.ncpu > 1 ? [['Cores', `${f.ncpu}`] as [string, string]] : []), ['Claude and what it started', `${pctText(f.cpuClaude ?? 0)}%`]],
+      most: most(f.cpuTop, n => `${pctText(n)}%`),
+    },
+    gpu: f.gpu === undefined ? undefined : {
+      title: 'Graphics processor',
+      value: `${pctText(f.gpu)}% busy`,
+      rows: [
+        ...(f.gpuClaude !== undefined ? [['Claude and what it started', `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
+        ...(f.gpuMem !== undefined ? [['Graphics memory in use', f.gpuMemTotal ? `${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB` : `${gbText(f.gpuMem)} GB`] as [string, string]] : []),
+      ],
+    },
+    battery: !b ? undefined : {
+      title: 'Battery',
+      value: `${batteryShown(b).pct}%`,
+      note: upperFirst(batteryNote(b)),
+      // The strain on it: what the whole Mac draws, and what Claude's processors draw of that (the Mac counts no process's graphics
+      // or screen power)
+      rows: [
+        ...(f.watts !== undefined ? [['The Mac is drawing', `${wattText(f.watts)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [["Claude's processors draw", `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+      ],
+    },
+    disk: f.disk === undefined ? undefined : {
+      title: 'Disk',
+      value: rateText(f.disk).join(' '),
+      note: 'Reading and writing together',
+      rows: f.diskClaude !== undefined ? [['Claude and what it runs', rateFine(Math.min(f.diskClaude, f.disk))]] : [],
+    },
+    net: f.net === undefined ? undefined : {
+      title: 'Network',
+      value: rateText(f.net).join(' '),
+      rows: [
+        ...(f.netIn !== undefined && f.netOut !== undefined ? [['Download', rateFine(f.netIn)], ['Upload', rateFine(f.netOut)]] as [string, string][] : []),
+        // Claude's own, never past the Mac's: nettop counts every interface, tunnels and loopback too, where the totals count the Mac's ports
+        ...(f.netInClaude !== undefined && f.netOutClaude !== undefined ? [['Claude downloading', rateFine(f.netIn !== undefined ? Math.min(f.netInClaude, f.netIn) : f.netInClaude)], ['Claude uploading', rateFine(f.netOut !== undefined ? Math.min(f.netOutClaude, f.netOut) : f.netOutClaude)]] as [string, string][] : []),
+      ],
+    },
   }
 }
-// The line of more, in place of nothing above the figures: drawn hidden, shown while the pointer rests on its figure
-const usageMoreDrawn = (ui: Ui, f: UsageFigures) => {
+// A speed in a card, where there is room for small ones: KB/s below a megabyte a second, so an API's trickle does not read 0
+const rateFine = (perSecond: number) => (perSecond < 1024 * 1024 ? `${Math.round(perSecond / 1024)} KB/s` : rateText(perSecond).join(' '))
+const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+// Watts, whole from ten up, a tenth below
+const wattText = (w: number) => (w >= 10 ? `${Math.round(w)}` : `${Math.round(w * 10) / 10}`)
+// The card, in the bar's own column above the figures: drawn hidden, and shown while the pointer rests on its figure through the
+// figure's hover group. The app's lifted hover cards (an absolute Box under a keyed one) were tried and left cards open after the
+// pointer had gone on to the next figure; a group is lit and put out by the pointer itself, so one card shows at a time
+const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
   const { Box, Text } = ui
-  const more = usageMore(f)
-  return (Object.entries(more) as [string, string][]).filter(([, text]) => text).map(([key, text]) => (
-    <Box key={`usage-more-${key}`} display="none" hover={{ scope: `usage-${key}`, display: 'flex' }} height={1} overflow="hidden">
-      <Text dimColor wrap="truncate-end">{text}</Text>
+  const row = (name: string, value: string, n: number, kind: string) => (
+    <Box key={`${key}-${kind}-${n}`} flexDirection="row" justifyContent="space-between" gap={3}>
+      <Text dimColor wrap="truncate-end">{name}</Text>
+      <Text wrap="truncate-end">{value}</Text>
     </Box>
-  ))
+  )
+  return (
+    <Box key={`${key}-card`} display="none" hover={{ scope: key, display: 'flex' }} flexDirection="column" gap={1} alignSelf="flex-start" borderStyle="round" borderDimColor paddingX={1} marginBottom={1}>
+      <Box key={`${key}-card-head`} flexDirection="row" justifyContent="space-between" gap={3}>
+        <Text bold>{card.title}</Text>
+        <Text bold>{card.value}</Text>
+      </Box>
+      {card.note ? <Text key={`${key}-card-note`} dimColor>{card.note}</Text> : null}
+      {card.rows.length ? <Box key={`${key}-card-rows`} flexDirection="column">{card.rows.map(([name, value], n) => row(name, value, n, 'row'))}</Box> : null}
+      {card.most?.length ? (
+        <Box key={`${key}-card-most`} flexDirection="column">
+          <Text dimColor>Using the most</Text>
+          {card.most.map(([name, value], n) => row(name, value, n, 'most'))}
+        </Box>
+      ) : null}
+    </Box>
+  )
 }
 
 // The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
-// for the disk and the network
+// for the disk and the network. The pointer resting on a figure lights its group: a faint fill under it, and its card above
 const usageDrawn = (ui: Ui, f: UsageFigures) => {
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const { Box, Text } = ui
@@ -9478,9 +9903,11 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
   const Svg = table.Svg
   const isHigh = isMemoryHigh(f)
   const words = usageWords(f)
-  const one = (key: string, svg: { source: string; width: number; height: number }, alt: string, value: string, unit: string, color?: string) => (
-    <Box key={key} flexDirection="row" flexShrink={0} alignItems="center" hover={{ scope: key }}>
-      <Svg key={`${key}-${svg.source.length}-${hashOf(svg.source)}`} source={svg.source} alt={alt} width={svg.width} height={svg.height} />
+  const cards = usageCards(f)
+  const one = (key: string, card: UsageCard | undefined, svg: { source: string; width: number; height: number }, alt: string, value: string, unit: string, color?: string) => (
+    // A member of a group must change how it looks, or the desktop app never wires it to the pointer: hence the fill
+    <Box key={`usage-${key}`} flexDirection="row" flexShrink={0} alignItems="center" hover={{ scope: `usage-${key}`, backgroundColor: FILL }}>
+      <Svg key={`usage-${key}-${svg.source.length}-${hashOf(svg.source)}`} source={svg.source} alt={alt} width={svg.width} height={svg.height} />
       <Text color={color} wrap="truncate-end">
         {value}
         <Text dimColor={!color} color={color}>{unit}</Text>
@@ -9488,14 +9915,17 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
     </Box>
   )
   return [
-    one('usage-memory', usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),
-    f.cpu === undefined ? null : one('usage-cpu', usageSvg('cpu', { claude: f.cpuClaude ?? 0, used: f.cpu }), words.cpu, pctText(f.cpu), '%'),
-    f.gpu === undefined ? null : one('usage-gpu', usageSvg('gpu', { claude: 0, used: f.gpu }), words.gpu, pctText(f.gpu), '%'),
-    f.battery ? one('usage-battery', batterySvg(f.battery), words.battery, `${f.battery.pct}`, `%${batteryAfter(f.battery)}`, isBatteryLow(f.battery) ? USAGE_AMBER : undefined) : null,
-    f.disk === undefined ? null : one('usage-disk', usageSvg('disk'), words.disk, rateText(f.disk)[0], ` ${rateText(f.disk)[1]}`),
-    f.net === undefined ? null : one('usage-net', usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
+    one('memory', cards.memory, usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),
+    f.cpu === undefined ? null : one('cpu', cards.cpu, usageSvg('cpu', { claude: f.cpuClaude ?? 0, used: f.cpu }), words.cpu, pctText(f.cpu), '%'),
+    f.gpu === undefined ? null : one('gpu', cards.gpu, usageSvg('gpu', { claude: f.gpuClaude ?? 0, used: f.gpu }), words.gpu, pctText(f.gpu), '%'),
+    f.battery ? one('battery', cards.battery, batterySvg(f.battery), words.battery, `${f.battery.pct}`, `%${batteryAfter(f.battery)}`, isBatteryLow(f.battery) ? USAGE_AMBER : undefined) : null,
+    f.disk === undefined ? null : one('disk', cards.disk, usageSvg('disk'), words.disk, rateText(f.disk)[0], ` ${rateText(f.disk)[1]}`),
+    f.net === undefined ? null : one('net', cards.net, usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
   ]
 }
+// The cards above the figures, one for each figure drawn, all hidden until the pointer rests on their figure
+const usageCardsDrawn = (ui: Ui, f: UsageFigures) =>
+  (Object.entries(usageCards(f)) as [string, UsageCard | undefined][]).map(([key, card]) => (card ? usageCardDrawn(ui, `usage-${key}`, card) : null))
 // The line as text, for the terminal, in a phone's 50 columns with the octopus: a word for each, units cut to G and M/s, and three-cell meters with Claude's cells purple
 const USAGE_CELLS = 3
 // Given the room, a figure that does not fit is left out whole, never cut in the middle: the network first, then the disk, then the
@@ -9528,7 +9958,7 @@ const usageText = (ui: Ui, f: UsageFigures, room = Infinity) => {
       <Text color={amber}>{` ${gbText(f.memUsed)}`}</Text>
       <Text color={amber} dimColor={!amber}>G</Text>
       {f.cpu === undefined ? null : [<Text key="c" dimColor>{' cpu'}</Text>, ...meter(f.cpuClaude ?? 0, f.cpu), <Text key="cv">{` ${pctText(f.cpu)}`}</Text>, <Text key="cu" dimColor>%</Text>]}
-      {f.gpu === undefined || !shown.gpu ? null : [<Text key="g" dimColor>{' gpu'}</Text>, ...meter(0, f.gpu), <Text key="gv">{` ${pctText(f.gpu)}`}</Text>, <Text key="gu" dimColor>%</Text>]}
+      {f.gpu === undefined || !shown.gpu ? null : [<Text key="g" dimColor>{' gpu'}</Text>, ...meter(f.gpuClaude ?? 0, f.gpu), <Text key="gv">{` ${pctText(f.gpu)}`}</Text>, <Text key="gu" dimColor>%</Text>]}
       {f.battery ? batteryText(ui, f.battery) : null}
       {f.disk === undefined || !shown.disk ? null : [<Text key="d" dimColor>{' disk '}</Text>, <Text key="dv">{rateText(f.disk)[0]}</Text>, <Text key="du" dimColor>{rateText(f.disk)[1].replace('B/s', '/s')}</Text>]}
       {f.net === undefined || !shown.net ? null : [<Text key="n" dimColor>{' net '}</Text>, <Text key="nv">{rateText(f.net)[0]}</Text>, <Text key="nu" dimColor>{rateText(f.net)[1].replace('B/s', '/s')}</Text>]}
@@ -9652,8 +10082,8 @@ const bandHooks = (on: On) => {
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
 
     // How Claude uses this computer: memory in use and Claude's part, how busy the processor is and Claude's part, the disk's and the
-    // network's speed, looked at every few seconds while work runs. The second's tick redraws it as the figures move
-    await read($, tick)
+    // network's speed, looked at every few seconds while work runs. New figures redraw it
+    await read($, figuresAt)
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
@@ -9671,11 +10101,11 @@ const bandHooks = (on: On) => {
         ) : null}
       </Box>
     )
-    // Where the figures are drawn, a pointer resting on one shows more of it in a line above, so the figures stay where they are
+    // Where the figures are drawn, a pointer resting on one shows its card above them; the bar grows upward, so the figures stay put
     return (drawn && figures) || marker ? (
       <Box flexDirection="column">
         {marker}
-        {drawn && figures ? usageMoreDrawn(ui, figures) : null}
+        {drawn && figures ? usageCardsDrawn(ui, figures) : null}
         {row}
       </Box>
     ) : (
@@ -10225,6 +10655,26 @@ const panelHooks = (on: On) => {
     // speed and time left as the run printed them, or worked out from its percent where it says none; then paused, a wait's target,
     // a watch's last event, nothing printed since it began, or quiet for minutes (in amber). A run that prints says nothing of when:
     // its line is read every few seconds, so what it says is now
+    // a run whose own progress line gives its percent but no time left has one worked out from how long it has run, marked as a
+    // guess: only the work's own line, which counts the whole run (a tool's bar starts again at each epoch, package or phase),
+    // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
+    const guessLeft = (job: Job, ran: number) => {
+      const share = Number.parseFloat(job.pct ?? '') / 100
+      return !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
+    }
+    // Its time, and how long it said it should take. Once past that, the figure it said no longer holds: where the run says how
+    // long it has left as it prints now (or its percent gives one), the time so far and that left make a fresh expectation;
+    // otherwise its row says plainly that it is past the time it was expected to take, in amber. Nothing is made up
+    const jobTime = (job: Job, ran: number) => {
+      if (!job.expectText || !job.expect) return { time: took(ran), isPast: false }
+      if (ran <= job.expect) return { time: `${took(ran)} of ~${job.expectText}`, isPast: false }
+      const isFresh = !job.isPaused && Boolean(job.wroteAt) && at - (job.wroteAt ?? 0) < 60_000
+      // the time left is as of when it was printed, so it adds to the time it had run then
+      const printedAt = Math.min(ran, Math.max(0, (job.wroteAt ?? 0) - job.at))
+      const left = isFresh ? leftSeconds(job.left ?? guessLeft(job, printedAt)) : undefined
+      const fresh = left ? timeLeftText(Math.max(ran / 1000, printedAt / 1000 + left))?.replace(/ left$/, '') : undefined
+      return fresh ? { time: `${took(ran)} of ~${fresh}`, isPast: false } : { time: `${took(ran)} · past ~${job.expectText}`, isPast: true }
+    }
     const jobStand = (job: Job, width: number) => {
       const pct = job.pct ? [job.pct] : []
       const quiet = job.wroteAt ? at - job.wroteAt : 0
@@ -10243,11 +10693,7 @@ const panelHooks = (on: On) => {
       const warn = isWarn && Boolean(state)
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
       const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
-      // a run whose own progress line gives its percent but no time left has one worked out from how long it has run, marked as a
-      // guess: only the work's own line, which counts the whole run (a tool's bar starts again at each epoch, package or phase),
-      // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
-      const share = Number.parseFloat(job.pct ?? '') / 100
-      const guess = !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
+      const guess = guessLeft(job, ran)
       const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
@@ -10264,10 +10710,8 @@ const panelHooks = (on: On) => {
       if (!job) return null
       const key = `${scope}-job-${job.id}`
       const width = perRow - 4 - t.depth * 2
-      // its time, and how long it said it should take: in amber once well past that
       const ran = at - job.at
-      const isLong = Boolean(job.expect && ran > (job.expect ?? 0) * 1.5)
-      const time = job.expectText ? `${took(ran)} of ~${job.expectText}` : took(ran)
+      const { time, isPast: isLong } = jobTime(job, ran)
       const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
       const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -10340,16 +10784,21 @@ const panelHooks = (on: On) => {
     // In a small card: what it has running, then the helpers at work now or just ended, and any that one of those runs under; the
     // rest are one closing row, laid out as the others, that says how many have ended and opens the card's Details, where every
     // helper is listed. A helper that ended with a job still running stays for it
+    // The runs that ended under a card: its own and its helpers', oldest first
+    const endedRunsOf = (one: Todo, list = all) => [one, ...underOf(list, one.id)].flatMap(kid => kid.endedRuns ?? []).sort((a, b) => a.endedAt - b.endedAt)
+    // Runs that ended leave the tree at once; the closing row counts them with the helpers that ended, and says how many of them
+    // failed, were killed or ran out of time, so nothing goes without a trace
     const treeUnder = (one: Todo) => {
       const under = underOf(all, one.id)
       const own = jobBranches(one)
-      if (!under.length && !own.length) return []
+      const runs = endedRunsOf(one, one.chat ? helpersThere : all)
+      if (!under.length && !own.length && !runs.length) return []
       const branches = [...own, ...withJobs(branchesOf(all, one.id, kid => kid.status === 'working' || isLingering(kid, at) || jobsOf(kid, at).length > 0))]
       const twigs = twigsOf(branches, true)
       const rest = under.length - twigs.filter(t => !t.job).length
-      if (!rest) return twigsOf(branches).map(rowOf)
+      if (!rest && !runs.length) return twigsOf(branches).map(rowOf)
       const closing: Twig = { depth: 1, rails: [], isLast: true, hasKids: false }
-      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, `${rest} ${rest === 1 ? 'helper' : 'helpers'} ended`, true, '', () => openWork($, one.id))]
+      return [...twigs.map(rowOf), twigRowOf(closing, `rest-${one.id}`, endedSummary(rest, runs), true, '', () => openWork($, one.id))]
     }
 
     // ---- A workflow's card, in blue: its stages in order with the one being run, who is in it, and its rounds ----
@@ -10699,6 +11148,31 @@ const panelHooks = (on: On) => {
         <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
       )
     }
+    // In Details, under what runs: every run that has ended, the newest first, each with how it ended in plain words, how long it
+    // ran and when it ended; one that failed, was killed or ran out of time in amber
+    const endedRunsPart = (one: Todo) => {
+      const runs = endedRunsOf(one, one.chat ? helpersThere : all).reverse()
+      if (!runs.length) return null
+      const isBad = (run: (typeof runs)[number]) => run.how === 'failed' || run.how === 'killed' || run.how === 'timed out'
+      const bad = runs.filter(isBad).length
+      return part(
+        'part-ended-runs',
+        'Runs ended',
+        `${runs.length} ${runs.length === 1 ? 'run' : 'runs'}${bad ? ` · ${bad} did not finish` : ''}`,
+        <Box flexDirection="column">
+          {runs.map(run => (
+            <Box key={`ended-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A run'}</Text>
+              </Box>
+              <Box flexShrink={0}>
+                <Text dimColor={!isBad(run)} color={isBad(run) ? NEEDS : undefined}>{`${endedWord(run)} after ${took(run.endedAt - run.at)} · ${shortAgo(at - run.endedAt)} ago`}</Text>
+              </Box>
+            </Box>
+          ))}
+        </Box>,
+      )
+    }
 
     // The work's own chat, drawn as the app draws a chat, the oldest first: what it was told in a filled block, what it wrote as
     // text, and each run of tool steps folded into one quiet row that opens on a press. A long message to it is folded too
@@ -10892,6 +11366,7 @@ const panelHooks = (on: On) => {
           {one.words ? askPart(one) : null}
           {todoPart(one)}
           {helpersPart(one)}
+          {endedRunsPart(one)}
           {one.chat && !lines && (talks.has(one.id) || one.chat.host)
             ? part('part-chat', 'Its chat', '', theirChat(one, one.chat))
             : part('part-chat', 'Its chat', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading its chat…</Text>)}
@@ -11251,6 +11726,7 @@ const panelHooks = (on: On) => {
               {reportsButton($, ui, kept, isKeyed)}
               {statsButton($, ui, isKeyed)}
               {memoryButton($, ui, isKeyed)}
+              {keysButton($, ui, isKeyed)}
               {configButton($, ui, isKeyed)}
               {aboutButton($, ui, isKeyed)}
               {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x Tab for keys</Text> : null}

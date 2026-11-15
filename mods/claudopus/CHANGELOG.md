@@ -2,6 +2,22 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.122 · 15 November 2026
+- In the desktop app, resting the pointer on a figure above the prompt now really shows its card, one at a time, gone as the pointer leaves: who uses the most memory and processor, the battery in words, network download and upload
+- The cards show Claude's own part of the graphics processor, the disk and the network, and the strain on the battery: what the Mac draws and what Claude's processors draw, in watts
+- The bar above the prompt redraws only when new figures come, not every second
+
+## 0.2.121 · 15 November 2026
+- Claudopus now remembers which keys, tokens and logins you have given, by name and where each is kept, never a value: Claudopus's keychain, keys you saved by hand in this Mac's keychain, SBOS, and the .env files in your subjects' folders. A Keys button beside Memory shows the list, and work reads it before asking.
+- The list is made again from each store's own list of names whenever you open it, a key is given or forgotten, or work asks for one, so a key taken out of a store stops being listed.
+- Work that asks for a key the list already has is stopped and told where it is and how to use it.
+
+## 0.2.120 · 15 November 2026
+- Under a card, only runs that are really running are listed: a watch the engine killed or timed out, and a wait or command that ended, leave the list at once, so no clock counts on for something that stopped.
+- The closing row counts the runs that ended beside the helpers, such as "3 runs ended · 3 timed out", and Details lists each with how it ended in plain words: finished, failed with its exit code, killed, timed out or stopped by the work.
+- A run past the time the work said it would take no longer shows that old figure as if it held: it shows a fresh expectation from the time left the run prints (or its percent), or else says plainly that it is past its expected time.
+- Work is told to give a new expected time when its own estimate turns out wrong, and to stop its waits and watches once it no longer needs them.
+
 ## 0.2.119 · 15 November 2026
 - While you type into an ask's reply box or a key box, the panel and Details hold still: other cards' lines, times and output wait until you stop, so the box no longer flickers, drops letters or throws the panel to its bottom; a card that starts, finishes or asks, and an admin command waiting, still show at once.
 - With nobody typing, the panel is drawn again at once for anything new, but for running times and command output only every ten seconds, so a button under the pointer keeps its hover and takes the first click.
