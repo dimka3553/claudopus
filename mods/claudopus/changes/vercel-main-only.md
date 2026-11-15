@@ -1,0 +1,1 @@
+- claudopus.ai is now built only from main, not from every branch pushed, so a busy day no longer uses up Vercel's daily limit and leaves the site on an older version
