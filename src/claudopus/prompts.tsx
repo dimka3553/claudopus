@@ -124,7 +124,7 @@ const tellWaiting = async ($: EngineInterface) => {
 // Without (a settings hook answered it), it goes at once: nothing was put to the person
 type Outcome = 'running' | 'ran' | 'no' | 'stopped'
 let answeredPrompts: Waiting[] = []
-const PROMPT_SHOWN = 60_000
+const PROMPT_SHOWN = 15_000
 // An allowed call whose end is never seen is taken as over this long after it was seen running, so nothing stays purple for good
 const RUNNING_LONGEST = 15 * 60_000
 const answeredShown = (at: number) => answeredPrompts.filter(one => (one.endedAt ? at - one.endedAt < PROMPT_SHOWN : at - one.at < RUNNING_LONGEST))

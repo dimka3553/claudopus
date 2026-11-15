@@ -289,7 +289,10 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
     gateSaid.set(id, said)
     void noteDone($, {
       id: `gate-${id}`,
-      head: gate.kind === 'release' ? `A release of ${gate.host}` : gate.kind === 'file' ? `A change to ${gate.host}` : `An admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
+      ...(gate.call ? { call: gate.call } : {}),
+      // Refused, nothing runs: what it says is over at once
+      ...(said === 'deny' ? { endedAt: 0 } : {}),
+      head: gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host} into ${gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
       said:
         said === 'deny'
           ? `You denied it · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}, and the work was told`
@@ -300,7 +303,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
             : gate.isWork
               ? "You allowed this work's admin commands · it runs now"
               : 'You allowed it once · it runs now',
-      what: cut(oneLine(gate.command), 200),
+      what: gate.kind === 'release' && gate.folder ? `from ${shortPath(gate.folder)}` : gate.kind === 'file' ? '' : cut(oneLine(gate.command), 200),
       isOn: said !== 'deny',
     }).catch(() => undefined)
   }
@@ -323,7 +326,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
     const isWork = gate.mode === 'work' && Boolean(card)
     const isCovered = (isWork && workAllowed.has(top)) || (await isAllowed($, call))
     if (!isCovered) {
-      const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(isWork ? { isWork: true } : {}) }, card ? top : '')
+      const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(isWork ? { isWork: true } : {}) }, card ? top : '')
       if (said !== 'once' && said !== 'always') {
         await dropGrants($, grants)
         return { deny: said === 'deny' ? GATE_DENIED() : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
@@ -345,11 +348,39 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
 // release runner named by any spelling of its path, from the folder the command runs it in (a cd before it moves that). Allowed, it gets
 // a grant naming that worktree and its branch, which bin/release takes once; its --status asks nothing
 type ReleaseCall = { folder: string; branch: string }
+// The runner's own arguments, as the shell hands them: a redirection (`> log`, `2>log`, `>>log`, `<in`) and what it names are the
+// shell's, never a branch. Read otherwise, `release > log` asked to release a branch called ">", whose grant the runner (on its
+// own branch) refused, so the work ran it again and the person was asked twice
+const releaseArgs = (words: string[]) => {
+  const args: string[] = []
+  for (let n = 0; n < words.length; n++) {
+    const word = words[n]!
+    if (/^\d*(?:>>?|<<?|>\||<>)$/.test(word)) {
+      n++
+      continue
+    }
+    if (/^\d*[<>]/.test(word)) continue
+    const cut = word.search(/[<>]/)
+    if (cut >= 0) {
+      if (cut > 0) args.push(word.slice(0, cut))
+      // `branch>log` hands the branch and sends what it prints to log; `branch> log` names the log in the next word
+      if (/[<>]$/.test(word)) n++
+      continue
+    }
+    args.push(word)
+  }
+  return args
+}
 const releaseCalls = (command: string, root: string, from: string): ReleaseCall[] => {
   let folder = from
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const found: ReleaseCall[] = []
-  for (const words of shellWords(command)) {
+  for (const said of shellWords(command)) {
+    // `release>log` is the runner and a redirection, as the shell reads it: the runner's own word alone is split
+    const words = said.flatMap(word => {
+      const cut = word.search(/[<>]/)
+      return cut > 0 && isAdminPath(word.slice(0, cut), root, 'release') ? [word.slice(0, cut), word.slice(cut)] : [word]
+    })
     const i = commandAt(words)
     const name = (words[i] ?? '').split('/').pop() ?? ''
     if ((name === 'cd' || name === 'pushd') && words[i + 1]) {
@@ -359,7 +390,7 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
     // Run by a shell handed it as a script, or by itself
     const at = ['bash', 'sh', 'zsh'].includes(name) ? i + 1 + words.slice(i + 1).findIndex(one => !one.startsWith('-')) : i
     if (at < i || !isAdminPath(words[at] ?? '', root, 'release')) continue
-    const args = words.slice(at + 1)
+    const args = releaseArgs(words.slice(at + 1))
     if (args[0] === '--status') continue
     const rest = args[0] === '-m' ? args.slice(2) : args
     found.push({ folder, branch: rest[0] ?? '' })
@@ -380,7 +411,10 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     // Not a repo, or no branch: the runner itself says what is wrong, and it releases nothing without a grant
     if (!repo || !branch || branch === 'HEAD') continue
     const id = `${e.tool_use_id}-r${n}`
-    const said = await holdGate($, next, { id, kind: 'release', host: repo.split('/').pop() ?? repo, command: `${branch} from ${repo}`, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
+    // Named by the repo itself, not the worktree's folder: a worktree's git folder is inside the repo's own
+    const common = await git(['rev-parse', '--path-format=absolute', '--git-common-dir'])
+    const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo
+    const said = await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
     if (said !== 'once') {
       await dropGrants($, grants)
       const gate = { kind: 'release' as const }
@@ -428,7 +462,7 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
   const list = await read($, todos)
   const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
   const card = list.find(one => one.id === top)
-  const said = await holdGate($, next, { id: `${e.tool_use_id}-f`, kind: 'file', host: file, command: cut(change, 2000), at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
+  const said = await holdGate($, next, { id: `${e.tool_use_id}-f`, call: e.tool_use_id, kind: 'file', host: file, command: cut(change, 2000), at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
   const gate = { kind: 'file' as const }
   return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
 }
@@ -712,10 +746,19 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
 
 // On the card: what it wants to run, whole, and the three presses. Another chat's panel shows it with no buttons: only the chat
 // that holds the call allows it
+// Drawn as Claude Code draws its own permission asks: an outlined box with the kind of ask at its top, never a filled card with an
+// edge as work's cards are, so an ask is not taken for one more piece of work
+const gateKind = (gate: Gate) => (gate.isUndone ? 'Put back' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
-  <ui.Box key={key} flexDirection="column" gap={1}>
+  <ui.Box key={key} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+    <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? (gate.isUndone ? 'yours to decide' : 'waits for your press') : isElsewhere ? 'asked in another chat' : 'no longer waits'}`}</ui.Text>
     <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
-    {gate.command ? (
+    {gate.kind === 'release' && gate.folder ? (
+      <ui.Box flexDirection="column">
+        <ui.Text wrap="truncate-end">{`Branch ${gate.branch ?? ''}`}</ui.Text>
+        <ui.Text dimColor wrap="truncate-start">{`from ${shortPath(gate.folder)}`}</ui.Text>
+      </ui.Box>
+    ) : gate.command ? (
       <ui.Box backgroundColor={FILL} paddingLeft={2}>
         <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
       </ui.Box>
@@ -751,9 +794,16 @@ const adminBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string) =>
     </ui.Box>
   ) : null
 // A gate with no card, at the top of the panel
-const gatesPart = ($: EngineInterface, ui: Ui) =>
-  looseGates.map(gate => (
-    <ui.Box key={`gate-top-${gate.id}`} flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-      {gateRow($, ui, gate, `gate-${gate.id}`, false)}
-    </ui.Box>
-  ))
+const gatesPart = ($: EngineInterface, ui: Ui) => looseGates.map(gate => gateRow($, ui, gate, `gate-${gate.id}`, false))
+// A path in one line: the home folder as ~, and the middle left out past `room` characters, keeping its last folders
+const shortPath = (path: string, room = 44) => {
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const p = home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path
+  if (p.length <= room) return p
+  const parts = p.split('/')
+  for (let keep = parts.length - 2; keep >= 1; keep--) {
+    const short = `${parts[0]}/…/${parts.slice(-keep).join('/')}`
+    if (short.length <= room) return short
+  }
+  return `…/${parts.at(-1) ?? ''}`
+}

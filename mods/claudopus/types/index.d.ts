@@ -73,7 +73,7 @@ export type Todo = {
   // (`here` or an ssh host), the exact command, the agent that runs it, and whether Allow covers the whole piece of work
   // What waits for the person's press: an admin command, a release to main ('release'), or a change to a file of theirs ('file')
   // `isUndone`: a file of theirs a command changed, put back as it was (`isOutside`: found changed between commands, by an editor or a program left running); Allow makes the change again
-  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean }[]
+  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean; call?: string; folder?: string; branch?: string }[]
   startedAt: number
   // 0 while it works
   endedAt: number
