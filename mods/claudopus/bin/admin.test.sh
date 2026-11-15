@@ -268,7 +268,7 @@ cat >"$r/gh/gh" <<EOF
 #!/bin/bash
 case "\$*" in
   "auth status") exit 0 ;;
-  "api -X POST repos/"*"/actions/workflows/check.yml/dispatches -f ref=main -f inputs[sha]="*) printf '%s\n' "\${*##*=}" >"$r/asked" ;;
+  "api -X POST repos/"*"/actions/workflows/check.yml/dispatches -f ref=main -f inputs[sha]="*) all=\$*; printf '%s\n' "\${all##*=}" >"$r/asked" ;;
   "api repos/"*"/actions/workflows/check.yml/runs?event=workflow_dispatch"*) [ -s "$r/asked" ] && echo 77 ;;
   "api --paginate repos/"*"/actions/runs/77/jobs"*)
     n=\$(( \$(cat "$r/asks" 2>/dev/null || echo 0) + 1 )); echo \$n >"$r/asks"
