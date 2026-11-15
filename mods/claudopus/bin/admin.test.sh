@@ -25,6 +25,9 @@ for f in admin release secret keyring; do
   sed 's|^own_home=$(/usr/bin/perl .*$|own_home=$HOME|' "$here/$f" >"$tmp/bin/$f" && chmod +x "$tmp/bin/$f"
   ! cmp -s "$here/$f" "$tmp/bin/$f" || { echo "admin.test.sh: $f takes its home folder some other way now"; exit 1; }
 done
+# The release's copy takes this test's own gh, which answers as GitHub would (below)
+sed -i.bak "s|^gh_bin=.*\$|gh_bin=$tmp/release/gh/gh|" "$tmp/bin/release" && rm -f "$tmp/bin/release.bak"
+grep -qx "gh_bin=$tmp/release/gh/gh" "$tmp/bin/release" || { echo "admin.test.sh: release finds gh some other way now"; exit 1; }
 here=$tmp/bin
 admin=$here/admin
 if [ -n "$mac" ]; then
@@ -255,6 +258,77 @@ expect "a person's own release at a terminal, answered no: refused" 6 "$RELEASE_
 expect "a person's own release at a terminal, answered yes: released" 0 'released' -- at_terminal y
 n=$((n + 1))
 [ "$(git -C "$r/origin.git" show main:file)" = three ] && echo "ok $n - main has the person's release" || { echo "NOT OK $n - main does not have the person's release"; failed=1; }
+
+# Main's own checks are read and run even where the .release names only some of the settings (15 Nov: a read that ended on a name
+# the file left out took none of them, so CHECK went unrun; GitHub's runner hid it, as it sets GITHUB_WORKFLOW itself)
+(cd "$r/work" && git fetch -q origin && git checkout -q -B main origin/main && printf 'CHECK=false\n' >.release && git commit -q -am "checks fail" && RELEASE_PUSH=1 git push -q origin main && git checkout -q -b red-check && echo red >file && git commit -q -am red) || { echo "NOT OK - the repo for a failing check was not set up"; failed=1; }
+release_grant rel-red release-grant red-check
+expect "main's own check fails: refused" 3 'the checks failed on main with red-check' -- release
+# GitHub's checks: with GITHUB_CHECKS in main's .release, main's own workflow is started on the very commit main is to become, and
+# main moves only once every job of that run passed. This test's gh keeps the commit it was asked to check, lists run 77 for it as
+# main's dispatch (and whatever $r/runs.extra adds, its SHA put in), through jq with the release's own filter; it answers 77's jobs
+# from $r/checks (one "name<tab>status<tab>conclusion<tab>url" line each), or from $r/checks.later once asked twice, and any other
+# run's as all passed
+mkdir -p "$r/gh"
+cat >"$r/gh/gh" <<EOF
+#!/bin/bash
+jobs() { if [ "\$(cat "$r/asks" 2>/dev/null || echo 0)" -gt 2 ] && [ -e "$r/checks.later" ]; then cat "$r/checks.later"; else cat "$r/checks"; fi; }
+filter=; for a in "\$@"; do [ "\$prev" = --jq ] && filter=\$a; prev=\$a; done
+case "\$*" in
+  "auth status") exit 0 ;;
+  "api -X POST repos/"*"/actions/workflows/check.yml/dispatches -f ref=refs/heads/main -f inputs[sha]="*) all=\$*; printf '%s\n' "\${all##*=}" >"$r/asked" ;;
+  "api repos/"*"/actions/workflows/check.yml/runs?event=workflow_dispatch&branch=main"*)
+    [ -s "$r/asked" ] || { echo '{"workflow_runs":[]}' | jq -r "\$filter"; exit; }
+    sha=\$(cat "$r/asked"); at=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    { printf '{"id":77,"display_title":"Release check %s","head_branch":"main","head_sha":"%s","path":".github/workflows/check.yml","event":"workflow_dispatch","created_at":"%s"}\n' "\$sha" "\$(git -C "$r/origin.git" rev-parse main)" "\$at"
+      [ -e "$r/runs.extra" ] && sed "s/SHA/\$sha/g; s/NOW/\$at/g" "$r/runs.extra"; } | jq -s '{workflow_runs: (reverse)}' | jq -r "\$filter" ;;
+  "api repos/"*"/actions/runs/77 --jq"*) n=\$(( \$(cat "$r/asks" 2>/dev/null || echo 0) + 1 )); echo \$n >"$r/asks"; jobs | awk -F'\t' '\$2 != "completed" { busy = 1 } \$2 == "completed" && \$3 !~ /^(success|skipped|neutral)\$/ { red = 1 } END { print (busy ? "in_progress\t" : red ? "completed\tfailure" : "completed\tsuccess") }' ;;
+  "api repos/"*"/actions/runs/"*" --jq"*) printf 'completed\tsuccess\n' ;;
+  "api --paginate repos/"*"/actions/runs/77/jobs"*) jobs ;;
+  "api --paginate repos/"*"/actions/runs/"*"/jobs"*) printf 'check (ubuntu-latest)\tcompleted\tsuccess\tu\ncheck (macos-latest)\tcompleted\tsuccess\tu\n' ;;
+  *) echo "gh: not answered here: \$*" >&2; exit 1 ;;
+esac
+EOF
+chmod +x "$r/gh/gh"
+# (main of this test's own repo is pushed past the guard the release put in, as the test runs with CLAUDECODE set)
+(cd "$r/work" && git fetch -q origin && git checkout -q -B main origin/main && printf 'CHECK=true\nGITHUB_CHECKS="check (ubuntu-latest), check (macos-latest)"\n' >.release && git commit -q -am "checks on GitHub" && RELEASE_PUSH=1 git push -q origin main && git checkout -q -b gh-checks && echo four >file && git commit -q -am four) || { echo "NOT OK - the repo for GitHub's checks was not set up"; failed=1; }
+checks() { printf "$@" >"$r/checks"; rm -f "$r/checks.later" "$r/asks" "$r/asked" "$r/runs.extra"; }
+gh_release() { release_grant "rel-$1" release-grant gh-checks; (cd "$r/work" && RELEASE_CHECK_EVERY=1 RELEASE_CHECK_WAIT=${WAIT:-4} "$here/release"); }
+main_was=$(git -C "$r/origin.git" rev-parse main)
+unmoved() { n=$((n + 1)); [ "$(git -C "$r/origin.git" rev-parse main)" = "$main_was" ] && echo "ok $n - $1: main was not moved" || { echo "NOT OK $n - $1: main moved"; failed=1; }; }
+no_candidate() { n=$((n + 1)); [ -z "$(git -C "$r/origin.git" for-each-ref refs/release-check refs/heads/release-check)" ] && echo "ok $n - $1: the commit put up for GitHub to check is taken down" || { echo "NOT OK $n - $1: the commit put up for GitHub to check was left"; failed=1; }; }
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tfailure\thttps://github.com/run/2\n'
+expect 'a red check on GitHub: refused, naming the check' 3 'failed on main with gh-checks.*check (macos-latest) (failure) https://github.com/run/2' -- gh_release red
+unmoved 'a red check'; no_candidate 'a red check'
+n=$((n + 1)); [ -n "$(cat "$r/asked" 2>/dev/null)" ] && git -C "$r/origin.git" cat-file -e "$(cat "$r/asked")" 2>/dev/null && echo "ok $n - the checks read were of the commit pushed for GitHub to check" || { echo "NOT OK $n - the checks read were of no commit pushed"; failed=1; }
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tin_progress\t\tu2\n'
+expect 'a check still running when the wait runs out: refused, saying which' 3 'did not end in time.*check (macos-latest) running' -- gh_release running
+unmoved 'a check still running'; no_candidate 'a check still running'
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\n'
+expect 'a named check GitHub never started: refused, saying which' 3 'check (macos-latest) not started' -- gh_release missing
+unmoved 'a named check missing'
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tsuccess\tu2\nother\tcompleted\tcancelled\tu3\n'
+expect 'any other check on the commit that did not pass: refused' 3 'other (cancelled)' -- gh_release other
+unmoved 'another check cancelled'
+# A run named for the same commit but started on another branch (its own check.yml, all passing), newer than main's red one:
+# never the one read
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tfailure\tu2\n'
+printf '{"id":88,"display_title":"Release check SHA","head_branch":"evil","head_sha":"SHA","path":".github/workflows/check.yml","event":"workflow_dispatch","created_at":"NOW"}\n' >"$r/runs.extra"
+expect "a passing run of the same commit from another branch: not taken, main's red run refuses it" 3 'check (macos-latest) (failure) u2' -- gh_release evil
+unmoved 'a run from another branch'
+# Two runs on main named for the same commit: refused
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tsuccess\tu2\n'
+printf '{"id":89,"display_title":"Release check SHA","head_branch":"main","head_sha":"SHA","path":".github/workflows/check.yml","event":"workflow_dispatch","created_at":"NOW"}\n' >"$r/runs.extra"
+expect 'two runs on main named for the same commit: refused' 3 'more than one run' -- gh_release twice
+unmoved 'two runs for one commit'
+checks 'check (ubuntu-latest)\tqueued\t\tu1\ncheck (macos-latest)\tin_progress\t\tu2\n'
+printf 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tsuccess\tu2\n' >"$r/checks.later"
+# (a wait long enough for a slow runner: it ends as soon as the checks pass)
+WAIT=60
+expect 'checks running, then green: released once they pass, after saying what it waits for' 0 "waiting for GitHub's checks: check (ubuntu-latest) running, check (macos-latest) running" -- gh_release green
+WAIT=
+n=$((n + 1)); [ "$(git -C "$r/origin.git" rev-parse main)" = "$(cat "$r/asked")" ] && echo "ok $n - main is the very commit GitHub checked" || { echo "NOT OK $n - main is not the commit GitHub checked"; failed=1; }
+no_candidate 'a green release'
 unset CLAUDECODE
 expect 'forgetting a password needs no grant' 0 'No password was kept' -- "$admin" here --forget
 expect 'with no command it says how it is used' 2 'usage' -- "$admin" here

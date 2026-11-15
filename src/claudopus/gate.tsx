@@ -226,10 +226,16 @@ const unquoted = (command: string) => command.replace(/["'\\]/g, '')
 // (its comment lines left out, so a test script that makes a home of its own and only names a runner in a comment is not refused)
 const RUNNER_NAMED = /\bbin\/(?:admin|secret|release|keyring)(?![\w.-])/
 const RUNNER_MOVED = /(?:^|[\s;&|(`'"])(?:HOME|XDG_DATA_HOME|CLAUDECODE)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:HOME|XDG_DATA_HOME|CLAUDECODE)\b|\benv\b[^;&|\n]*\s(?:-u\s*|--unset[= ])CLAUDECODE\b|\benv\b[^;&|\n]*\s-i\b|\benv(?:\s+-\w+)*\s+-(?=\s|$)|\bexec\s+-\w*c/
+// The release runs as itself (#!/bin/bash -p: no startup file, no functions from the environment), so what its shell runs, the
+// GitHub checks' verdict among it, is its own: a command that names it and sets what a shell or git reads first (a startup file,
+// functions, options, the PATH, git's settings), sources a script first, or starts it through a shell of its own choosing, is refused
+const RELEASE_NAMED = /\bbin\/release(?![\w.-])/
+const RELEASE_MOVED =
+  /(?:^|[\s;&|(`'"])(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+|BASH_FUNC_\S+)=|\b(?:export|unset|declare|typeset|readonly|local)\s+(?:-\w+\s+)*(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|PATH|GIT_\w+)\b|\b(?:export|declare|typeset)\s+(?:-\w+\s+)*-\w*f|(?:^|[;&|(]\s*)(?:source|\.)\s|\b(?:ba|z|da|k|c|tc|fi)?sh\s+(?:-\S+\s+)*\S*bin\/release(?![\w.-])/
 const movesRunner = (command: string) =>
-  [command, unquoted(command)].map(one => one.replace(/^\s*#.*$/gm, '')).some(one => RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one))
+  [command, unquoted(command)].map(one => one.replace(/^\s*#.*$/gm, '')).some(one => (RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one)) || (RELEASE_NAMED.test(one) && RELEASE_MOVED.test(one)))
 const NO_RUNNER_MOVED =
-  "This command did not run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the marks Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or takes CLAUDECODE away, is refused. Run the runner as it is."
+  "This command did not run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the marks Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or takes CLAUDECODE away, is refused, and so is one that sets the PATH, BASH_ENV, shell options or git's settings for bin/release, sources a script before it, or starts it through a shell. Run the runner as it is."
 const touchesGate = (e: ToolCallInput) => {
   if (e.tool === 'Bash') {
     const command = String((e as { command?: unknown }).command ?? '')
@@ -645,7 +651,9 @@ const personLook = async ($: EngineInterface, by?: ToolCallInput): Promise<strin
     await personPut($, name, was, is)
     undone.push(name)
     await log($, `${name} was changed outside Claudopus${by ? ' by a command' : ''}, and put back`)
-    if (name !== 'admin-allowed.json') void offerUndone($, by, name, is).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
+    // Offered before the look ends, so the card is there once the call or the load that found it goes on (left to run on its own, a
+    // slow Mac drew it late, and one begun under an earlier load could land after the next load's and take its card away)
+    if (name !== 'admin-allowed.json') await offerUndone($, by, name, is).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
   }
   for (const name of PERSON_FILES) if (now.has(name) && !known.has(name)) known.set(name, null)
   if (!sealedKnown) {

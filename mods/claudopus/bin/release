@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 # release [-m "title"] [branch]: the one way work reaches a repo's main branch, so two pieces of work never release at once.
 # Run it from the work's own worktree, its work committed on its own branch. On this Mac one release per repo runs at a time
 # (a lock others wait on); across Macs, git's refusal of a push that is not a fast-forward makes it take main again. It takes
@@ -6,21 +6,42 @@
 # left that the repo does not track, runs the repo's checks on the result, pushes main and the version's tag.
 #   release --status   says who is releasing in this repo now, and since when
 # Exit: 0 released; 2 main and the branch changed the same lines (merge main into the branch, resolve, commit, run again);
-#       3 the build or the checks failed (fix on the branch, run again), or, with GITHUB_RELEASE, its notes could not be made
+#       3 the build or the checks failed (fix on the branch, run again), or GitHub's checks (GITHUB_CHECKS) failed, were missing
+#       or did not end in time (it names which), or, with GITHUB_RELEASE, its notes could not be made
 #       or gh cannot make the release (not installed, not signed in, no write access to the repo: fix that, run again); 4 main was pushed but its tag or its GitHub release was
-#       not (it says the one command that finishes it); 1 anything else. Nothing is pushed unless it exits 0 or 4.
+#       not (it says the one command that finishes it); 1 anything else. Nothing is pushed to main unless it exits 0 or 4 (with
+#       GITHUB_CHECKS the release's commit goes to a refs/release-check/ ref for GitHub to check, removed again as it ends).
 # Settings, all optional, in the repo's committed `.release` (bash): MAIN (main), REMOTE (origin), NAME (put before the version
 # in the title), VERSION_FILE (a JSON file with "version": "x.y.z", or a file holding only x.y.z), DERIVED (files the build
 # makes, never merged), BUILD, CHECK (commands run in the release's own checkout), AFTER (run in the work's worktree once
 # pushed), GITHUB_RELEASE (a command, run in the release's checkout with the version in RELEASE_VERSION, that prints the
 # notes of the version's GitHub release: with it every release with a version is made a GitHub release marked latest, and gh
-# must be signed in, which is checked before anything is pushed). `release.local` in the repo's git folder, never committed, can set the same for this Mac only, such as AFTER.
+# must be signed in, which is checked before anything is pushed), GITHUB_CHECKS (names of GitHub's jobs, by commas, that must pass
+# on the very commit main is to become, run by main's own CHECKS_WORKFLOW (check.yml), which takes a `sha` input to check out and
+# is named "Release check <sha>": main moves only once every job of that run passed; red, a named one missing, or still running
+# after 40 minutes, and nothing reaches main). `release.local` in the repo's git folder, never committed, can set the same for this Mac only, such as AFTER.
 # The settings are read in a shell of their own and only as values, main's own committed `.release` (never the branch's) and this Mac's
 # release.local, so nothing a branch writes there runs here, before the lock or after it.
 # Inside Claude Code it releases only what the person allowed with a press on the work's card in the Claudopus panel: the hook that
 # holds the call leaves a grant naming this worktree and this branch, sealed as bin/admin's are, which this runner takes once. Run by
 # hand outside Claude Code at a terminal, it asks there instead. Exit 6 when neither said yes: nothing is done.
 set -uo pipefail
+# Nothing of the caller's environment decides what runs here or in what it starts (git, perl, gh, the build and checks): -p above
+# reads no BASH_ENV and takes no function from it, and a run with anything beyond the few it needs starts itself again with only
+# those, so no PERL5OPT, XDG_CONFIG_HOME, GIT_ or BASH_FUNC_ setting reaches git, perl or a child shell
+KEPT_ENV="HOME USER LOGNAME LANG LC_ALL LC_CTYPE TERM TMPDIR SSH_AUTH_SOCK PATH CLAUDECODE CLAUDE_CODE_EXECPATH GH_TOKEN GITHUB_TOKEN RELEASE_LOCKS RELEASE_BARRIER RELEASE_CHECK_WAIT RELEASE_CHECK_EVERY PWD OLDPWD SHLVL _"
+extra=
+for v in $(compgen -e); do case " $KEPT_ENV " in *" $v "*) ;; *) extra=1 ;; esac; done
+[ -z "$(/usr/bin/env | /usr/bin/sed -n '/^BASH_FUNC_/p')" ] || extra=1
+if [ -n "$extra" ]; then
+  kept=()
+  for v in $KEPT_ENV; do [ "$v" = _ ] || [ -z "${!v+x}" ] || kept+=("$v=${!v}"); done
+  exec /usr/bin/env -i "${kept[@]}" /bin/bash -p "$0" "$@"
+fi
+# The system's own tools come before anything the caller's PATH adds
+PATH=/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}
+export PATH
+unset CDPATH
 say() { echo "release: $*" >&2; }
 die() { say "$1"; exit "${2:-1}"; }
 # The home folder is the one the user database names for this user, never $HOME, which whoever runs this can set to a folder of
@@ -33,16 +54,16 @@ export HOME
 
 top=$(git rev-parse --show-toplevel 2>/dev/null) || die "not in a git repo"
 common=$(cd "$top" && cd "$(git rev-parse --git-common-dir)" && pwd)
-MAIN= REMOTE=origin NAME= VERSION_FILE= DERIVED= BUILD= CHECK= AFTER= GITHUB_RELEASE=
+MAIN= REMOTE=origin NAME= VERSION_FILE= DERIVED= BUILD= CHECK= AFTER= GITHUB_RELEASE= GITHUB_CHECKS= CHECKS_WORKFLOW=
 # A settings file's values, read in a bash of its own started afresh from the system's own path (no BASH_ENV, no function brought in):
 # what else it defines, a function or another variable, never reaches this shell. $1 the file (read from its own folder), $2 the names
 settings_of() {
   [ -f "$1" ] || return 0
   local said
-  said=$(cd "$(dirname "$1")" && env -u BASH_ENV -u ENV /bin/bash --noprofile --norc -c '. "$1" >/dev/null 2>&1 </dev/null; shift; for v in "$@"; do [ -n "${!v+x}" ] && printf "%s=%q\n" "$v" "${!v}"; done' bash "$1" $2 2>/dev/null) || return 0
+  said=$(cd "$(dirname "$1")" && env -u BASH_ENV -u ENV /bin/bash --noprofile --norc -c '. "$1" >/dev/null 2>&1 </dev/null; shift; for v in "$@"; do [ -n "${!v+x}" ] && printf "%s=%q\n" "$v" "${!v}"; done; exit 0' bash "$1" $2 2>/dev/null) || return 0
   eval "$said"
 }
-SETTINGS="MAIN REMOTE NAME VERSION_FILE DERIVED BUILD CHECK AFTER GITHUB_RELEASE"
+SETTINGS="MAIN REMOTE NAME VERSION_FILE DERIVED BUILD CHECK AFTER GITHUB_RELEASE GITHUB_CHECKS CHECKS_WORKFLOW"
 settings_of "$common/release.local" "$SETTINGS"
 url=$(git -C "$top" remote get-url "$REMOTE" 2>/dev/null) || die "no remote $REMOTE"
 # With no MAIN set, main is the remote's own default branch (main, master or another), else main
@@ -138,7 +159,7 @@ until mkdir "$lock" 2>/dev/null && echo $$ >"$lock/pid"; do
   fi
   [ $waited -eq 0 ] && say "waiting: $(cat "$lock/who" 2>/dev/null || echo another release) is releasing"
   sleep 0.5; waited=$((waited + 1))
-  [ $waited -gt 2400 ] && die "waited 20 minutes for the other release; nothing done"
+  [ $waited -gt 10800 ] && die "waited 90 minutes for the other releases; nothing done"
 done
 echo "$branch from $top, since $(date '+%H:%M:%S')" >"$lock/who"
 [ $waited -gt 0 ] && say "my turn after $((waited / 2)) s"
@@ -149,7 +170,10 @@ git -C "$top" worktree list --porcelain | sed -n 's#^worktree \(.*/claudopus-rel
 done
 git -C "$top" worktree prune
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/claudopus-release.XXXXXX")/release"
-cleanup() { git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
+# The branch a release's commit waits on GitHub's checks under goes once it is decided, or as the release ends any other way
+cref=
+drop_candidate() { [ -n "$cref" ] && git -C "$top" push -q "$REMOTE" --delete "$cref" >/dev/null 2>&1; cref=; return 0; }
+cleanup() { drop_candidate; git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 
@@ -158,7 +182,20 @@ getv() { perl -ne 'if (/"version"\s*:\s*"(\d+\.\d+\.\d+)"/ || /^(\d+\.\d+\.\d+)\
 setv() { perl -0pi -e 's/("version"\s*:\s*")\d+\.\d+\.\d+"/${1}'"$2"'"/ or s/^\d+\.\d+\.\d+$/'"$2"'/m' "$1"; }
 gained() { [ -n "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN" 2>/dev/null)" ] || return 0; git -C "$top" log --no-merges --format='  %h %s' "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN")..$REMOTE/$MAIN" | cut -c1-150 | head -12; }
 
+# gh as installed, never one the caller's PATH puts first, with nothing of the caller's that sends it to another server, account
+# folder or proxy; and no call to it hangs the release while it holds the lock
+gh_bin=$(for g in /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do [ -x "$g" ] && { echo "$g"; break; }; done)
+ghq() { env -u GH_HOST -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_CONFIG_DIR -u XDG_CONFIG_HOME -u GH_REPO -u GH_DEBUG \
+  -u HTTPS_PROXY -u HTTP_PROXY -u ALL_PROXY -u https_proxy -u http_proxy -u all_proxy -u SSL_CERT_FILE -u SSL_CERT_DIR \
+  /usr/bin/perl -e 'my $p = fork // exit 127; if (!$p) { setpgrp(0, 0); exec @ARGV; exit 127 } $SIG{ALRM} = sub { kill "KILL", -$p }; alarm 60; waitpid $p, 0; exit($? & 127 ? 124 : $? >> 8)' "$gh_bin" "$@"; }
+# The wait for GitHub's checks, across every try, ends 40 minutes from the first; RELEASE_CHECK_WAIT (seconds) can make it shorter,
+# never longer
+wait_s=${RELEASE_CHECK_WAIT:-2400}; case $wait_s in '' | *[!0-9]* | 0) wait_s=2400 ;; esac; [ "$wait_s" -gt 2400 ] && wait_s=2400
+check_deadline=$(( $(date +%s) + wait_s ))
+# The checks read and the lock are of the repo pushed to
+[ "$(git -C "$top" remote get-url --push "$REMOTE" 2>/dev/null)" = "$url" ] || die "$REMOTE pushes somewhere other than it fetches from; nothing done"
 for try in 1 2 3 4 5; do
+  candidate=
   if [ -z "$(git -C "$top" ls-remote --heads "$REMOTE" "$MAIN" 2>/dev/null)" ]; then
     git -C "$top" ls-remote "$REMOTE" >/dev/null 2>&1 || die "could not reach $REMOTE"
     # A repo with no main yet: the branch becomes its first main as it is
@@ -176,9 +213,15 @@ for try in 1 2 3 4 5; do
   # The checks and build are main's own, read from main's committed .release as values only, so a branch cannot drop or change them
   # or run anything of its own; this Mac's own still apply. Where and what is pushed stay as this Mac set them
   keep_main=$MAIN keep_remote=$REMOTE keep_after=$AFTER
-  BUILD= CHECK= DERIVED= VERSION_FILE= NAME= GITHUB_RELEASE=
-  git cat-file -e "$base:.release" 2>/dev/null && settings_of ./.release "NAME VERSION_FILE DERIVED BUILD CHECK GITHUB_RELEASE"
-  settings_of "$common/release.local" "NAME VERSION_FILE DERIVED BUILD CHECK GITHUB_RELEASE"
+  BUILD= CHECK= DERIVED= VERSION_FILE= NAME= GITHUB_RELEASE= GITHUB_CHECKS= CHECKS_WORKFLOW=
+  git cat-file -e "$base:.release" 2>/dev/null && settings_of ./.release "NAME VERSION_FILE DERIVED BUILD CHECK GITHUB_RELEASE GITHUB_CHECKS CHECKS_WORKFLOW"
+  # This Mac's own file can add checks to wait for, never drop the ones main names
+  main_checks=$GITHUB_CHECKS main_workflow=$CHECKS_WORKFLOW
+  settings_of "$common/release.local" "NAME VERSION_FILE DERIVED BUILD CHECK GITHUB_RELEASE GITHUB_CHECKS CHECKS_WORKFLOW"
+  # and the workflow that checks is main's, where main names one
+  [ -n "$main_checks" ] && CHECKS_WORKFLOW=$main_workflow
+  [ -n "$main_checks" ] && [ "$GITHUB_CHECKS" != "$main_checks" ] && GITHUB_CHECKS="$main_checks${GITHUB_CHECKS:+,$GITHUB_CHECKS}"
+  [ -z "$GITHUB_CHECKS" ] || [ -n "$(printf %s "$GITHUB_CHECKS" | tr -d ', \t\n\r')" ] || die "GITHUB_CHECKS names no check; nothing pushed" 3
   MAIN=$keep_main REMOTE=$keep_remote AFTER=$keep_after
   if ! out=$(git merge -q --no-ff --no-commit "$branch" 2>&1); then
     git rev-parse -q --verify MERGE_HEAD >/dev/null || die "git would not merge $branch onto $MAIN: $out" 1
@@ -232,13 +275,81 @@ for try in 1 2 3 4 5; do
   what=${title:-$(git log --no-merges -1 --format=%s "$base..$branch")}
   label=${NAME:+$NAME }${ver:+$ver: }
   git commit -q -m "${label}${what}" -m "Released from $branch by release, on $(git rev-parse --short "$base")." || die "nothing to commit"
-  if pushed=$(RELEASE_PUSH=1 git push -q "$REMOTE" "HEAD:refs/heads/$MAIN" 2>&1); then
-    sha=$(git rev-parse --short HEAD)
+  # GitHub's own checks on the very commit main is to become, before main moves, run by main's own workflow (CHECKS_WORKFLOW), never
+  # the branch's: the commit goes to a ref outside the branches (which starts no workflow), main's workflow is started on it, and
+  # main is pushed only once every job of that run passed with every named check among them. Red, a named one missing, or still
+  # running when the wait ends, and nothing is pushed to main. The lock is held all the while, so releases close together are
+  # each checked on their own whole tree
+  if [ -n "$GITHUB_CHECKS" ]; then
+    [ -n "$gh_bin" ] || die "GITHUB_CHECKS is set but gh is not installed; nothing pushed" 3
+    ghq auth status >/dev/null 2>&1 || die "gh is not signed in to GitHub (gh auth login), so its checks cannot be read; nothing pushed" 3
+    repo=$(printf %s "$url" | sed -E 's#/+$##; s#\.git$##' | awk -F'[/:]' '{ print $(NF-1) "/" $NF }')
+    workflow=${CHECKS_WORKFLOW:-check.yml}
+    candidate=$(git rev-parse HEAD)
+    cref="refs/release-check/${ver:-x}-$(git rev-parse --short HEAD)"
+    out=$(git push -q "$REMOTE" "HEAD:$cref" 2>&1) || { echo "$out" | tail -5 >&2; cref=; die "could not push $candidate for GitHub to check; nothing pushed to $MAIN" 3; }
+    # Runs made before this dispatch are never taken (a minute's leeway for GitHub's clock)
+    since=$(date -u -r $(( $(date +%s) - 60 )) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$(( $(date +%s) - 60 ))" +%Y-%m-%dT%H:%M:%SZ)
+    out=$(ghq api -X POST "repos/$repo/actions/workflows/$workflow/dispatches" -f "ref=refs/heads/$MAIN" -f "inputs[sha]=$candidate" 2>&1) || { echo "$out" | tail -5 >&2; die "GitHub would not start $workflow on $MAIN for $(git rev-parse --short HEAD); nothing pushed to $MAIN" 3; }
+    every=${RELEASE_CHECK_EVERY:-15}; case $every in '' | *[!0-9]* | 0) every=15 ;; esac; [ "$every" -gt 60 ] && every=60
+    t=0; verdict=; run=
+    say "waiting for GitHub's checks ($workflow as on $MAIN) on $(git rev-parse --short HEAD): ${GITHUB_CHECKS}"
+    while [ "$(date +%s)" -lt "$check_deadline" ]; do
+      t=$((t + 1))
+      # The run is main's own: started by a dispatch on main, of main's workflow file, since this release's dispatch, named for the
+      # very commit. One started on any other branch or tag, or before, never counts; two that fit are refused
+      if [ -z "$run" ] && found=$(ghq api "repos/$repo/actions/workflows/$workflow/runs?event=workflow_dispatch&branch=$MAIN&per_page=50" --jq ".workflow_runs[] | select(.display_title == \"Release check $candidate\" and .head_branch == \"$MAIN\" and .path == \".github/workflows/$workflow\" and .event == \"workflow_dispatch\" and .created_at >= \"$since\") | [.id, .head_sha] | @tsv" 2>/dev/null); then
+        found=$(printf '%s\n' "$found" | grep -E '^[0-9]+	[0-9a-f]{40}$')
+        if [ "$(printf '%s\n' "$found" | grep -c .)" -gt 1 ]; then verdict="red: more than one run of $workflow on $MAIN is named for $(git rev-parse --short HEAD)"; break; fi
+        if [ -n "$found" ]; then
+          run=${found%%	*}
+          # Started on a main that moved since: the push below would be refused anyway; taken again from the newer main
+          [ "${found#*	}" = "$base" ] || { verdict=moved; break; }
+        fi
+      fi
+      runs=; state=
+      if [ -n "$run" ]; then
+        state=$(ghq api "repos/$repo/actions/runs/$run" --jq '[.status, (.conclusion // "")] | @tsv' 2>/dev/null) || state=
+        runs=$(ghq api --paginate "repos/$repo/actions/runs/$run/jobs?per_page=100" --jq '.jobs[] | [.name, .status, (.conclusion // ""), .html_url] | @tsv' 2>/dev/null) || runs=
+      fi
+      # pass: the run passed, every named check is in it and passed, and no other job failed; red: any job failed; else wait (a list
+      # gh could not read whole is waited on, never judged)
+      verdict=$(printf '%s\n' "$runs" | RUN_STATE=$state NAMES=$GITHUB_CHECKS /usr/bin/perl -F'\t' -lane '
+        BEGIN { %want = map { s/^\s+|\s+$//g; ($_ => 1) } grep { /\S/ } split /,/, $ENV{NAMES} }
+        next unless @F >= 2; $seen{$F[0]} = 1;
+        if ($F[1] ne "completed") { push @busy, $F[0]; next }
+        if ($F[2] !~ /^(success|skipped|neutral)$/ || ($want{$F[0]} && $F[2] ne "success")) { push @red, "$F[0] ($F[2]) $F[3]" }
+        END {
+          if (@red) { print "red: ", join("; ", @red); exit }
+          my @missing = grep { !$seen{$_} } sort keys %want;
+          if (@busy || @missing) { print "wait: ", join(", ", (map { "$_ running" } @busy), (map { "$_ not started" } @missing)); exit }
+          my ($status, $conclusion) = split /\t/, $ENV{RUN_STATE} // "";
+          if (($status // "") ne "completed") { print "wait: the run not ended"; exit }
+          if (($conclusion // "") ne "success") { print "red: the run ended ", ($conclusion || "without a conclusion"); exit }
+          print "green" }')
+      case $verdict in green | red:*) break ;; esac
+      [ -n "$run" ] || verdict="wait: $workflow not started yet"
+      echo "progress: $t tries waiting for GitHub's checks: ${verdict#wait: }, eta $(( (check_deadline - $(date +%s) + 59) / 60 )) min at most" >&2
+      sleep "$every"
+    done
+    case $verdict in
+      green) say "GitHub's checks passed on $(git rev-parse --short "$candidate"): ${GITHUB_CHECKS}" ;;
+      moved) drop_candidate; cd "$top" || exit 1; say "$MAIN moved while GitHub checked; taking it again (try $try)"; continue ;;
+      red:*) drop_candidate; die "GitHub's checks failed on $MAIN with $branch, so nothing was pushed to $MAIN: ${verdict#red: }" 3 ;;
+      *) drop_candidate; die "GitHub's checks did not end in time (${verdict#wait: }); nothing pushed to $MAIN" 3 ;;
+    esac
+  fi
+  # What goes to main and is tagged is the commit the checks passed on, never whatever the checkout holds after the wait
+  [ -n "${candidate:-}" ] || candidate=$(git rev-parse HEAD)
+  [ "$(git rev-parse HEAD)" = "$candidate" ] || { drop_candidate; die "the release's checkout moved while GitHub checked it; nothing pushed to $MAIN" 3; }
+  if pushed=$(RELEASE_PUSH=1 git push -q "$REMOTE" "$candidate:refs/heads/$MAIN" 2>&1); then
+    drop_candidate
+    sha=$(git rev-parse --short "$candidate")
     failed=""
     if [ -n "$ver" ]; then
       kept="$common/release-notes-v$ver.md"
       retry="gh release create v$ver --repo \"${repo:-}\" --title \"${NAME:+$NAME }$ver\" --notes-file \"$kept\" --latest --verify-tag"
-      if ! { git tag -f "v$ver" >/dev/null && RELEASE_PUSH=1 git push -q "$REMOTE" "v$ver" 2>/dev/null; }; then
+      if ! { git tag -f "v$ver" "$candidate" >/dev/null && RELEASE_PUSH=1 git push -q "$REMOTE" "v$ver" 2>/dev/null; }; then
         failed="RELEASE FAILED: $MAIN was pushed as $sha, but its tag v$ver was not. Finish it with: git push $REMOTE $sha:refs/tags/v$ver"
         [ -n "$GITHUB_RELEASE" ] && { cp "$notes" "$kept"; failed="$failed, then: $retry"; }
       elif [ -n "$GITHUB_RELEASE" ]; then
@@ -261,6 +372,7 @@ for try in 1 2 3 4 5; do
     [ -n "$failed" ] && die "$failed" 4
     exit 0
   fi
+  drop_candidate
   cd "$top" || exit 1
   git -C "$top" fetch -q "$REMOTE" "+refs/heads/$MAIN:refs/remotes/$REMOTE/$MAIN"
   if [ "$(git -C "$top" rev-parse "$REMOTE/$MAIN")" = "$base" ]; then

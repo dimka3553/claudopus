@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.127 · 15 November 2026
+- A release now waits for GitHub's own checks on the exact version it is about to put out, and goes out only once they pass; a failed or unfinished check stops it and says which.
+- Tests that failed at random on GitHub's slower machines are steady again.
+
 ## 0.2.126 · 15 November 2026
 - A newer Claudopus is now a small grey box in the panel's header, not a big notice: the version, how many versions it covers since yours, and in a line what is new.
 - Updating is three steps, each your press, the box showing where it stands: Download (with its size and progress as it comes), Install (saying what it replaces), and Reload (saying whether this chat or every chat needs it). Not now keeps it quiet for a day, Skip this version until a newer one.
