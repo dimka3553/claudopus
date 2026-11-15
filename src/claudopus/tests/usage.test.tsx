@@ -193,7 +193,7 @@ test('in a narrow terminal a figure that does not fit is left out whole, the net
     return text
   }
   // A phone's 50 columns: memory, the processor and the battery whole; a little more room, the graphics processor too
-  expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 85% 4:12$/)
-  expect(await line(56)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4:12$/)
+  expect(await line(44)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 85% 4:12$/)
+  expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4:12$/)
   expect(await line(80)).toMatch(/bat 85% 4:12 disk 63M\/s net 1M\/s$/)
 })

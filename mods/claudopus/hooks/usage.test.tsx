@@ -211,4 +211,5 @@ test('programs are named as a person knows them: the app, Claude Code\'s engine 
   expect(appOf('2.1.325')).toBe('Claude')
   expect(appOf('/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper')).toBe('Claude')
   expect(appOf('/usr/bin/python3')).toBe('python3')
+  expect(appOf('/opt/tool/1.2.3')).toBe('1.2.3')
 })

@@ -3,8 +3,8 @@
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
 let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
-// The cells the small octopus takes in the terminal, before the figures
-const BAND_TERM_MARK = 6
+// The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
+const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
   // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing

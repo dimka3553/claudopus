@@ -15,9 +15,11 @@ export const MEMORY_WARN = 0.9
 // Monitor counts it, the disks' and the network's running totals, and now and then top's own memory of each process
 export const usageMac = (isTop: boolean) =>
   `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`
-// One look on Linux, from /proc and /sys, and nvidia-smi where the machine has one (bounded, as a GPU with no driver kept loaded is slow to answer)
+// One look on Linux, from /proc and /sys, and nvidia-smi where the machine has one (bounded, as a GPU with no driver kept loaded is slow
+// to answer). A graphics card asleep (its display device, not its sound) is left asleep: then there is no GPU figure. Files are read by
+// the shell itself, so the look starts no process per device
 export const USAGE_LINUX =
-  "echo \"@@SELF@@ $PPID\"; echo @@STAT@@; grep -H '' /proc/[0-9]*/stat 2>/dev/null; echo @@STATM@@; grep -H '' /proc/[0-9]*/statm 2>/dev/null; echo @@SYS@@; getconf PAGESIZE; getconf CLK_TCK; head -n 1 /proc/stat; echo @@MEM@@; cat /proc/meminfo; echo @@DISK@@; cat /proc/diskstats; echo @@NET@@; cat /proc/net/dev; echo @@GPU@@; asleep=; for d in /sys/bus/pci/devices/*; do case \"$(cat $d/vendor 2>/dev/null)\" in 0x10de|0x1002) [ \"$(cat $d/power/runtime_status 2>/dev/null)\" = suspended ] && asleep=1;; esac; done; if [ -n \"$asleep\" ]; then :; elif command -v nvidia-smi >/dev/null 2>&1; then timeout 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; else cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null; fi; echo @@BATT@@; grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status 2>/dev/null; true"
+  "echo \"@@SELF@@ $PPID\"; echo @@STAT@@; grep -H '' /proc/[0-9]*/stat 2>/dev/null; echo @@STATM@@; grep -H '' /proc/[0-9]*/statm 2>/dev/null; echo @@SYS@@; getconf PAGESIZE; getconf CLK_TCK; head -n 1 /proc/stat; echo @@MEM@@; cat /proc/meminfo; echo @@DISK@@; cat /proc/diskstats; echo @@NET@@; cat /proc/net/dev; echo @@GPU@@; asleep=; for d in /sys/bus/pci/devices/*; do c=; v=; p=; { read c < $d/class; } 2>/dev/null; case \"$c\" in 0x03*) { read v < $d/vendor; read p < $d/power/runtime_status; } 2>/dev/null; case \"$v\" in 0x10de|0x1002) [ \"$p\" = suspended ] && asleep=1;; esac;; esac; done; if [ -n \"$asleep\" ]; then :; elif command -v nvidia-smi >/dev/null 2>&1; then timeout 2 nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noheader,nounits 2>/dev/null; else cat /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null; fi; echo @@BATT@@; grep -H '' /sys/class/power_supply/*/type /sys/class/power_supply/*/scope /sys/class/power_supply/*/capacity /sys/class/power_supply/*/status 2>/dev/null; true"
 
 // A process: its parent, its processor time in seconds, its memory in bytes, its name
 export type UsageProc = { pid: string; ppid: string; cpu: number; mem: number; name: string }
@@ -87,8 +89,8 @@ export const gpuMemOf = (text: string, isLinux: boolean): { used: number; total?
 export const appOf = (name: string) => {
   const app = /([^/]+)\.app\//.exec(name)?.[1]
   const own = app ?? name.split('/').pop() ?? name
-  // Claude Code's own engine is kept under its version's number (claude/versions/2.1.325)
-  return /^claude$/i.test(own) || /\/claude\/versions\/[^/]+$/.test(name) || /^\d+\.\d+\.\d+$/.test(own) ? 'Claude' : own
+  // Claude Code's own engine is kept under its version's number (claude/versions/2.1.325); Linux names a process by that bare number
+  return /^claude$/i.test(own) || /\/claude\/versions\/[^/]+$/.test(name) || /^\d+\.\d+\.\d+$/.test(name) ? 'Claude' : own
 }
 // The programs that use the most, each app's processes together, largest first
 export const topOf = (amounts: [string, number][], count = 3): UsageTop => {
