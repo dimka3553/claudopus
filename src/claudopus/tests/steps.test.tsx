@@ -90,15 +90,19 @@ test('the work waits for its helpers with a command of its own: a file it waits 
   expect(roll()).toContain('"Read the nose code" (a2): ended')
 })
 
-test('work that tries to end while a helper of its runs is held back, and lets go once it has ended', async ($, on) => {
+test('work that tries to end while a helper of its runs is held back, and lets go once it has ended; a helper that already answered holds nothing, and work stopped takes its running helpers with it', async ($, on) => {
   const agents: Record<string, string> = {}
-  const { clock } = world(on, { agents })
+  const { clock, stopped } = world(on, { agents })
   on('classic.SubagentStop', () => ({}) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
   await $.agent.spawn({ ...spawn, description: 'Read the nose code', prompt: 'read', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Serve the page', prompt: 'serve', parentAgentId: 'a1' } as never)
   const stop = () => ($ as unknown as { classic: { SubagentStop: (e: object) => Promise<{ block?: string }> } }).classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: 'a1', background_tasks: [] })
+  // The server helper answered and left its server running: it still works, but holds nothing; the reading one still does
+  agents.a3 = 'waiting'
+  await $.turn.complete({ answer: `The page is served on port 3100, and it keeps running for you to look at. ${'It shows the nose as drawn, at every size. '.repeat(14)}`, durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' } as never)
   expect((await stop()).block).toContain('a helper still running in the background')
   const handback = await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: 'Fixed.' } as never)
   expect(String((handback as { deny?: unknown }).deny)).toContain('Do not finish yet')
@@ -106,6 +110,10 @@ test('work that tries to end while a helper of its runs is held back, and lets g
   await $.turn.complete({ answer: 'nose.ts', durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' } as never)
   await clock.advance(20_000)
   expect((await stop()).block).toBeUndefined()
+  // Stopped from its card or by the chat, the work's running helpers are stopped with it
+  await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw', parentAgentId: 'a1' } as never)
+  await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
+  expect(stopped).toEqual(expect.arrayContaining(['a1', 'a4']))
 })
 
 test('a helper quiet for five minutes is named to its work once, and the card says so only then: a helper at work is a row of its own', SLOW, async ($, on) => {
@@ -122,23 +130,4 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, the work was told$/ }))?.text).toBeDefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
-})
-
-test('a helper that already answered holds nothing, a report given lets the end go, and work stopped takes its running helpers with it', async ($, on) => {
-  const agents: Record<string, string> = {}
-  const { stopped } = world(on, { agents })
-  on('classic.SubagentStop', () => ({}) as never)
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, prompt: 'fix it' } as never)
-  await $.agent.spawn({ ...spawn, description: 'Serve the page', prompt: 'serve', parentAgentId: 'a1' } as never)
-  await $.agent.spawn({ ...spawn, description: 'Draw the nose', prompt: 'draw', parentAgentId: 'a1' } as never)
-  const stop = () => ($ as unknown as { classic: { SubagentStop: (e: object) => Promise<{ block?: string }> } }).classic.SubagentStop({ hook_event_name: 'SubagentStop', agent_id: 'a1', background_tasks: [] })
-  // The server helper answered and left its server running: it still works, but holds nothing; the other still does
-  agents.a2 = 'waiting'
-  await $.turn.complete({ answer: `The page is served on port 3100, and it keeps running for you to look at. ${'It shows the nose as drawn, at every size. '.repeat(14)}`, durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' } as never)
-  expect((await stop()).block).toContain('a helper still running')
-  // Stopped from its card or by the chat, the work's running helpers are stopped with it
-  await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
-  expect(stopped).toEqual(expect.arrayContaining(['a1', 'a3']))
 })

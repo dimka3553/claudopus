@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.129 · 15 November 2026
+- Work is told to add a test only when no test already covers what it changes, to show each new test fails without the change, and to remove tests a change makes redundant.
+
 ## 0.2.128 · 15 November 2026
 - The panel and Details are no longer rebuilt every second while work runs. The app rebuilt the whole panel each time Claudopus wrote anything it shows, even when nothing changed, and Claudopus wrote its running times every second and the same list of work every few seconds. So whatever was under the pointer lost its hover look, and a click could land on a button that had just been replaced.
 - Now the panel is drawn again only when something it shows has changed. Running times and command output move every ten seconds, and not at all while you're using the panel (for fifteen seconds after you scroll it, click in it or type in it). A new ask, an admin command, work starting or finishing, and anything you press still show at once.
