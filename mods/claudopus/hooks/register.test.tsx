@@ -7839,8 +7839,8 @@ test('a pointer resting on a figure shows more of it in a line above: who uses t
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
   const more: Record<string, string> = {
-    memory: 'Memory 29 of 64 GB in use · Claude with what it started 3.3 GB · most: Claude 3.3 GB, Safari 0.4 GB',
-    cpu: 'Processor 50% busy across 10 cores · Claude with what it started 20% · most: Safari 30%, Claude 20%',
+    memory: 'Memory 29 of 64 GB in use · most: Claude 3.3 GB, Safari 0.4 GB · Claude with what it started 3.3 GB',
+    cpu: 'Processor 50% busy across 10 cores · most: Safari 30%, Claude 20% · Claude with what it started 20%',
     gpu: 'Graphics processor 37% busy · 1.2 GB of memory in use',
     battery: 'Battery 85% · on battery, 4:12 left as the system estimates it',
     disk: 'Disk 63 MB/s read and written · disk0',
