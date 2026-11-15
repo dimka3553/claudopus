@@ -16,12 +16,12 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isUpdateDue, loo
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSaid, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
+import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSaid, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
-import { FOOTPRINT_EVERY, gbText, isMemoryHigh, keptOf, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
-import type { UsageFigures, UsageKept } from './usage'
+import { batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
+import type { UsageTop, UsageBattery, UsageFigures, UsageKept } from './usage'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
 // helpers, the log and the chat's saved words
@@ -246,32 +246,87 @@ const modelName = (id: string) => {
   const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:[-.](\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
   return m?.[1] ? `${m[1].charAt(0).toUpperCase()}${m[1].slice(1)}${m[2] ? ` ${m[2]}${m[3] ? `.${m[3]}` : ''}` : ''}` : ''
 }
-// The models the person can move running work to from its card, by the id each step is sent with. Never Haiku
+// The models the person can move running work to from its card, by the id each step is sent with, the newest of each family. Never
+// Haiku. These are the least the mod knows: a newer id the engine starts work on or answers from takes its family's place (seeModel)
 const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2']
-// The model a step of work is sent to in place of one no work runs on: an older version than the newest above, which the app moves
-// work to after its safeguards flag a message, goes to the newest Fable or Sonnet, and Haiku to Sonnet. Nothing for a model work
-// may run on: the three above or a newer version, a name with no version, which the app reads as the newest, and Haiku when the
-// settings name it for a kind of work
-const INSTEAD: Record<string, string> = { Opus: 'claude-fable-5-2', Fable: 'claude-fable-5-2', Sonnet: 'claude-sonnet-5-5', Haiku: 'claude-sonnet-5-5' }
+// The newest Haiku, for the settings that name Haiku for a kind of work, raised the same way
+const HAIKU = ['claude-haiku-5-5']
+// A version as numbers; an id that leads with a date or an old numbering ("claude-3-5-sonnet-20241022") reads as none
+const versionOf = (id: string): [number, number] | undefined => {
+  const [major = 0, minor = 0] = (modelName(id).split(' ')[1] ?? '').split('.').map(Number)
+  return major && major <= 99 ? [major, minor] : undefined
+}
+const isBelow = (a: [number, number], b: [number, number]) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1])
+// The newest model of a family, by the id each step is sent with: Haiku's place is Sonnet's
+const newestModel = (family: string) => MODELS.find(one => modelName(one).startsWith(family === 'Haiku' ? 'Sonnet' : family))
+// A model the engine resolved or answered from: one newer than its family's newest takes its place, so what counts as older follows
+// the newest the engine offers and never goes stale
+const seeModel = (id: string) => {
+  const family = modelName(id).split(' ')[0] ?? ''
+  const version = versionOf(id)
+  const list = family === 'Haiku' ? HAIKU : MODELS
+  const at = list.findIndex(one => modelName(one).startsWith(`${family} `))
+  const top = at >= 0 ? versionOf(list[at]!) : undefined
+  if (!version || !top || !isBelow(top, version)) return
+  list[at] = `claude-${family.toLowerCase()}-${version[0]}${version[1] ? `-${version[1]}` : ''}`
+}
+// The model a step or start is sent to in place of one no work runs on: an older version than its family's newest goes to that
+// newest, and Haiku to the newest Sonnet. Nothing for a model work may run on: the newest or a newer version, a name with no
+// version, which the app reads as the newest, and Haiku when the settings name it for a kind of work
 const rightModel = (id: string): string | undefined => {
   const [family = '', version = ''] = modelName(id).split(' ')
   if (!family) return undefined
-  if (family === 'Haiku') return Object.values(models).includes('haiku') ? undefined : INSTEAD.Haiku
+  const isHaikuNamed = family === 'Haiku' && Object.values(models).includes('haiku')
+  if (family === 'Haiku' && !isHaikuNamed) return newestModel('Sonnet')
   if (!version) return undefined
-  const newest = MODELS.map(modelName).find(one => one.startsWith(family))?.split(' ')[1] ?? ''
-  const [major = 0, minor = 0] = version.split('.').map(Number)
-  const [topMajor = 0, topMinor = 0] = newest.split('.').map(Number)
-  // An id that leads with a date or an old numbering ("claude-3-5-sonnet-20241022") is an older model too
-  const isOlder = major > 99 || major < topMajor || (major === topMajor && minor < topMinor)
-  return isOlder ? INSTEAD[family] : undefined
+  const newest = isHaikuNamed ? HAIKU[0] : newestModel(family)
+  const top = versionOf(newest ?? '')
+  const mine = versionOf(id)
+  const isOlder = !mine || (top !== undefined && isBelow(mine, top))
+  return isOlder ? newest : undefined
+}
+// How strong a model is, for a check never weaker than what it checks
+const RANK: Record<string, number> = { Haiku: 0, Sonnet: 1, Opus: 2, Fable: 3 }
+// `opusplan` runs on Sonnet outside plan mode, so it counts as Sonnet
+const rankOf = (id: string) => (/opusplan/i.test(id) ? RANK.Sonnet! : (RANK[modelName(id).split(' ')[0] ?? ''] ?? -1))
+// A helper that looks over what was built, by its few words: a checking word, then what was built ("Review my PR", "Test the fix"),
+// or a look that is only ever a check ("Sanity check", "What is wrong with the build"). Legwork that names checking something else
+// ("Check the Stripe balance", "Review the docs", "Check the PR status") is not one
+const CHECKS = /\b(second look|another look|look(s|ing)? (over|for)|(re-?|double[- ]?|spot[- ]?|sanity[- ]?)?check(s|ing|ed|er)?|(code )?review(s|ing|ed|er)?|audit(s|ing|or)?|verif(y|ies|ying|ication|ied)|validat(e|es|ing|ion)|critique|proofread|inspect(s|ing|ion)?|test(s|ing)?|qa|find|hunt(s|ing)?)\b.*\b(page|fix|fixes|fixed|change|changes|build|built|work|diff|pr|code|branch|commit|result|results|report|output|mod|app|feature|design|claims|draft|holes|bugs|faults|what was built)\b/i
+const ONLY_CHECKS = /\b(second look|sanity check|spot[- ]?check|what is wrong|is wrong with)\b|^(checker|reviewer|auditor|code review)\b/i
+const NOT_CHECKS = /\b(status|comments?|balance|quota|usage|logs?)\b/i
+const isChecker = (description: string) => ONLY_CHECKS.test(description) || (CHECKS.test(description) && !NOT_CHECKS.test(description))
+// Work a safety check flagged whose next steps the app would send to an older model: it is ended with this report instead, so its
+// parent starts what is left again on a current model. The steps of it answered so
+const FLAGGED = (on: string) =>
+  `Stopped by Claudopus: a safety check flagged this agent's last message, and the app would have carried it on on ${modelName(on) || on}, an older model no work runs on, so nothing after the flag was done. Start what is left again on the current model, leaving out what was flagged.`
+const flaggedSteps = new Map<string, number>()
+// Work a safety check flagged once: its steps on an older model are never sent to a newer one, whatever it was started on
+const flaggedOnce = new Set<string>()
+// The model an agent is started on in place of the one asked, or why it is not started; nothing when it may start as asked
+const startModel = (e: { model?: string; parentModel?: string; parentAgentId?: string; description?: string; fork: boolean; workflow?: unknown }): { model?: string; deny?: string } => {
+  const parentModel = String(e.parentModel ?? '')
+  // A copy runs on its parent's model, which no hook changes
+  if (e.fork) return rightModel(parentModel) ? { deny: WRONG_MODEL(parentModel) } : {}
+  const asked = (e.model ?? '').trim()
+  const parent = rightModel(parentModel) ?? parentModel
+  // An alias or `inherit` the engine resolves to the newest, or the parent's; an older id or Haiku goes to its family's newest
+  let model = asked && asked !== 'inherit' ? (rightModel(asked) ?? '') : rightModel(parentModel) && (!asked || asked === 'inherit') ? parent : ''
+  // A check of what was built never runs weaker than what started it, nor below Opus
+  if (isChecker(e.description ?? '')) {
+    const runs = model || (asked && asked !== 'inherit' ? asked : parent)
+    const least = rankOf(parent) >= RANK.Opus! ? parent : (newestModel('Opus') ?? 'opus')
+    if (rankOf(runs) < rankOf(least)) model = least
+  }
+  return model ? { model } : {}
 }
 // The model each agent started on, as the engine resolved it: a step on Haiku of one that started there is its own kind's, not the app's move
 const startedOn = new Map<string, string>()
 // The work and helpers whose steps the app sent to such a model, each said in the log once
 const sentElsewhere = new Set<string>()
-// What an Agent call is answered when it names such a model
+// What a fork is answered when the model it would copy is such a model
 const WRONG_MODEL = (named: string) =>
-  `No work runs on ${modelName(named) || named}. Name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
+  `No work runs on ${modelName(named) || named}. Start a fresh agent and name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
 // The line written into a piece of work's own chat when the person moves it to another model; the panel draws it as a line of its own
 const MODEL_HEAD = 'Model changed to '
 const MODEL_LINE = /^Model changed to (.+?) at (\d{1,2}:\d{2})\./
@@ -5749,7 +5804,7 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
 // word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
 // any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
 // it is no wall against code set on getting round it
-type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string }
+type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string; call?: string }
 // The Bash calls of this chat that run bin/admin or bin/secret, by call id, with their command: a box is drawn only for a request of
 // this chat's own while one of them runs (one sent to the background for BOX_OLD after it began), and says which command asked. A
 // request no runner of this chat could have made, however it is worded, is drawn nowhere
@@ -5763,7 +5818,7 @@ const runnerEnded = (id: string, isBackground: boolean, at: number) => {
   for (const [key, other] of [...runnerCalls]) if (other.until < at) runnerCalls.delete(key)
 }
 // The command that asked: the one of this chat's running runners begun last before the request
-const runnerOf = (at: number, now: number) => [...runnerCalls.values()].filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0]
+const runnerOf = (at: number, now: number) => [...runnerCalls].map(([call, one]) => ({ ...one, call })).filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0]
 const BOX_SKEW = 60_000
 // What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
 const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
@@ -5808,29 +5863,56 @@ const boxWording = (one: Record<string, unknown>): string | undefined => {
 let boxes: Asked[] = []
 // What the person just did with a box or an admin command, shown a minute at the top of the panel where it was: what they did and
 // what happens now, so nothing that needed them just vanishes
-type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean }
+// A note tied to the call the press let go (`call`) goes once that call ends, never before DONE_LEAST so it can be read, and at
+// most DONE_LONGEST while it runs; one with no call is shown DONE_SHOWN
+type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number }
 let doneNotes: DoneNote[] = []
 const DONE_SHOWN = 60_000
+const DONE_LEAST = 15_000
+const DONE_LONGEST = 30 * 60_000
+const isNoteShown = (one: DoneNote, at: number) =>
+  !one.call ? at - one.at < DONE_SHOWN : one.endedAt === undefined ? at - one.at < DONE_LONGEST : at < Math.max(one.endedAt, one.at + DONE_LEAST)
+// The calls that have ended, so a note made after its call ended (a runner sent to the background) is over from the start
+const callsEnded = new Set<string>()
 const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
   const at = await $.clock.now()
+<<<<<<< HEAD
   doneNotes = [...doneNotes.filter(one => one.id !== note.id && at - one.at < DONE_SHOWN), { ...note, at }].slice(-6)
   drawAgain($)
   // Drawn again as its minute ends, so it goes with nothing else to redraw the panel
   $.clock.after(DONE_SHOWN + 100, () => drawAgain($))
+=======
+  const made = { ...note, at, ...(note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}) }
+  doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), made].slice(-6)
+  $.ui.invalidate('ui.render')
+  // Drawn again as its time ends, so it goes with nothing else to redraw the panel
+  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => $.ui.invalidate('ui.render'))
+>>>>>>> origin/main
 }
+// The call a note tells of has ended: what it said is over, so the note goes (after DONE_LEAST from its press)
+const noteCallEnded = async ($: EngineInterface, call: string) => {
+  callsEnded.add(call)
+  if (callsEnded.size > 200) callsEnded.delete(callsEnded.values().next().value ?? '')
+  if (!doneNotes.some(one => one.call === call && one.endedAt === undefined)) return
+  const at = await $.clock.now()
+  doneNotes = doneNotes.map(one => (one.call === call && one.endedAt === undefined ? { ...one, endedAt: at } : one))
+  $.ui.invalidate('ui.render')
+  const last = Math.max(...doneNotes.filter(one => one.call === call).map(one => one.at + DONE_LEAST))
+  $.clock.after(Math.max(0, last - at) + 100, () => $.ui.invalidate('ui.render'))
+}
+// What was done is a line, as Claude Code reports a call's result under it: a mark and the words, with no box, fill or edge, so it is
+// never taken for a card of work. Green once allowed or given, grey once refused or cancelled
+const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, lines: string[]) => (
+  <ui.Box key={key} flexDirection="row" gap={1} paddingX={2} flexShrink={0}>
+    <ui.Text color={isOn ? DONE : undefined} dimColor={!isOn}>{isOn ? '✓' : '✕'}</ui.Text>
+    <ui.Box flexDirection="column" minWidth={0} flexGrow={1} flexShrink={1}>
+      <ui.Text wrap="wrap">{said}</ui.Text>
+      {lines.filter(Boolean).map((line, n) => <ui.Text key={`${key}-${n}`} dimColor wrap="truncate-end">{line}</ui.Text>)}
+    </ui.Box>
+  </ui.Box>
+)
 const doneNotesPart = (ui: Ui, at: number) =>
-  doneNotes
-    .filter(one => at - one.at < DONE_SHOWN)
-    .map(one => (
-      <ui.Box key={`done-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <ui.Box width={1} flexShrink={0} backgroundColor={one.isOn ? LIVE : FILL} />
-        <ui.Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <ui.Text bold wrap="truncate-end">{one.head}</ui.Text>
-          <ui.Text wrap="wrap" color={one.isOn ? LIVE : undefined} bold={one.isOn}>{one.said}</ui.Text>
-          {one.what ? <ui.Text dimColor wrap="wrap">{one.what}</ui.Text> : null}
-        </ui.Box>
-      </ui.Box>
-    ))
+  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
 // What a box asks for, in a few words, for its note once answered
 const boxHead = (text: string) => {
   const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
@@ -5884,7 +5966,7 @@ const lookBoxes = async ($: EngineInterface) => {
       const key = typeof one.key === 'string' ? one.key : undefined
       if (key && !boxKeys.has(id)) boxKeys.set(id, key)
       const isKeySame = !key || boxKeys.get(id) === key
-      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, ...(one.kind === 'admin' && key ? { key } : {}) })
+      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, call: runner.call, ...(one.kind === 'admin' && key ? { key } : {}) })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
@@ -5971,7 +6053,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     boxSaid.delete(id)
     const one = boxes.find(other => other.id === id)
     boxes = boxes.filter(other => other.id !== id)
-    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
+    if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   drawAgain($)
@@ -5982,8 +6064,14 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled �
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
+<<<<<<< HEAD
   if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said, what: '' })
   drawAgain($)
+=======
+  // Cancelled, nothing more comes of it: it is over at once
+  if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call, endedAt: 0 } : {}), head: boxHead(one.text), said, what: '' })
+  $.ui.invalidate('ui.render')
+>>>>>>> origin/main
 }
 
 const boxesPart = ($: EngineInterface, ui: Ui) => {
@@ -5991,7 +6079,8 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
   // This chat's own requests first, the first of them with the keys, so a value typed for the notice it told goes to its own box
   const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
   return shown.map((one, n) => (
-    <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+    <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+      <ui.Text dimColor wrap="truncate-end">{`${one.key ? 'Admin password' : 'Key'} · waits for you to type it`}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
       {one.command ? <ui.Text dimColor wrap="wrap">{`Asked by this chat's command: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
       <ui.Text dimColor wrap="wrap">{one.key ? 'What you type here shows as you type it. It goes only to the command that asked, sealed for it, never into a chat, and is not kept.' : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>
@@ -6304,7 +6393,10 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
     gateSaid.set(id, said)
     void noteDone($, {
       id: `gate-${id}`,
-      head: gate.kind === 'release' ? `A release of ${gate.host}` : gate.kind === 'file' ? `A change to ${gate.host}` : `An admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
+      ...(gate.call ? { call: gate.call } : {}),
+      // Refused, nothing runs: what it says is over at once
+      ...(said === 'deny' ? { endedAt: 0 } : {}),
+      head: gate.kind === 'release' ? `Release of ${gate.branch ?? gate.host} into ${gate.host}` : gate.kind === 'file' ? `Change to ${gate.host}` : `Admin command on ${gate.host === 'here' ? thisMac() : gate.host}`,
       said:
         said === 'deny'
           ? `You denied it · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}, and the work was told`
@@ -6315,7 +6407,7 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid) => {
             : gate.isWork
               ? "You allowed this work's admin commands · it runs now"
               : 'You allowed it once · it runs now',
-      what: cut(oneLine(gate.command), 200),
+      what: gate.kind === 'release' && gate.folder ? `from ${shortPath(gate.folder)}` : gate.kind === 'file' ? '' : cut(oneLine(gate.command), 200),
       isOn: said !== 'deny',
     }).catch(() => undefined)
   }
@@ -6338,7 +6430,7 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
     const isWork = gate.mode === 'work' && Boolean(card)
     const isCovered = (isWork && workAllowed.has(top)) || (await isAllowed($, call))
     if (!isCovered) {
-      const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(isWork ? { isWork: true } : {}) }, card ? top : '')
+      const said = await holdGate($, next, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}), ...(isWork ? { isWork: true } : {}) }, card ? top : '')
       if (said !== 'once' && said !== 'always') {
         await dropGrants($, grants)
         return { deny: said === 'deny' ? GATE_DENIED() : said === 'late' ? GATE_LATE() : said === 'blind' ? GATE_BLIND() : GATE_GONE(), grants: [] }
@@ -6360,11 +6452,39 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
 // release runner named by any spelling of its path, from the folder the command runs it in (a cd before it moves that). Allowed, it gets
 // a grant naming that worktree and its branch, which bin/release takes once; its --status asks nothing
 type ReleaseCall = { folder: string; branch: string }
+// The runner's own arguments, as the shell hands them: a redirection (`> log`, `2>log`, `>>log`, `<in`) and what it names are the
+// shell's, never a branch. Read otherwise, `release > log` asked to release a branch called ">", whose grant the runner (on its
+// own branch) refused, so the work ran it again and the person was asked twice
+const releaseArgs = (words: string[]) => {
+  const args: string[] = []
+  for (let n = 0; n < words.length; n++) {
+    const word = words[n]!
+    if (/^\d*(?:>>?|<<?|>\||<>)$/.test(word)) {
+      n++
+      continue
+    }
+    if (/^\d*[<>]/.test(word)) continue
+    const cut = word.search(/[<>]/)
+    if (cut >= 0) {
+      if (cut > 0) args.push(word.slice(0, cut))
+      // `branch>log` hands the branch and sends what it prints to log; `branch> log` names the log in the next word
+      if (/[<>]$/.test(word)) n++
+      continue
+    }
+    args.push(word)
+  }
+  return args
+}
 const releaseCalls = (command: string, root: string, from: string): ReleaseCall[] => {
   let folder = from
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const found: ReleaseCall[] = []
-  for (const words of shellWords(command)) {
+  for (const said of shellWords(command)) {
+    // `release>log` is the runner and a redirection, as the shell reads it: the runner's own word alone is split
+    const words = said.flatMap(word => {
+      const cut = word.search(/[<>]/)
+      return cut > 0 && isAdminPath(word.slice(0, cut), root, 'release') ? [word.slice(0, cut), word.slice(cut)] : [word]
+    })
     const i = commandAt(words)
     const name = (words[i] ?? '').split('/').pop() ?? ''
     if ((name === 'cd' || name === 'pushd') && words[i + 1]) {
@@ -6374,7 +6494,7 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
     // Run by a shell handed it as a script, or by itself
     const at = ['bash', 'sh', 'zsh'].includes(name) ? i + 1 + words.slice(i + 1).findIndex(one => !one.startsWith('-')) : i
     if (at < i || !isAdminPath(words[at] ?? '', root, 'release')) continue
-    const args = words.slice(at + 1)
+    const args = releaseArgs(words.slice(at + 1))
     if (args[0] === '--status') continue
     const rest = args[0] === '-m' ? args.slice(2) : args
     found.push({ folder, branch: rest[0] ?? '' })
@@ -6395,7 +6515,10 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     // Not a repo, or no branch: the runner itself says what is wrong, and it releases nothing without a grant
     if (!repo || !branch || branch === 'HEAD') continue
     const id = `${e.tool_use_id}-r${n}`
-    const said = await holdGate($, next, { id, kind: 'release', host: repo.split('/').pop() ?? repo, command: `${branch} from ${repo}`, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
+    // Named by the repo itself, not the worktree's folder: a worktree's git folder is inside the repo's own
+    const common = await git(['rev-parse', '--path-format=absolute', '--git-common-dir'])
+    const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo
+    const said = await holdGate($, next, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
     if (said !== 'once') {
       await dropGrants($, grants)
       const gate = { kind: 'release' as const }
@@ -6443,7 +6566,7 @@ const gateOwnFile = async ($: EngineInterface, e: ToolCallInput, next: { signal?
   const list = await read($, todos)
   const top = e.agentId === undefined ? '' : topOf(list, e.agentId)
   const card = list.find(one => one.id === top)
-  const said = await holdGate($, next, { id: `${e.tool_use_id}-f`, kind: 'file', host: file, command: cut(change, 2000), at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
+  const said = await holdGate($, next, { id: `${e.tool_use_id}-f`, call: e.tool_use_id, kind: 'file', host: file, command: cut(change, 2000), at: await $.clock.now(), ...(e.agentId ? { from: e.agentId } : {}) }, card ? top : '')
   const gate = { kind: 'file' as const }
   return said === 'once' ? '' : said === 'deny' ? GATE_DENIED(gate) : said === 'late' ? GATE_LATE(gate) : said === 'blind' ? GATE_BLIND(gate) : GATE_GONE(gate)
 }
@@ -6727,10 +6850,19 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
 
 // On the card: what it wants to run, whole, and the three presses. Another chat's panel shows it with no buttons: only the chat
 // that holds the call allows it
+// Drawn as Claude Code draws its own permission asks: an outlined box with the kind of ask at its top, never a filled card with an
+// edge as work's cards are, so an ask is not taken for one more piece of work
+const gateKind = (gate: Gate) => (gate.isUndone ? 'Put back' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean) => (
-  <ui.Box key={key} flexDirection="column" gap={1}>
+  <ui.Box key={key} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+    <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? (gate.isUndone ? 'yours to decide' : 'waits for your press') : isElsewhere ? 'asked in another chat' : 'no longer waits'}`}</ui.Text>
     <ui.Text wrap="wrap" color={NEEDS} bold>{gateWhat(gate)}</ui.Text>
-    {gate.command ? (
+    {gate.kind === 'release' && gate.folder ? (
+      <ui.Box flexDirection="column">
+        <ui.Text wrap="truncate-end">{`Branch ${gate.branch ?? ''}`}</ui.Text>
+        <ui.Text dimColor wrap="truncate-start">{`from ${shortPath(gate.folder)}`}</ui.Text>
+      </ui.Box>
+    ) : gate.command ? (
       <ui.Box backgroundColor={FILL} paddingLeft={2}>
         <ui.Text mono wrap="wrap">{gate.command}</ui.Text>
       </ui.Box>
@@ -6766,12 +6898,19 @@ const adminBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string) =>
     </ui.Box>
   ) : null
 // A gate with no card, at the top of the panel
-const gatesPart = ($: EngineInterface, ui: Ui) =>
-  looseGates.map(gate => (
-    <ui.Box key={`gate-top-${gate.id}`} flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-      {gateRow($, ui, gate, `gate-${gate.id}`, false)}
-    </ui.Box>
-  ))
+const gatesPart = ($: EngineInterface, ui: Ui) => looseGates.map(gate => gateRow($, ui, gate, `gate-${gate.id}`, false))
+// A path in one line: the home folder as ~, and the middle left out past `room` characters, keeping its last folders
+const shortPath = (path: string, room = 44) => {
+  const home = dir.replace(/\/\.claude\/claudopus$/, '')
+  const p = home && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path
+  if (p.length <= room) return p
+  const parts = p.split('/')
+  for (let keep = parts.length - 2; keep >= 1; keep--) {
+    const short = `${parts[0]}/…/${parts.slice(-keep).join('/')}`
+    if (short.length <= room) return short
+  }
+  return `…/${parts.at(-1) ?? ''}`
+}
 
 // The app's own prompts: a chat stopped on "Allow Claude to run this command?" shows amber in every panel
 
@@ -6899,7 +7038,7 @@ const tellWaiting = async ($: EngineInterface) => {
 // Without (a settings hook answered it), it goes at once: nothing was put to the person
 type Outcome = 'running' | 'ran' | 'no' | 'stopped'
 let answeredPrompts: Waiting[] = []
-const PROMPT_SHOWN = 60_000
+const PROMPT_SHOWN = 15_000
 // An allowed call whose end is never seen is taken as over this long after it was seen running, so nothing stays purple for good
 const RUNNING_LONGEST = 15 * 60_000
 const answeredShown = (at: number) => answeredPrompts.filter(one => (one.endedAt ? at - one.endedAt < PROMPT_SHOWN : at - one.at < RUNNING_LONGEST))
@@ -8557,6 +8696,8 @@ const workHooks = (on: On) => {
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
         if (grants.length && !(e as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
         runnerEnded(e.tool_use_id, Boolean((e as { run_in_background?: unknown }).run_in_background), await $.clock.now())
+        // A note of what the person allowed for this call goes as it ends
+        await noteCallEnded($, e.tool_use_id).catch(() => undefined)
       }
     }
     let grants: string[] = []
@@ -8593,11 +8734,13 @@ const workHooks = (on: On) => {
     const isRefusedHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
-      if (gated.deny) return { deny: gated.deny }
+      // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
+      if (gated.deny) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: gated.deny })
       grants = gated.grants
       const released = await gateRelease($, e, raw as never)
       if (released.deny) {
         await dropGrants($, grants)
+        await noteCallEnded($, e.tool_use_id).catch(() => undefined)
         return { deny: released.deny }
       }
       grants = [...grants, ...released.grants]
@@ -8606,7 +8749,7 @@ const workHooks = (on: On) => {
     }
     if (!isRefusedHere) {
       const fileSaid = await gateOwnFile($, e, raw as never)
-      if (fileSaid) return { deny: fileSaid }
+      if (fileSaid) return (await noteCallEnded($, e.tool_use_id).catch(() => undefined), { deny: fileSaid })
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
@@ -8736,11 +8879,14 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       return r
     }
-    // No agent, the chat's or a work's helper, is started on an older model or on Haiku
-    if (!isOff && e.tool === 'Agent' && rightModel(String((e as { model?: unknown }).model ?? ''))) {
-      const wrong = String((e as { model?: unknown }).model)
-      await log($, `refused an Agent call on ${modelName(wrong)}`)
-      return { deny: WRONG_MODEL(wrong) }
+    // No agent, the chat's or a work's helper, is started on an older model or on Haiku: one named so starts on its family's newest
+    // (Haiku's is Sonnet), by its alias, which the Agent tool takes
+    const askedModel = !isOff && e.tool === 'Agent' && (e as { subagent_type?: unknown }).subagent_type !== 'fork' ? String((e as { model?: unknown }).model ?? '') : ''
+    const better = askedModel ? rightModel(askedModel) : undefined
+    if (better) {
+      const alias = (modelName(better).split(' ')[0] ?? '').toLowerCase()
+      await log($, `an Agent call on ${modelName(askedModel)} starts on ${modelName(better)}`)
+      return next({ ...e, model: alias } as typeof e)
     }
     if (e.agentId !== undefined) return next(e)
     if (isOff || !(await read($, me)).isChat) return next(e)
@@ -8797,13 +8943,40 @@ const workHooks = (on: On) => {
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
-    // A step the app sends to an older model or to Haiku (it moves work there after its safeguards flag a message) is left where the
-    // app sent it, even for work the person moved to a model of their own, and the card says which model it runs on now. Only a
-    // helper whose own kind started it on Haiku (as Explore is), which the person never wants, has its Haiku steps go to Sonnet, or to
-    // the model the person picked: a step of it on Haiku is where it started, not where the app moved it
-    const own = id !== undefined ? startedOn.get(id) : undefined
-    const isOwnHaiku = /haiku/i.test(e.model) && /haiku/i.test(own ?? '')
-    const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnHaiku
+    // A step the app sends to an older model or to Haiku after its safeguards flag a message is not moved back past the flag: the
+    // work is ended there with a report that says so (FLAGGED), so its parent starts what is left again on a current model. An agent
+    // that started on an older model or on Haiku itself (its own kind's model, or an alias the settings point at an older version)
+    // has its steps go to that family's newest, or to the model the person picked. An agent whose start the mod did not see is left
+    // where the app sent it, and its card says so
+    // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
+    const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
+    const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
+    const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
+    const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
+    if (isMovedByApp && own !== undefined && id !== undefined) {
+      const n = (flaggedSteps.get(id) ?? 0) + 1
+      flaggedSteps.set(id, n)
+      flaggedOnce.add(id)
+      if (n === 1) await log($, `work ${id} was flagged and the app would send it to ${modelName(e.model)}: it is ended with a report instead`)
+      if (dir) {
+        await update($, todos, list => list.map(one => (one.id === id ? { ...one, flagged: modelName(e.model), moved: undefined } : one)))
+        await stopHelpers($, id).catch(() => undefined)
+      }
+      // Its report goes back through the handback tool; where that does not end it, a plain last answer, and past a few the work is
+      // stopped as a press on Stop would
+      if (n > 3) void $.tool.call({ tool: 'TaskStop', task_id: id }).catch(() => undefined)
+      const text = FLAGGED(e.model)
+      if (n === 1) {
+        const call = `toolu_flagged_${id}`
+        yield { kind: 'tool', index: 0, id: call, name: 'SubagentHandback' }
+        yield { kind: 'input', index: 0, json: JSON.stringify({ message: text }) }
+        yield { kind: 'stop', stopReason: 'tool_use', usage: null }
+        return { turnId: e.turnId, index: e.index, answer: '', toolUses: [{ name: 'SubagentHandback', input: { message: text } }], stopReason: 'tool_use', usage: null }
+      }
+      yield { kind: 'text', index: 0, text }
+      yield { kind: 'stop', stopReason: 'end_turn', usage: null }
+      return { turnId: e.turnId, index: e.index, answer: text, toolUses: [], stopReason: 'end_turn', usage: null }
+    }
     const instead = id !== undefined && !isOff && !isMovedByApp && !chosen ? rightModel(e.model) : undefined
     if (id !== undefined && (isMovedByApp || instead) && !sentElsewhere.has(`${id} ${e.model}`)) {
       sentElsewhere.add(`${id} ${e.model}`)
@@ -8812,10 +8985,13 @@ const workHooks = (on: On) => {
     // The card says so only while it holds: not once the app sends its steps to a right model again
     const moved = isMovedByApp ? modelName(e.model) : undefined
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
-    const to = chosen && !isMovedByApp && modelName(chosen) !== modelName(e.model) ? chosen : instead
+    // A pick the engine has since passed is its family's newest
+    const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined
+    const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead
     const r = yield* next(to ? { ...e, model: to } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
+    if (model) seeModel(model)
     if (id !== undefined && tokens && flowAgents.has(id)) await flowStep($, id, tokens, model).catch(() => undefined)
     if (id !== undefined && tokens && dir) await update($, todos, list => list.map(one => (one.id === id ? { ...one, tokens, model: one.chosen ?? (modelName(model ?? '') ? model : one.model) } : one)))
 
@@ -8836,12 +9012,23 @@ const workHooks = (on: On) => {
     return r
   })
 
-  on('agent.spawn', async ($, e, next) => {
-    agentStarted($, e.tool_use_id)
+  on('agent.spawn', async ($, asked, next) => {
+    agentStarted($, asked.tool_use_id)
+    // Every agent starts on a current model: one named an older model or Haiku on its family's newest, a copy of an agent on an
+    // older model not at all, and one left to its parent's model, when that is older, on that family's newest. A check of what was
+    // built, by a helper or a workflow's agent, runs on a model never weaker than its parent's, and at least on Opus
+    const start = isOff || asked.resume ? undefined : startModel(asked)
+    if (start?.deny) {
+      await log($, `refused a copy of an agent on ${modelName(String(asked.parentModel ?? ''))}`)
+      return { deny: start.deny }
+    }
+    if (start?.model) await log($, `${asked.workflow ? 'a workflow agent' : 'an agent'} asked to run on ${modelName(asked.model ?? '') || `its parent's ${modelName(String(asked.parentModel ?? '')) || 'model'}`} starts on ${modelName(start.model)}`)
+    const e = start?.model ? { ...asked, model: start.model } : asked
     // An agent a workflow's script starts belongs to its run's blue card, not a card of its own
     if (e.workflow) {
       const r = await next(e)
-      if (r.agentId && r.model) startedOn.set(r.agentId, r.model)
+      if (r.model) seeModel(r.model)
+      if (r.agentId && r.model && !e.resume) startedOn.set(r.agentId, r.model)
       if (r.agentId && dir) await flowSpawned($, e.workflow.runId, r.agentId, modelName(r.model ?? '') ? r.model : e.model || r.model || '', e.description ?? '').catch(err => log($, `workflow agent not kept: ${String(err)}`))
       return r
     }
@@ -8857,7 +9044,11 @@ const workHooks = (on: On) => {
     const isBackground = isHelperSpawn(e)
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
-    if (r.agentId && r.model) startedOn.set(r.agentId, r.model)
+    if (r.model) seeModel(r.model)
+    // A resumed agent keeps the model it first started on, or none: the model it resumes on may be one the app moved it to after a flag. A
+    // flagged one goes on to its next report afresh
+    if (r.agentId && r.model && !e.resume) startedOn.set(r.agentId, r.model)
+    if (r.agentId && e.resume) flaggedSteps.delete(r.agentId)
     if (!dir || !r.agentId) return r
     const id = r.agentId
     endedByHandback.delete(id)
@@ -8871,7 +9062,7 @@ const workHooks = (on: On) => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
       const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
-      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model }])
+      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model) }])
     })
     if (isOwn) await openList($)
     if (!isOwn) await writeRolls($, true).catch(err => log($, `helpers not written: ${String(err)}`))
@@ -9127,7 +9318,38 @@ const usageWords = (f: UsageFigures) => ({
   cpu: f.cpu === undefined ? '' : `Processor: ${pctText(f.cpu)}% busy, Claude ${pctText(f.cpuClaude ?? 0)}% of the whole`,
   disk: f.disk === undefined ? '' : `Disk: ${rateText(f.disk).join(' ')} read and written`,
   net: f.net === undefined ? '' : `Network: ${rateText(f.net).join(' ')} in and out`,
+  gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy`,
+  battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
 })
+const batteryWords = (b: UsageBattery) =>
+  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
+// What follows the charge: the time left, the time to full, or that it is on power; nothing while the system still estimates
+const batteryAfter = (b: UsageBattery) => (b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : '')
+
+// More of each figure, for a pointer resting on it: who uses the most, Claude's part, the parts of a speed, and the battery's state
+// in full. Only what the looks gave; a part that is not known is left out
+const usageMore = (f: UsageFigures) => {
+  const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? ` · most: ${top.map(([name, n]) => `${name} ${text(n)}`).join(', ')}` : '')
+  const b = f.battery
+  return {
+    memory: `Memory ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use${most(f.memTop, n => `${gbText(n)} GB`)} · Claude with what it started ${gbText(f.memClaude)} GB`,
+    cpu: f.cpu === undefined ? '' : `Processor ${pctText(f.cpu)}% busy${f.ncpu && f.ncpu > 1 ? ` across ${f.ncpu} cores` : ''}${most(f.cpuTop, n => `${pctText(n)}%`)} · Claude with what it started ${pctText(f.cpuClaude ?? 0)}%`,
+    gpu: f.gpu === undefined ? '' : `Graphics processor ${pctText(f.gpu)}% busy${f.gpuMem === undefined ? '' : f.gpuMemTotal ? ` · ${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB of its memory in use` : ` · ${gbText(f.gpuMem)} GB of memory in use`}`,
+    battery: !b ? '' : `Battery ${b.pct}% · ${b.state === 'battery' ? (b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : 'on battery, the system is still estimating the time left') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging, the time to full still being estimated') : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'}`,
+    disk: f.disk === undefined ? '' : `Disk ${rateText(f.disk).join(' ')} read and written${f.disks?.length ? ` · ${f.disks.join(', ')}` : ''}`,
+    net: f.net === undefined ? '' : `Network ${rateText(f.net).join(' ')}${f.netIn !== undefined && f.netOut !== undefined ? ` · in ${rateText(f.netIn).join(' ')}, out ${rateText(f.netOut).join(' ')}` : ''}${f.ports?.length ? ` · ${f.ports.join(', ')}` : ''}`,
+  }
+}
+// The line of more, in place of nothing above the figures: drawn hidden, shown while the pointer rests on its figure
+const usageMoreDrawn = (ui: Ui, f: UsageFigures) => {
+  const { Box, Text } = ui
+  const more = usageMore(f)
+  return (Object.entries(more) as [string, string][]).filter(([, text]) => text).map(([key, text]) => (
+    <Box key={`usage-more-${key}`} display="none" hover={{ scope: `usage-${key}`, display: 'flex' }} height={1} overflow="hidden">
+      <Text dimColor wrap="truncate-end">{text}</Text>
+    </Box>
+  ))
+}
 
 // The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
 // for the disk and the network
@@ -9139,7 +9361,7 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
   const isHigh = isMemoryHigh(f)
   const words = usageWords(f)
   const one = (key: string, svg: { source: string; width: number; height: number }, alt: string, value: string, unit: string, color?: string) => (
-    <Box key={key} flexDirection="row" flexShrink={0} alignItems="center">
+    <Box key={key} flexDirection="row" flexShrink={0} alignItems="center" hover={{ scope: key }}>
       <Svg key={`${key}-${svg.source.length}-${hashOf(svg.source)}`} source={svg.source} alt={alt} width={svg.width} height={svg.height} />
       <Text color={color} wrap="truncate-end">
         {value}
@@ -9150,14 +9372,27 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
   return [
     one('usage-memory', usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),
     f.cpu === undefined ? null : one('usage-cpu', usageSvg('cpu', { claude: f.cpuClaude ?? 0, used: f.cpu }), words.cpu, pctText(f.cpu), '%'),
+    f.gpu === undefined ? null : one('usage-gpu', usageSvg('gpu', { claude: 0, used: f.gpu }), words.gpu, pctText(f.gpu), '%'),
+    f.battery ? one('usage-battery', batterySvg(f.battery), words.battery, `${f.battery.pct}`, `%${batteryAfter(f.battery)}`, isBatteryLow(f.battery) ? USAGE_AMBER : undefined) : null,
     f.disk === undefined ? null : one('usage-disk', usageSvg('disk'), words.disk, rateText(f.disk)[0], ` ${rateText(f.disk)[1]}`),
     f.net === undefined ? null : one('usage-net', usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
   ]
 }
 // The line as text, for the terminal, in a phone's 50 columns with the octopus: a word for each, units cut to G and M/s, and three-cell meters with Claude's cells purple
 const USAGE_CELLS = 3
-const usageText = (ui: Ui, f: UsageFigures) => {
+// Given the room, a figure that does not fit is left out whole, never cut in the middle: the network first, then the disk, then the
+// graphics processor, so memory, the processor and the battery stay
+const usageText = (ui: Ui, f: UsageFigures, room = Infinity) => {
   const { Text } = ui
+  const rate = (n: number) => rateText(n).join('').replace('B/s', '/s')
+  const widths = {
+    gpu: f.gpu === undefined ? 0 : ` gpu${'▱'.repeat(USAGE_CELLS)} ${pctText(f.gpu)}%`.length,
+    disk: f.disk === undefined ? 0 : ` disk ${rate(f.disk)}`.length,
+    net: f.net === undefined ? 0 : ` net ${rate(f.net)}`.length,
+  }
+  let width = `mem${'▱'.repeat(USAGE_CELLS)} ${gbText(f.memUsed)}G`.length + (f.cpu === undefined ? 0 : ` cpu${'▱'.repeat(USAGE_CELLS)} ${pctText(f.cpu)}%`.length) + (f.battery ? batteryAfterText(f.battery).length + ` bat ${f.battery.pct}%`.length : 0) + widths.gpu + widths.disk + widths.net
+  const shown = { gpu: true, disk: true, net: true }
+  for (const one of ['net', 'disk', 'gpu'] as const) if (width > room && widths[one]) (shown[one] = false), (width -= widths[one])
   const isHigh = isMemoryHigh(f)
   const meter = (claude: number, used: number, color?: string) => {
     const { mine, rest } = meterOf(claude, used, USAGE_CELLS)
@@ -9175,11 +9410,26 @@ const usageText = (ui: Ui, f: UsageFigures) => {
       <Text color={amber}>{` ${gbText(f.memUsed)}`}</Text>
       <Text color={amber} dimColor={!amber}>G</Text>
       {f.cpu === undefined ? null : [<Text key="c" dimColor>{' cpu'}</Text>, ...meter(f.cpuClaude ?? 0, f.cpu), <Text key="cv">{` ${pctText(f.cpu)}`}</Text>, <Text key="cu" dimColor>%</Text>]}
-      {f.disk === undefined ? null : [<Text key="d" dimColor>{' disk '}</Text>, <Text key="dv">{rateText(f.disk)[0]}</Text>, <Text key="du" dimColor>{rateText(f.disk)[1].replace('B/s', '/s')}</Text>]}
-      {f.net === undefined ? null : [<Text key="n" dimColor>{' net '}</Text>, <Text key="nv">{rateText(f.net)[0]}</Text>, <Text key="nu" dimColor>{rateText(f.net)[1].replace('B/s', '/s')}</Text>]}
+      {f.gpu === undefined || !shown.gpu ? null : [<Text key="g" dimColor>{' gpu'}</Text>, ...meter(0, f.gpu), <Text key="gv">{` ${pctText(f.gpu)}`}</Text>, <Text key="gu" dimColor>%</Text>]}
+      {f.battery ? batteryText(ui, f.battery) : null}
+      {f.disk === undefined || !shown.disk ? null : [<Text key="d" dimColor>{' disk '}</Text>, <Text key="dv">{rateText(f.disk)[0]}</Text>, <Text key="du" dimColor>{rateText(f.disk)[1].replace('B/s', '/s')}</Text>]}
+      {f.net === undefined || !shown.net ? null : [<Text key="n" dimColor>{' net '}</Text>, <Text key="nv">{rateText(f.net)[0]}</Text>, <Text key="nu" dimColor>{rateText(f.net)[1].replace('B/s', '/s')}</Text>]}
     </Text>
   )
 }
+// The battery in words, short: "bat 85% 4:12" on battery, "bat 62% ↑1:05" charging (↑ and the time to full), "bat 100% ac" on power
+const batteryText = (ui: Ui, b: UsageBattery) => {
+  const { Text } = ui
+  const low = isBatteryLow(b) ? USAGE_AMBER : undefined
+  const after = batteryAfterText(b)
+  return [
+    <Text key="b" color={low} dimColor={!low}>{' bat '}</Text>,
+    <Text key="bv" color={low}>{`${b.pct}`}</Text>,
+    <Text key="bu" color={low} dimColor={!low}>%</Text>,
+    after ? <Text key="ba" color={b.state === 'charging' ? USAGE_PURPLE : low} dimColor={!low && b.state !== 'charging'}>{after}</Text> : null,
+  ]
+}
+const batteryAfterText = (b: UsageBattery) => (b.state === 'plugged' ? ' ac' : b.state === 'charging' ? ` ↑${b.left ? leftText(b.left) : ''}` : b.left ? ` ${leftText(b.left)}` : '')
 // A short mark of a drawing, so a new drawing is a new picture to the app
 const hashOf = (text: string) => {
   let h = 0
@@ -9192,6 +9442,8 @@ const hashOf = (text: string) => {
 // The answer picked above the prompt by its number, and how long the pick waits for the same number again
 let bandPick: { id: string; n: number } | undefined
 const BAND_PICK = 6000
+// The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
+const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
   // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
@@ -9269,10 +9521,11 @@ const bandHooks = (on: On) => {
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
-    return (
-      <Box flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
+    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
+    const row = (
+      <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
         {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
-        {figures ? (e.surface === 'terminal' ? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box> : usageDrawn(ui, figures) ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures)}</Box>) : null}
+        {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
         {/* The figures fill a phone's terminal: the hint shows until they come */}
         {isPanelAway && !figures ? (
           <Box flexShrink={0}>
@@ -9280,6 +9533,15 @@ const bandHooks = (on: On) => {
           </Box>
         ) : null}
       </Box>
+    )
+    // Where the figures are drawn, a pointer resting on one shows more of it in a line above, so the figures stay where they are
+    return drawn && figures ? (
+      <Box flexDirection="column">
+        {usageMoreDrawn(ui, figures)}
+        {row}
+      </Box>
+    ) : (
+      row
     )
   })
 
@@ -9388,7 +9650,7 @@ const panelHooks = (on: On) => {
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
     // Work the app sent to an older model says so, and which one; work that answers from one all the same says so
-    const offModel = (one: Todo) => (one.moved ? `moved to ${one.moved} by the app` : rightModel(one.model ?? '') ? 'not a model work should run on' : '')
+    const offModel = (one: Todo) => (one.flagged ? `ended after a safety flag, not carried on on ${one.flagged}` : one.moved ? `moved to ${one.moved} by the app` : rightModel(one.model ?? '') ? 'not a model work should run on' : '')
     const glance = (one: Todo, count = '') =>
       [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waits for your answer' : stood[isActingOnReply(one) ? 'working' : one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
@@ -9800,20 +10062,22 @@ const panelHooks = (on: On) => {
           <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>
       )
-    // Under its name, the tree's lines carried down past it, so its second line hangs in the same place
+    // Under its name, the tree's lines carried down past it, as wide as its own lines and mark, so its second line starts under its
+    // name. The app drops a picture with no words for it, and the line then started at the card's edge, left of the tree
     const jobRails = (t: Twig, key: string) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt="" width={twigWidth(t)} height={LINE} />
+          <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt={t.isLast ? 'Last on the tree' : 'The tree goes on'} width={twigWidth(t)} height={LINE} />
         </Box>
       ) : (
         <Box key={key} flexShrink={0}>
-          <Text dimColor>{`${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}  `}</Text>
+          <Text dimColor>{`${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}   `}</Text>
         </Box>
       )
     // How it stands, its second line, so a glance tells whether it moves and how far it is: how much of how much, its percent,
-    // speed and time left as the run printed them; then paused, a wait's target, a watch's last event, nothing printed since it
-    // began, quiet for minutes (in amber), or when it last printed. Quiet is told apart from working in words, never by a clock
+    // speed and time left as the run printed them, or worked out from its percent where it says none; then paused, a wait's target,
+    // a watch's last event, nothing printed since it began, or quiet for minutes (in amber). A run that prints says nothing of when:
+    // its line is read every few seconds, so what it says is now
     const jobStand = (job: Job, width: number) => {
       const pct = job.pct ? [job.pct] : []
       const quiet = job.wroteAt ? at - job.wroteAt : 0
@@ -9825,18 +10089,25 @@ const panelHooks = (on: On) => {
         : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
         // (a server prints only when asked, so its quiet is no warning)
         : job.wroteAt && quiet >= JOB_QUIET && job.kind !== 'server' ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
-        : job.wroteAt ? [`printed ${shortAgo(quiet)} ago`, `printed ${shortAgo(quiet)} ago`, false]
+        : job.wroteAt ? ['', '', false]
         // A job whose output cannot be found says so, so a blank row is never taken for one that moves
         : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', 'no output', true]
         : ['', '', false]
       const warn = isWarn && Boolean(state)
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
       const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
-      const left = job.left && isFresh ? [job.left] : []
+      // a run whose own progress line gives its percent but no time left has one worked out from how long it has run, marked as a
+      // guess: only the work's own line, which counts the whole run (a tool's bar starts again at each epoch, package or phase),
+      // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
+      const share = Number.parseFloat(job.pct ?? '') / 100
+      const guess = !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
+      const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
-      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], [...compact, ...pct, short], [...compact, ...pct], [short]], width)
+      // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
+      const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
+      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
       return { text, isWarn: warn }
     }
     // A job's two lines: what it is, in the work's own words, with its time; and under it how it stands, then the latest line it
@@ -9882,7 +10153,8 @@ const panelHooks = (on: On) => {
           {head}
           <Box key={`stand-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
             {jobRails(t, `rails-${key}`)}
-            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+            {/* (on a desktop by the step a plain Button pads a run's name with, where its name is one, so the two start in one column) */}
+            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={canOpenJob(job) ? lead : 0}>
               {pctAt >= 0 && job.pct ? (
                 <Box flexDirection="row" flexShrink={0}>
                   {pctAt > 0 ? <Text dimColor>{stand.slice(0, pctAt)}</Text> : null}
@@ -10495,33 +10767,33 @@ const panelHooks = (on: On) => {
     }
     // Only this chat's own prompt, while this chat holds it: another chat's is answered in that chat, as no file may answer one
     const isHeldHere = (p: Prompt, c?: Shared) => Boolean(!c && p.isHeld && promptHeld.has(p.id))
+    // Drawn as Claude Code draws its permission asks, as the admin gate's are: an outlined box with the kind of ask at its top, never
+    // a filled card with an edge as work's cards are
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
-      <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
-        <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <Box flexDirection="column">
-            <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
-            <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
-          </Box>
-          <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
-          {p.detail ? (
-            <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
-              <Text mono wrap="wrap">{p.detail}</Text>
-            </Box>
-          ) : null}
-          {p.yes || p.no ? (
-            <Box flexDirection="column">
-              {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
-              {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
-            </Box>
-          ) : null}
-          {isHeldHere(p, c) ? promptButtons(p, key) : <Text dimColor wrap="wrap">{where}</Text>}
-          {c && pressOf(c) && !isHeldHere(p, c) ? (
-            <Box flexDirection="row">
-              <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
-            </Box>
-          ) : null}
+      <Box key={`prompt-${key}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+        <Box flexDirection="column">
+          <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waits for your answer' : 'asked in another chat'}`}</Text>
+          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+          <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
         </Box>
+        <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
+        {p.detail ? (
+          <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
+            <Text mono wrap="wrap">{p.detail}</Text>
+          </Box>
+        ) : null}
+        {p.yes || p.no ? (
+          <Box flexDirection="column">
+            {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
+            {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
+          </Box>
+        ) : null}
+        {isHeldHere(p, c) ? promptButtons(p, key) : <Text dimColor wrap="wrap">{where}</Text>}
+        {c && pressOf(c) && !isHeldHere(p, c) ? (
+          <Box flexDirection="row">
+            <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
+          </Box>
+        ) : null}
       </Box>
     )
     // Where a prompt is answered: in this chat, the box Claude Code shows at its bottom
@@ -10536,16 +10808,9 @@ const panelHooks = (on: On) => {
       if (p.isCut) return 'You allowed it · it was stopped before it finished'
       return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
     }
-    const answeredCard = (p: Prompt, key: string, c?: Shared) => (
-      <Box key={`answered-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <Box width={1} flexShrink={0} backgroundColor={p.isRunning ? LIVE : FILL} />
-        <Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
-          <Text wrap="wrap" color={p.isRunning ? LIVE : undefined} bold={p.isRunning}>{saidOf(p)}</Text>
-          <Text dimColor wrap="wrap">{p.text}</Text>
-        </Box>
-      </Box>
-    )
+    // Once answered it is a line of what was done, as the gate's notes are: no box, fill or edge
+    const answeredCard = (p: Prompt, key: string, c?: Shared) =>
+      reportLine(table, `answered-${key}`, p.answered !== 'no' && p.answered !== 'stopped' && !p.isCut, saidOf(p), [p.title || (c ? 'That chat itself' : 'This chat itself'), p.text])
 
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
     // the Claude app when pressed, where its link opens here

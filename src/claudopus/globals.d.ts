@@ -196,6 +196,7 @@ declare global {
   export import isPid = M10.isPid
   export import isWaitOnly = M10.isWaitOnly
   export import labelOf = M10.labelOf
+  export import timeLeftText = M10.leftText
   export import JOB_COLOR = M10.JOB_COLOR
   export import JOB_GLYPH = M10.JOB_GLYPH
   export import JOB_HEAD = M10.JOB_HEAD
@@ -222,10 +223,13 @@ declare global {
   export import Job = M10.Job
   export import JobKind = M10.JobKind
   export import TabMove = M9.TabMove
+  export import batterySvg = M11.batterySvg
   export import FOOTPRINT_EVERY = M11.FOOTPRINT_EVERY
   export import gbText = M11.gbText
+  export import isBatteryLow = M11.isBatteryLow
   export import isMemoryHigh = M11.isMemoryHigh
   export import keptOf = M11.keptOf
+  export import leftText = M11.leftText
   export import meterOf = M11.meterOf
   export import nextKept = M11.nextKept
   export import pctText = M11.pctText
@@ -236,6 +240,8 @@ declare global {
   export import USAGE_PURPLE = M11.USAGE_PURPLE
   export import usageMac = M11.usageMac
   export import usageSvg = M11.usageSvg
+  export import UsageTop = M11.UsageTop
+  export import UsageBattery = M11.UsageBattery
   export import UsageFigures = M11.UsageFigures
   export import UsageKept = M11.UsageKept
 }

@@ -2,6 +2,27 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.116 · 15 November 2026
+- A run's second line starts under its name, with the tree's line carried down beside it, in the app and in a terminal: the app had left out the line and started it at the card's edge
+- A run shows how long is left, its own or worked out from its percent, and no longer when it last printed; work's scripts print their progress at least every 10 seconds
+
+## 0.2.115 · 15 November 2026
+- The line above the prompt now shows the battery: its charge, a bolt while charging or a plug on power, and the time left (or to full) as the system reports it; nothing while it is still estimating, and nothing at all on a computer without a battery.
+- It also shows how busy the graphics processor is, beside the processor.
+- In the desktop app, resting the pointer on a figure shows more of it in a line above: the programs using the most memory and processor, the graphics processor's memory, the network in and out, which disks and ports are counted, and the battery's state in full.
+
+## 0.2.114 · 15 November 2026
+- Work and helpers start only on the newest models: one asked to run on an older model or on Haiku starts on its family's newest instead of being refused, and so does a helper left to a parent on an older model, a workflow's agent, or an agent whose own kind names an older model.
+- A helper that checks what was built runs on a model no weaker than the work that started it, and at least on Opus.
+- When a safety check flags a message and the app would carry the work on on an older model (as it carried a second look on Opus 4.8), the work is ended there with a report saying so, and its card says "ended after a safety flag"; the work above it starts what is left again on the current model.
+- What counts as the newest follows the newest model the engine starts work on, not a version written into the mod.
+
+## 0.2.113 · 15 November 2026
+- Asks for your press (a release, an admin command, a change to your settings, a change put back, a password or key, Claude Code's own permission asks) are outlined boxes that name the kind of ask at the top, so they are no longer taken for one more piece of work.
+- What you pressed is now one quiet line with a tick or a cross, not a card, and it goes as soon as what it reports has finished, rather than staying a minute.
+- A release names its branch and the repo, with the folder shortened to one line.
+- A release whose output went to a log asked you twice, the first time for a branch called ">", which the release then refused: it now asks once, for its own branch.
+
 ## 0.2.112 · 15 November 2026
 - Details lists every to-do in its order, done ones ticked, in place of the next three and a count.
 - In Details, each helper at work shows the step it is on and where it says it is, and each running command shows the last lines of its output, under its row.

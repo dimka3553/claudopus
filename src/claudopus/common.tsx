@@ -221,32 +221,87 @@ const modelName = (id: string) => {
   const m = /(fable|opus|sonnet|haiku)(?:-(\d+)(?:[-.](\d{1,2}))?(?!\d))?/.exec(id.toLowerCase())
   return m?.[1] ? `${m[1].charAt(0).toUpperCase()}${m[1].slice(1)}${m[2] ? ` ${m[2]}${m[3] ? `.${m[3]}` : ''}` : ''}` : ''
 }
-// The models the person can move running work to from its card, by the id each step is sent with. Never Haiku
+// The models the person can move running work to from its card, by the id each step is sent with, the newest of each family. Never
+// Haiku. These are the least the mod knows: a newer id the engine starts work on or answers from takes its family's place (seeModel)
 const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2']
-// The model a step of work is sent to in place of one no work runs on: an older version than the newest above, which the app moves
-// work to after its safeguards flag a message, goes to the newest Fable or Sonnet, and Haiku to Sonnet. Nothing for a model work
-// may run on: the three above or a newer version, a name with no version, which the app reads as the newest, and Haiku when the
-// settings name it for a kind of work
-const INSTEAD: Record<string, string> = { Opus: 'claude-fable-5-2', Fable: 'claude-fable-5-2', Sonnet: 'claude-sonnet-5-5', Haiku: 'claude-sonnet-5-5' }
+// The newest Haiku, for the settings that name Haiku for a kind of work, raised the same way
+const HAIKU = ['claude-haiku-5-5']
+// A version as numbers; an id that leads with a date or an old numbering ("claude-3-5-sonnet-20241022") reads as none
+const versionOf = (id: string): [number, number] | undefined => {
+  const [major = 0, minor = 0] = (modelName(id).split(' ')[1] ?? '').split('.').map(Number)
+  return major && major <= 99 ? [major, minor] : undefined
+}
+const isBelow = (a: [number, number], b: [number, number]) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1])
+// The newest model of a family, by the id each step is sent with: Haiku's place is Sonnet's
+const newestModel = (family: string) => MODELS.find(one => modelName(one).startsWith(family === 'Haiku' ? 'Sonnet' : family))
+// A model the engine resolved or answered from: one newer than its family's newest takes its place, so what counts as older follows
+// the newest the engine offers and never goes stale
+const seeModel = (id: string) => {
+  const family = modelName(id).split(' ')[0] ?? ''
+  const version = versionOf(id)
+  const list = family === 'Haiku' ? HAIKU : MODELS
+  const at = list.findIndex(one => modelName(one).startsWith(`${family} `))
+  const top = at >= 0 ? versionOf(list[at]!) : undefined
+  if (!version || !top || !isBelow(top, version)) return
+  list[at] = `claude-${family.toLowerCase()}-${version[0]}${version[1] ? `-${version[1]}` : ''}`
+}
+// The model a step or start is sent to in place of one no work runs on: an older version than its family's newest goes to that
+// newest, and Haiku to the newest Sonnet. Nothing for a model work may run on: the newest or a newer version, a name with no
+// version, which the app reads as the newest, and Haiku when the settings name it for a kind of work
 const rightModel = (id: string): string | undefined => {
   const [family = '', version = ''] = modelName(id).split(' ')
   if (!family) return undefined
-  if (family === 'Haiku') return Object.values(models).includes('haiku') ? undefined : INSTEAD.Haiku
+  const isHaikuNamed = family === 'Haiku' && Object.values(models).includes('haiku')
+  if (family === 'Haiku' && !isHaikuNamed) return newestModel('Sonnet')
   if (!version) return undefined
-  const newest = MODELS.map(modelName).find(one => one.startsWith(family))?.split(' ')[1] ?? ''
-  const [major = 0, minor = 0] = version.split('.').map(Number)
-  const [topMajor = 0, topMinor = 0] = newest.split('.').map(Number)
-  // An id that leads with a date or an old numbering ("claude-3-5-sonnet-20241022") is an older model too
-  const isOlder = major > 99 || major < topMajor || (major === topMajor && minor < topMinor)
-  return isOlder ? INSTEAD[family] : undefined
+  const newest = isHaikuNamed ? HAIKU[0] : newestModel(family)
+  const top = versionOf(newest ?? '')
+  const mine = versionOf(id)
+  const isOlder = !mine || (top !== undefined && isBelow(mine, top))
+  return isOlder ? newest : undefined
+}
+// How strong a model is, for a check never weaker than what it checks
+const RANK: Record<string, number> = { Haiku: 0, Sonnet: 1, Opus: 2, Fable: 3 }
+// `opusplan` runs on Sonnet outside plan mode, so it counts as Sonnet
+const rankOf = (id: string) => (/opusplan/i.test(id) ? RANK.Sonnet! : (RANK[modelName(id).split(' ')[0] ?? ''] ?? -1))
+// A helper that looks over what was built, by its few words: a checking word, then what was built ("Review my PR", "Test the fix"),
+// or a look that is only ever a check ("Sanity check", "What is wrong with the build"). Legwork that names checking something else
+// ("Check the Stripe balance", "Review the docs", "Check the PR status") is not one
+const CHECKS = /\b(second look|another look|look(s|ing)? (over|for)|(re-?|double[- ]?|spot[- ]?|sanity[- ]?)?check(s|ing|ed|er)?|(code )?review(s|ing|ed|er)?|audit(s|ing|or)?|verif(y|ies|ying|ication|ied)|validat(e|es|ing|ion)|critique|proofread|inspect(s|ing|ion)?|test(s|ing)?|qa|find|hunt(s|ing)?)\b.*\b(page|fix|fixes|fixed|change|changes|build|built|work|diff|pr|code|branch|commit|result|results|report|output|mod|app|feature|design|claims|draft|holes|bugs|faults|what was built)\b/i
+const ONLY_CHECKS = /\b(second look|sanity check|spot[- ]?check|what is wrong|is wrong with)\b|^(checker|reviewer|auditor|code review)\b/i
+const NOT_CHECKS = /\b(status|comments?|balance|quota|usage|logs?)\b/i
+const isChecker = (description: string) => ONLY_CHECKS.test(description) || (CHECKS.test(description) && !NOT_CHECKS.test(description))
+// Work a safety check flagged whose next steps the app would send to an older model: it is ended with this report instead, so its
+// parent starts what is left again on a current model. The steps of it answered so
+const FLAGGED = (on: string) =>
+  `Stopped by Claudopus: a safety check flagged this agent's last message, and the app would have carried it on on ${modelName(on) || on}, an older model no work runs on, so nothing after the flag was done. Start what is left again on the current model, leaving out what was flagged.`
+const flaggedSteps = new Map<string, number>()
+// Work a safety check flagged once: its steps on an older model are never sent to a newer one, whatever it was started on
+const flaggedOnce = new Set<string>()
+// The model an agent is started on in place of the one asked, or why it is not started; nothing when it may start as asked
+const startModel = (e: { model?: string; parentModel?: string; parentAgentId?: string; description?: string; fork: boolean; workflow?: unknown }): { model?: string; deny?: string } => {
+  const parentModel = String(e.parentModel ?? '')
+  // A copy runs on its parent's model, which no hook changes
+  if (e.fork) return rightModel(parentModel) ? { deny: WRONG_MODEL(parentModel) } : {}
+  const asked = (e.model ?? '').trim()
+  const parent = rightModel(parentModel) ?? parentModel
+  // An alias or `inherit` the engine resolves to the newest, or the parent's; an older id or Haiku goes to its family's newest
+  let model = asked && asked !== 'inherit' ? (rightModel(asked) ?? '') : rightModel(parentModel) && (!asked || asked === 'inherit') ? parent : ''
+  // A check of what was built never runs weaker than what started it, nor below Opus
+  if (isChecker(e.description ?? '')) {
+    const runs = model || (asked && asked !== 'inherit' ? asked : parent)
+    const least = rankOf(parent) >= RANK.Opus! ? parent : (newestModel('Opus') ?? 'opus')
+    if (rankOf(runs) < rankOf(least)) model = least
+  }
+  return model ? { model } : {}
 }
 // The model each agent started on, as the engine resolved it: a step on Haiku of one that started there is its own kind's, not the app's move
 const startedOn = new Map<string, string>()
 // The work and helpers whose steps the app sent to such a model, each said in the log once
 const sentElsewhere = new Set<string>()
-// What an Agent call is answered when it names such a model
+// What a fork is answered when the model it would copy is such a model
 const WRONG_MODEL = (named: string) =>
-  `No work runs on ${modelName(named) || named}. Name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
+  `No work runs on ${modelName(named) || named}. Start a fresh agent and name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
 // The line written into a piece of work's own chat when the person moves it to another model; the panel draws it as a line of its own
 const MODEL_HEAD = 'Model changed to '
 const MODEL_LINE = /^Model changed to (.+?) at (\d{1,2}:\d{2})\./

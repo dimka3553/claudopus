@@ -42,6 +42,10 @@ export type Todo = {
   chosen?: string
   // The older model, or Haiku, the app sent its steps to, which the mod sent to a model work runs on instead: "Opus 4.8"
   moved?: string
+  // The older model the app would have carried it on after a safety check flagged a message, which it was ended rather than run on
+  flagged?: string
+  // The model the engine first started it on, kept across reloads: a resume may come back on the model the app moved it to
+  startedOn?: string
   // How many tool steps it has made
   steps?: number
   // How many of them since it last touched its to-dos or said where it stands
@@ -73,7 +77,7 @@ export type Todo = {
   // (`here` or an ssh host), the exact command, the agent that runs it, and whether Allow covers the whole piece of work
   // What waits for the person's press: an admin command, a release to main ('release'), or a change to a file of theirs ('file')
   // `isUndone`: a file of theirs a command changed, put back as it was (`isOutside`: found changed between commands, by an editor or a program left running); Allow makes the change again
-  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean }[]
+  admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean; call?: string; folder?: string; branch?: string }[]
   startedAt: number
   // 0 while it works
   endedAt: number

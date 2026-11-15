@@ -10,7 +10,7 @@
 // word (a host on a key, a name on a password), a kind it does not know or a host or name it would not take, is drawn as nothing;
 // any other field is left unread. A planted request so shows only what the runners would ask. This stops slips and common tricks;
 // it is no wall against code set on getting round it
-type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string }
+type Asked = { id: string; text: string; at: number; chat?: string; command?: string; key?: string; call?: string }
 // The Bash calls of this chat that run bin/admin or bin/secret, by call id, with their command: a box is drawn only for a request of
 // this chat's own while one of them runs (one sent to the background for BOX_OLD after it began), and says which command asked. A
 // request no runner of this chat could have made, however it is worded, is drawn nowhere
@@ -24,7 +24,7 @@ const runnerEnded = (id: string, isBackground: boolean, at: number) => {
   for (const [key, other] of [...runnerCalls]) if (other.until < at) runnerCalls.delete(key)
 }
 // The command that asked: the one of this chat's running runners begun last before the request
-const runnerOf = (at: number, now: number) => [...runnerCalls.values()].filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0]
+const runnerOf = (at: number, now: number) => [...runnerCalls].map(([call, one]) => ({ ...one, call })).filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0]
 const BOX_SKEW = 60_000
 // What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
 const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/
@@ -69,29 +69,56 @@ const boxWording = (one: Record<string, unknown>): string | undefined => {
 let boxes: Asked[] = []
 // What the person just did with a box or an admin command, shown a minute at the top of the panel where it was: what they did and
 // what happens now, so nothing that needed them just vanishes
-type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean }
+// A note tied to the call the press let go (`call`) goes once that call ends, never before DONE_LEAST so it can be read, and at
+// most DONE_LONGEST while it runs; one with no call is shown DONE_SHOWN
+type DoneNote = { id: string; head: string; said: string; what: string; at: number; isOn?: boolean; call?: string; endedAt?: number }
 let doneNotes: DoneNote[] = []
 const DONE_SHOWN = 60_000
+const DONE_LEAST = 15_000
+const DONE_LONGEST = 30 * 60_000
+const isNoteShown = (one: DoneNote, at: number) =>
+  !one.call ? at - one.at < DONE_SHOWN : one.endedAt === undefined ? at - one.at < DONE_LONGEST : at < Math.max(one.endedAt, one.at + DONE_LEAST)
+// The calls that have ended, so a note made after its call ended (a runner sent to the background) is over from the start
+const callsEnded = new Set<string>()
 const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
   const at = await $.clock.now()
+<<<<<<< HEAD
   doneNotes = [...doneNotes.filter(one => one.id !== note.id && at - one.at < DONE_SHOWN), { ...note, at }].slice(-6)
   drawAgain($)
   // Drawn again as its minute ends, so it goes with nothing else to redraw the panel
   $.clock.after(DONE_SHOWN + 100, () => drawAgain($))
+=======
+  const made = { ...note, at, ...(note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}) }
+  doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), made].slice(-6)
+  $.ui.invalidate('ui.render')
+  // Drawn again as its time ends, so it goes with nothing else to redraw the panel
+  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => $.ui.invalidate('ui.render'))
+>>>>>>> origin/main
 }
+// The call a note tells of has ended: what it said is over, so the note goes (after DONE_LEAST from its press)
+const noteCallEnded = async ($: EngineInterface, call: string) => {
+  callsEnded.add(call)
+  if (callsEnded.size > 200) callsEnded.delete(callsEnded.values().next().value ?? '')
+  if (!doneNotes.some(one => one.call === call && one.endedAt === undefined)) return
+  const at = await $.clock.now()
+  doneNotes = doneNotes.map(one => (one.call === call && one.endedAt === undefined ? { ...one, endedAt: at } : one))
+  $.ui.invalidate('ui.render')
+  const last = Math.max(...doneNotes.filter(one => one.call === call).map(one => one.at + DONE_LEAST))
+  $.clock.after(Math.max(0, last - at) + 100, () => $.ui.invalidate('ui.render'))
+}
+// What was done is a line, as Claude Code reports a call's result under it: a mark and the words, with no box, fill or edge, so it is
+// never taken for a card of work. Green once allowed or given, grey once refused or cancelled
+const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, lines: string[]) => (
+  <ui.Box key={key} flexDirection="row" gap={1} paddingX={2} flexShrink={0}>
+    <ui.Text color={isOn ? DONE : undefined} dimColor={!isOn}>{isOn ? '✓' : '✕'}</ui.Text>
+    <ui.Box flexDirection="column" minWidth={0} flexGrow={1} flexShrink={1}>
+      <ui.Text wrap="wrap">{said}</ui.Text>
+      {lines.filter(Boolean).map((line, n) => <ui.Text key={`${key}-${n}`} dimColor wrap="truncate-end">{line}</ui.Text>)}
+    </ui.Box>
+  </ui.Box>
+)
 const doneNotesPart = (ui: Ui, at: number) =>
-  doneNotes
-    .filter(one => at - one.at < DONE_SHOWN)
-    .map(one => (
-      <ui.Box key={`done-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <ui.Box width={1} flexShrink={0} backgroundColor={one.isOn ? LIVE : FILL} />
-        <ui.Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <ui.Text bold wrap="truncate-end">{one.head}</ui.Text>
-          <ui.Text wrap="wrap" color={one.isOn ? LIVE : undefined} bold={one.isOn}>{one.said}</ui.Text>
-          {one.what ? <ui.Text dimColor wrap="wrap">{one.what}</ui.Text> : null}
-        </ui.Box>
-      </ui.Box>
-    ))
+  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what]))
 // What a box asks for, in a few words, for its note once answered
 const boxHead = (text: string) => {
   const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
@@ -145,7 +172,7 @@ const lookBoxes = async ($: EngineInterface) => {
       const key = typeof one.key === 'string' ? one.key : undefined
       if (key && !boxKeys.has(id)) boxKeys.set(id, key)
       const isKeySame = !key || boxKeys.get(id) === key
-      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, ...(one.kind === 'admin' && key ? { key } : {}) })
+      if (one.id === id && text && isKeySame && typeof one.at === 'number' && now - one.at < BOX_OLD && one.at - now <= BOX_SKEW && one.chat === boxChat && boxChat && runner) found.push({ id, text, at: one.at, chat: one.chat, command: runner.command, call: runner.call, ...(one.kind === 'admin' && key ? { key } : {}) })
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
@@ -232,7 +259,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     boxSaid.delete(id)
     const one = boxes.find(other => other.id === id)
     boxes = boxes.filter(other => other.id !== id)
-    if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
+    if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
   drawAgain($)
@@ -243,8 +270,14 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled �
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
+<<<<<<< HEAD
   if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said, what: '' })
   drawAgain($)
+=======
+  // Cancelled, nothing more comes of it: it is over at once
+  if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call, endedAt: 0 } : {}), head: boxHead(one.text), said, what: '' })
+  $.ui.invalidate('ui.render')
+>>>>>>> origin/main
 }
 
 const boxesPart = ($: EngineInterface, ui: Ui) => {
@@ -252,7 +285,8 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
   // This chat's own requests first, the first of them with the keys, so a value typed for the notice it told goes to its own box
   const shown = [...boxes.filter(one => one.chat === boxChat), ...boxes.filter(one => one.chat !== boxChat)]
   return shown.map((one, n) => (
-    <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
+    <ui.Box key={`box-${one.id}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+      <ui.Text dimColor wrap="truncate-end">{`${one.key ? 'Admin password' : 'Key'} · waits for you to type it`}</ui.Text>
       <ui.Text bold color={NEEDS} wrap="wrap">{one.text}</ui.Text>
       {one.command ? <ui.Text dimColor wrap="wrap">{`Asked by this chat's command: ${cut(oneLine(one.command), 200)}`}</ui.Text> : null}
       <ui.Text dimColor wrap="wrap">{one.key ? 'What you type here shows as you type it. It goes only to the command that asked, sealed for it, never into a chat, and is not kept.' : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>

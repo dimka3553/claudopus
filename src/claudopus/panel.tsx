@@ -101,7 +101,7 @@ const panelHooks = (on: On) => {
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
     // Work the app sent to an older model says so, and which one; work that answers from one all the same says so
-    const offModel = (one: Todo) => (one.moved ? `moved to ${one.moved} by the app` : rightModel(one.model ?? '') ? 'not a model work should run on' : '')
+    const offModel = (one: Todo) => (one.flagged ? `ended after a safety flag, not carried on on ${one.flagged}` : one.moved ? `moved to ${one.moved} by the app` : rightModel(one.model ?? '') ? 'not a model work should run on' : '')
     const glance = (one: Todo, count = '') =>
       [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waits for your answer' : stood[isActingOnReply(one) ? 'working' : one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
@@ -513,20 +513,22 @@ const panelHooks = (on: On) => {
           <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>
       )
-    // Under its name, the tree's lines carried down past it, so its second line hangs in the same place
+    // Under its name, the tree's lines carried down past it, as wide as its own lines and mark, so its second line starts under its
+    // name. The app drops a picture with no words for it, and the line then started at the card's edge, left of the tree
     const jobRails = (t: Twig, key: string) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt="" width={twigWidth(t)} height={LINE} />
+          <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt={t.isLast ? 'Last on the tree' : 'The tree goes on'} width={twigWidth(t)} height={LINE} />
         </Box>
       ) : (
         <Box key={key} flexShrink={0}>
-          <Text dimColor>{`${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}  `}</Text>
+          <Text dimColor>{`${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}   `}</Text>
         </Box>
       )
     // How it stands, its second line, so a glance tells whether it moves and how far it is: how much of how much, its percent,
-    // speed and time left as the run printed them; then paused, a wait's target, a watch's last event, nothing printed since it
-    // began, quiet for minutes (in amber), or when it last printed. Quiet is told apart from working in words, never by a clock
+    // speed and time left as the run printed them, or worked out from its percent where it says none; then paused, a wait's target,
+    // a watch's last event, nothing printed since it began, or quiet for minutes (in amber). A run that prints says nothing of when:
+    // its line is read every few seconds, so what it says is now
     const jobStand = (job: Job, width: number) => {
       const pct = job.pct ? [job.pct] : []
       const quiet = job.wroteAt ? at - job.wroteAt : 0
@@ -538,18 +540,25 @@ const panelHooks = (on: On) => {
         : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
         // (a server prints only when asked, so its quiet is no warning)
         : job.wroteAt && quiet >= JOB_QUIET && job.kind !== 'server' ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
-        : job.wroteAt ? [`printed ${shortAgo(quiet)} ago`, `printed ${shortAgo(quiet)} ago`, false]
+        : job.wroteAt ? ['', '', false]
         // A job whose output cannot be found says so, so a blank row is never taken for one that moves
         : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', 'no output', true]
         : ['', '', false]
       const warn = isWarn && Boolean(state)
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
       const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
-      const left = job.left && isFresh ? [job.left] : []
+      // a run whose own progress line gives its percent but no time left has one worked out from how long it has run, marked as a
+      // guess: only the work's own line, which counts the whole run (a tool's bar starts again at each epoch, package or phase),
+      // only while that line is the latest, and never for a wait, whose count is how long it is willing to wait
+      const share = Number.parseFloat(job.pct ?? '') / 100
+      const guess = !job.left && job.isOwn && !job.isEarlier && job.kind !== 'wait' && share >= 0.01 && share < 1 && ran >= 20_000 ? timeLeftText((ran / 1000) * ((1 - share) / share)) : undefined
+      const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
-      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], [...compact, ...pct, short], [...compact, ...pct], [short]], width)
+      // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
+      const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
+      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
       return { text, isWarn: warn }
     }
     // A job's two lines: what it is, in the work's own words, with its time; and under it how it stands, then the latest line it
@@ -595,7 +604,8 @@ const panelHooks = (on: On) => {
           {head}
           <Box key={`stand-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
             {jobRails(t, `rails-${key}`)}
-            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+            {/* (on a desktop by the step a plain Button pads a run's name with, where its name is one, so the two start in one column) */}
+            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={canOpenJob(job) ? lead : 0}>
               {pctAt >= 0 && job.pct ? (
                 <Box flexDirection="row" flexShrink={0}>
                   {pctAt > 0 ? <Text dimColor>{stand.slice(0, pctAt)}</Text> : null}
@@ -1208,33 +1218,33 @@ const panelHooks = (on: On) => {
     }
     // Only this chat's own prompt, while this chat holds it: another chat's is answered in that chat, as no file may answer one
     const isHeldHere = (p: Prompt, c?: Shared) => Boolean(!c && p.isHeld && promptHeld.has(p.id))
+    // Drawn as Claude Code draws its permission asks, as the admin gate's are: an outlined box with the kind of ask at its top, never
+    // a filled card with an edge as work's cards are
     const promptCard = (p: Prompt, key: string, where: string, c?: Shared) => (
-      <Box key={`prompt-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <Box width={1} flexShrink={0} backgroundColor={NEEDS} />
-        <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <Box flexDirection="column">
-            <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
-            <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
-          </Box>
-          <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
-          {p.detail ? (
-            <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
-              <Text mono wrap="wrap">{p.detail}</Text>
-            </Box>
-          ) : null}
-          {p.yes || p.no ? (
-            <Box flexDirection="column">
-              {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
-              {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
-            </Box>
-          ) : null}
-          {isHeldHere(p, c) ? promptButtons(p, key) : <Text dimColor wrap="wrap">{where}</Text>}
-          {c && pressOf(c) && !isHeldHere(p, c) ? (
-            <Box flexDirection="row">
-              <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
-            </Box>
-          ) : null}
+      <Box key={`prompt-${key}`} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
+        <Box flexDirection="column">
+          <Text dimColor wrap="truncate-end">{`${p.kind === 'question' ? 'Question' : p.kind === 'plan' ? 'Plan' : 'Permission'} · ${isHeldHere(p, c) || !c ? 'waits for your answer' : 'asked in another chat'}`}</Text>
+          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
+          <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
         </Box>
+        <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
+        {p.detail ? (
+          <Box backgroundColor={FILL} paddingLeft={2} paddingRight={1}>
+            <Text mono wrap="wrap">{p.detail}</Text>
+          </Box>
+        ) : null}
+        {p.yes || p.no ? (
+          <Box flexDirection="column">
+            {p.yes ? <Text wrap="wrap">{p.yes}</Text> : null}
+            {p.no ? <Text wrap="wrap">{p.no}</Text> : null}
+          </Box>
+        ) : null}
+        {isHeldHere(p, c) ? promptButtons(p, key) : <Text dimColor wrap="wrap">{where}</Text>}
+        {c && pressOf(c) && !isHeldHere(p, c) ? (
+          <Box flexDirection="row">
+            <Button key={`prompt-open-${key}-${presses}`} label="Open that chat" onPress={() => void ((presses += 1), openChat($, c).catch(err => log($, `chat not opened: ${String(err)}`)))} />
+          </Box>
+        ) : null}
       </Box>
     )
     // Where a prompt is answered: in this chat, the box Claude Code shows at its bottom
@@ -1249,16 +1259,9 @@ const panelHooks = (on: On) => {
       if (p.isCut) return 'You allowed it · it was stopped before it finished'
       return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
     }
-    const answeredCard = (p: Prompt, key: string, c?: Shared) => (
-      <Box key={`answered-${key}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
-        <Box width={1} flexShrink={0} backgroundColor={p.isRunning ? LIVE : FILL} />
-        <Box flexDirection="column" paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-          <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
-          <Text wrap="wrap" color={p.isRunning ? LIVE : undefined} bold={p.isRunning}>{saidOf(p)}</Text>
-          <Text dimColor wrap="wrap">{p.text}</Text>
-        </Box>
-      </Box>
-    )
+    // Once answered it is a line of what was done, as the gate's notes are: no box, fill or edge
+    const answeredCard = (p: Prompt, key: string, c?: Shared) =>
+      reportLine(table, `answered-${key}`, p.answered !== 'no' && p.answered !== 'stopped' && !p.isCut, saidOf(p), [p.title || (c ? 'That chat itself' : 'This chat itself'), p.text])
 
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
     // the Claude app when pressed, where its link opens here

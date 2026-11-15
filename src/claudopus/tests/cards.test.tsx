@@ -572,13 +572,15 @@ test("a card's title, its line of facts and every line under them start at one l
   await expectOneEdge(4)
 })
 
-test('work the app moves to an older model or to Haiku stays on it and its card says so; a helper whose own kind starts on Haiku runs on Sonnet', async ($, on) => {
-  const { stepped, files } = world(on, { model: 'claude-fable-5-2', startedOn: { 'Look it up': 'claude-haiku-5-5' } })
+test('work a safety flag would move to an older model is ended with a report that says so, never run there; an agent whose own kind starts it on an older model or Haiku runs on the newest', async ($, on) => {
+  const { stepped, files } = world(on, { model: 'claude-fable-5-2', startedOn: { 'Look it up': 'claude-haiku-5-5', 'Old kind': 'claude-opus-4-1' } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
   const step = async (index: number, model: string, agentId: string | undefined = 'a1') => {
-    for await (const _ of $.turn.step({ turnId: 'turn-2', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) void _
+    const chunks: { kind: string; name?: string; json?: string; text?: string }[] = []
+    for await (const c of $.turn.step({ turnId: 'turn-2', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) chunks.push(c as never)
+    return chunks
   }
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const line = async () => (await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')
@@ -586,49 +588,57 @@ test('work the app moves to an older model or to Haiku stays on it and its card 
   // On the model it was started on, nothing is changed and the card says nothing more
   await step(0, 'claude-opus-5-5')
   expect(stepped).toEqual(['claude-opus-5-5'])
-  expect(await line()).not.toContain('by the app')
+  expect(await line()).not.toContain('safety flag')
 
-  // The app's safeguards flagged a message and the app sends the next steps to Opus 4.8: they stay there, and the card says so
-  await step(1, 'claude-opus-4-8')
-  await step(2, 'claude-opus-4-8')
-  expect(stepped).toEqual(['claude-opus-5-5', 'claude-opus-4-8', 'claude-opus-4-8'])
-  expect(await line()).toContain('moved to Opus 4.8 by the app')
-  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was sent to Opus 4.8 by the app: its steps stay there').length).toBe(2)
+  // The app's safeguards flagged a message and the app would send the next step to Opus 4.8: no request is made there; the work
+  // hands back a report that says why, and its card says so
+  const flagged = await step(1, 'claude-opus-4-8')
+  expect(stepped).toEqual(['claude-opus-5-5'])
+  expect(flagged.find(c => c.kind === 'tool')?.name).toBe('SubagentHandback')
+  expect(JSON.parse(flagged.find(c => c.kind === 'input')?.json ?? '{}').message).toContain('Start what is left again on the current model, leaving out what was flagged')
+  expect(await line()).toContain('ended after a safety flag, not carried on on Opus 4.8')
+  // Where the handback does not end it, a step after is a plain last answer, and still nothing runs on the older model
+  const again = await step(2, 'claude-opus-4-8')
+  expect(stepped).toEqual(['claude-opus-5-5'])
+  expect(again.find(c => c.kind === 'text')?.text).toContain('an older model no work runs on')
+  expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was flagged and the app would send it to Opus 4.8').length).toBe(2)
 
-  // Once the app sends its steps to a right model again, a newer one too, nothing is changed and the card no longer says so
-  await step(3, 'claude-opus-5-6')
-  expect(stepped.at(-1)).toBe('claude-opus-5-6')
-  expect(await line()).not.toContain('by the app')
-  await step(4, 'claude-opus-4-8')
-  expect(await line()).toContain('moved to Opus 4.8 by the app')
-
-  // A helper of an agent type the app runs on Haiku runs on Sonnet 5.5; an older Sonnet the app moved it to stays
+  // A helper of an agent type that starts on Haiku runs on Sonnet 5.5; an older Sonnet the app moves it to is not run either
   await $.agent.spawn({ ...spawn, description: 'Look it up', prompt: 'look it up', parentAgentId: 'a1' } as never)
   await step(0, 'claude-haiku-5-5', 'a2')
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
   await step(1, 'claude-sonnet-5', 'a2')
-  expect(stepped.slice(-2)).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5'])
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  expect(stepped.length).toBe(2)
+
+  // An agent whose own kind names an older Opus runs on the newest Opus, step after step
+  await $.agent.spawn({ ...spawn, description: 'Old kind', prompt: 'look again', parentAgentId: 'a1' } as never)
+  await step(0, 'claude-opus-4-1', 'a3')
+  await step(1, 'claude-opus-4-1', 'a3')
+  expect(stepped.slice(-2)).toEqual(['claude-opus-5-5', 'claude-opus-5-5'])
 
   // The chat's own thread runs on the model the person picked for it, whichever that is
   await step(0, 'claude-opus-4-8', '')
   expect(stepped.at(-1)).toBe('claude-opus-4-8')
 
-  // A model the person picks on the card is used for the steps the app sends to a right model, never in place of the app's move
-  await pressed(pane, 'model-a1')
-  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
-  await step(5, 'claude-opus-5-5')
-  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
-  await step(6, 'claude-opus-4-8')
-  expect(stepped.at(-1)).toBe('claude-opus-4-8')
-  expect(await line()).toContain('moved to Opus 4.8 by the app')
-
-  // F-003: a step of work that started on another model, which the app sends to Haiku, stays there too, and the card says so
-  await step(7, 'claude-haiku-5-5')
-  expect(stepped.at(-1)).toBe('claude-haiku-5-5')
-  expect(await line()).toContain('moved to Haiku 5.5 by the app')
   // An agent whose start the mod did not see (a workflow's, before this copy loaded) is left where the app sent it, Haiku too
   await step(0, 'claude-haiku-5-5', 'w1')
   expect(stepped.at(-1)).toBe('claude-haiku-5-5')
   expect(files.get(`${MEMORY}/log.md`)).toContain('work w1 was sent to Haiku 5.5 by the app: its steps stay there')
+})
+
+test('work the person moved to a model of their own is ended too when a safety flag would move it to an older model', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'model-a1')
+  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
+  for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
+  expect(stepped).toEqual(['claude-sonnet-5-5'])
+  for await (const _ of $.turn.step({ turnId: 't', index: 1, model: 'claude-opus-4-8', messageCount: 2, agentId: 'a1' })) void _
+  expect(stepped).toEqual(['claude-sonnet-5-5'])
 })
 
 test('work that answers from an older model all the same says so on its card', async ($, on) => {
@@ -1043,11 +1053,11 @@ test('a long run shows how far it is from what it prints: how much of how much, 
     await list.unmount()
     return all
   }
-  // How much of how much leads the side, its percent in blue, its speed and the time left curl gives, then when it last printed
+  // How much of how much leads the side, its percent in blue, its speed and the time left curl gives, and never when it printed
   expect(await until(async () => ((await texts()).includes('460 MB of 1 GB · ') || undefined))).toBe(true)
   const shown = await texts()
   expect(shown).toContain('45%')
-  expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · (printed )?\d+s ago$/.test(text))).toBe(true)
+  expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // In a narrower panel its speed gives way first
   expect((await texts(100)).some(text => /^460 MB(\/| of )1 GB · $/.test(text))).toBe(true)
   // The work's own line, as its scripts are told to print it
@@ -1118,11 +1128,11 @@ test('every run under a card says how it stands: a command held open shows its p
     const all = await texts()
     return all.includes('460 MB of 1 GB · ') ? all : undefined
   })) ?? []
-  // The download held open: how much of how much, its percent, speed and time left, as curl printed them
+  // The download held open: how much of how much, its percent, speed and time left, as curl printed them, and nothing of when
   // Named in the work's own form: its kind already said, how long it should take beside its time, in amber well past it
   expect(shown).toContain('Download the CT scans')
   expect(shown).toContain('9m 00s of ~3m')
-  expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · printed 2s ago$/.test(text))).toBe(true)
+  expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
   expect(shown.some(text => /^nothing printed in 9m$/.test(text))).toBe(true)
@@ -1143,4 +1153,86 @@ test('every run under a card says how it stands: a command held open shows its p
   await list.unmount()
   held.get('dl')?.('')
   await call
+})
+
+test("a run's second line starts under its name, with the tree's lines carried down beside it: not the last, the last, a run under a helper, a narrow panel, on a desktop and in a terminal; 15 Nov the app dropped the lines and the line started left of the tree", SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const outputs: Record<string, string> = { '/w/fit.log': 'loading\nprogress: 3/6 steps fitting\n', '/w/up.log': 'progress: 2/3 files uploading eta 4m\n', '/w/pics.log': 'progress: 10/40 pictures drawing\n' }
+  const { clock } = world(on, { jobs: { output: file => outputs[file] ?? '', wroteAt: () => now - 2_000 } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fit and upload', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fit and upload', prompt: 'go' } as never)
+  const detach = (agentId: string, id: string, log: string, description: string) =>
+    $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command: `cd /w && nohup python run.py > ${log} 2>&1 & echo $!`, description } as never)
+  await detach('a1', 'n1', 'fit.log', 'Run the fit of every head')
+  await detach('a1', 'n2', 'up.log', 'Upload the cleaned A, B, C over the old ones')
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Draw the pictures', prompt: 'go', parentAgentId: 'a1' } as never)
+  await detach('a2', 'n3', 'pics.log', 'Run the drawing of every picture')
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Check the drawing', prompt: 'go', parentAgentId: 'a1' } as never)
+  for (let n = 0; n < 6; n++) await advance(20_000)
+
+  type Node = { type?: string; key?: string; text?: string; props: Record<string, unknown>; children?: unknown[] }
+  const kids = (node: Node) => (node.children ?? []).filter(one => one && typeof one === 'object') as Node[]
+  const all = (node: Node): Node[] => [node, ...kids(node).flatMap(all)]
+  const textOf = (node: Node) => all(node).filter(one => one.type === 'Text').flatMap(one => (one.children ?? []).filter(part => typeof part === 'string')).join('')
+  // Each run's two lines: the head (its lines and mark, its name, its time) and how it stands (the lines carried down, the words)
+  const rows = async (surface: 'desktop' | 'terminal', columns: number) => {
+    const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: columns }, surface } as never)
+    const found = await until(async () => {
+      const boxes = (await pane.findAll({ type: 'Box' })) as unknown as Node[]
+      const runs = boxes.filter(one => /^job-list-job-/.test(String(one.key ?? '')) && kids(one).length === 2)
+      return runs.length === 3 ? runs : undefined
+    })
+    const svgs = (await pane.findAll({ type: 'Svg' })) as unknown as Node[]
+    await pane.unmount()
+    return { runs: (found ?? []).map(one => ({ head: kids(kids(one)[0] as Node)[0] as Node, stand: kids(one)[1] as Node })), svgs }
+  }
+  for (const columns of [72, 40]) {
+    // In a terminal: the carried lines are as wide as the head's lines and mark, so the words start in its name's column, a line
+    // under each line that goes on and none under the last
+    const { runs } = await rows('terminal', columns)
+    expect(runs).toHaveLength(3)
+    const seen = runs.map(({ head, stand }) => {
+      const lines = textOf(head)
+      const rails = textOf(kids(stand)[0] as Node)
+      expect(rails.length).toBe(lines.length)
+      expect([...rails].map((ch, n) => (ch === '│') === /[│├]/.test(lines[n] ?? ''))).toEqual([...rails].map(() => true))
+      expect(stand.props.height).toBe(1)
+      return lines
+    })
+    // every case is here: a run that is not the last, the last, and one under a helper with the work's own line going on beside it
+    expect(seen.some(lines => lines.startsWith('├'))).toBe(true)
+    expect(seen.some(lines => lines.startsWith('└') || /^│ └/.test(lines))).toBe(true)
+    expect(seen.some(lines => /^│ [├└]/.test(lines))).toBe(true)
+    // On a desktop: every picture has the words the app needs to draw it at all, and the carried lines are as wide as the head's
+    const drawn = await rows('desktop', columns)
+    for (const svg of drawn.svgs) {
+      expect(String(svg.props.alt ?? '').trim()).not.toBe('')
+      expect(Number(svg.props.width)).toBeGreaterThan(0)
+    }
+    for (const { head, stand } of drawn.runs) {
+      const [lines] = all(head).filter(one => one.type === 'Svg')
+      const [rails] = all(kids(stand)[0] as Node).filter(one => one.type === 'Svg')
+      expect(rails?.props.width).toBe(lines?.props.width)
+      // and the words move in by the step the name's own button pads it with
+      expect(kids(stand)[1]?.props.paddingLeft).toBe('xs')
+      expect(String(rails?.props.source)).toContain('<path')
+    }
+  }
+  // How it stands is now: how far and how long is left, the run's own or worked out from its percent, never when it printed
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
+  const shown = (await pane.findAll({ type: 'Text' })).map(one => one.text).join('\n')
+  await pane.unmount()
+  expect(shown).toContain('4m left')
+  expect(shown).toMatch(/~2m left/)
+  expect(shown).not.toMatch(/printed/)
+  // A narrow panel keeps how long is left before the percent
+  const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 40 }, surface: 'terminal' } as never)
+  const tight = (await narrow.findAll({ type: 'Text' })).map(one => one.text)
+  expect(tight).toContain('3/6 steps · ~2m left')
+  // and one under a helper, with less room, keeps its count beside it
+  expect(tight).toContain('10/40 · ~6m left')
+  await narrow.unmount()
 })

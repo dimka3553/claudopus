@@ -59,6 +59,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const resumed: string[] = []
   // The model each step of a piece of work was sent to
   const stepped: string[] = []
+  // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
+  const agentModels: (string | undefined)[] = []
+  const asked: (string | undefined)[] = []
   const played: string[] = []
   const notified: string[] = []
   // What was handed to osascript
@@ -327,6 +330,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
+    // and where the repo a worktree belongs to keeps its git folder, as git:common lays it
+    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--git-common-dir')) return ok(files.has('git:common') ? `${files.get('git:common')}\n` : '', files.has('git:common') ? 0 : 128)
     if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
@@ -382,6 +387,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   // A command a test holds running until it lets it go, with what it then prints: `held.get(id)?.(text)`
   const held = new Map<string, (text: string) => void>()
   on('tool.call', async (_, e) => {
+    if (e.tool === 'Agent') agentModels.push((e as { model?: string }).model)
     const command = String((e as { command?: string }).command ?? '')
     // The person says no to the app's prompt for this tool
     // as the engine says it: an error result in words, the same for an approval cut short
@@ -420,6 +426,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('agent.spawn', (_, e) => {
     prompts.push(e.prompt)
     backgrounds.push(e.background)
+    asked.push(e.model)
     const resume = (e as { resume?: { agentId?: string } }).resume
     // The model an agent's own type starts it on, by its task's few words, as Explore starts on Haiku
     return { model: options.startedOn?.[e.description ?? ''] ?? options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
@@ -452,7 +459,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
