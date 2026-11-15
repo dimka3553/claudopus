@@ -8100,7 +8100,9 @@ const lookJobs = async ($: EngineInterface) => {
   if (!r) return
   const [body = '', tail = ''] = r.stdout.split('\n@@ALIVE@@')
   const [aliveText = '', psText] = tail.split('@@PS@@\n')
-  if (psText !== undefined) ((jobProcs = procsOf(psText, now)), (jobProcsAt = now))
+  // ps gives each process's age: its start is that age before ps answered, not before this look began (on a slow Mac the look can
+  // start well before its ps runs, and every shell then seemed to start earlier than it did, too early to be the command held open)
+  if (psText !== undefined) ((jobProcs = procsOf(psText, await $.clock.now())), (jobProcsAt = now))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
   // A detached job whose process ended leaves its card, kept as ended (how its process ended is not known)

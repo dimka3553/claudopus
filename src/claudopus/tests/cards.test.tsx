@@ -1116,7 +1116,10 @@ test('every run under a card says how it stands: a command held open shows its p
   await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'tail -n0 -F sheet.log', description: 'Azure jobs finishing' } as never)
   heldAt = now
   const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Download the CT scans (about 3 min)' } as never)
-  for (let n = 0; n < 27; n++) await advance(20_000)
+  // Nine minutes, in steps of 5 s: the stand-in ps ages the shell from `now`, which runs a whole step ahead of the clock while a
+  // step's timers fire, and the mod takes as the command held open only a shell started within 20 s of its call. In steps of
+  // 20 s a look that ran behind on a slow machine (GitHub's) saw the shell start too early and never read the download
+  for (let n = 0; n < 108; n++) await advance(5_000)
   const texts = async () => {
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
     // (a run's name is a button, as a press opens its output)
