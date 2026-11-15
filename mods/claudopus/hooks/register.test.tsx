@@ -2277,9 +2277,12 @@ test('every run under a card says how it stands: a command held open shows its p
   await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'tail -n0 -F sheet.log', description: 'Azure jobs finishing' } as never)
   heldAt = now
   const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Download the CT scans (about 3 min)' } as never)
-  // Nine minutes, in steps of 5 s: the stand-in ps ages the shell from `now`, which runs a whole step ahead of the clock while a
-  // step's timers fire, and the mod takes as the command held open only a shell started within 20 s of its call. In steps of
-  // 20 s a look that ran behind on a slow machine (GitHub's) saw the shell start too early and never read the download
+  // The mod takes as the command held open only a shell started within 20 s of when the call began, as its hook saw it: the clock
+  // moves only once the call is running, else on a slow machine (GitHub's) the hook ran a few steps late and no shell matched
+  for (let tries = 0; tries < 2000 && !held.has('dl'); tries += 1) await new Promise<void>(resolve => setTimeout(() => resolve(), 5))
+  expect(held.has('dl')).toBe(true)
+  // Nine minutes, in steps of 5 s: the stand-in ps ages the shell from `now`, which runs a step ahead of the clock while a step's
+  // timers fire
   for (let n = 0; n < 108; n++) await advance(5_000)
   const texts = async () => {
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)

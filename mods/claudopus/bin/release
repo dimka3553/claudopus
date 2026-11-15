@@ -171,7 +171,7 @@ gained() { [ -n "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN" 2>/dev/nul
 gh_bin=$(for g in /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do [ -x "$g" ] && { echo "$g"; break; }; done)
 ghq() { env -u GH_HOST -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_CONFIG_DIR -u XDG_CONFIG_HOME -u GH_REPO -u GH_DEBUG \
   -u HTTPS_PROXY -u HTTP_PROXY -u ALL_PROXY -u https_proxy -u http_proxy -u all_proxy -u SSL_CERT_FILE -u SSL_CERT_DIR \
-  /usr/bin/perl -e 'alarm 60; exec @ARGV or exit 127' "$gh_bin" "$@"; }
+  /usr/bin/perl -e 'my $p = fork // exit 127; if (!$p) { exec @ARGV; exit 127 } $SIG{ALRM} = sub { kill "KILL", $p }; alarm 60; waitpid $p, 0; exit($? & 127 ? 124 : $? >> 8)' "$gh_bin" "$@"; }
 # The wait for GitHub's checks, across every try, ends 40 minutes from the first; RELEASE_CHECK_WAIT (seconds) can make it shorter,
 # never longer
 wait_s=${RELEASE_CHECK_WAIT:-2400}; case $wait_s in '' | *[!0-9]* | 0) wait_s=2400 ;; esac; [ "$wait_s" -gt 2400 ] && wait_s=2400
@@ -179,6 +179,7 @@ check_deadline=$(( $(date +%s) + wait_s ))
 # The checks read and the lock are of the repo pushed to
 [ "$(git -C "$top" remote get-url --push "$REMOTE" 2>/dev/null)" = "$url" ] || die "$REMOTE pushes somewhere other than it fetches from; nothing done"
 for try in 1 2 3 4 5; do
+  candidate=
   if [ -z "$(git -C "$top" ls-remote --heads "$REMOTE" "$MAIN" 2>/dev/null)" ]; then
     git -C "$top" ls-remote "$REMOTE" >/dev/null 2>&1 || die "could not reach $REMOTE"
     # A repo with no main yet: the branch becomes its first main as it is
@@ -269,17 +270,33 @@ for try in 1 2 3 4 5; do
     candidate=$(git rev-parse HEAD)
     cref="refs/release-check/${ver:-x}-$(git rev-parse --short HEAD)"
     out=$(git push -q "$REMOTE" "HEAD:$cref" 2>&1) || { echo "$out" | tail -5 >&2; cref=; die "could not push $candidate for GitHub to check; nothing pushed to $MAIN" 3; }
-    out=$(ghq api -X POST "repos/$repo/actions/workflows/$workflow/dispatches" -f "ref=$MAIN" -f "inputs[sha]=$candidate" 2>&1) || { echo "$out" | tail -5 >&2; die "GitHub would not start $workflow on $MAIN for $(git rev-parse --short HEAD); nothing pushed to $MAIN" 3; }
+    # Runs made before this dispatch are never taken (a minute's leeway for GitHub's clock)
+    since=$(date -u -r $(( $(date +%s) - 60 )) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$(( $(date +%s) - 60 ))" +%Y-%m-%dT%H:%M:%SZ)
+    out=$(ghq api -X POST "repos/$repo/actions/workflows/$workflow/dispatches" -f "ref=refs/heads/$MAIN" -f "inputs[sha]=$candidate" 2>&1) || { echo "$out" | tail -5 >&2; die "GitHub would not start $workflow on $MAIN for $(git rev-parse --short HEAD); nothing pushed to $MAIN" 3; }
     every=${RELEASE_CHECK_EVERY:-15}; case $every in '' | *[!0-9]* | 0) every=15 ;; esac; [ "$every" -gt 60 ] && every=60
     t=0; verdict=; run=
     say "waiting for GitHub's checks ($workflow as on $MAIN) on $(git rev-parse --short HEAD): ${GITHUB_CHECKS}"
     while [ "$(date +%s)" -lt "$check_deadline" ]; do
       t=$((t + 1))
-      [ -n "$run" ] || run=$(ghq api "repos/$repo/actions/workflows/$workflow/runs?event=workflow_dispatch&per_page=50" --jq ".workflow_runs[] | select(.display_title == \"Release check $candidate\") | .id" 2>/dev/null | head -1)
-      case $run in *[!0-9]*) run= ;; esac
-      runs=; [ -n "$run" ] && runs=$(ghq api --paginate "repos/$repo/actions/runs/$run/jobs?per_page=100" --jq '.jobs[] | [.name, .status, (.conclusion // ""), .html_url] | @tsv' 2>/dev/null)
-      # pass: every named check is there and passed, and no other job of the run failed; red: any job failed; else wait
-      verdict=$(printf '%s\n' "$runs" | NAMES=$GITHUB_CHECKS /usr/bin/perl -F'\t' -lane '
+      # The run is main's own: started by a dispatch on main, of main's workflow file, since this release's dispatch, named for the
+      # very commit. One started on any other branch or tag, or before, never counts; two that fit are refused
+      if [ -z "$run" ] && found=$(ghq api "repos/$repo/actions/workflows/$workflow/runs?event=workflow_dispatch&branch=$MAIN&per_page=50" --jq ".workflow_runs[] | select(.display_title == \"Release check $candidate\" and .head_branch == \"$MAIN\" and .path == \".github/workflows/$workflow\" and .event == \"workflow_dispatch\" and .created_at >= \"$since\") | [.id, .head_sha] | @tsv" 2>/dev/null); then
+        found=$(printf '%s\n' "$found" | grep -E '^[0-9]+	[0-9a-f]{40}$')
+        if [ "$(printf '%s\n' "$found" | grep -c .)" -gt 1 ]; then verdict="red: more than one run of $workflow on $MAIN is named for $(git rev-parse --short HEAD)"; break; fi
+        if [ -n "$found" ]; then
+          run=${found%%	*}
+          # Started on a main that moved since: the push below would be refused anyway; taken again from the newer main
+          [ "${found#*	}" = "$base" ] || { verdict=moved; break; }
+        fi
+      fi
+      runs=; state=
+      if [ -n "$run" ]; then
+        state=$(ghq api "repos/$repo/actions/runs/$run" --jq '[.status, (.conclusion // "")] | @tsv' 2>/dev/null) || state=
+        runs=$(ghq api --paginate "repos/$repo/actions/runs/$run/jobs?per_page=100" --jq '.jobs[] | [.name, .status, (.conclusion // ""), .html_url] | @tsv' 2>/dev/null) || runs=
+      fi
+      # pass: the run passed, every named check is in it and passed, and no other job failed; red: any job failed; else wait (a list
+      # gh could not read whole is waited on, never judged)
+      verdict=$(printf '%s\n' "$runs" | RUN_STATE=$state NAMES=$GITHUB_CHECKS /usr/bin/perl -F'\t' -lane '
         BEGIN { %want = map { s/^\s+|\s+$//g; ($_ => 1) } grep { /\S/ } split /,/, $ENV{NAMES} }
         next unless @F >= 2; $seen{$F[0]} = 1;
         if ($F[1] ne "completed") { push @busy, $F[0]; next }
@@ -288,6 +305,9 @@ for try in 1 2 3 4 5; do
           if (@red) { print "red: ", join("; ", @red); exit }
           my @missing = grep { !$seen{$_} } sort keys %want;
           if (@busy || @missing) { print "wait: ", join(", ", (map { "$_ running" } @busy), (map { "$_ not started" } @missing)); exit }
+          my ($status, $conclusion) = split /\t/, $ENV{RUN_STATE} // "";
+          if (($status // "") ne "completed") { print "wait: the run not ended"; exit }
+          if (($conclusion // "") ne "success") { print "red: the run ended ", ($conclusion || "without a conclusion"); exit }
           print "green" }')
       case $verdict in green | red:*) break ;; esac
       [ -n "$run" ] || verdict="wait: $workflow not started yet"
@@ -295,19 +315,23 @@ for try in 1 2 3 4 5; do
       sleep "$every"
     done
     case $verdict in
-      green) say "GitHub's checks passed on $(git rev-parse --short HEAD): ${GITHUB_CHECKS}" ;;
+      green) say "GitHub's checks passed on $(git rev-parse --short "$candidate"): ${GITHUB_CHECKS}" ;;
+      moved) drop_candidate; cd "$top" || exit 1; say "$MAIN moved while GitHub checked; taking it again (try $try)"; continue ;;
       red:*) drop_candidate; die "GitHub's checks failed on $MAIN with $branch, so nothing was pushed to $MAIN: ${verdict#red: }" 3 ;;
       *) drop_candidate; die "GitHub's checks did not end in time (${verdict#wait: }); nothing pushed to $MAIN" 3 ;;
     esac
   fi
-  if pushed=$(RELEASE_PUSH=1 git push -q "$REMOTE" "HEAD:refs/heads/$MAIN" 2>&1); then
+  # What goes to main and is tagged is the commit the checks passed on, never whatever the checkout holds after the wait
+  [ -n "${candidate:-}" ] || candidate=$(git rev-parse HEAD)
+  [ "$(git rev-parse HEAD)" = "$candidate" ] || { drop_candidate; die "the release's checkout moved while GitHub checked it; nothing pushed to $MAIN" 3; }
+  if pushed=$(RELEASE_PUSH=1 git push -q "$REMOTE" "$candidate:refs/heads/$MAIN" 2>&1); then
     drop_candidate
-    sha=$(git rev-parse --short HEAD)
+    sha=$(git rev-parse --short "$candidate")
     failed=""
     if [ -n "$ver" ]; then
       kept="$common/release-notes-v$ver.md"
       retry="gh release create v$ver --repo \"${repo:-}\" --title \"${NAME:+$NAME }$ver\" --notes-file \"$kept\" --latest --verify-tag"
-      if ! { git tag -f "v$ver" >/dev/null && RELEASE_PUSH=1 git push -q "$REMOTE" "v$ver" 2>/dev/null; }; then
+      if ! { git tag -f "v$ver" "$candidate" >/dev/null && RELEASE_PUSH=1 git push -q "$REMOTE" "v$ver" 2>/dev/null; }; then
         failed="RELEASE FAILED: $MAIN was pushed as $sha, but its tag v$ver was not. Finish it with: git push $REMOTE $sha:refs/tags/v$ver"
         [ -n "$GITHUB_RELEASE" ] && { cp "$notes" "$kept"; failed="$failed, then: $retry"; }
       elif [ -n "$GITHUB_RELEASE" ]; then
