@@ -203,14 +203,16 @@ const barDesktop = ($: EngineInterface, ui: Ui, rows: BarWait[], surface: Render
     const answers = barAnswers(one, surface, columns)
     const second = one.kind === 'gate' && one.gate ? gateSecond(one.gate, surface, one.id, columns) : ''
     const canOpen = Boolean(ask) || (one.kind === 'gate' && one.state === 'waits') || (isOpen && Boolean(askShown))
+    const isGate = one.kind === 'gate'
     return (
       <Box key={`bar-${one.id}`} flexDirection="column" borderStyle="round" borderColor={color} borderDimColor={!color} paddingX={1} flexShrink={0}>
         <Box key={`bar-${one.id}-line`} flexDirection="row" alignItems="center" gap={1}>
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             <Text wrap="truncate-end">
-              {/* Not sent: said first, in place of whose it is, so the question stays in view */}
-              {one.failed ? <Text color={NEEDS}>{`${upperFirst(one.failed)} · `}</Text> : <Text dimColor>{`${one.who} · `}</Text>}
-              {one.state === 'waits' || one.state === 'acting' ? <Text color={color} bold>{one.what}</Text> : <Text color={color} dimColor={!color} bold>{one.said ?? ''}</Text>}
+              {/* Not sent: said first, then whose it is; the question is whole once the row is opened */}
+              {one.failed ? <Text color={NEEDS}>{`${upperFirst(one.failed)} · `}</Text> : null}
+              <Text dimColor>{isGate && one.state === 'waits' ? one.who : `${one.who} · `}</Text>
+              {isGate && one.state === 'waits' ? null : one.state === 'waits' || one.state === 'acting' ? <Text color={color} bold>{one.what}</Text> : <Text color={color} dimColor={!color} bold>{one.said ?? ''}</Text>}
             </Text>
           </Box>
           <Box flexDirection="row" gap={1} flexShrink={0}>
@@ -219,8 +221,18 @@ const barDesktop = ($: EngineInterface, ui: Ui, rows: BarWait[], surface: Render
             {canOpen ? <Button key={`bar-${one.id}-more`} label={isOpen ? 'Less' : 'More'} plain dimColor hover={{ scope: `bar-${one.id}-more`, underline: true }} onPress={() => barToggle($, openKey)} /> : null}
           </Box>
         </Box>
+        {/* A gate says what it wants on a line of its own, whole, beside nothing that could cut where it runs */}
+        {isGate ? (
+          <Box key={`bar-${one.id}-what`}>
+            <Text color={one.state === 'waits' ? NEEDS : undefined} dimColor={one.state !== 'waits'} bold={one.state === 'waits'} wrap="wrap">{one.what}</Text>
+          </Box>
+        ) : null}
         {/* What it runs, whole and wrapped when it can be allowed here; answered, the same lines, dim */}
-        {second ? <Text key={`bar-${one.id}-command`} mono dimColor={one.state !== 'waits'} wrap="wrap">{second}</Text> : null}
+        {second ? (
+          <Box key={`bar-${one.id}-command`}>
+            <Text mono dimColor={one.state !== 'waits'} wrap="wrap">{second}</Text>
+          </Box>
+        ) : null}
         {/* Opened: the whole of it, as on its card, with the box for a reply in words */}
         {isOpen && askShown ? barAskOpen($, ui, one, askShown, surface, !ask) : null}
         {isOpen && one.kind === 'gate' && one.state === 'waits' ? (
@@ -252,7 +264,7 @@ const barAskOpen = ($: EngineInterface, ui: Ui, row: BarWait, ask: NonNullable<T
   const { Box, Button, Text } = ui
   return (
     <Box key={`bar-${row.id}-open`} flexDirection="column" gap={1} paddingTop={1}>
-      {oneLine(ask.text) !== ask.text || ask.text.length > 80 ? <Text key={`bar-${row.id}-text`} color={NEEDS} bold wrap="wrap">{ask.text}</Text> : null}
+      <Text key={`bar-${row.id}-text`} color={isDone ? undefined : NEEDS} dimColor={isDone} bold={!isDone} wrap="wrap">{ask.text}</Text>
       {ask.details ? <Text key={`bar-${row.id}-details`} wrap="wrap">{ask.details.length <= 600 ? ask.details : `${cut(ask.details, 600)} The rest is on its card.`}</Text> : null}
       {ask.copy ? (
         <Box key={`bar-${row.id}-copy`} flexDirection="row" alignItems="center" gap={2} backgroundColor={FILL} paddingLeft={2}>
@@ -290,7 +302,9 @@ const termLines = (row: BarWait, columns: number, answers: BarAnswer[]) => {
   const notes = row.kind === 'ask' && row.state !== 'acting' ? Number(Boolean(row.ask?.details)) + Number(Boolean(row.ask?.copy)) : 0
   const tail = Math.max(answers.length ? Math.max(1, Math.ceil((4 + answers.reduce((n, a) => n + a.label.length + 6, 0)) / Math.max(20, columns - 8))) : 1, barTail.get(row.id) ?? 1)
   if (answers.length) barTail.set(row.id, tail)
-  return 1 + second + notes + tail
+  // A gate's line wraps whole, so where it runs is never cut
+  const head = row.kind === 'gate' ? Math.max(1, Math.ceil((row.who.length + 2 + row.what.length) / Math.max(20, columns - 8))) : 1
+  return head + second + notes + tail
 }
 // The rows in the terminal: a line each, its answers numbered under it. A bare digit typed in an empty prompt presses a band's Button,
 // and a message may begin with one, so the first press only picks the answer and says so; the same digit again sends it. Numbers run
@@ -323,8 +337,9 @@ const barTerminal = ($: EngineInterface, ui: Ui, rows: BarWait[], columns: numbe
         const isDone = row.state === 'answered' || row.state === 'refused'
         return (
           <Box key={`bar-${row.id}`} flexDirection="column">
-            <Text wrap="truncate-end">
-              {row.failed ? <Text color={NEEDS}>{`${upperFirst(row.failed)}: `}</Text> : <Text dimColor>{`${row.who}: `}</Text>}
+            <Text wrap={row.kind === 'gate' ? 'wrap' : 'truncate-end'}>
+              {row.failed ? <Text color={NEEDS}>{`${upperFirst(row.failed)} · `}</Text> : null}
+              <Text dimColor>{`${row.who}: `}</Text>
               <Text color={isDone ? undefined : color} dimColor={isDone} bold={!isDone}>{cut(row.what, Math.max(40, columns * 2))}</Text>
             </Text>
             {second ? (

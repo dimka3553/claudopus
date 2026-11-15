@@ -287,12 +287,16 @@ test("a gate's row keeps its lines when pressed: its command stays under what wa
   expect(await w.held('p1')).toBeDefined()
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await rLabels(band)).length ? true : undefined))
-  const lines = async () => (await rTexts(band)).filter(t => /chmod 644|Wants to run|You allowed/.test(t.text)).length
+  // The row's lines, by their keys: its line, what it wants, its command
+  const lines = async () => [...(await band.findAll({ type: 'Box' })), ...(await band.findAll({ type: 'Text' }))].map(n => n.key ?? '').filter(key => /^bar-gate-.*-(line|what|command)$/.test(key)).sort()
   const before = await lines()
   const once = (await band.findAll({ type: 'Button' })).find(b => b.props.label === 'Allow once')?.key
   await band.press({ key: String(once) })
   expect(await band.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeDefined()
   expect(await lines()).toEqual(before)
+  expect(before).toHaveLength(3)
+  // Where it runs is on a line of its own, never cut beside the buttons
+  expect((await band.findAll({ type: 'Text' })).find(t => t.text === 'Wants to run an admin command on this Mac')?.props.wrap).toBe('wrap')
   w.wake()
   await band.unmount()
 })
