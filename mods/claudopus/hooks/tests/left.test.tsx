@@ -796,6 +796,9 @@ test('xargs -P sending its output nowhere is a run that says it runs and gives n
   // Its memory moving at each look of the processes draws the panel afresh no more than when it holds still: it is shown
   // at the next drawing, so the panel keeps still under the pointer
   expect(await panelDrawsWhile(drawn, advance, procs)).toBe(true)
+  // and the card shows the new figure once it is drawn again
+  await advance(10_000)
+  expect(await until(async () => ((await leftTexts($)).some(text => text.includes('8.8 GB')) || undefined))).toBe(true)
 })
 
 test('a Python pool left running is one run with its workers\' memory added up', SLOW, async ($, on) => {
