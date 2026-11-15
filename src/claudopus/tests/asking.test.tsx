@@ -1014,3 +1014,104 @@ test('two presses on an ask, the second on the drawing before the first was take
   await new Promise<void>(done => setTimeout(done, 50))
   expect(s.answers()).toHaveLength(1)
 })
+
+// What the panel reads, written in a minute, and how many seconds of it the panel was drawn afresh in: each one the app builds whole
+// again, under the pointer
+const watchWrites = (on: On) => {
+  const writes: Record<string, number> = {}
+  const counting = { isOn: false }
+  on('ui.invalidate', (_, e, next) => ((counting.isOn && (writes.invalidate = (writes.invalidate ?? 0) + 1)), next(e)))
+  on('state.set', (_, e, next) => {
+    const key = (e as { key?: string }).key ?? (e as { ref?: { key?: string } }).ref?.key ?? Object.keys(e).join(',')
+    if (counting.isOn) writes[key] = (writes[key] ?? 0) + 1
+    return next(e)
+  })
+  return { writes, counting }
+}
+
+test('with work running and nothing new, the panel is drawn afresh only every ten seconds and nothing it reads is written over with the same: the 15 Nov hover that flickered each second', async ($, on) => {
+  const { clock } = world(on)
+  const { writes, counting } = watchWrites(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(2000)
+  counting.isOn = true
+  const drawings = new Set<string>()
+  for (let i = 0; i < 60; i++) (await clock.advance(1000), drawings.add(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))))
+  // Nothing the panel reads is written: the times move by the mod's own call, every ten seconds
+  expect({ tick: writes.tick ?? 0, todos: writes.todos ?? 0 }).toEqual({ tick: 0, todos: 0 })
+  expect(writes.invalidate ?? 0).toBeLessThanOrEqual(7)
+  expect(drawings.size).toBeLessThanOrEqual(7)
+  expect(drawings.size).toBeGreaterThanOrEqual(5)
+  // Anything new still shows at once
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'I am looking at the left ear.' } as never)
+  expect(await list.find({ type: 'Text', text: 'I am looking at the left ear.' })).toBeDefined()
+  await list.unmount()
+})
+
+test('with nothing running the panel is not drawn again at all, so what is under the pointer stays as it is and a press reaches it', async ($, on) => {
+  const { clock } = world(on)
+  const { writes, counting } = watchWrites(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.turn.complete({ answer: 'Ears checked.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(120_000)
+  await list.findAll({ type: 'Text' })
+  counting.isOn = true
+  for (let i = 0; i < 60; i++) (await clock.advance(1000), await list.findAll({ type: 'Text' }))
+  expect(writes.invalidate ?? 0).toBe(0)
+  expect({ tick: writes.tick ?? 0, todos: writes.todos ?? 0 }).toEqual({ tick: 0, todos: 0 })
+  await list.unmount()
+})
+
+test('while the person uses the panel its running times stand still, and move again once they stop; an ask that comes meanwhile shows at once', async ($, on) => {
+  const { clock } = world(on)
+  const { writes, counting } = watchWrites(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two pieces of work', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(12_000)
+  await list.findAll({ type: 'Text' })
+  // A press in the panel: drawn once for what it did, then still while the person is at it
+  const title = (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('open-'))
+  expect(title).toBeDefined()
+  await list.press({ key: title?.key ?? '' })
+  await list.findAll({ type: 'Text' })
+  counting.isOn = true
+  const still = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  for (let i = 0; i < 13; i++) (await clock.advance(1000), expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).toBe(still))
+  // An ask comes: shown at once all the same
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a2', text: 'May I go on?', choices: ['Approve', 'Not now'] } as never)
+  expect(await list.find({ type: 'Text', text: 'May I go on?' })).toBeDefined()
+  // Left alone, the times move again
+  const asked = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  await clock.advance(30_000)
+  expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).not.toBe(asked)
+  await list.unmount()
+})
+
+test('with only a Details tab in front, or the Servers tab open, the mod still asks for no more than a drawing every ten seconds', async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: true, isPlaced: true }, { id: 'servers', isShown: true, isPlaced: true }]
+  const { clock } = world(on, { live })
+  const { writes, counting } = watchWrites(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(2000)
+  await list.unmount()
+  const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  const servers = await $.ui.mount({ ...LIST, requestId: 'servers', props: { ...LIST.props, title: 'Servers' }, surface: 'desktop' } as never)
+  await clock.advance(2000)
+  counting.isOn = true
+  for (let i = 0; i < 60; i++) (await clock.advance(1000), await details.findAll({ type: 'Text' }))
+  expect(writes.invalidate ?? 0).toBeLessThanOrEqual(7)
+  expect(writes.tick ?? 0).toBe(0)
+  await Promise.all([details.unmount(), servers.unmount()])
+})
