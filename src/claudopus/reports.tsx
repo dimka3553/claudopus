@@ -57,6 +57,10 @@ const answeredOf = (r: Report) => {
 }
 
 const gists = new Map<string, string>()
+// A file a report names is a path inside its own folder: never absolute, never one that climbs out with .., whoever wrote it (a
+// report another Mac handed over included)
+const isInside = (file: unknown): file is string =>
+  typeof file === 'string' && Boolean(file) && !file.startsWith('/') && !file.startsWith('~') && !file.includes('\0') && file.split('/').every(part => part !== '..' && part !== '')
 const loadReports = async ($: EngineInterface) => {
   const found: Report[] = []
   for (const entry of await $.fs.list(reportsDir()).catch(() => [])) {
@@ -67,7 +71,7 @@ const loadReports = async ($: EngineInterface) => {
       // A report a piece of work wrote has its finding read again from its text, once a load, as the finding is now found;
       // one brought in by hand keeps the finding written for it
       if (one.agent && !gists.has(one.id)) gists.set(one.id, gistOf(await readOr($, `${reportsDir()}/${entry.name}/report.md`), one.title) || one.gist)
-      found.push({ ...one, subject: one.subject || one.title, gist: (one.agent && gists.get(one.id)) || one.gist || '', files: Array.isArray(one.files) ? one.files : [] })
+      found.push({ ...one, subject: one.subject || one.title, gist: (one.agent && gists.get(one.id)) || one.gist || '', files: Array.isArray(one.files) ? one.files.filter(isInside) : [] })
     } catch {
       // A folder without its meta.json is not a report yet
     }
@@ -169,10 +173,13 @@ const saveReport = async ($: EngineInterface, card: Todo, text: string) => {
 
 // The small copy of a picture the panel draws, kept beside the report
 const thumbPath = (r: Report, file: string) => `${reportPath(r)}/thumbs/${file.replaceAll('/', '--')}.jpg`
+// A picture is read only where it really is inside its report's folder: no link along its path leads anywhere else
+const INSIDE = 'f=$1; d=$(cd -P "$2" 2>/dev/null && pwd) || exit 1; p=$(cd -P "$(dirname "$f")" 2>/dev/null && pwd) || exit 1; [ ! -L "$f" ] && [ -f "$f" ] || exit 1; case "$p/" in "$d"/*) exit 0 ;; esac; exit 1'
 const makeThumbs = async ($: EngineInterface, r: Report) => {
-  for (const file of r.files.filter(one => RASTER.test(one))) {
+  for (const file of r.files.filter(one => RASTER.test(one) && isInside(one))) {
     const to = thumbPath(r, file)
     if (await $.fs.exists(to)) continue
+    if ((await $.process.run(['sh', '-c', INSIDE, 'sh', `${reportPath(r)}/${file}`, reportPath(r)]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) continue
     await $.process.run(['mkdir', '-p', `${reportPath(r)}/thumbs`])
     for (const size of THUMB_SIZES) {
       await $.process.run([sips($), '-Z', size, '-s', 'format', 'jpeg', '-s', 'formatOptions', '55', `${reportPath(r)}/${file}`, '--out', to])

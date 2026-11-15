@@ -88,13 +88,13 @@ test('work that is ready plays one sound and raises one notification; helpers, a
   app.noSurface = false
 
   // config.json switches each off
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ sound: false }))
+  ownSet(files, 'config.json', JSON.stringify({ sound: false }))
   await $.agent.spawn({ ...spawn, description: 'Draw the brows', prompt: 'draw the brows' } as never)
   await end('a11', 't9')
   await clock.advance(1_000)
   expect(played).toHaveLength(6)
   expect(notified).toHaveLength(6)
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false }))
+  ownSet(files, 'config.json', JSON.stringify({ notifications: false }))
   await $.agent.spawn({ ...spawn, description: 'Draw the lips', prompt: 'draw the lips' } as never)
   await end('a12', 't10')
   await clock.advance(1_000)
@@ -142,13 +142,13 @@ test('work that needs the person is heard once: its notification comes as the am
   expect(own).toHaveLength(1)
 
   // Sound off in Config: the amber notification, silent, and no chime of the mod's
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ sound: false }))
+  ownSet(files, 'config.json', JSON.stringify({ sound: false }))
   await ask('k3', 'Press Approve.')
   expect(lead(own.at(-1))).toEqual(['--asks'])
   expect(played).toEqual([])
 
   // Claudopus Asks turned off in System Settings: the purple Claudopus, which carries no sound, and the mod's own chime
-  files.set(`${MEMORY}/config.json`, '{}')
+  ownSet(files, 'config.json', '{}')
   app.asks = 2
   await ask('k4', 'Type your password.')
   expect(lead(own.at(-2))).toEqual(['--asks', '--chime'])
@@ -169,13 +169,13 @@ test('work that needs the person is heard once: its notification comes as the am
   app.asks = 0
 
   // Notifications off in Config: only the chime; both off: nothing
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false }))
+  ownSet(files, 'config.json', JSON.stringify({ notifications: false }))
   const before = own.length
   await clock.advance(6_000)
   await ask('k5', 'Pick a name.')
   expect(own).toHaveLength(before)
   expect(played).toHaveLength(3)
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ notifications: false, sound: false }))
+  ownSet(files, 'config.json', JSON.stringify({ notifications: false, sound: false }))
   await clock.advance(6_000)
   await ask('k6', 'Pick a colour.')
   expect(own).toHaveLength(before)

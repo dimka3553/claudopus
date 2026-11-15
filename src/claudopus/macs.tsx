@@ -22,7 +22,56 @@ type Fetched = { mac: string; text: string; fetchedAt: number; triedAt: number; 
 // This Mac's own chats' files, as handed to the other Macs: those written in the last three minutes, never another Mac's copies
 const ownFiles = async ($: EngineInterface, now: number) => {
   const listed = (await $.fs.list(liveDir()).catch(() => [])).filter(entry => entry.kind === 'file' && entry.name.endsWith('.json') && !(entry.mtimeMs && now - entry.mtimeMs > 180_000))
-  return (await Promise.all(listed.map(entry => readOr($, `${liveDir()}/${entry.name}`)))).filter(text => text.trim().startsWith('{'))
+  return (await Promise.all(listed.map(entry => readOr($, `${liveDir()}/${entry.name}`)))).filter(text => text.trim().startsWith('{')).map(forOtherMac)
+}
+// What leaves this Mac for another: a chat's file less every command and text that work runs or sends. Gone are the text an ask
+// gives to paste (a code, a token or a command), the command or text a prompt shows whole and the words of its line that came from
+// the command, the command a card shows running, sent to the background or detached (and the log it writes), and the command, change
+// or release an admin, file or release press is asked for: a card there says what kind of thing waits, and what it is in the work's
+// own words where it gave some, never the command. All of it stays on this Mac's own cards and in its chats
+const AS_COMMAND = 'a command'
+const forOtherMac = (text: string) => {
+  try {
+    const one = JSON.parse(text) as { cards?: unknown; ended?: unknown; prompts?: unknown; answeredPrompts?: unknown }
+    type Run = { what?: unknown; cmd?: unknown; label?: unknown; log?: unknown; pid?: unknown }
+    // The work's own words for what runs, never a line of the command itself
+    const said = (run: Run) => {
+      const what = typeof run.what === 'string' ? run.what : ''
+      const cmd = typeof run.cmd === 'string' ? run.cmd : ''
+      const label = typeof run.label === 'string' ? run.label : ''
+      const first = cmd.split('\n')[0]?.trim() ?? ''
+      const isCommand = !what || (first && (first.startsWith(what.trim()) || what.trim().startsWith(first.slice(0, 40)) || cmd.includes(what.trim())))
+      return isCommand ? label && !cmd.includes(label) ? label : AS_COMMAND : what
+    }
+    const run = (r: unknown) => {
+      if (!r || typeof r !== 'object') return r
+      const { cmd: _cmd, label: _label, log: _log, pid: _pid, ...rest } = r as Run & Record<string, unknown>
+      return 'cmd' in (r as object) ? { ...rest, what: said(r as Run), ...('log' in (r as object) ? { cmd: '', log: '' } : {}) } : rest
+    }
+    const card = (c: unknown) => {
+      if (!c || typeof c !== 'object') return c
+      const t = c as Record<string, unknown> & { ask?: Record<string, unknown>; running?: unknown; bg?: unknown; detached?: unknown; admins?: unknown }
+      const ask = t.ask ? (({ copy: _copy, ...rest }) => rest)(t.ask) : undefined
+      return {
+        ...t,
+        ...(t.ask ? { ask } : {}),
+        ...(t.running ? { running: run(t.running) } : {}),
+        ...(Array.isArray(t.bg) ? { bg: t.bg.map(run) } : {}),
+        ...(Array.isArray(t.detached) ? { detached: t.detached.map(run) } : {}),
+        ...(Array.isArray(t.admins) ? { admins: t.admins.map(g => (g && typeof g === 'object' ? { ...(g as object), command: '' } : g)) } : {}),
+      }
+    }
+    const prompt = (p: unknown) => {
+      if (!p || typeof p !== 'object') return p
+      const { detail: _detail, ...rest } = p as { detail?: unknown; text?: unknown; kind?: unknown }
+      // "Run a command: <its words>": only the kind of thing it asks, as the words after it may be the command
+      return typeof rest.text === 'string' && rest.kind === 'allow' ? { ...rest, text: rest.text.split(': ')[0] } : rest
+    }
+    const each = (list: unknown, fn: (one: unknown) => unknown) => (Array.isArray(list) ? list.map(fn) : list)
+    return JSON.stringify({ ...one, cards: each(one.cards, card), ended: each(one.ended, card), prompts: each(one.prompts, prompt), answeredPrompts: each(one.answeredPrompts, prompt) })
+  } catch {
+    return text
+  }
 }
 // Each other Mac is reached by whichever chat here finds its copy older than FETCH_EVERY: one trip for every chat on this Mac. A trip
 // hands that Mac this Mac's chats, brings back its chats and the answers pressed there for this Mac's chats. What a trip that failed
@@ -48,23 +97,10 @@ const fetchMacs = async ($: EngineInterface) => {
       }
       const fetchedAt = await $.clock.now()
       const { text, carried } = tripOf(r.stdout)
-      // An answer carried back is left for its chat here as one pressed in another chat's panel, its time moved onto this Mac's clock
-      const shift = clockOf(text) ? fetchedAt - clockOf(text) : 0
-      // Only an answer left here, or left on an earlier trip, is put away there: one that could not be left is carried again
-      const names: string[] = []
-      for (const one of carried) {
-        if (kept.seen.includes(one.name)) {
-          names.push(one.name)
-          continue
-        }
-        const path = `${liveDir()}/${ANSWERS}/${one.chat}/${one.name}`
-        const r = await $.fs
-          .write(`${path}.part`, JSON.stringify({ ...one.answer, at: one.answer.at + shift }))
-          .then(() => $.process.run(['mv', '-f', `${path}.part`, path]))
-          .catch(err => ({ exitCode: -1, stderr: String(err) }))
-        if (r.exitCode === 0) names.push(one.name)
-        else await log($, `answer from ${mac} not left: ${r.stderr.trim().slice(0, 160)}`)
-      }
+      // An answer carried back from that Mac answers nothing here: an ask is answered only in its own chat, and that Mac (or anything
+      // that can write its outbox) proves nothing of who pressed it. Each is only put away there, on the next trip
+      const names = carried.map(one => one.name)
+      if (names.some(name => !kept.seen.includes(name))) await log($, `answers carried from ${mac} put away unread: an ask is answered only in its own chat`)
       await $.fs.write(macPath(mac), JSON.stringify({ mac, text, fetchedAt, triedAt: now, acks: names, seen: [...new Set([...kept.seen, ...names])].slice(-200) }))
     }
   } finally {

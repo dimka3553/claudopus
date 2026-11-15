@@ -32,7 +32,7 @@ const SHIPPED_PRINCIPLES: string = '<shipped: rules/CLAUDE.md>'
 const prompts: string[] = []
 
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: () => string; wroteAt: () => number }; usage?: (script: string) => string } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: () => string; wroteAt: () => number }; usage?: (script: string) => string; startedOn?: Record<string, string> } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -182,16 +182,24 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const ok = (stdout = '', exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // The admin gate's wait between two looks at what was pressed: it lasts until the test lets it go with wake(), as a second passing
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
+    // Every admin password an earlier version kept, taken out of the keychain as the mod loads
+    if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
+    // What a password box sends, sealed by openssl to the key of the runner that asked: the test's own stand-in for it
+    if (tool === '/bin/bash' && String(rest[1]).includes('pkeyutl -encrypt')) return ok(`${boxSealed(String(rest[3]), String(e.init?.stdin ?? ''))}\n`)
     // The admin gate's seals: one for each message, under the key the keychain holds as keychain:gate; "make" makes a key where
     // there is none and "new" always, as the Mac's own shell does
     if (tool === '/bin/sh' && String(rest[1]).includes('claudopus-admin-gate')) {
-      const [, , , mode, ...messages] = rest
-      if (mode === 'new' || (mode === 'make' && !files.has('keychain:gate'))) files.set('keychain:gate', `key-${(gateKeys += 1)}`)
-      const key = files.get('keychain:gate')
+      const [, , , said, ...messages] = rest
+      // The kept copy of the settings and texts has its key apart, as keychain:known
+      const item = String(said).startsWith('known-') ? 'keychain:known' : 'keychain:gate'
+      // A keychain that does not answer (locked over ssh, or refusing)
+      if (files.has('keychain:refused')) return ok('', 1)
+      const mode = String(said).replace(/^known-/, '')
+      if (mode === 'new' || (mode === 'make' && !files.has(item))) files.set(item, `key-${(gateKeys += 1)}`)
+      const key = files.get(item)
+      if (mode === 'has') return ok('', key ? 0 : 3)
       return key ? ok(messages.map(one => `${fakeSeal(key, String(one))}\n`).join('')) : ok('', 3)
     }
-    // Every kept admin password taken out of the keychain
-    if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
     // A line added to the end of a file, as the log is written
     if (tool === 'sh' && rest[1] === 'printf %s "$2" >> "$1"' && rest[3] !== undefined) {
       files.set(rest[3], `${files.get(rest[3]) ?? ''}${rest[4] ?? ''}`)
@@ -267,6 +275,12 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       files.set(told, '')
       return { value: { exitCode: isNew ? 0 : 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // A file made only where none is, as the update's lock is taken with the shell's noclobber
+    if (tool === 'sh' && rest[1] === 'set -C; printf %s "$2" > "$1"' && rest[3] !== undefined) {
+      if (files.has(String(rest[3]))) return ok('', 1)
+      files.set(String(rest[3]), String(rest[4] ?? ''))
+      return ok()
+    }
     // A shell run here: bringing results from another Mac lays there what the test laid as remote:<folder>/<file>, and a folder moved
     // into place goes only where none has its name
     if (tool === 'sh' || tool === 'bash') {
@@ -289,10 +303,22 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (tool === 'scutil') return { value: { exitCode: 0, stdout: 'Sams-MacBook-Air\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'rm') files.delete(String(rest.at(-1)))
     // A file moved aside
-    if (tool === 'mv') (files.set(String(rest[2]), files.get(String(rest[1])) ?? ''), files.delete(String(rest[1])))
+    if (tool === 'mv') (files.set(String(rest.at(-1)), files.get(String(rest.at(-2))) ?? ''), files.delete(String(rest.at(-2))))
     // A copy the mod makes of a file
     if (tool === 'cp') (copied.push(String(rest[2])), files.set(String(rest[2]), files.get(String(rest[1])) ?? ''))
     const isGone = killed.includes('700')
+    // bin/keyring, as the runners keep a value: laid by the test as keyring:<service>/<account>
+    if (tool?.endsWith('bin/keyring')) {
+      const key = `keyring:${rest[1]}/${rest[2]}`
+      if (rest[0] === 'get') return files.has(key) ? ok(files.get(key)) : ok('', 1)
+      if (rest[0] === 'set') return (files.set(key, String(e.init?.stdin ?? '').replace(/\n$/, '')), ok())
+      if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
+      if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))
+      return ok('', 2)
+    }
+    // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
+    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--show-toplevel')) return ok(files.has('git:top') ? `${files.get('git:top')}\n` : '', files.has('git:top') ? 0 : 128)
+    if (tool === 'git' && rest.includes('rev-parse') && rest.includes('--abbrev-ref')) return ok(files.has('git:branch') ? `${files.get('git:branch')}\n` : '', files.has('git:branch') ? 0 : 128)
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
     if (tool?.endsWith('bin/secret')) {
@@ -354,6 +380,17 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (files.get('interrupt') === e.tool) return { result: '[Request interrupted by user for tool use]', isError: true } as never
     // A command started detached prints its process, as `echo $!` does
     if (e.tool === 'Bash' && /\bnohup\b/.test(command) && command.includes('$!')) return { result: { stdout: '48213\n', stderr: '', interrupted: false } } as never
+    // A command that writes a file of the memory folder, by a path the hook cannot read in it: `effect <name> <text>` writes it,
+    // `effect <name>` takes it away, and `effect <name> hold <key>` writes it once the test lets the call end
+    // Write to the person's rules and roles writes them, as the tool does
+    if (e.tool === 'Write' && /\/\.claude\/claudopus\/(?:rules|roles)\//.test(String((e as { file_path?: string }).file_path))) files.set(String((e as { file_path?: string }).file_path), String((e as { content?: string }).content ?? ''))
+    if (e.tool === 'Bash' && command.startsWith('effect ')) {
+      const [, name = '', ...text] = command.split(' ')
+      if (text[0] === 'hold') await new Promise<string>(done => held.set(text[1] ?? '', done))
+      if (text.length) files.set(`${MEMORY}/${name}`, text[0] === 'hold' ? text.slice(2).join(' ') : text.join(' '))
+      else files.delete(`${MEMORY}/${name}`)
+      return { result: { stdout: '', stderr: '', interrupted: false } } as never
+    }
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))
@@ -373,7 +410,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     prompts.push(e.prompt)
     backgrounds.push(e.background)
     const resume = (e as { resume?: { agentId?: string } }).resume
-    return { model: options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
+    // The model an agent's own type starts it on, by its task's few words, as Explore starts on Haiku
+    return { model: options.startedOn?.[e.description ?? ''] ?? options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
   })
   on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status })) as never }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
@@ -409,6 +447,32 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
 const fakeSeal = (key: string, message: string) =>
   Array.from({ length: 8 }, (_, n) => [...`${n}${key}\n${message}`].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261 + n).toString(16).padStart(8, '0')).join('')
+// A box's value as the test world seals it to a runner's key: hex of the key's start and the value, long as a real one, never the
+// value itself as typed
+const boxSealed = (key: string, value: string) => `${[...`${key.slice(0, 12)}|${value}`].map(c => c.charCodeAt(0).toString(16).padStart(2, '0')).join('')}`.padEnd(344, 'A')
+// The public half of a runner's key, as bin/admin puts it in a request
+const BOX_PUBLIC = `MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA${'x'.repeat(300)}IDAQAB`
+// One of the person's settings or texts as Config writes it: the file, and what Claudopus knows it holds, so no check puts it back
+const ownSet = (files: Map<string, string>, name: string, text: string) => {
+  const kept = (() => {
+    try {
+      return (JSON.parse(files.get(`${MEMORY}/admin-known.json`) ?? '{}') as { files?: Record<string, string | null> }).files ?? {}
+    } catch {
+      return {}
+    }
+  })()
+  const known = { ...kept, [name]: text }
+  if (!files.has('keychain:known')) files.set('keychain:known', 'key-known')
+  const count = (() => {
+    try {
+      return Number((JSON.parse(files.get(`${MEMORY}/admin-known.json`) ?? '{}') as { count?: number }).count ?? 0) + 1
+    } catch {
+      return 1
+    }
+  })()
+  files.set(`${MEMORY}/admin-known.json`, JSON.stringify({ files: known, count, seal: fakeSeal(files.get('keychain:known') ?? '', `known\n${count}\n${JSON.stringify(known)}`) }))
+  files.set(`${MEMORY}/${name}`, text)
+}
 // A button of the open card by its key less the count of presses the card adds to it
 const keyed = async (pane: { findAll: (q: { type: string }) => Promise<readonly { key: string | undefined; props: Record<string, unknown> }[]> }, base: string) =>
   (await pane.findAll({ type: 'Button' })).find(one => new RegExp(`^${base}-\\d+$`).test(one.key ?? ''))

@@ -5,6 +5,7 @@
 // The person's own copy of one of the three texts the mod ships (TEXTS in ./config), each written at its own fixed place in the
 // memory folder; the Config tab is the only writer, and nothing else is written there
 async function writeOwnText($: EngineInterface, memory: string, path: string, text: string) {
+  await personWrote($, memory, path, text)
   if (path === 'rules/CLAUDE.md') return $.fs.write(`${memory}/rules/CLAUDE.md`, text)
   if (path === 'roles/chat.md') return $.fs.write(`${memory}/roles/chat.md`, text)
   if (path === 'roles/work.md') return $.fs.write(`${memory}/roles/work.md`, text)
@@ -12,7 +13,8 @@ async function writeOwnText($: EngineInterface, memory: string, path: string, te
 }
 // The text in force: the person's own copy when it holds anything, the shipped one otherwise
 async function inForce($: EngineInterface, root: string, memory: string, path: string) {
-  const own = memory ? await readOr($, `${memory}/${path}`) : ''
+  // What is read is what is known: a change made since is never read, and is put back
+  const own = memory ? await personText($, memory, path) : ''
   const shipped = await readOr($, `${root}/${path}`)
   // A copy the same as what shipped is no change of the person's
   // A copy made before an update can lack a place the shipped text now fills (a setting such as the models): it is stale
@@ -23,12 +25,13 @@ async function inForce($: EngineInterface, root: string, memory: string, path: s
 }
 
 async function readConfig($: EngineInterface, memory: string) {
-  return parse(await readOr($, `${memory}/config.json`))
+  return parse(await personText($, memory, 'config.json'))
 }
 // Sets one key, or with undefined puts it back to what shipped; every other key, ones this tab does not know included, is kept
 async function setConfig($: EngineInterface, memory: string, key: keyof Config, value: unknown, role?: Role) {
+  // A change is made on what is known, never on a copy changed since
   const path = `${memory}/config.json`
-  const text = await readOr($, path)
+  const text = await personText($, memory, 'config.json')
   const config = (() => {
     try {
       return JSON.parse(text || '{}') as Record<string, unknown>
@@ -46,6 +49,7 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
     else delete config.models
   } else if (value === undefined) delete config[key]
   else config[key] = value
+  await personWrote($, memory, 'config.json', `${JSON.stringify(config, null, 2)}\n`)
   await $.fs.write(`${memory}/config.json`, `${JSON.stringify(config, null, 2)}\n`)
 }
 
@@ -57,7 +61,7 @@ async function openedInEditor($: EngineInterface, path: string) {
 // Edit: the person's own copy, made from the shipped text the first time, opened in their editor
 async function editText($: EngineInterface, root: string, memory: string, path: string) {
   const own = `${memory}/${path}`
-  if (!(await readOr($, own)).trim()) await writeOwnText($, memory, path, await readOr($, `${root}/${path}`))
+  if (!(await personText($, memory, path)).trim()) await writeOwnText($, memory, path, await readOr($, `${root}/${path}`))
   return openedInEditor($, own)
 }
 // Put back: the person's copy moves aside as .old, and the shipped text is in force again
@@ -65,6 +69,7 @@ async function putBack($: EngineInterface, memory: string, path: string) {
   const own = `${memory}/${path}`
   // Each copy put back is kept under a name of its own, so a second Reset never loses the first
   const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
+  await personWrote($, memory, path, null)
   const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   return r.exitCode === 0 ? '' : r.stderr || 'not put back'
 }
@@ -79,24 +84,35 @@ async function saveText($: EngineInterface, root: string, memory: string, path: 
 
 // Kept keys stay out of every chat: a command that would read one from the keychain is refused, and once any key is kept, what a
 // tool answers comes back with every kept value hidden. The values never reach the mod: `bin/secret --hide` swaps them in a pipe
-let secrets = { at: -SECRETS_MS, names: [] as string[] }
+let secrets = { at: -SECRETS_MS, names: [] as string[], isAdminKept: false }
+// The names of the kept keys, and whether an admin password is kept, read again at most every SECRETS_MS (and with each use of a
+// runner): a list that cannot be read keeps what was known before, so hiding never stops on a failure
+const knowKept = async ($: EngineInterface, isNow = false) => {
+  const now = await $.clock.now()
+  if (now - secrets.at < SECRETS_MS && !isNow) return secrets
+  const listed = await $.process.run([`${$.plugin.root}/bin/secret`, '--list']).catch(() => undefined)
+  const admins = await $.process.run([`${$.plugin.root}/bin/keyring`, 'list', 'claudopus-admin']).catch(() => undefined)
+  if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean), isAdminKept: admins?.exitCode === 0 ? Boolean(admins.stdout.trim()) : secrets.isAdminKept }
+  return secrets
+}
+// A JSON text with every kept value hidden inside its strings, kept admin passwords too; undefined when it could not be checked
+const hiddenJson = async ($: EngineInterface, text: string) => {
+  const { names, isAdminKept } = await knowKept($)
+  if (!names.length && !isAdminKept) return text
+  const hidden = await $.process.run([`${$.plugin.root}/bin/secret`, '--hide', '--json', ...names], { stdin: text }).catch(() => undefined)
+  return hidden && hidden.exitCode === 0 && !hidden.isStdoutTruncated && hidden.stdout.trim() ? hidden.stdout : undefined
+}
 async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult): Promise<ToolCallResult> {
   const command = e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
   if (r.deny || OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return r
-  const runner = `${$.plugin.root}/bin/secret`
-  const now = await $.clock.now()
-  if (now - secrets.at >= SECRETS_MS || command.includes('bin/secret')) {
-    // A list that cannot be read keeps the names known before, so hiding never stops on a failure
-    const listed = await $.process.run([runner, '--list']).catch(() => undefined)
-    if (listed?.exitCode === 0) secrets = { at: now, names: listed.stdout.split('\n').filter(Boolean) }
-  }
-  if (!secrets.names.length) return r
+  const { names, isAdminKept } = await knowKept($, command.includes('bin/secret') || command.includes('bin/admin'))
+  if (!names.length && !isAdminKept) return r
   try {
     const text = JSON.stringify({ result: r.result, context: r.context })
-    const hidden = await $.process.run([runner, '--hide', '--json', ...secrets.names], { stdin: text })
-    if (hidden.exitCode !== 0 || hidden.isStdoutTruncated) throw new Error('not hidden')
-    if (hidden.stdout === text) return r
-    const swapped = JSON.parse(hidden?.stdout ?? '') as { result: typeof r.result; context: typeof r.context }
+    const hidden = await hiddenJson($, text)
+    if (hidden === undefined) throw new Error('not hidden')
+    if (hidden === text) return r
+    const swapped = JSON.parse(hidden) as { result: typeof r.result; context: typeof r.context }
     return { ...r, result: swapped.result, context: swapped.context } as ToolCallResult
   } catch {
     return { deny: `${e.tool} ran, and what it answered was withheld: it could not be checked for kept keys.` }
@@ -130,7 +146,7 @@ const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
   config: await readConfig($, dir),
   gate: await (async () => {
     const [gate, kept] = [await gateOf($), await validAllowed($)]
-    return { mode: gate.mode, unsealed: gate.unsealed, password: gate.password, allowed: kept.valid.map(({ host, command }) => ({ host, command })), unsealedAllowed: kept.unsealed, isAfar: isRunFromAfar, isLinux }
+    return { mode: gate.mode, unsealed: gate.unsealed, allowed: kept.valid.map(({ host, command }) => ({ host, command })), unsealedAllowed: kept.unsealed, isAfar: isRunFromAfar, isLinux }
   })(),
   // A config.json that does not read is said at once: until it is fixed every setting is as shipped
   failed:
@@ -175,12 +191,9 @@ const configActs = ($: EngineInterface) => ({
   set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) =>
     configAct($, 'Not saved', async () => {
       await setConfig($, dir, key, value, role)
-      // Automatic updates turned back on look at once when a look is due, not at the next quarter hour
-      if (key === 'updates' && value === undefined) void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`))
     }),
   // Admin commands: each choice is sealed as it is made, and one that takes something back makes every earlier seal void
   gateMode: (mode: 'each' | 'work' | 'never') => configAct($, 'Not saved', () => regate($, { mode })),
-  gatePassword: (value: 'keep' | 'macos') => configAct($, 'Not saved', () => setAdminPassword($, value)),
   gateRemove: (host: string, command: string) => configAct($, 'Not removed', () => regate($, { remove: { host, command } })),
   // A press while a check runs does nothing: the tab shows it checking
   check: () => {

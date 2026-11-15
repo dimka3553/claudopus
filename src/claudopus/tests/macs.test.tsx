@@ -1,6 +1,6 @@
 // The other Mac: its chats over ssh, the same results on both, and chats the app runs over ssh
 
-test("a Mac that reaches another hands it this Mac's chats in the same trip, and leaves here the answers pressed there for them, once each", async ($, on) => {
+test("F-014 · a Mac that reaches another hands it this Mac's chats in the same trip; answers carried back from there answer nothing here and are put away there", async ($, on) => {
   const { files, clock, sshed } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }))
   files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW))
@@ -16,12 +16,9 @@ test("a Mac that reaches another hands it this Mac's chats in the same trip, and
   expect(rest.join('\n')).toContain('"chat":"chat-b"')
   expect(first?.[0]).toContain('$L/pushed/sams-macbook-air.$$.part')
   expect(first?.[0]).not.toContain('rm -f 1')
-  // The answer is left for chat-b as one pressed in another chat's panel; the one under a name it does not make is not
-  const left = files.get(`${MEMORY}/live/answers/chat-b/${NOW}-abc.json`)
-  expect(JSON.parse(left ?? '{}')).toMatchObject({ card: 'b1', choice: 'Send', askAt: NOW })
-  expect([...files.keys()].filter(path => path.includes('/live/answers/chat-b/'))).toHaveLength(1)
-  // chat-b takes it; the next trip puts it away there, and carried again it is not left again
-  files.delete(`${MEMORY}/live/answers/chat-b/${NOW}-abc.json`)
+  // The answer is left for no chat here, though it names the ask that stands
+  expect([...files.keys()].filter(path => path.includes('/live/answers/chat-b/'))).toEqual([])
+  // The next trip puts it away there, and carried again it is not left either
   await clock.advance(10_000)
   const second = sshed.filter(([command]) => command?.startsWith("sh -c 'L=")).at(-1)
   expect(second?.[0]).toContain(`rm -f ${NOW}-abc.json`)
@@ -129,7 +126,7 @@ test('a result brought back after it was put away on the other Mac stays out of 
   expect(here.archived).toBeUndefined()
 })
 
-test("a Mac handed another Mac's chats lists them by name and Mac with its own, leaves an answer for them to be carried back, and drops them once that Mac stops handing them over", async ($, on) => {
+test("a Mac handed another Mac's chats lists them by name and Mac with its own, with their asks answered only there, and drops them once that Mac stops handing them over", async ($, on) => {
   const { files, clock } = world(on)
   // No macs here: this is the Mac that cannot reach the other one. Its clock is an hour behind the other Mac's
   const ahead = NOW + 3_600_000
@@ -152,11 +149,9 @@ test("a Mac handed another Mac's chats lists them by name and Mac with its own, 
   expect((await list.findAll({ type: 'Text' })).filter(one => one.text === 'Robot arm')).toHaveLength(1)
   // Its running time is told on this Mac's clock
   expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ done · )?(\d+s|1m \d\ds)$/ })).toBeDefined()
-  // An answer pressed here waits in the outbox for that Mac
-  const send = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Send')
-  await list.press({ key: send?.key ?? '' })
-  const left = await until(async () => [...files.keys()].find(path => path.startsWith(`${MEMORY}/live/outbox/sams-m5/`) && path.endsWith('.json')))
-  expect(JSON.parse(files.get(left ?? '') ?? '{}')).toMatchObject({ card: 'b1', choice: 'Send', chat: 'chat-m5', askAt: ahead })
+  // Its ask has nothing to press here, and nothing waits in the outbox for that Mac
+  expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Send')).toBe(false)
+  expect([...files.keys()].filter(path => path.startsWith(`${MEMORY}/live/outbox/sams-m5/`) && path.endsWith('.json'))).toEqual([])
   // That Mac goes to sleep: its copy is not handed over again and goes stale, and its chats leave, as does the naming of this one
   await clock.advance(100_000)
   files.set(`${MEMORY}/live/chat-own.json`, JSON.stringify({ chat: 'chat-own', title: 'Own quiet', folder: '/y', host: '', at: NOW + 100_000, cards: [] }))

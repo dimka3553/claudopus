@@ -66,8 +66,8 @@ That is all. It is on in every chat from then on, and it keeps itself up to date
 | **Work outlives the connection** | In a chat your Claude app runs on another Mac over SSH, work goes on when your Mac sleeps or the app ends the chat there: that Mac starts the chat again by itself, under its own sign-in, the cut-off work carries on, and its card and a notice say so. [More](mods/claudopus/docs/guide.md#what-you-see) |
 | **Memory** | Your messages, the results and a brief per subject are kept as plain files in `~/.claude/claudopus`, so chats can stay small. |
 | **Working rules** | A short set of principles goes into every chat: ask less, show the result, have a second agent check the work. They leave the rest to you: edit them in the Config tab, and your copy is the one used. |
-| **Models** | Opus for most work, Sonnet for long legwork, Fable only for heavy work. Checks never run on a weaker model than the one that built the work. An agent named an older model or Haiku is refused, and work the app moves to an older model runs on Fable instead; its card says so. |
-| **Passwords and keys** | Asked for once in a box at the top of the panel, in every chat, kept in the macOS keychain (on Linux, in a file only you can read), never put in a chat. The box words itself and work is kept out of its files: this stops slips and common tricks, and is no wall. |
+| **Models** | Opus for most work, Sonnet for long legwork, Fable only for heavy work. Checks never run on a weaker model than the one that built the work. An agent named an older model or Haiku is refused. Work the app itself moves to an older model stays there, and its card says so; a step sent to Haiku runs on Sonnet. |
+| **Passwords and keys** | A key is asked for once in a box at the top of the panel, kept in the macOS keychain (on Linux, in a file only you can read), never put in a chat; an admin password is asked for each time and never kept. The box words itself and work is kept out of its files: this stops slips and common tricks, and is no wall. |
 | **Admin commands ask first** | Before work runs a command as administrator, its card shows the exact command and the Mac with Allow once, Always allow this command and Deny. Config chooses each time, once per piece of work or never, and lists what you always allow. Or let macOS ask for the password each time and keep none. |
 | **One release at a time** | Work changes a repo only in its own worktree and branch, and reaches main only through one release command that takes its turn, numbers the version, builds, checks and pushes. A push to main by hand is refused. |
 | **Tabs** | Results, Stats (tokens, cost at API prices, time saved), Config and About; Memory opens the memory folder. `/claudopus` reopens a closed panel, `/servers` lists the local servers your chats started. |
@@ -84,9 +84,7 @@ Everything is set in the panel's **Config** tab, which shows what is in force an
 | `agents` | `true` | `false` stops the handing over; each chat does its own work again |
 | `sound` | `true` | `false` silences the chime and the "needs you" sound |
 | `notifications` | `true` | `false` stops the notifications when work is ready, stopped or failed |
-| `updates` | `true` | `false` keeps the version you have |
 | `admin` | `each` | When you are asked before an admin command runs: `each` time, once per piece of `work`, or `never`; set it in Config, which seals it |
-| `adminPassword` | `keep` | `macos` lets macOS ask for the admin password each time and keeps none |
 | `models` | `work` opus, `legwork` sonnet, `heavy` fable | The models for most work, long legwork and heavy work |
 | `macs` | none | Up to four other Macs over SSH whose chats the panel lists |
 
@@ -95,7 +93,7 @@ More on each, and on editing the rules, in the [guide](mods/claudopus/docs/guide
 ## Needs
 
 - macOS 12 or newer. Stats needs `jq`, which macOS 15 and later include.
-- Or Linux, with Claude Code in a terminal (there is no desktop app for Linux): the same install lines. Passwords and keys are kept in files only you can read, as Linux has no keychain to use; notifications need a desktop; there is no Open in Terminal and no "Let macOS ask". Small copies of pictures need ImageMagick. [What differs](mods/claudopus/docs/guide.md#on-linux)
+- Or Linux, with Claude Code in a terminal (there is no desktop app for Linux): the same install lines. Keys are kept in files only you can read, as Linux has no keychain to use, and an admin password is asked for in the panel each time; notifications need a desktop; there is no Open in Terminal. Small copies of pictures need ImageMagick. [What differs](mods/claudopus/docs/guide.md#on-linux)
 - Claude Code 2.1.287 or newer, or the desktop app 2.1.286 or newer (VS Code from 2.1.299).
 - Not under WSL, nor where your organization blocks mods. No panel in `claude -p` or cloud sessions.
 - Seen working in the macOS desktop app and in a terminal on Linux (Ubuntu 24.04); VS Code has not been tried yet. [More](mods/claudopus/docs/guide.md#needs)
@@ -103,8 +101,8 @@ More on each, and on editing the rules, in the [guide](mods/claudopus/docs/guide
 ## Privacy
 
 - Everything it keeps is in `~/.claude/claudopus` on your Mac. Delete the folder and it is gone.
-- It sends only to Claude, through Claude Code, and to your own Macs over SSH if you name them. Unless `updates` is off, once an hour it reads a version number from claudopus.ai, and when it changes, Claude Code fetches the new release from GitHub; a copy run from a folder of its code brings that folder up to date with git, only as a fast-forward that leaves uncommitted work alone. No telemetry.
-- Passwords and keys stay in this Mac's keychain, or on Linux in files under `~/.local/share/claudopus/keyring` that only you can read. An admin command runs only after you allow it on its card; a kept password can be read by any process running as you, so only "Let macOS ask, keep nothing" is a wall.
+- It sends only to Claude, through Claude Code, and to your own Macs over SSH if you name them. Every hour it reads a version number from claudopus.ai, and when it is newer the panel says so with Install; only when you press Install, or Check for updates in Config, does Claude Code fetch the new release from GitHub; a copy run from a folder of its code brings that folder up to date with git, only as a fast-forward that leaves uncommitted work alone. No telemetry.
+- Passwords and keys stay in this Mac's keychain, or on Linux in files under `~/.local/share/claudopus/keyring` that only you can read. An admin password is never kept: each admin command asks for it, in macOS's own box on this Mac, else in the panel. An admin command runs only after you allow it on its card, with the system's own `PATH`, and a release only after you press Release on its card.
 - The two small notification apps are committed built; `mods/claudopus/notifier/checksums.txt` holds the SHA-256 of each of their files, and every release checks the committed apps still match it; the full account says how to rebuild them and compare, and what differs on another toolchain.
 
 The full account of every file, hook and program is in [What Claudopus does on your Mac](mods/claudopus/docs/privacy.md).

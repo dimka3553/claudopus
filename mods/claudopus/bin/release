@@ -15,15 +15,35 @@
 # pushed), GITHUB_RELEASE (a command, run in the release's checkout with the version in RELEASE_VERSION, that prints the
 # notes of the version's GitHub release: with it every release with a version is made a GitHub release marked latest, and gh
 # must be signed in, which is checked before anything is pushed). `release.local` in the repo's git folder, never committed, can set the same for this Mac only, such as AFTER.
+# The settings are read in a shell of their own and only as values, main's own committed `.release` (never the branch's) and this Mac's
+# release.local, so nothing a branch writes there runs here, before the lock or after it.
+# Inside Claude Code it releases only what the person allowed with a press on the work's card in the Claudopus panel: the hook that
+# holds the call leaves a grant naming this worktree and this branch, sealed as bin/admin's are, which this runner takes once. Run by
+# hand outside Claude Code at a terminal, it asks there instead. Exit 6 when neither said yes: nothing is done.
 set -uo pipefail
 say() { echo "release: $*" >&2; }
 die() { say "$1"; exit "${2:-1}"; }
+# The home folder is the one the user database names for this user, never $HOME, which whoever runs this can set to a folder of
+# their own (with a key and grants made there)
+own_home=$(/usr/bin/perl -e 'print((getpwuid($<))[7] // "")' 2>/dev/null)
+[ -n "$own_home" ] || own_home=$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)
+[ -n "$own_home" ] && [ -d "$own_home" ] || die "this user has no home folder"
+HOME=$own_home
+export HOME
 
 top=$(git rev-parse --show-toplevel 2>/dev/null) || die "not in a git repo"
 common=$(cd "$top" && cd "$(git rev-parse --git-common-dir)" && pwd)
 MAIN= REMOTE=origin NAME= VERSION_FILE= DERIVED= BUILD= CHECK= AFTER= GITHUB_RELEASE=
-[ -f "$top/.release" ] && . "$top/.release"
-[ -f "$common/release.local" ] && . "$common/release.local"
+# A settings file's values, read in a bash of its own started afresh from the system's own path (no BASH_ENV, no function brought in):
+# what else it defines, a function or another variable, never reaches this shell. $1 the file (read from its own folder), $2 the names
+settings_of() {
+  [ -f "$1" ] || return 0
+  local said
+  said=$(cd "$(dirname "$1")" && env -u BASH_ENV -u ENV /bin/bash --noprofile --norc -c '. "$1" >/dev/null 2>&1 </dev/null; shift; for v in "$@"; do [ -n "${!v+x}" ] && printf "%s=%q\n" "$v" "${!v}"; done' bash "$1" $2 2>/dev/null) || return 0
+  eval "$said"
+}
+SETTINGS="MAIN REMOTE NAME VERSION_FILE DERIVED BUILD CHECK AFTER GITHUB_RELEASE"
+settings_of "$common/release.local" "$SETTINGS"
 url=$(git -C "$top" remote get-url "$REMOTE" 2>/dev/null) || die "no remote $REMOTE"
 # With no MAIN set, main is the remote's own default branch (main, master or another), else main
 if [ -z "$MAIN" ]; then
@@ -45,6 +65,37 @@ branch=${1:-$(git -C "$top" rev-parse --abbrev-ref HEAD)}
 [ "$branch" = "$MAIN" ] && die "release a branch of your own, never $MAIN itself"
 git -C "$top" rev-parse -q --verify "refs/heads/$branch" >/dev/null || die "no branch $branch"
 [ -z "$(git -C "$top" status --porcelain --untracked-files=no)" ] || die "uncommitted changes in $top: commit them to $branch or drop them first"
+
+# The person's press: a grant for this worktree and this branch, under two minutes old, sealed with the admin gate's key, taken once
+here_bin=$(cd -P "$(dirname "$0")" && pwd)
+granted=$("$here_bin/keyring" get claudopus-admin-gate seal 2>/dev/null | /usr/bin/perl -MJSON::PP -MDigest::SHA=hmac_sha256_hex -e '
+  my $k = <STDIN>; $k = "" unless defined $k; chomp $k;
+  my ($grants, $want) = @ARGV;
+  my $read = sub { my $text = do { local $/; open(my $f, "<", $_[0]) or return {}; <$f> }; my $j = eval { decode_json($text) }; ref $j eq "HASH" ? $j : {} };
+  my $bytes = sub { my $v = shift; return "" if !defined $v || ref $v; $v = "$v"; utf8::encode($v); $v };
+  exit 1 unless length $k && opendir(my $d, $grants);
+  for my $name (sort grep { /\.json$/ } readdir $d) {
+    my $g = $read->("$grants/$name");
+    my ($id, $at) = ($bytes->($g->{id}), $bytes->($g->{at}));
+    next unless $at =~ /^\d+$/ && abs(time() * 1000 - $at) <= 120_000;
+    next unless $bytes->($g->{host}) eq "release" && $bytes->($g->{command}) eq $want;
+    next unless $bytes->($g->{seal}) eq hmac_sha256_hex("release-grant\n$id\n$at\nrelease\n$want", $k);
+    next unless rename("$grants/$name", "$grants/$name.$$");
+    unlink "$grants/$name.$$";
+    print "granted";
+    exit 0;
+  }
+  exit 1;
+' "$HOME/.claude/claudopus/admin-grants" "$top
+$branch")
+# A person releasing by hand, outside Claude Code and at a terminal, says yes there instead; anything else with no grant (a run with no
+# terminal, or one inside Claude Code) is refused
+if [ "$granted" != granted ] && [ -z "${CLAUDECODE:-}" ] && [ -t 0 ] && [ -t 2 ]; then
+  printf 'release: release %s from %s to %s? [y/N] ' "$branch" "$top" "${MAIN:-main}" >&2
+  read -r -t 300 yes </dev/tty || yes=
+  case $yes in y | Y | yes | Yes) granted=granted ;; esac
+fi
+[ "$granted" = granted ] || die "refused: nothing was released, because this release was not allowed on its card in the Claudopus panel. Run it as one Bash call of its own from the work's worktree, cd there first if need be: cd $top && $0. The card then shows it and asks." 6
 
 # The guard: in this repo a push of main from inside Claude Code that does not come from release is refused. Put in once,
 # only where the repo has no pre-push hook of its own; a person pushing outside Claude Code is never stopped
@@ -122,11 +173,13 @@ for try in 1 2 3 4 5; do
   if [ -d "$tmp" ]; then git -C "$tmp" merge --abort >/dev/null 2>&1; git -C "$tmp" reset -q --hard "$base"; git -C "$tmp" clean -qfdx
   else git -C "$top" worktree add -q --detach "$tmp" "$base" >/dev/null 2>&1 || die "could not make the release's own checkout"; fi
   cd "$tmp" || die "no checkout"
-  # The checks and build are main's own when main has its settings, so a branch cannot drop them; this Mac's own still apply
-  if git cat-file -e "$base:.release" 2>/dev/null; then
-    keep=$MAIN; BUILD= CHECK= DERIVED= VERSION_FILE= NAME= GITHUB_RELEASE=; . ./.release; MAIN=$keep
-    [ -f "$common/release.local" ] && . "$common/release.local"
-  fi
+  # The checks and build are main's own, read from main's committed .release as values only, so a branch cannot drop or change them
+  # or run anything of its own; this Mac's own still apply. Where and what is pushed stay as this Mac set them
+  keep_main=$MAIN keep_remote=$REMOTE keep_after=$AFTER
+  BUILD= CHECK= DERIVED= VERSION_FILE= NAME= GITHUB_RELEASE=
+  git cat-file -e "$base:.release" 2>/dev/null && settings_of ./.release "NAME VERSION_FILE DERIVED BUILD CHECK GITHUB_RELEASE"
+  settings_of "$common/release.local" "NAME VERSION_FILE DERIVED BUILD CHECK GITHUB_RELEASE"
+  MAIN=$keep_main REMOTE=$keep_remote AFTER=$keep_after
   if ! out=$(git merge -q --no-ff --no-commit "$branch" 2>&1); then
     git rev-parse -q --verify MERGE_HEAD >/dev/null || die "git would not merge $branch onto $MAIN: $out" 1
     real=""

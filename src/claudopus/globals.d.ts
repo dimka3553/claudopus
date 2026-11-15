@@ -151,13 +151,13 @@ declare global {
   export import ConfigShown = M6.ConfigShown
   export import Models = M6.Models
   export import Role = M6.Role
+  export import Look = M7.Look
   export import LookIo = M7.LookIo
   export import checkSaid = M7.checkSaid
   export import copyOf = M7.copyOf
   export import folderLook = M7.folderLook
   export import installedFrom = M7.installedFrom
   export import isNewer = M7.isNewer
-  export import isReloadDue = M7.isReloadDue
   export import isUpdateDue = M7.isUpdateDue
   export import lookOnce = M7.lookOnce
   export import RELOAD_AGAIN = M7.RELOAD_AGAIN
