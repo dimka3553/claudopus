@@ -255,6 +255,8 @@ const clearGates = async ($: EngineInterface) => {
 const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget?: { remainingMs: number } }, gate: Gate, top: string): Promise<GateSaid | 'gone' | 'late' | 'blind'> => {
   if (!(await $.session.surfaces().catch(() => [])).length) return 'blind'
   gateHeld.add(gate.id)
+  // A gate held afresh waits for a press of its own: a mark an earlier one of the same id left never hides it
+  gatePressed.delete(gate.id)
   await setGates($, top, list => [...list.filter(one => one.id !== gate.id), gate])
   await openList($).catch(() => undefined)
   const card = top ? (await read($, todos)).find(one => one.id === top) : undefined
@@ -769,6 +771,7 @@ const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, na
   // Nothing waits on it: the card offers it until pressed, and the press itself makes the change again
   undoneOffers.set(id, { name, text, top: card ? top : '' })
   gateHeld.add(id)
+  gatePressed.delete(id)
   await setGates($, card ? top : '', gates => [...gates.filter(one => one.id !== id), { id, kind: 'file', isUndone: true, ...(by ? {} : { isOutside: true }), host: what, command: cut(text ?? '(the file taken away)', 2000), at, ...(by?.agentId ? { from: by.agentId } : {}) }])
   await openList($).catch(() => undefined)
   $.ui.log(`${card ? `A command of the work "${titleOf(card)}" changed` : by ? 'A command changed' : 'Something outside Claudopus changed'} ${what}, and it was put back · Press Allow once ${card ? 'on its card' : 'at the top'} in the Claudopus panel to make the change again, or Deny.`)
