@@ -239,35 +239,38 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   if (isReply) freeTimes($)
   redraw($)
   let isCleared = false
-  let isOnWay = false
+  let steerAt = 0
   try {
     const at = await $.clock.now()
+    steerAt = at
     await update($, todos, list =>
       list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
     )
     if (askPressed.get(one.id) === mark) askPressed.delete(one.id)
     // The work has since asked something else, or it was answered elsewhere: nothing went, and the card shows what it carries now
     if (!isCleared) return void (sentReplies.get(one.id)?.to === 'sending' && sentReplies.delete(one.id), redraw($))
-    isOnWay = await answerCleared($, one, ask, said, isReply, target, at, line)
+    await answerCleared($, one, ask, said, isReply, target, at, line)
   } catch (err) {
-    // It did not reach the work: the card says so, and its buttons come back to be pressed again
+    // It did not reach the work: the card says so, and its buttons come back to be pressed again, with nothing of the answer left
     if (askPressed.get(one.id) === mark) askPressed.delete(one.id)
-    if (isOnWay) throw err
     answeredAsks.delete(asked)
-    if (isCleared) await update($, todos, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask } : card))).catch(() => undefined)
+    if (answeredAt.get(one.id) === ask.at) answeredAt.delete(one.id)
+    if (pending.get(target) === one.id) pending.delete(target)
+    const isBack = !isCleared || (await update($, todos, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: card.entries.filter(entry => !(entry.kind === 'steer' && entry.at === steerAt)) } : card))).then(() => true).catch(() => false))
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'failed', at: await $.clock.now().catch(() => 0), line, isCard: true })
+    // and when even that could not be written, the chat is told, so the ask is not lost unseen
+    if (!isBack) $.ui.log(`The answer “${cut(said, 120)}” to "${titleOf(one)}" (${ask.text}) did not reach it, and its ask could not be put back on its card. Type your answer in this chat instead.`)
     redraw($)
     throw err
   }
 }
-// The rest of an answer once its ask is cleared from the card's file: to the work, or to wake it. True once it is on its way
+// The rest of an answer once its ask is cleared from the card's file: to the work, or to wake it
 const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string, isReply: boolean, target: string, at: number, line: string) => {
   answeredAt.set(one.id, ask.at)
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at, line, isCard: true })
   redraw($)
-  void askGone($, one, said)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
   // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
@@ -278,7 +281,8 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
     redraw($)
   } else await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true })
-  return true
+  // Said in the chat only once the answer is on its way
+  void askGone($, one, said)
 }
 // A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
 // and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its

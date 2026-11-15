@@ -297,11 +297,27 @@ const gateNoteFailed = ($: EngineInterface, gate: Gate, card: string, said: stri
   doneNotes.some(one => one.id === `gate-${gate.id}`)
     ? noteDone($, { id: `gate-${gate.id}`, ...(gate.call ? { call: gate.call } : {}), ...(card ? { card } : {}), endedAt: 0, head: gateHead(gate), said, what: gateWhatLine(gate), isOn: false }).catch(() => undefined)
     : Promise.resolve()
+// A call refused after a press, by another of its commands denied or not let through: nothing in it runs, so a gate of it already
+// allowed says so in grey, never green
+const callRefused = async ($: EngineInterface, call: string) => {
+  for (const one of doneNotes.filter(note => note.call === call && note.isOn && note.id.startsWith('gate-'))) {
+    const { at: _at, ...rest } = one
+    await noteDone($, { ...rest, endedAt: 0, isOn: false, said: 'It did not run: another part of the same command was refused, so nothing in it ran' }).catch(() => undefined)
+  }
+}
 // `card` names the work whose card the gate is on: what was done is said in that card, where the gate was
 const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') => {
   presses += 1
   const id = gate.id
-  if (gate.isUndone) return void answerUndone($, gate, said).then(() => redraw($)).catch(err => log($, `undone change not answered: ${String(err)}`))
+  // A put-back goes from the panel in the press's own drawing too, and comes back only if it could not be answered
+  if (gate.isUndone) {
+    if (gatePressed.has(id)) return
+    gatePressed.set(id, said)
+    redraw($)
+    return void answerUndone($, gate, said)
+      .catch(err => log($, `undone change not answered: ${String(err)}`))
+      .finally(() => (gatePressed.delete(id), redraw($)))
+  }
   if (gateHeld.has(id) && !gatePressed.has(id)) {
     gatePressed.set(id, said)
     gateSaid.set(id, said)

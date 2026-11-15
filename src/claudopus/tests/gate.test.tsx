@@ -603,3 +603,25 @@ test('a gate allowed but not let through says so where its green box was, never 
   expect(await w.list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeUndefined()
   expect(await w.list.find({ type: 'Text', text: /· allowed$/ })).toBeUndefined()
 })
+
+// Found on a second look: one Bash call with two commands to allow, the first allowed and the second refused, ran nothing yet left
+// "You allowed it once" green for the first
+test('a call refused after one of its commands was allowed says in grey that nothing in it ran, never green', SLOW, async ($, on) => {
+  const w = await gated($, on)
+  w.files.set('git:top', '/repo/wt')
+  w.files.set('git:branch', 'fix-it')
+  for (const [id, command, second] of [
+    ['m1', `${ADMIN} here 'id -u'; ${ADMIN} here 'id -g'`, 'gate-m1-1-deny'],
+    ['m2', `${ADMIN} here 'id -u'; /plug/claudopus/bin/release`, 'gate-m2-r0-deny'],
+  ] as const) {
+    const call = w.bash(id, command)
+    expect(await w.held(id)).toBeDefined()
+    await w.press(`gate-${id}-0-once`)
+    expect(await until(async () => keyed(w.list, second))).toBeDefined()
+    await w.press(second)
+    expect(((await call) as { deny?: string }).deny).toBeDefined()
+    expect(w.admins).toEqual([])
+    expect(await until(async () => w.list.find({ type: 'Text', text: 'It did not run: another part of the same command was refused, so nothing in it ran' }))).toBeDefined()
+    expect(await w.list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeUndefined()
+  }
+})
