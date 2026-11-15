@@ -8790,31 +8790,61 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
     return el.props?.key === key ? el : kids(el).map(k => find(k, key)).find(Boolean)
   }
   const textOf = (node: unknown): string[] => (typeof node === 'string' ? [node] : !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(textOf) : kids(node as El).flatMap(textOf))
-  for (const [key, parts] of Object.entries(cards)) {
-    const figure = find(drawn, `usage-${key}`)
-    // The figure lights its group and a faint fill under a resting pointer: a group member whose hover changes nothing is never wired
-    // to the pointer by the desktop app
-    expect(figure?.hover?.scope).toBe(`usage-${key}`)
-    expect(Object.keys(figure?.hover ?? {}).sort()).toEqual(['backgroundColor', 'scope'])
-    // Its card waits hidden in the bar's column above the figures and shows while the group is lit, so one shows at a time and goes
-    // as the pointer leaves; not an absolute Box, which the app lifts as a card of its own that stayed open
-    const card = find(drawn, `usage-${key}-card`)
-    expect(card?.props?.display).toBe('none')
-    expect(card?.props?.position).toBeUndefined()
-    expect(card?.hover).toEqual({ scope: `usage-${key}`, display: 'flex' })
-    for (const part of parts) expect(textOf(card)).toContain(part)
-  }
-  // Above the figures, so they stay where they are when one shows
   const parentOf = (node: unknown, key: string): El | undefined => {
     if (!node || typeof node !== 'object') return undefined
     if (Array.isArray(node)) return node.map(n => parentOf(n, key)).find(Boolean)
     const el = node as El
     return kids(el).some(k => k.props?.key === key) ? el : kids(el).map(k => parentOf(k, key)).find(Boolean)
   }
-  const column = parentOf(drawn, 'band-row')
-  expect(column?.props?.flexDirection).toBe('column')
-  expect(kids(column ?? {}).at(-1)?.props?.key).toBe('band-row')
-  expect(kids(column ?? {}).filter(k => k.props?.key?.endsWith('-card')).length).toBe(6)
+  for (const [key, parts] of Object.entries(cards)) {
+    const figure = find(drawn, `usage-${key}`)
+    // The figure lights its group and a faint fill under a resting pointer: a group member whose hover changes nothing is never wired
+    // to the pointer by the desktop app
+    expect(figure?.hover?.scope).toBe(`usage-${key}`)
+    expect(Object.keys(figure?.hover ?? {}).sort()).toEqual(['backgroundColor', 'scope'])
+    // Its part of the card waits hidden and shows while the group is lit, so one figure's part shows at a time and goes as the
+    // pointer leaves
+    const card = find(drawn, `usage-${key}-card`)
+    expect(card?.props?.display).toBe('none')
+    expect(card?.hover).toEqual({ scope: `usage-${key}`, display: 'flex' })
+    for (const part of parts) expect(textOf(card)).toContain(part)
+    // The card floats over the chat, taking no room, so nothing in the chat or the bar moves when it shows: an absolute Box drawn
+    // hidden in the figure's keyed Box and shown by its hover, with no key or group of its own, which the desktop app lifts above
+    // the figure as its own card, kept in the window
+    const lifted = parentOf(drawn, `usage-${key}-card`)
+    expect(lifted?.props?.position).toBe('absolute')
+    expect(lifted?.props?.display).toBe('none')
+    expect(lifted?.props?.key).toBeUndefined()
+    expect(lifted?.hover).toEqual({ display: 'flex' })
+    expect(kids(figure ?? {})).toContain(lifted)
+  }
+  // Nothing in the bar's own flow but its row: no card above the figures to push the chat up or the figures out of the bar
+  const inFlow = (node: unknown): El[] =>
+    !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(inFlow) : (node as El).props?.position === 'absolute' ? [] : [node as El, ...kids(node as El).flatMap(inFlow)]
+  expect(inFlow(drawn).filter(k => k.props?.key?.endsWith('-card'))).toEqual([])
+  await desk.unmount()
+})
+
+test('each new look moves the figures past the places they had, so the app shows again no card the pointer has left', async ($, on) => {
+  let n = 0
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  // The hidden keyed Boxes before the figures, there in every other drawing: more than the figures and their cards hold, so no
+  // figure's card takes a place a card had in the drawing before
+  const spacers = async () => (JSON.stringify(await desk.drawn()).match(/"key":"usage-spacer-\d+"/g) ?? []).length
+  const keyed = async () => (JSON.stringify(await desk.drawn()).match(/"key":"usage-(?!spacer)[^"]*"/g) ?? []).length
+  const first = await spacers()
+  expect(await keyed()).toBeLessThan(120)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  expect(await until(async () => ((await spacers()) !== first ? true : undefined))).toBe(true)
+  expect([first, await spacers()].sort((a, b) => a - b)).toEqual([0, 120])
   await desk.unmount()
 })
 
@@ -8858,7 +8888,7 @@ test('in a phone-narrow terminal the word for a charge the system calls full whi
   await desk.unmount()
 })
 
-test('the battery card says what the Mac draws, the processors and graphics each, Claude\'s part of each, and what Claude covers', async ($, on) => {
+test('the battery card says what the Mac draws, the processors and graphics each, and Claude\'s part of each, with no paragraph under them', async ($, on) => {
   let n = 0
   // Each look: Claude's renderer a quarter of the graphics time, Safari the rest; Claude's chat 20 J a look, the
   // processors 40 J, the graphics processor 5 J
@@ -8888,9 +8918,11 @@ test('the battery card says what the Mac draws, the processors and graphics each
   for (const text of ['The whole Mac draws', '80 W', 'Processors, every program', "Claude's own processes", 'Graphics, every program', 'Claude of that, estimated'])
     expect(await desk.find({ type: 'Text', text })).toBeDefined()
   expect(await desk.find({ type: 'Text', text: "Claude's processors draw" })).toBeUndefined()
-  expect(await desk.find({ type: 'Text', text: /^Claude: the app, its chats and all their work\. Part of what the processors draw is no program's, and work that ends within seconds is missed\. The screen, memory and storage count only in the whole, which the Mac updates about once a minute\.$/ })).toBeDefined()
-  // The graphics card: busy is time at work, what it draws, and who uses it most
-  for (const text of ['Time at work, at any speed', 'Drawing', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
+  // The cards are their rows alone: no paragraph under them on what the figures cover, and no line on what busy means
+  expect(await desk.find({ type: 'Text', text: /^Claude: the app/ })).toBeUndefined()
+  expect(await desk.find({ type: 'Text', text: 'Time at work, at any speed' })).toBeUndefined()
+  // The graphics card: what it draws, and who uses it most
+  for (const text of ['Drawing', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
   await desk.unmount()
 })
 

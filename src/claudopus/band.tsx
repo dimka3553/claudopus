@@ -94,12 +94,12 @@ const bandHooks = (on: On) => {
 
     // How Claude uses this computer: memory in use and Claude's part, how busy the processor is and Claude's part, the disk's and the
     // network's speed, looked at every few seconds while work runs. New figures redraw it
-    await read($, figuresAt)
+    const at = await read($, figuresAt)
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
     const marker = await waitMarker($, ui, e.surface)
-    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
+    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures, at) : null
     const row = (
       <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
         {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
@@ -112,11 +112,10 @@ const bandHooks = (on: On) => {
         ) : null}
       </Box>
     )
-    // Where the figures are drawn, a pointer resting on one shows its card above them; the bar grows upward, so the figures stay put
-    return (drawn && figures) || marker ? (
+    // Where the figures are drawn, a pointer resting on one shows its card floating over the chat above them, taking no room
+    return marker ? (
       <Box flexDirection="column">
         {marker}
-        {drawn && figures ? usageCardsDrawn(ui, figures) : null}
         {row}
       </Box>
     ) : (

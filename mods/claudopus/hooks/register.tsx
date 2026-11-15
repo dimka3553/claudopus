@@ -10183,8 +10183,7 @@ const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
 // More of each figure, for a pointer resting on it: a heading with the figure in full, then rows of a name and its value (Claude's
 // part, the parts of a speed, who uses the most), and for the battery its state in words. Only what the looks gave: a part that is
 // not known is left out
-// foot: what the figures above it cover, under them
-type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][]; foot?: string }
+type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][] }
 const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
   const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? top.map(([name, n]): [string, string] => [name, text(n)]) : undefined)
   const b = f.battery
@@ -10197,11 +10196,11 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
       most: most(f.cpuTop, n => `${pctText(n)}%`),
     },
     // Busy is time at work at any speed, so a busy graphics processor can draw little; drawing the screen is macOS's own
-    // (WindowServer), for every app's window, Claude's too, so it is no one's part
+    // (WindowServer), for every app's window, Claude's too, so it is no one's part. The card is its rows alone, with no words under
+    // them on what they cover
     gpu: f.gpu === undefined ? undefined : {
       title: 'Graphics processor',
       value: `${pctText(f.gpu)}% busy`,
-      note: 'Time at work, at any speed',
       rows: [
         ...(f.gpuClaude !== undefined ? [['Claude and what it started', `${pctText(f.gpuClaude)}%`] as [string, string]] : []),
         ...(f.wattsGpu !== undefined ? [['Drawing', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
@@ -10223,9 +10222,6 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
         ...(f.wattsGpu !== undefined ? [['Graphics, every program', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
         ...(f.wattsGpuClaude !== undefined ? [['Claude of that, estimated', `${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
       ],
-      ...(f.wattsClaude !== undefined || f.wattsGpuClaude !== undefined
-        ? { foot: `Claude: the app, its chats and all their work.${f.wattsGpuClaude === undefined ? ' Graphics is not in its watts.' : ''} Part of what the processors draw is no program's, and work that ends within seconds is missed. The screen, memory and storage count only in the whole, which the Mac updates about once a minute.` }
-        : {}),
     },
     disk: f.disk === undefined ? undefined : {
       title: 'Disk',
@@ -10249,9 +10245,12 @@ const rateFine = (perSecond: number) => (perSecond < 1024 * 1024 ? `${Math.round
 const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
 // Watts, whole from ten up, a tenth below
 const wattText = (w: number) => (w >= 10 ? `${Math.round(w)}` : `${Math.round(w * 10) / 10}`)
-// The card, in the bar's own column above the figures: drawn hidden, and shown while the pointer rests on its figure through the
-// figure's hover group. The app's lifted hover cards (an absolute Box under a keyed one) were tried and left cards open after the
-// pointer had gone on to the next figure; a group is lit and put out by the pointer itself, so one card shows at a time
+// A figure's card: one Box placed absolutely and drawn hidden inside the figure's keyed Box, which the desktop app lifts over the
+// chat as its own floating card above the figure, kept in the window and shifted sideways at its edges, so showing it moves nothing
+// in the chat or the bar (in the bar's column it took room: the chat was pushed up and sprang back, and a tall card hid the figures).
+// What it says is shown by the figure's hover group, which the pointer lights and puts out at once, so as the pointer goes on to
+// the next figure this card's words are gone before the next card shows, though the app keeps the lifted card itself a moment for
+// a pointer on its way into it
 const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
   const { Box, Text } = ui
   const row = (name: string, value: string, n: number, kind: string) => (
@@ -10261,27 +10260,52 @@ const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
     </Box>
   )
   return (
-    <Box key={`${key}-card`} display="none" hover={{ scope: key, display: 'flex' }} flexDirection="column" gap={1} alignSelf="flex-start" borderStyle="round" borderDimColor paddingX={1} marginBottom={1}>
-      <Box key={`${key}-card-head`} flexDirection="row" justifyContent="space-between" gap={3}>
-        <Text bold>{card.title}</Text>
-        <Text bold>{card.value}</Text>
-      </Box>
-      {card.note ? <Text key={`${key}-card-note`} dimColor>{card.note}</Text> : null}
-      {card.rows.length ? <Box key={`${key}-card-rows`} flexDirection="column">{card.rows.map(([name, value], n) => row(name, value, n, 'row'))}</Box> : null}
-      {card.most?.length ? (
-        <Box key={`${key}-card-most`} flexDirection="column">
-          <Text dimColor>Using the most</Text>
-          {card.most.map(([name, value], n) => row(name, value, n, 'most'))}
+    // No key and no hover group of its own: the app lifts only a hidden absolute Box shown by the hover of its keyed Box
+    <Box position="absolute" top={-1} left={0} display="none" hover={{ display: 'flex' }} flexDirection="column">
+      <Box key={`${key}-card`} display="none" hover={{ scope: key, display: 'flex' }} flexDirection="column" gap={1}>
+        <Box key={`${key}-card-head`} flexDirection="row" justifyContent="space-between" gap={3}>
+          <Text bold>{card.title}</Text>
+          <Text bold>{card.value}</Text>
         </Box>
-      ) : null}
-      {card.foot ? <Text key={`${key}-card-foot`} dimColor>{card.foot}</Text> : null}
+        {card.note ? <Text key={`${key}-card-note`} dimColor>{card.note}</Text> : null}
+        {card.rows.length ? <Box key={`${key}-card-rows`} flexDirection="column">{card.rows.map(([name, value], n) => row(name, value, n, 'row'))}</Box> : null}
+        {card.most?.length ? (
+          <Box key={`${key}-card-most`} flexDirection="column">
+            <Text dimColor>Using the most</Text>
+            {card.most.map(([name, value], n) => row(name, value, n, 'most'))}
+          </Box>
+        ) : null}
+      </Box>
     </Box>
   )
 }
 
+// The desktop app draws the bar anew with each look, and shows again each lifted card whose figure's place (its count among the
+// keyed Boxes drawn) held a card that was up as the old drawing went: so a card the pointer had just left, or another figure's card,
+// stayed up with nothing under the pointer to put it away, and one shown again before its words were lit was placed too low, over
+// the figures. A run of hidden keyed Boxes before the figures, there in every other drawing, moves every figure past the places the
+// last drawing had, more than all the keyed Boxes of the figures and their cards, so no card is shown again but the one under the
+// pointer, which the app measures whole
+const USAGE_SPACERS = 120
+let usageSpacedAt = 0
+let usageSpaced = false
+const usageSpacersDrawn = (ui: Ui, at: number) => {
+  const { Box, Text } = ui
+  if (at !== usageSpacedAt) (usageSpacedAt = at), (usageSpaced = !usageSpaced)
+  return usageSpaced ? (
+    <Box display="none">
+      {Array.from({ length: USAGE_SPACERS }, (_, n) => (
+        <Box key={`usage-spacer-${n}`}>
+          <Text> </Text>
+        </Box>
+      ))}
+    </Box>
+  ) : null
+}
+
 // The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
 // for the disk and the network. The pointer resting on a figure lights its group: a faint fill under it, and its card above
-const usageDrawn = (ui: Ui, f: UsageFigures) => {
+const usageDrawn = (ui: Ui, f: UsageFigures, at = 0) => {
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const { Box, Text } = ui
   if (!table.Svg) return null
@@ -10297,9 +10321,11 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
         {value}
         <Text dimColor={!color} color={color}>{unit}</Text>
       </Text>
+      {card ? usageCardDrawn(ui, `usage-${key}`, card) : null}
     </Box>
   )
   return [
+    usageSpacersDrawn(ui, at),
     one('memory', cards.memory, usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),
     f.cpu === undefined ? null : one('cpu', cards.cpu, usageSvg('cpu', { claude: f.cpuClaude ?? 0, used: f.cpu }), words.cpu, pctText(f.cpu), '%'),
     f.gpu === undefined ? null : one('gpu', cards.gpu, usageSvg('gpu', { claude: f.gpuClaude ?? 0, used: f.gpu }), words.gpu, pctText(f.gpu), '%'),
@@ -10308,9 +10334,6 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
     f.net === undefined ? null : one('net', cards.net, usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
   ]
 }
-// The cards above the figures, one for each figure drawn, all hidden until the pointer rests on their figure
-const usageCardsDrawn = (ui: Ui, f: UsageFigures) =>
-  (Object.entries(usageCards(f)) as [string, UsageCard | undefined][]).map(([key, card]) => (card ? usageCardDrawn(ui, `usage-${key}`, card) : null))
 // The line as text, for the terminal, in a phone's 50 columns with the octopus: a word for each, units cut to G and M/s, and three-cell meters with Claude's cells purple
 const USAGE_CELLS = 3
 // Given the room, a figure that does not fit is left out whole, never cut in the middle: the network first, then the disk, then the
@@ -10468,12 +10491,12 @@ const bandHooks = (on: On) => {
 
     // How Claude uses this computer: memory in use and Claude's part, how busy the processor is and Claude's part, the disk's and the
     // network's speed, looked at every few seconds while work runs. New figures redraw it
-    await read($, figuresAt)
+    const at = await read($, figuresAt)
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
     const marker = await waitMarker($, ui, e.surface)
-    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
+    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures, at) : null
     const row = (
       <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
         {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
@@ -10486,11 +10509,10 @@ const bandHooks = (on: On) => {
         ) : null}
       </Box>
     )
-    // Where the figures are drawn, a pointer resting on one shows its card above them; the bar grows upward, so the figures stay put
-    return (drawn && figures) || marker ? (
+    // Where the figures are drawn, a pointer resting on one shows its card floating over the chat above them, taking no room
+    return marker ? (
       <Box flexDirection="column">
         {marker}
-        {drawn && figures ? usageCardsDrawn(ui, figures) : null}
         {row}
       </Box>
     ) : (

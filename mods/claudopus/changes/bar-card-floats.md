@@ -1,0 +1,1 @@
+- In the desktop app, a figure's card above the prompt now floats over the chat: showing it no longer pushes the chat up or makes it spring back, and the row of figures stays in sight under it, so you can move straight to the next figure.
