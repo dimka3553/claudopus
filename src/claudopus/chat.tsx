@@ -467,6 +467,9 @@ const chatHooks = (on: On) => {
     const isChat = (await read($, me)).isChat && !isOff
     const r = await next({ ...e, instructions: [e.instructions, KEEP, isChat ? KEEP_AGENTS : ''].filter(Boolean).join('\n') })
     if (e.agentId === undefined && e.trigger !== 'precompute') await update($, me, m => ({ ...m, needsContext: true }))
+    // A piece of work compacted loses the rules it was handed after its brief: it is handed them again at its next step
+    const agent = e.agentId
+    if (agent !== undefined && e.trigger !== 'precompute' && dir) await changeTodos($, list => (list.some(one => one.id === agent && !one.parentId) ? list.map(one => (one.id === agent ? { ...one, rulesDue: true } : one)) : list))
 
     return r
   })

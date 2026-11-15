@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
+import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
 import type { Job } from './jobs'
 
 test('a job is told by its command: a server with its port, a download, else a script; its latest line is what a progress bar shows last', async () => {
@@ -265,4 +265,36 @@ test('how a run ended, from the last line the engine writes on its output: finis
   expect(leftSeconds('55s left')).toBe(55)
   expect(isOutputEnded('1794640530\n\n[exited with code 0]\n')).toBe(true)
   expect(isOutputEnded('frame 81/120\n')).toBe(false)
+})
+
+test('what a command left running is told by its group and by when it started: old app helpers, other commands and runs still deciding are never taken for it', () => {
+  const now = 1_700_000_000_000
+  const at = now - 10_000
+  const ps = (lines: string[]) => procsOf(lines.join('\n'), now)
+  const span = { id: 'c1', from: 5000, to: 5100, at, endAt: now - 2_000, until: now - 2_000, cmd: 'python launch.py 8' }
+  // Left by the command: its group's leader (5050) is gone, it started while the command ran
+  const mine = '5060 1 5050 S 00:05 7000000 /u/bin/python fig4.py page PMC closed 0'
+  // An app helper orphaned 20 hours ago, whose dead group leader's number falls in the range after the numbers came round
+  const old = '5070 1 5040 S 20:01:00 90000 /Applications/Telegram.app/Contents/Frameworks/Helper'
+  const found = leftoversOf(ps([mine, old]), [span])
+  expect(found.map(l => l.top.pid)).toEqual(['5060'])
+  expect(memOf(found[0]?.tree ?? [])).toBe('6.7 GB')
+  // Numbers that wrapped round past the most macOS hands out
+  expect(leftoversOf(ps(['120 1 99990 S 00:05 1000 sleep 60']), [{ ...span, from: 99_950, to: 300 }]).length).toBe(1)
+  // A run a command still running may have started waits for that one
+  const daemon = '5080 1 5080 S 00:05 1000 /u/bin/python daemon.py'
+  expect(leftoversOf(ps([daemon]), [span], new Set(), [{ from: 5070, at: now - 8_000 }]).length).toBe(0)
+  expect(leftoversOf(ps([daemon]), [span]).length).toBe(1)
+  // The rest of a pipeline whose last command is followed by its printed number is that run's
+  expect(leftoversOf(ps([mine, '5061 1 5050 S 00:05 1000 tee out.log']), [span], new Set(['5061'])).length).toBe(0)
+  // A command sent to the background takes what starts after it as long as it is open
+  expect(leftoversOf(ps(['5060 1 5050 S 00:01 1000 sleep 60']), [{ ...span, until: undefined }]).length).toBe(1)
+  // Two commands at once: each group goes to the command whose first number is nearest below its leader, whichever is newer
+  const a = { ...span, id: 'a', from: 5000, to: 5200, at: now - 20_000, until: now - 1_000 }
+  const b = { ...span, id: 'b', from: 5100, to: 5150, at: now - 9_000, until: now - 6_000 }
+  const both = leftoversOf(ps(['5003 1 5002 S 00:08 1000 sleep 600', '5110 1 5102 S 00:08 1000 sleep 601']), [b, a])
+  expect(both.map(l => `${l.top.pid}>${l.span}`).sort()).toEqual(['5003>a', '5110>b'])
+  // A call still open past the wrap holds back what it may have started
+  expect(leftoversOf(ps(['20 1 20 S 00:05 1000 /u/bin/python daemon.py']), [{ ...span, from: 99_990, to: 40 }], new Set(), [{ from: 99_995, at: now - 8_000 }]).length).toBe(0)
+  expect(leftName('/opt/homebrew/Cellar/python/Python.app/Contents/MacOS/Python fig4.py page 3')).toBe('Run python fig4.py page 3')
 })
