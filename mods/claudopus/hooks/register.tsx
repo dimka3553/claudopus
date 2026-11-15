@@ -5550,29 +5550,36 @@ const asksForBar = (cards: Todo[]) => cards.filter(one => !one.parentId && !one.
 const barTarget = (cards: Todo[]) => (replyTo ? asksForBar(cards).find(isReplyOpen) : undefined)
 // The bar's own id on each surface, as its drawing is asked for: where the cursor is put when the box opens
 const barIds = new Map<string, string>()
-// What was typed for a card and never sent is the card's: a question its work has since put in place of the one it was typed for
-// shows it too, in the bar's box as it is opened again and in the card's own box when the bar folds
-const carryDraft = ($: EngineInterface, one: Todo) => {
-  if (!one.ask) return
+// What was typed in the bar's box is its card's: when the work has since put a new question in place of the one the box was
+// opened on, the words are shown under that question too, in the box as it is opened again and in the card's own box when the
+// bar folds. Only the words of the box the person last had open for that card (barLeft), never those of an older question
+const barLeft = new Map<string, string>()
+const carryDraft = ($: EngineInterface, one: Todo, from: string | undefined) => {
+  if (!one.ask || !from) return
   const to = draftOf(one.id, one.ask)
-  if (drafts.get(to)) return
-  const from = [...drafts.keys()].filter(key => key !== to && key.startsWith(`${one.id}|`) && drafts.get(key)).pop()
-  const typed = from ? drafts.get(from) : undefined
-  if (!from || !typed) return
+  const typed = drafts.get(from)
+  if (from === to || !typed || drafts.get(to)) return
   drafts.set(to, typed)
   keepDraft($, to, typed)
   drafts.delete(from)
   keepDraft($, from, undefined)
 }
-// A reply sent from the bar's box answers what its card asks as it is sent: the box may have been drawn for an earlier question
-const sendFromBar = async ($: EngineInterface, id: string, value: string) => {
-  const one = (await read($, todos)).find(card => card.id === id)
-  if (one?.ask && value.trim()) await answerAsk($, one, value, true)
+// A reply sent from the bar's box answers what its card asks as it is sent: the box may have been drawn for an earlier question.
+// On its way from the press itself, as an answer from the card is (answersOnWay)
+const sendFromBar = ($: EngineInterface, id: string, value: string) => {
+  const run = (async () => {
+    const one = (await read($, todos)).find(card => card.id === id)
+    if (one?.ask && value.trim()) await answerAsk($, one, value, true)
+  })()
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
 }
 // Opens the bar's reply box for a card, or closes it. Opening it, the cursor is asked into the box: the app gives it only where
 // the bar already holds the keys, so where it does not the person clicks the box
 const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) => {
-  if (one) carryDraft($, one)
+  if (replyTo) barLeft.set(replyTo, barDraft(replyTo))
+  if (one) (carryDraft($, one, barLeft.get(one.id)), barLeft.delete(one.id))
   replyTo = one?.ask ? one.id : ''
   replyMark = one?.ask ? askMark(one.ask) : ''
   barBoxAt = 0
@@ -10997,8 +11004,8 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
   ) : null
 // The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
 // to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
-// panel's scrolling. The box is the card's own: the same drafts, the same answer, a new one for each ask. It takes the cursor when
-// the person clicks anywhere in the bar (autoFocus)
+// panel's scrolling. The box is the card's own: the same answer, and the same box through a new question of its work, until the
+// person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
 const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
   const draft = barDraft(one.id)
   return (
@@ -11051,10 +11058,9 @@ const bandHooks = (on: On) => {
       // A box open in a bar that can no longer show it is closed, and stays closed when the bar is back; what was half typed in
       // it is drawn in the card's own box, and nothing is held as typed in any more
       const open = canBox ? undefined : cards.find(one => one.id === replyTo)
-      if (open) carryDraft($, open)
+      if (open) (carryDraft($, open, barDraft(open.id)), freeTimes($))
       if (!canBox) ((replyTo = ''), (replyMark = ''), barHeld.delete(e.surface))
       barBoxAt = 0
-      freeTimes($)
       // Only a card that asks is drawn differently for it
       if (asksForBar(cards).length && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
@@ -11184,8 +11190,7 @@ const bandHooks = (on: On) => {
     }
     // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
     return drawing(drawn ? usageSpacersDrawn(ui) : null)
-    // A bar that could not be drawn takes no box: the card has its own again
-  }).catch(($, e, next) => ((replyTo = ''), (replyMark = ''), barBoxes.delete(e.surface), next(e)))
+  })
 
 }
 
@@ -11510,7 +11515,7 @@ const panelHooks = (on: On) => {
               panel to. Once opened it says where to type: the app puts the cursor there only on the person's own click */}
           {'Input' in table && !one.chat && repliesInBar(e.surface) ? (
             isReplyOpen(one) ? (
-              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type your reply in the box above the chat's prompt</Text>
+              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type it in the box above the chat</Text>
             ) : null
           ) : 'Input' in table && !one.chat ? (
             <Box width="100%" flexDirection="column">

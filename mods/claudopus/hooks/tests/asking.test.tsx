@@ -1882,7 +1882,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect(await says(bar, /^↳ Your reply to “Check the ears”$/)).toBe(true)
   expect((await labelled(bar, 'Close')).length).toBe(1)
   expect((await boxesIn(list)).length + (await boxesIn(details)).length).toBe(0)
-  expect(await says(list, /^✎ Type your reply in the box above the chat's prompt$/)).toBe(true)
+  expect(await says(list, /^✎ Type it in the box above the chat$/)).toBe(true)
   expect((await labelled(list, CLOSE)).length).toBe(1)
   expect((await labelled(list, OPEN)).length).toBe(0)
   // The panel scrolled away from its top with the box open: the bar still points at what waits there
@@ -1914,7 +1914,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   await bar.press({ key: (await labelled(bar, 'Close'))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(bar)).length === 0 ? true : undefined))).toBe(true)
   expect(await until(async () => ((await labelled(list, OPEN)).length === 1 ? true : undefined))).toBe(true)
-  expect(await says(list, /reply box is open/)).toBe(false)
+  expect(await says(list, /Type it in the box above/)).toBe(false)
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(bar))[0]?.props.value === 'The left, but ke' ? true : undefined))).toBe(true)
   // Closed from the card, the same

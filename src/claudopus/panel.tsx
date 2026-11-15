@@ -319,7 +319,7 @@ const panelHooks = (on: On) => {
               panel to. Once opened it says where to type: the app puts the cursor there only on the person's own click */}
           {'Input' in table && !one.chat && repliesInBar(e.surface) ? (
             isReplyOpen(one) ? (
-              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type your reply in the box above the chat's prompt</Text>
+              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type it in the box above the chat</Text>
             ) : null
           ) : 'Input' in table && !one.chat ? (
             <Box width="100%" flexDirection="column">

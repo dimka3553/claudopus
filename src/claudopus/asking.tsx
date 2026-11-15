@@ -295,29 +295,36 @@ const asksForBar = (cards: Todo[]) => cards.filter(one => !one.parentId && !one.
 const barTarget = (cards: Todo[]) => (replyTo ? asksForBar(cards).find(isReplyOpen) : undefined)
 // The bar's own id on each surface, as its drawing is asked for: where the cursor is put when the box opens
 const barIds = new Map<string, string>()
-// What was typed for a card and never sent is the card's: a question its work has since put in place of the one it was typed for
-// shows it too, in the bar's box as it is opened again and in the card's own box when the bar folds
-const carryDraft = ($: EngineInterface, one: Todo) => {
-  if (!one.ask) return
+// What was typed in the bar's box is its card's: when the work has since put a new question in place of the one the box was
+// opened on, the words are shown under that question too, in the box as it is opened again and in the card's own box when the
+// bar folds. Only the words of the box the person last had open for that card (barLeft), never those of an older question
+const barLeft = new Map<string, string>()
+const carryDraft = ($: EngineInterface, one: Todo, from: string | undefined) => {
+  if (!one.ask || !from) return
   const to = draftOf(one.id, one.ask)
-  if (drafts.get(to)) return
-  const from = [...drafts.keys()].filter(key => key !== to && key.startsWith(`${one.id}|`) && drafts.get(key)).pop()
-  const typed = from ? drafts.get(from) : undefined
-  if (!from || !typed) return
+  const typed = drafts.get(from)
+  if (from === to || !typed || drafts.get(to)) return
   drafts.set(to, typed)
   keepDraft($, to, typed)
   drafts.delete(from)
   keepDraft($, from, undefined)
 }
-// A reply sent from the bar's box answers what its card asks as it is sent: the box may have been drawn for an earlier question
-const sendFromBar = async ($: EngineInterface, id: string, value: string) => {
-  const one = (await read($, todos)).find(card => card.id === id)
-  if (one?.ask && value.trim()) await answerAsk($, one, value, true)
+// A reply sent from the bar's box answers what its card asks as it is sent: the box may have been drawn for an earlier question.
+// On its way from the press itself, as an answer from the card is (answersOnWay)
+const sendFromBar = ($: EngineInterface, id: string, value: string) => {
+  const run = (async () => {
+    const one = (await read($, todos)).find(card => card.id === id)
+    if (one?.ask && value.trim()) await answerAsk($, one, value, true)
+  })()
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
 }
 // Opens the bar's reply box for a card, or closes it. Opening it, the cursor is asked into the box: the app gives it only where
 // the bar already holds the keys, so where it does not the person clicks the box
 const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) => {
-  if (one) carryDraft($, one)
+  if (replyTo) barLeft.set(replyTo, barDraft(replyTo))
+  if (one) (carryDraft($, one, barLeft.get(one.id)), barLeft.delete(one.id))
   replyTo = one?.ask ? one.id : ''
   replyMark = one?.ask ? askMark(one.ask) : ''
   barBoxAt = 0

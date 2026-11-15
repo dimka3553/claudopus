@@ -25,8 +25,8 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
   ) : null
 // The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
 // to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
-// panel's scrolling. The box is the card's own: the same drafts, the same answer, a new one for each ask. It takes the cursor when
-// the person clicks anywhere in the bar (autoFocus)
+// panel's scrolling. The box is the card's own: the same answer, and the same box through a new question of its work, until the
+// person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
 const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
   const draft = barDraft(one.id)
   return (
@@ -79,10 +79,9 @@ const bandHooks = (on: On) => {
       // A box open in a bar that can no longer show it is closed, and stays closed when the bar is back; what was half typed in
       // it is drawn in the card's own box, and nothing is held as typed in any more
       const open = canBox ? undefined : cards.find(one => one.id === replyTo)
-      if (open) carryDraft($, open)
+      if (open) (carryDraft($, open, barDraft(open.id)), freeTimes($))
       if (!canBox) ((replyTo = ''), (replyMark = ''), barHeld.delete(e.surface))
       barBoxAt = 0
-      freeTimes($)
       // Only a card that asks is drawn differently for it
       if (asksForBar(cards).length && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
@@ -212,8 +211,7 @@ const bandHooks = (on: On) => {
     }
     // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
     return drawing(drawn ? usageSpacersDrawn(ui) : null)
-    // A bar that could not be drawn takes no box: the card has its own again
-  }).catch(($, e, next) => ((replyTo = ''), (replyMark = ''), barBoxes.delete(e.surface), next(e)))
+  })
 
 }
 
