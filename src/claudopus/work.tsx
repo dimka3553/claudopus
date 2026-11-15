@@ -135,6 +135,12 @@ const workHooks = (on: On) => {
       await log($, 'refused a command that reads the keychain')
       return { deny: NO_READ }
     }
+    // An ask for a key the list of keys has is told where that key is
+    const keyKept = await keyAsked($, e).catch(() => '')
+    if (keyKept) {
+      await log($, `refused an ask for a key the list of keys has (${e.tool})`)
+      return { deny: keyKept }
+    }
     const ownFiles = await writesOwnFiles($, e)
     if (ownFiles) {
       await log($, `refused ${e.tool} writing the memory folder's own files`)
@@ -186,6 +192,7 @@ const workHooks = (on: On) => {
       if (woken && !r.deny && !r.isError) await wakeCard($, woken)
       if (dir && e.agentId !== undefined && !r.deny && !r.isError) await keepBackground($, e.agentId, call as never, r.result).catch(err => log($, `background work not followed: ${String(err)}`))
       if (dir && e.agentId !== undefined && !r.deny && !r.isError && !(call as { run_in_background?: unknown }).run_in_background) await keepDetached($, e.agentId, call as never, r.result).catch(err => log($, `detached work not followed: ${String(err)}`))
+      await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       return hideKept($, call, r)
     }
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
@@ -331,7 +338,7 @@ const workHooks = (on: On) => {
       if (!r.deny && stopId) {
         stoppedHere.add(stopId)
         await stopHelpers($, stopId)
-        await dropBackground($, [stopId])
+        await dropBackground($, [stopId], 'stopped')
         const now = await $.clock.now()
         await update($, todos, list => list.map(one => (one.id === stopId && !one.parentId && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === stopId && one.leftSince ? { ...one, leftSince: undefined } : one)))
         await keepStoppedReports($, now)

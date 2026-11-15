@@ -14,7 +14,12 @@ export const MEMORY_WARN = 0.9
 // One look on a Mac: the engine's own process, every process with its parent, memory and processor time, the memory as Activity
 // Monitor counts it, the disks' and the network's running totals, and now and then top's own memory of each process
 export const usageMac = (isTop: boolean) =>
-  `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`
+  `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt; echo @@POWER@@; ioreg -rn AppleSmartBattery -w0 | grep -oE '"SystemLoad"=[0-9]+'; echo @@GPUP@@; ioreg -r -c AGXDeviceUserClient -l -w0 | grep -E '"AppUsage"|"IOUserClientCreator"'; echo @@NETP@@; nettop -n -P -L 1 -x -J bytes_in,bytes_out 2>/dev/null; echo @@RU@@; ${USAGE_RU}${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`
+// Each process's disk bytes read and written and the energy its processors used (nanojoules), as the Mac keeps them for Activity
+// Monitor: libproc's proc_pid_rusage, through the system's Python, and only where the developer tools are there, as without them
+// /usr/bin/python3 asks to install them. A process of another user gives nothing
+const USAGE_RU =
+  `xcode-select -p >/dev/null 2>&1 && /usr/bin/python3 -I -c 'import ctypes as c\nL=c.CDLL("/usr/lib/libproc.dylib");P=(c.c_int*8192)();k=L.proc_listallpids(P,c.sizeof(P));B=(c.c_uint64*60)()\nfor p in P[:k]:\n if p>0 and L.proc_pid_rusage(p,6,B)==0:print(p,B[18],B[19],B[42])' 2>/dev/null`
 // One look on Linux, from /proc and /sys, and nvidia-smi where the machine has one (bounded, as a GPU with no driver kept loaded is slow
 // to answer). A graphics card asleep (its display device, not its sound) is left asleep: then there is no GPU figure. Files are read by
 // the shell itself, so the look starts no process per device
@@ -31,9 +36,9 @@ export type UsageProc = { pid: string; ppid: string; cpu: number; mem: number; n
 export type UsageBattery = { pct: number; state: 'battery' | 'charging' | 'plugged' | 'unknown'; left?: number; finishing?: true }
 // The programs that use the most, by name, for the detail a pointer on a figure shows: [name, bytes] or [name, part of the processor]
 export type UsageTop = [string, number][]
-export type UsageRaw = { names?: Record<string, string>; memTop?: UsageTop; gpuMem?: number; gpuMemTotal?: number; netIn?: number; netOut?: number; gpu?: number; battery?: UsageBattery; at: number; cpu: Record<string, number>; claude: string[]; claudeMem: number; memUsed: number; memTotal: number; ncpu: number; disk: Record<string, number>; net: Record<string, number>; busy?: number; all?: number }
+export type UsageRaw = { gpuNs?: Record<string, number>; netInBy?: Record<string, number>; netOutBy?: Record<string, number>; diskBy?: Record<string, number>; energyBy?: Record<string, number>; watts?: number; names?: Record<string, string>; memTop?: UsageTop; gpuMem?: number; gpuMemTotal?: number; netIn?: number; netOut?: number; gpu?: number; battery?: UsageBattery; at: number; cpu: Record<string, number>; claude: string[]; claudeMem: number; memUsed: number; memTotal: number; ncpu: number; disk: Record<string, number>; net: Record<string, number>; busy?: number; all?: number }
 // What the line shows: bytes, parts of the whole processor (0 to 1), bytes a second
-export type UsageFigures = { memTop?: UsageTop; cpuTop?: UsageTop; gpuMem?: number; gpuMemTotal?: number; netIn?: number; netOut?: number; disks?: string[]; ports?: string[]; ncpu?: number; gpu?: number; battery?: UsageBattery; memUsed: number; memTotal: number; memClaude: number; cpu?: number; cpuClaude?: number; disk?: number; net?: number }
+export type UsageFigures = { gpuClaude?: number; diskClaude?: number; netInClaude?: number; netOutClaude?: number; wattsClaude?: number; watts?: number; memTop?: UsageTop; cpuTop?: UsageTop; gpuMem?: number; gpuMemTotal?: number; netIn?: number; netOut?: number; disks?: string[]; ports?: string[]; ncpu?: number; gpu?: number; battery?: UsageBattery; memUsed: number; memTotal: number; memClaude: number; cpu?: number; cpuClaude?: number; disk?: number; net?: number }
 // What is kept between looks, in the shared file: the last look, its figures, top's memory of each process when last had, and when
 // top was last asked, whether or not it answered
 export type UsageKept = { at: number; raw: UsageRaw; figures: UsageFigures; footprint?: { at: number; byPid: Record<string, number> }; topAt?: number }
@@ -158,6 +163,35 @@ const netSplitOf = (text: string, isLinux: boolean) => {
   return { netIn, netOut }
 }
 
+// Each process's own running totals on a Mac, by pid. The graphics processor's busy time in nanoseconds from each Metal client
+// (its AppUsage comes before the line naming the process that opened it)
+export const gpuTimesOf = (text: string) => {
+  const by: Record<string, number> = {}
+  let sum = 0
+  for (const line of text.split('\n')) {
+    if (line.includes('"AppUsage"')) sum = [...line.matchAll(/"accumulatedGPUTime"=(\d+)/g)].reduce((a, m) => a + Number(m[1]), 0)
+    const pid = /"IOUserClientCreator" = "pid (\d+),/.exec(line)?.[1]
+    if (pid) (by[pid] = (by[pid] ?? 0) + sum), (sum = 0)
+  }
+  return by
+}
+// nettop's bytes in and out of each process (name.pid,in,out,)
+export const netByOf = (text: string) => {
+  const netIn: Record<string, number> = {}
+  const netOut: Record<string, number> = {}
+  for (const m of text.matchAll(/\.(\d+),(\d+),(\d+),?\s*$/gm)) (netIn[m[1] ?? ''] = Number(m[2])), (netOut[m[1] ?? ''] = Number(m[3]))
+  return { netIn, netOut }
+}
+// proc_pid_rusage's disk bytes (read and written together) and processor energy of each process. The look prints rusage_info_v6's
+// 64-bit counts after its 16-byte uuid: ri_diskio_bytesread and ri_diskio_byteswritten at 18 and 19, ri_energy_nj at 42 (41 is ri_pcycles)
+export const rusageOf = (text: string) => {
+  const disk: Record<string, number> = {}
+  const energy: Record<string, number> = {}
+  for (const m of text.matchAll(/^(\d+) (\d+) (\d+) (\d+)$/gm)) (disk[m[1] ?? ''] = Number(m[2]) + Number(m[3])), (energy[m[1] ?? ''] = Number(m[4]))
+  return { disk, energy }
+}
+const pick = (by: Record<string, number>, pids: Set<string>) => Object.fromEntries(Object.entries(by).filter(([pid]) => pids.has(pid)))
+
 // A Mac's look as running totals; Claude's memory is top's where it has the process, else its resident memory
 export const rawOfMac = (text: string, at: number, footprint?: Record<string, number>): UsageRaw | undefined => {
   const s = sectionsOf(text)
@@ -192,7 +226,18 @@ export const rawOfMac = (text: string, at: number, footprint?: Record<string, nu
   const gpuMem = gpuMemOf(s.GPU ?? '', false)
   const battery = batteryOfMac(s.BATT ?? '')
   const memTop = topOf(procs.map(p => [p.name, footprint?.[p.pid] ?? p.mem]))
-  return { names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used } : {}), ...netSplitOf(s.NET ?? '', false), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed, memTotal, ncpu: ncpu || 1, disk, net, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}) }
+  // Claude's own totals: its graphics time against everyone's, its network, disk and processor energy; and the whole Mac's draw
+  const gpuNs = gpuTimesOf(s.GPUP ?? '')
+  const netBy = netByOf(s.NETP ?? '')
+  const ru = rusageOf(s.RU ?? '')
+  const load = Number(/"SystemLoad"=(\d+)/.exec(s.POWER ?? '')?.[1] ?? 0)
+  const own = {
+    ...(Object.keys(gpuNs).length ? { gpuNs } : {}),
+    ...(Object.keys(netBy.netIn).length ? { netInBy: pick(netBy.netIn, claude), netOutBy: pick(netBy.netOut, claude) } : {}),
+    ...(Object.keys(ru.disk).length ? { diskBy: pick(ru.disk, claude), energyBy: pick(ru.energy, claude) } : {}),
+    ...(load > 0 ? { watts: load / 1000 } : {}),
+  }
+  return { ...own, names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used } : {}), ...netSplitOf(s.NET ?? '', false), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed, memTotal, ncpu: ncpu || 1, disk, net, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}) }
 }
 
 // A Linux look: processes from /proc/<pid>/stat (Claude's memory is each process's resident memory less what it shares)
@@ -284,7 +329,25 @@ export const figuresOf = (prev: UsageRaw | undefined, cur: UsageRaw): UsageFigur
     ports: Object.keys(cur.net).filter(name => typeof prev.net?.[name] === 'number' && (cur.net[name] ?? 0) > (prev.net[name] ?? 0)),
     disks: Object.keys(cur.disk).filter(name => typeof prev.disk?.[name] === 'number' && (cur.disk[name] ?? 0) > (prev.disk[name] ?? 0)),
     ...(split ? { netIn: ((cur.netIn ?? 0) - (prev.netIn ?? 0)) / span, netOut: ((cur.netOut ?? 0) - (prev.netOut ?? 0)) / span } : {}),
+    ...claudeShareOf(prev, cur, span),
   }
+}
+
+// Claude's part of what moved between two looks, where the Mac told each process's own: of the graphics processor (its share of all
+// clients' time, as a part of how busy the device was), its disk and network speeds, and the power its processors drew
+const claudeShareOf = (prev: UsageRaw, cur: UsageRaw, span: number): Partial<UsageFigures> => {
+  const claude = new Set(cur.claude)
+  const out: Partial<UsageFigures> = {}
+  if (cur.gpuNs && prev.gpuNs && cur.gpu !== undefined) {
+    const all = movedOf(prev.gpuNs, cur.gpuNs)
+    if (all > 0) out.gpuClaude = Math.min(cur.gpu, cur.gpu * (movedOf(prev.gpuNs, pick(cur.gpuNs, claude)) / all))
+  }
+  if (cur.diskBy && prev.diskBy) out.diskClaude = movedOf(prev.diskBy, cur.diskBy) / span
+  if (cur.netInBy && prev.netInBy && cur.netOutBy && prev.netOutBy) (out.netInClaude = movedOf(prev.netInBy, cur.netInBy) / span), (out.netOutClaude = movedOf(prev.netOutBy, cur.netOutBy) / span)
+  // A Mac whose processors count no energy (an Intel one) counts none: then nothing is said, not 0 W
+  if (cur.energyBy && prev.energyBy && Object.values(cur.energyBy).some(n => n > 0)) out.wattsClaude = movedOf(prev.energyBy, cur.energyBy) / 1e9 / span
+  if (cur.watts !== undefined) out.watts = cur.watts
+  return out
 }
 
 // The next kept state from a look: top's memory kept for a minute, the figures against the look before

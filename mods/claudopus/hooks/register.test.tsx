@@ -333,6 +333,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (rest[0] === 'set') return (files.set(key, String(e.init?.stdin ?? '').replace(/\n$/, '')), ok())
       if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
       if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))
+      // Every service and account a value is kept under, never a value: the keys laid as secret:<name> and keychain-entry:<service>\t<account>
+      // (a keychain that does not answer, where the test lays keyring:refused, fails it)
+      if (rest[0] === 'entries' && files.has('keyring:refused')) return ok('', 1)
+      if (rest[0] === 'entries') return ok([...files.keys()].flatMap(one => (one.startsWith('secret:') && one !== 'secret:refused' ? [`claudopus-secret\t${one.slice(7)}\n`] : one.startsWith('keychain-entry:') ? [`${one.slice(15)}\n`] : [])).join(''))
       return ok('', 2)
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
@@ -343,9 +347,15 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
     if (tool?.endsWith('bin/secret')) {
-      const said = rest[0] === '--list' ? (kept ? 'API_KEY\n' : '') : kept ? String(e.init?.stdin ?? '').replaceAll(kept, '[hidden API_KEY]') : String(e.init?.stdin ?? '')
+      // and the keys a test lays as secret:<name>, each listed by its name and hidden in what passes through
+      const more = [...files].filter(([key]) => key.startsWith('secret:')).map(([key, value]) => [key.slice(7), value] as const)
+      if (rest[0] === '--hide' && files.has('secret:refused')) return ok('', 1)
+      const hidden = more.reduce((text, [name, value]) => text.replaceAll(value, `[hidden ${name}]`), kept ? String(e.init?.stdin ?? '').replaceAll(kept, '[hidden API_KEY]') : String(e.init?.stdin ?? ''))
+      const said = rest[0] === '--list' ? `${kept ? 'API_KEY\n' : ''}${more.map(([name]) => `${name}\n`).join('')}` : hidden
       return { value: { exitCode: 0, stdout: said, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
+    if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
     const stdout = tool?.endsWith('jq')
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
@@ -426,7 +436,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
     if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
-    if (e.tool === 'Monitor') return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: 0, persistent: true } } as never
+    // SBOS's list of names, as the test lays it
+    if (e.tool === 'mcp__sbos__secrets') return { result: { content: [{ type: 'text', text: files.get('sbos:secrets') ?? '[]' }] } } as never
+    if (e.tool === 'Monitor') {
+      // as the engine answers: a watch not kept for good ends at its time limit, at most 30 minutes
+      const w = e as { timeout_ms?: number; persistent?: boolean | string }
+      const forGood = w.persistent === undefined || w.persistent === true || w.persistent === 'true'
+      return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: forGood ? 0 : Math.min(w.timeout_ms ?? 300_000, 1_800_000), persistent: forGood } } as never
+    }
     if (e.tool === 'Workflow') return { result: { status: 'async_launched', taskId: 'wt1', runId: 'wf_1', taskType: 'local_workflow', workflowName: 'rounds', transcriptDir: '/t/wf_1', scriptPath: '/t/wf_1.js' } } as never
     return { result: 'ran' } as never
   })
@@ -1315,7 +1332,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
   // Its helper, ended in the same moment, stays in its card for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Keys', 'Config', 'About', 'Fix the nose', 'Search the docs'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeDefined()
   await clock.advance(1_100)
@@ -1324,8 +1341,8 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /^Nothing/ }))?.text).toBe('Nothing is running')
   // It is one folded row, "Finished", under the running cards; unfolded, a card as running work has, with Details and no Stop
   const buttons = await pane.findAll({ type: 'Button' })
-  expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', '▸ Finished 1'])
-  await pane.press({ key: String(buttons[4]?.key) })
+  expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Keys', 'Config', 'About', '▸ Finished 1'])
+  await pane.press({ key: String(buttons[5]?.key) })
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.wrap).toBe('truncate-end')
   expect((await pane.find({ type: 'Text', text: /^Finished ·/ }))?.text).toBe('Finished · 1 of 7 done · 2m 00s')
   expect(await pane.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
@@ -2275,7 +2292,9 @@ test('every run under a card says how it stands: a command held open shows its p
   // The download held open: how much of how much, its percent, speed and time left, as curl printed them, and nothing of when
   // Named in the work's own form: its kind already said, how long it should take beside its time, in amber well past it
   expect(shown).toContain('Download the CT scans')
-  expect(shown).toContain('9m 00s of ~3m')
+  // past it, the run's own time left makes a fresh expectation, never the old figure as if it held
+  expect(shown).toContain('9m 00s of ~9m 53s')
+  expect(shown.some(text => /of ~3m/.test(text))).toBe(false)
   expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
@@ -2297,6 +2316,77 @@ test('every run under a card says how it stands: a command held open shows its p
   await list.unmount()
   held.get('dl')?.('')
   await call
+})
+
+test('only runs really running are listed: a watch the engine killed at its time limit, a command that failed and one that finished leave at once, counted on the closing row and told apart in Details; 15 Nov three "[killed]" watches stayed with their clocks running', SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const born = now
+  const TASKS = '/tmp/claude-501/x/s1/tasks'
+  const MIN = 60_000
+  // The 15 Nov card: two alike watches set 30 minutes, one more, and the wait that was really still going
+  const outputs: Record<string, () => string> = {
+    [`${TASKS}/mon-m1.output`]: () => (now - born >= 30 * MIN ? '\n[killed]\n' : ''),
+    [`${TASKS}/mon-m2.output`]: () => (now - born >= 30 * MIN ? '\n[killed]\n' : ''),
+    [`${TASKS}/bg-w1.output`]: () => '',
+    [`${TASKS}/bg-f1.output`]: () => (now - born >= 3 * MIN ? 'Traceback: boom\n\n[exited with code 1]\n' : ''),
+    [`${TASKS}/bg-k1.output`]: () => (now - born >= 2 * MIN ? 'all good\n\n[exited with code 0]\n' : ''),
+    // one past its time that prints how long it has left, and one past its time that does not
+    [`${TASKS}/bg-p1.output`]: () => 'progress: 3/6 steps fitting eta 4m\n',
+    [`${TASKS}/bg-p2.output`]: () => 'drawing frames\n',
+  }
+  const { clock } = world(on, { jobs: { output: file => outputs[file]?.() ?? '', wroteAt: () => now - 2_000 } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'save the videos', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Save the videos', prompt: 'go' } as never)
+  const watch = (id: string) => $.tool.call({ tool: 'Monitor', tool_use_id: id, agentId: 'a1', command: 'until grep -q "pass 1 done" /s/screen.log; do sleep 20; done', description: 'Wait for first screening pass (about 35 min)', timeout_ms: 3_000_000, persistent: false } as never)
+  await watch('m1')
+  await watch('m2')
+  const bg = (id: string, command: string, description: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command, description, run_in_background: true } as never)
+  await bg('w1', 'until grep -q "pass 1 done" /s/screen.log; do sleep 20; done; tail -2 /s/screen.log', 'Wait for the details screening to finish (about 55 min)')
+  await bg('f1', 'python3 fetch.py', 'Run the fetch of the list')
+  await bg('k1', 'python3 tidy.py', 'Run the tidy up')
+  await bg('p1', 'python3 fit.py', 'Run the fit (about 20 min)')
+  await bg('p2', 'python3 frames.py', 'Run the drawing of frames (about 20 min)')
+  const texts = async (surface = 'terminal') => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface } as never)
+    const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
+    await list.unmount()
+    return all
+  }
+  for (let n = 0; n < 10; n++) await advance(MIN)
+  // Before the limit both watches run, as one row of two
+  expect((await texts()).some(text => /^Wait for first screening pass ×2$/.test(text))).toBe(true)
+  for (let n = 0; n < 39; n++) await advance(MIN)
+  const shown = (await until(async () => {
+    const all = await texts()
+    return all.some(text => /^4 runs ended/.test(text)) ? all : undefined
+  })) ?? []
+  // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
+  expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
+  expect(shown.some(text => /screening pass ×2|Run the fetch|Run the tidy/.test(text))).toBe(false)
+  // The closing row counts them and says, in words, how many did not finish well
+  expect(shown).toContain('4 runs ended · 1 failed, 2 timed out')
+  // The wait still running stays, within its time
+  expect(shown).toContain('Wait for the details screening to finish')
+  expect(shown).toContain('49m 00s of ~55m')
+  // Past its time: a fresh expectation from the time left it prints; or else plainly past it, never the old figure as if it held
+  expect(shown).toContain('49m 00s of ~53m')
+  expect(shown).toContain('49m 00s · past ~20m')
+  expect(shown.some(text => /of ~20m/.test(text))).toBe(false)
+  // Details names each ended run with how it ended
+  const pane = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
+  const details = (await pane.findAll({ type: 'Text' })).map(one => one.text)
+  await pane.unmount()
+  expect(details).toContain('Runs ended')
+  expect(details.filter(text => text === 'Wait for first screening pass').length).toBe(2)
+  expect(details.filter(text => /^timed out after (29|30)m \d\ds · /.test(text)).length).toBe(2)
+  expect(details.some(text => /^failed \(exit code 1\) after \dm \d\ds · /.test(text))).toBe(true)
+  expect(details.some(text => /^finished after \dm \d\ds · /.test(text))).toBe(true)
+  // Later the wait passes its time too, with nothing printed: it says so
+  for (let n = 0; n < 8; n++) await advance(MIN)
+  expect((await texts()).some(text => /^57m 00s · past ~55m$/.test(text))).toBe(true)
 })
 
 test("a run's second line starts under its name, with the tree's lines carried down beside it: not the last, the last, a run under a helper, a narrow panel, on a desktop and in a terminal; 15 Nov the app dropped the lines and the line started left of the tree", SLOW, async ($, on) => {
@@ -4045,7 +4135,7 @@ test('the bar keeps its buttons whole on a row of their own under the header, wr
   // A terminal's gap would be a whole blank line between the rows, so it has none
   const term = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 30 }, surface: 'terminal' } as never)
   expect((await term.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')?.props.rowGap).toBe(0)
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Keys', 'Config', 'About'])
   // The chat's size is no longer squeezed beside the buttons
   expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
 })
@@ -8316,6 +8406,156 @@ test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper
   expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ ids: ['a1'] })
 })
 
+// The keys remembered: names and stores only, made again from the stores, shown by the Keys button, and an ask for a kept key refused
+
+// Made-up keys, as a person would have given them, in each store
+const keysLaid = (files: Map<string, string>) => {
+  files.set('secret:ELEVENLABS_API_KEY', 'el-made-up-value-0001')
+  files.set('secret:KAGGLE_KEY', 'kg-made-up-value-0002')
+  files.set('keychain-entry:elevenlabs-api\tsam', '')
+  // An app's own storage is not a key someone gave
+  files.set('keychain-entry:Chrome Safe Storage\tChrome', '')
+  // An account named by what is in fact a kept value, as a slip could leave it: hidden in the list like any other
+  files.set('keychain-entry:other-api\tkg-made-up-value-0002', '')
+  files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n- Render | /repo/render |  | going | Renders\n')
+  files.set('/repo/render/.env.local', 'export OPENAI_API_KEY=env-made-up-value-0003\nVOICE_ID=abc\nDB_PASSWORD = env-made-up-value-0004\nNEXT_PUBLIC_STRIPE_KEY=pk_made_up\n')
+  files.set('/repo/render/.env.example', 'EXAMPLE_TOKEN=x\n')
+  files.set('sbos:secrets', JSON.stringify([
+    { name: 'elevenlabs-key', label: 'ElevenLabs API key', put_in: false, value: 'sbos-made-up-value-0005' },
+    { name: 'github-token', label: 'GitHub read-only token', put_in: true, secret: 'sbos-made-up-value-0006' },
+    { name: 'labs', label: "Labs' production database", database: true, put_in: true },
+    // labels that carry a kept value, as a slip could leave them: one with a | in it, one long enough to be cut
+    { name: 'odd-one', label: `pipe ${'pp|made-up-value-0009'} and ${'x'.repeat(70)} long-made-up-value-0010`, put_in: false },
+  ]))
+  files.set('secret:PIPE_KEY', 'pp|made-up-value-0009')
+  files.set('secret:LONG_KEY', 'long-made-up-value-0010')
+}
+const VALUES = ['el-made-up-value-0001', 'kg-made-up-value-0002', 'env-made-up-value-0003', 'env-made-up-value-0004', 'sbos-made-up-value-0005', 'sbos-made-up-value-0006', 'made-up-value-0009', 'long-made-up', 'pk_made_up']
+
+test('the list of keys holds every store\'s names and never a value, and the Keys button shows it in a tab', SLOW, async ($, on) => {
+  const { files, tabs, logged } = world(on)
+  keysLaid(files)
+  await $.session.start(start)
+  // SBOS's list, as a piece of work reads it, is taken in
+  await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's1', agentId: 'w1' } as never)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect((await keyed(pane, 'keys-open'))?.props.label).toBe('Keys')
+  await pressed(pane, 'keys-open')
+  const opened = await until(async () => tabs.find(tab => /^memory-keys-md-\d+: Keys$/.test(tab)))
+  expect(opened).toBeDefined()
+  const tab = await $.ui.mount({ ...LIST, requestId: (opened ?? '').split(':')[0], surface: 'desktop' } as never)
+  const shown = String((await tab.find({ type: 'Markdown' }))?.props.text)
+  for (const name of ['ELEVENLABS_API_KEY', 'KAGGLE_KEY', "Claudopus's keychain", '| elevenlabs-api |', 'OPENAI_API_KEY', 'DB_PASSWORD', '/repo/render/.env.local', 'elevenlabs-key', 'asked, not given', 'github-token', 'SBOS secrets'])
+    expect(shown).toContain(name)
+  // Not a key: an app's own storage, a variable that holds none, and an example file
+  for (const name of ['Chrome', 'VOICE_ID', 'EXAMPLE_TOKEN', 'NEXT_PUBLIC_STRIPE_KEY']) expect(shown).not.toContain(name)
+  // Another app's account that is not a name stays out of the list
+  expect(shown).not.toContain('/ sam')
+  // A database in SBOS is used through its query
+  expect(shown).toMatch(/\| labs \|[^\n]*`query`/)
+  // No value anywhere: the list, its state, the log, what the work was told
+  const everything = [...files].filter(([key]) => key.startsWith(MEMORY)).map(([key, text]) => `${key}\n${text}`).join('\n') + logged.join('\n')
+  for (const value of VALUES) expect(everything).not.toContain(value)
+  // A kept value in a label is hidden before the label is cut
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('pipe [hidden PIPE_KEY] and')
+})
+
+test('a key taken out of a store goes from the list, and nothing is written when the list cannot be checked for kept values', async ($, on) => {
+  const { files } = world(on)
+  keysLaid(files)
+  await $.session.start(start)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'w1', command: '/plug/bin/secret KAGGLE_KEY here true' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('KAGGLE_KEY')
+  files.delete('secret:KAGGLE_KEY')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', agentId: 'w1', command: '/plug/bin/secret KAGGLE_KEY --forget' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).not.toContain('| KAGGLE_KEY |')
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('ELEVENLABS_API_KEY')
+  // SBOS's next list drops what it no longer holds
+  await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's1', agentId: 'w1' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('github-token')
+  files.set('sbos:secrets', '[]')
+  await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's2', agentId: 'w1' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).not.toContain('github-token')
+  // A kept value that is also a word of the list's own shape changes nothing else in it
+  files.set('secret:SHORT_PIN', 'true')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b5', agentId: 'w1', command: '/plug/bin/secret SHORT_PIN here true' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('| SHORT_PIN |')
+  expect(JSON.parse(files.get(`${MEMORY}/keys.json`) ?? '{}').entries.every((one: { isPresent: unknown }) => typeof one.isPresent === 'boolean')).toBe(true)
+  files.delete('secret:SHORT_PIN')
+  // A keychain that does not answer is not read as an empty one: what was known of it stays
+  files.set('keyring:refused', 'yes')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b4', agentId: 'w1', command: '/plug/bin/secret ELEVENLABS_API_KEY here true' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('| ELEVENLABS_API_KEY |')
+  files.delete('keyring:refused')
+  // A hiding that fails leaves the list as it was
+  const before = files.get(`${MEMORY}/keys.md`)
+  files.set('secret:refused', 'yes')
+  files.set('secret:NEW_TOKEN', 'new-made-up-value-0007')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b3', agentId: 'w1', command: '/plug/bin/secret NEW_TOKEN here true' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toBe(before)
+})
+
+test('an ask for a key the list has is refused with where it is; a key not kept is asked for', async ($, on) => {
+  const { files } = world(on)
+  keysLaid(files)
+  await $.session.start(start)
+  await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's1', agentId: 'w1' } as never)
+  // SBOS asked for a key Claudopus's keychain keeps under another name: the ElevenLabs ask of 15 Nov
+  const sbos = await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'a1', agentId: 'w1', name: 'elevenlabs-key', label: 'ElevenLabs API key' } as never)
+  expect(sbos.deny).toContain('ELEVENLABS_API_KEY')
+  expect(sbos.deny).toContain("Claudopus's keychain")
+  expect(sbos.deny).toMatch(/bin\/secret ELEVENLABS_API_KEY here/)
+  // one SBOS has put in already
+  expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'a2', agentId: 'w1', name: 'github-token', label: 'GitHub' } as never)).deny).toContain('SBOS secrets')
+  // The panel's ask for one
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'a3', agentId: 'w1', text: 'Paste your ElevenLabs API key', details: 'For the transcripts.' } as never)).deny).toContain('ELEVENLABS_API_KEY')
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'a4', agentId: 'w1', text: 'Paste KAGGLE_KEY in the box' } as never)).deny).toContain('KAGGLE_KEY')
+  // The secret runner under a name it does not keep, or asked to take a kept one in again
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'a5', agentId: 'w1', command: "/plug/bin/secret ELEVENLABS_KEY here 'curl x'" } as never)).deny).toContain('ELEVENLABS_API_KEY')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'a6', agentId: 'w1', command: '/plug/bin/secret ELEVENLABS_API_KEY --add' } as never)).deny).toMatch(/--forget/)
+  // What is fine: the kept name used, a key not kept, an ask that is not for a key, and SBOS's own agents' keys
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f1', agentId: 'w1', command: "/plug/bin/secret ELEVENLABS_API_KEY here 'curl x'" } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'f2', agentId: 'w1', name: 'stripe-customers-key', label: 'Stripe' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f3', agentId: 'w1', text: 'Paste your Stripe key', details: 'x' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f4', agentId: 'w1', text: 'Release the list of keys?', details: 'It lists ElevenLabs and Kaggle.', choices: ['Release it', 'Not now'] } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'f5', agentId: 'w1', name: 'elevenlabs-key', label: 'x', agent: 'bot' } as never)).deny).toBeUndefined()
+  // An ask made leaves its name in the list as asked, not given
+  expect(files.get(`${MEMORY}/keys.md`)).toMatch(/\| stripe-customers-key \|[^\n]*asked, not given/)
+  // No false refusals: a name inside another word, a database of SBOS's, a key with other words in its name
+  for (const text of ['Paste the Replicate API token for the FaceIQ Labs app', 'Paste the Clipify webhook secret', 'Paste your Labs login key'])
+    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `n-${text.length}`, agentId: 'w1', text } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'w1', command: "/plug/bin/secret GITHUB_PAT here 'gh x'" } as never)).deny).toBeUndefined()
+  // The most specific kept key is the one named
+  files.set('secret:KAGGLE_USERNAME', 'kgu-made-up')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n2', agentId: 'w1', command: '/plug/bin/secret KAGGLE_USERNAME here true' } as never)
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'n3', agentId: 'w1', text: 'Type your Kaggle username for the login' } as never)).deny).toContain('KAGGLE_USERNAME')
+  // What it is about counts when the ask is to paste something; asked again on purpose, naming the kept key as it is, it is shown
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd1', agentId: 'w1', text: 'Paste the key in the box', details: 'It is your ElevenLabs API key.' } as never)).deny).toContain('ELEVENLABS_API_KEY')
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd2', agentId: 'w1', text: 'Paste your ElevenLabs API key', details: 'The kept ELEVENLABS_API_KEY is refused by ElevenLabs: 401.' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'd3', agentId: 'w1', name: 'elevenlabs-key', label: 'x', for: 'ELEVENLABS_API_KEY in the keychain answers 401' } as never)).deny).toBeUndefined()
+  // A word for a key after other words is another key; the word secret in a command that runs no runner is no ask
+  files.set('secret:STRIPE_SECRET_KEY', 'st-made-up-value-0011')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n4', agentId: 'w1', command: '/plug/bin/secret STRIPE_SECRET_KEY here true' } as never)
+  for (const text of ['Paste the Stripe webhook signing secret', 'Paste the Stripe publishable key', 'Type your GitHub login email'])
+    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `s-${text.length}`, agentId: 'w1', text } as never)).deny).toBeUndefined()
+  for (const command of ['git commit -m "keep the secret STRIPE_KEY here for now"', 'kubectl get secret STRIPE_KEY default'])
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `k-${command.length}`, agentId: 'w1', command } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 's1', agentId: 'w1', text: 'Paste your Stripe secret key' } as never)).deny).toContain('STRIPE_SECRET_KEY')
+  // The runner by other paths to it
+  for (const command of ["cd /plug/bin && ./secret ELEVENLABS_KEY here 'x'", "/plug/bin//secret ELEVENLABS_KEY here 'x'"])
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `p-${command.length}`, agentId: 'w1', command } as never)).deny).toContain('ELEVENLABS_API_KEY')
+  // An ask in SBOS for one it holds leaves it held
+  await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'h1', agentId: 'w1', name: 'github-token', label: 'GitHub', for: 'github-token answers 401' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toMatch(/\| github-token \|[^\n]*present/)
+})
+
+test('work never writes the list of keys itself, by any tool', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  expect((await $.tool.call({ tool: 'Write', tool_use_id: 'w1', agentId: 'w1', file_path: `${MEMORY}/keys.md`, content: 'X' } as never)).deny).toBeDefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'w2', agentId: 'w1', command: 'echo x > ~/.claude/claudopus/keys.json' } as never)).deny).toBeDefined()
+})
+
 // The line above the prompt while work runs: how Claude uses the computer, drawn on the desktop and written in the terminal
 
 // A Mac's look as its commands print it, with Claude's app and chat, another app, and how much has moved by the nth look
@@ -8472,7 +8712,7 @@ test('a computer with no battery shows none, and a desktop plugged into a UPS do
   await term.unmount()
 })
 
-test('a pointer resting on a figure shows more of it in a line above: who uses the most, the parts of a speed, the battery in full', async ($, on) => {
+test('a pointer resting on a figure shows its card: who uses the most, the parts of a speed, the battery in full', async ($, on) => {
   let n = 0
   const extra = `${gpuAt(37)}\n"In use system memory"=1288490188\n${batt('85%; discharging; 4:12 remaining')}`
   const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, extra) })
@@ -8483,24 +8723,50 @@ test('a pointer resting on a figure shows more of it in a line above: who uses t
   await clock.advance(1000)
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
-  const more: Record<string, string> = {
-    memory: 'Memory 29 of 64 GB in use · most: Claude 3.3 GB, Safari 0.4 GB · Claude with what it started 3.3 GB',
-    cpu: 'Processor 50% busy across 10 cores · most: Safari 30%, Claude 20% · Claude with what it started 20%',
-    gpu: 'Graphics processor 37% busy · 1.2 GB of memory in use',
-    battery: 'Battery 85% · on battery, 4:12 left as the system estimates it',
-    disk: 'Disk 63 MB/s read and written · disk0',
-    net: 'Network 1 MB/s · in 1 MB/s, out 0 MB/s · en0',
+  const cards: Record<string, string[]> = {
+    memory: ['Memory', '29 of 64 GB', 'Claude and what it started', '3.3 GB', 'Using the most', 'Safari', '0.4 GB'],
+    cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
+    gpu: ['Graphics processor', '37% busy', 'Graphics memory in use', '1.2 GB'],
+    battery: ['Battery', '85%', 'On battery, 4:12 left as the system estimates it'],
+    disk: ['Disk', '63 MB/s', 'Reading and writing together'],
+    net: ['Network', '1 MB/s', 'Download', 'Upload'],
   }
-  const boxes = await desk.findAll({ type: 'Box' })
-  for (const [key, text] of Object.entries(more)) {
-    // Hidden until the pointer rests on its own figure (the test kit does not show the hover itself)
-    const line = boxes.find(b => b.props.key === `usage-more-${key}`)
-    expect(line?.props.display).toBe('none')
-    expect(line?.text).toBe(text)
+  // The drawn tree as the surface gets it: each element's props, its hover, its children
+  type El = { type?: string; props?: Record<string, unknown> & { key?: string; children?: unknown }; hover?: Record<string, unknown>; children?: unknown }
+  const drawn: unknown = await desk.drawn()
+  const kids = (el: El): El[] => [el.children, el.props?.children].flatMap(c => (Array.isArray(c) ? c : c && typeof c === 'object' ? [c] : [])) as El[]
+  const find = (node: unknown, key: string): El | undefined => {
+    if (!node || typeof node !== 'object') return undefined
+    if (Array.isArray(node)) return node.map(n => find(n, key)).find(Boolean)
+    const el = node as El
+    return el.props?.key === key ? el : kids(el).map(k => find(k, key)).find(Boolean)
   }
-  // Above the figures, so they stay where they are when it shows
-  const band = boxes.find(b => b.props.flexDirection === 'column' && b.text.endsWith('1 MB/s'))
-  expect(band?.text.startsWith('Memory 29')).toBe(true)
+  const textOf = (node: unknown): string[] => (typeof node === 'string' ? [node] : !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(textOf) : kids(node as El).flatMap(textOf))
+  for (const [key, parts] of Object.entries(cards)) {
+    const figure = find(drawn, `usage-${key}`)
+    // The figure lights its group and a faint fill under a resting pointer: a group member whose hover changes nothing is never wired
+    // to the pointer by the desktop app
+    expect(figure?.hover?.scope).toBe(`usage-${key}`)
+    expect(Object.keys(figure?.hover ?? {}).sort()).toEqual(['backgroundColor', 'scope'])
+    // Its card waits hidden in the bar's column above the figures and shows while the group is lit, so one shows at a time and goes
+    // as the pointer leaves; not an absolute Box, which the app lifts as a card of its own that stayed open
+    const card = find(drawn, `usage-${key}-card`)
+    expect(card?.props?.display).toBe('none')
+    expect(card?.props?.position).toBeUndefined()
+    expect(card?.hover).toEqual({ scope: `usage-${key}`, display: 'flex' })
+    for (const part of parts) expect(textOf(card)).toContain(part)
+  }
+  // Above the figures, so they stay where they are when one shows
+  const parentOf = (node: unknown, key: string): El | undefined => {
+    if (!node || typeof node !== 'object') return undefined
+    if (Array.isArray(node)) return node.map(n => parentOf(n, key)).find(Boolean)
+    const el = node as El
+    return kids(el).some(k => k.props?.key === key) ? el : kids(el).map(k => parentOf(k, key)).find(Boolean)
+  }
+  const column = parentOf(drawn, 'band-row')
+  expect(column?.props?.flexDirection).toBe('column')
+  expect(kids(column ?? {}).at(-1)?.props?.key).toBe('band-row')
+  expect(kids(column ?? {}).filter(k => k.props?.key?.endsWith('-card')).length).toBe(6)
   await desk.unmount()
 })
 
@@ -8539,7 +8805,8 @@ test('in a phone-narrow terminal the word for a charge the system calls full whi
   // and the line of more says what the system said, with no estimate it did not give
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
-  expect((await desk.find({ type: 'Text', text: /^Battery 100% · / }))?.text).toBe('Battery 100% · finishing the charge: the system calls it full and still tops it up')
+  // Its card says it in full
+  expect(await desk.find({ type: 'Text', text: 'Finishing the charge: the system calls it full and still tops it up' })).toBeDefined()
   await desk.unmount()
 })
 
