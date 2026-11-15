@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.126 · 15 November 2026
+- A newer Claudopus is now a small grey box in the panel's header, not a big notice: the version, how many versions it covers since yours, and in a line what is new.
+- Updating is three steps, each your press, the box showing where it stands: Download (with its size and progress as it comes), Install (saying what it replaces), and Reload (saying whether this chat or every chat needs it). Not now keeps it quiet for a day, Skip this version until a newer one.
+- A download is checked against the fingerprint the release published before it can be installed, and checked again at Install; one that does not match is thrown away, and an installed copy that does not match has Claude Code's record put back. A failed step says what failed and that what your chat runs is unchanged.
+- A chat run from a folder of the code says so, and its steps fetch into that folder and move it forward, a fast-forward only; a worktree or another branch is told a release never reaches it and is offered no download.
+- Config's Updates: look every hour, every 6 hours, once a day, once a week or only when you ask; Check now only looks; it says which version this chat runs and where it loads from.
+- After a chat moves to a newer version, one quiet line says so with What's new, in place of the screen that covered the whole panel.
+
 ## 0.2.125 · 15 November 2026
 - The battery card now shows what the whole Mac draws, what the processors and the graphics processor each draw, and Claude's part of each; Claude's graphics power is marked as estimated, and the card says what "Claude" covers and that the screen, memory and storage count only in the whole.
 - Claude's watts, disk and network now count work a chat left running after its command ended, and processes that started between two readings, which were missed before.

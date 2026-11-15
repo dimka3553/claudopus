@@ -5,7 +5,9 @@
 // script with no imports or exports: all of them are one scope, as in the joined file, and globals.d.ts (made here from
 // imports.tsx) gives them what the joined file imports. `node src/claudopus/build.mjs` writes the files; `--check` only says
 // whether they are up to date, and fails when they are not
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -168,6 +170,39 @@ const changelogPage = () => {
   return page.replace('<!-- versions -->', body)
 }
 
+// The version page every install reads: the version, and what a download of it must be to be installed. `tree` is git's own
+// fingerprint of the mod's folder as this build leaves it, the very tree the release commits (the release adds every file the build
+// made and refuses files it does not track), so a copy downloaded from GitHub or installed by Claude Code is checked against it
+// file for file before Claudopus offers to install it; `size` its bytes; `versions` the newest few with the first line of each's
+// changes, which the panel shows as what is new. Made last, from the folder after everything else here is written
+const PAGE_VERSIONS = 30
+const lineOf = text => {
+  const plain = text.replace(/`/g, '').replace(/\s+/g, ' ').trim()
+  const first = /^(.{20,}?[.;:])(\s|$)/.exec(plain)?.[1] ?? plain
+  if (first.length <= 110) return first.replace(/[.;:]$/, '')
+  const comma = first.slice(0, 110).lastIndexOf(',')
+  return comma > 40 ? first.slice(0, comma) : `${first.slice(0, 107).replace(/\s+\S*$/, '')}…`
+}
+const treeOf = () => {
+  const root = join(here, '../..')
+  const scratch = mkdtempSync(join(tmpdir(), 'claudopus-tree-'))
+  try {
+    const git = args => execFileSync('git', ['-C', root, ...args], { env: { ...process.env, GIT_INDEX_FILE: join(scratch, 'index') }, encoding: 'utf8' }).trim()
+    git(['read-tree', '--empty'])
+    git(['add', '-A', '--', 'mods/claudopus'])
+    const tree = git(['write-tree', '--prefix=mods/claudopus/'])
+    const size = git(['ls-tree', '-r', '-l', tree]).split('\n').reduce((n, line) => n + (Number(line.split(/\s+/)[3]) || 0), 0)
+    return { tree, size }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true })
+  }
+}
+const versionPage = () => {
+  const { tree, size } = treeOf()
+  const versions = versionsIn(changelog).slice(0, PAGE_VERSIONS).map(v => ({ version: v.version, line: v.changes[0] ? lineOf(v.changes[0]) : '', more: Math.max(0, v.changes.length - 1) }))
+  return `${JSON.stringify({ version: JSON.parse(read(join(hooks, '../.claude-plugin/plugin.json'))).version, tree, size, versions })}\n`
+}
+
 const files = [
   [join(hooks, 'register.tsx'), joined(here, PARTS, 'It is the hooks module hooks.json names.')],
   [join(here, 'globals.d.ts'), globalsOf(importsOf(join(here, 'imports.tsx')), m => (m.startsWith('./') ? `../../mods/claudopus/hooks/${m.slice(2)}` : m === '../types' ? '../../mods/claudopus/types' : m))],
@@ -176,12 +211,14 @@ const files = [
   // The page claudopus.ai serves with the current version, which every install reads to know when to update: made from plugin.json,
   // so it moves with each release pushed to main
   [join(here, '../../site/changelog.html'), changelogPage()],
-  [join(here, '../../site/version.json'), `${JSON.stringify({ version: JSON.parse(read(join(hooks, '../.claude-plugin/plugin.json'))).version })}\n`],
+  // Last, and made only when its turn comes, once every file of the mod above is written
+  [join(here, '../../site/version.json'), versionPage],
 ]
 
 const isCheck = process.argv.includes('--check')
 const stale = []
-for (const [path, text] of files) {
+for (const [path, made] of files) {
+  const text = typeof made === 'function' ? made() : made
   let now = ''
   try {
     now = read(path)
