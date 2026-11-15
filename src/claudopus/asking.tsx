@@ -234,6 +234,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
+  // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
+  $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   void askGone($, one, said)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
@@ -268,6 +270,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
+  // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
+  $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
   if (inChat.has(one.id)) (inChat.delete(one.id), void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'

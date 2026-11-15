@@ -79,6 +79,8 @@ export type Todo = {
   // `isUndone`: a file of theirs a command changed, put back as it was (`isOutside`: found changed between commands, by an editor or a program left running); Allow makes the change again
   admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean; call?: string; folder?: string; branch?: string }[]
   startedAt: number
+  // When it first began, kept when it is started again (whose startedAt moves on so its time runs on): the cards keep their places by it
+  begunAt?: number
   // 0 while it works
   endedAt: number
   // When its turn last ended with its answer, finished, while its own background work still held it; absent once it steps again.

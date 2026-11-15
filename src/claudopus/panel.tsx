@@ -1486,12 +1486,20 @@ const panelHooks = (on: On) => {
     // done shows in the card, outlined green, and the card stays at the top until that goes
     const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
     const isWaitingPress = (one: Todo) => one.status === 'working' && Boolean(one.admins?.length)
-    const isUp = (one: Todo) => isAsking(one) || isWaitingPress(one) || (!one.chat && cardNotesOf(one.id, at).length > 0)
-    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)))
+    // An ask answered on its card keeps the card where it was, its answer said in it, for ANSWER_SHOWN: a press or a reply never
+    // takes the card from under the person's eyes, as a gate answered on its card does not
+    const answeredSince = (one: Todo) => {
+      const sent = one.chat ? undefined : sentReplies.get(one.id)
+      return sent?.isCard && sent.to !== 'lost' && at - sent.at < ANSWER_SHOWN ? sent.at : 0
+    }
+    const isUp = (one: Todo) => isAsking(one) || isWaitingPress(one) || (!one.chat && cardNotesOf(one.id, at).length > 0) || answeredSince(one) > 0
+    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)), answeredSince(one))
     const askingHere = shownWork.filter(isUp)
     const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
     const askCards = [...askingHere, ...askingThere].sort((a, b) => upSince(b) - upSince(a))
     const restHere = shownWork.filter(one => !isUp(one))
+    // Each card keeps the place it began in: work started again (Release it on an ended ask) never moves to the end
+    const begun = (one: Todo) => one.begunAt ?? one.startedAt
     // Notices and whole cards in one order, the newest first; a card that only says what was allowed comes under all that still
     // waits. A card is drawn when the panel is
     const top = [...notices.map(one => ({ at: one.at, draw: () => one.node })), ...askCards.map(one => ({ at: upSince(one) - (isAsking(one) || isWaitingPress(one) ? 0 : 1e15), draw: () => small(one) }))].sort((a, b) => b.at - a.at)
@@ -1587,10 +1595,10 @@ const panelHooks = (on: On) => {
               // person is above, at the top. Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
               ...(listedChats.length && (restHere.length || shownFlows.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...promptsAnswered.map(p => answeredCard(p, `this-${p.id}`)),
-              ...[...restHere.map(one => ({ at: one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              ...[...restHere.map(one => ({ at: begun(one), card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, with what is left of it once its asks are at the top
               ...listedChats.flatMap(c => {
-                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => a.startedAt - b.startedAt)
+                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => begun(a) - begun(b))
                 const answered = answeredOf(c.answeredPrompts).map(p => answeredCard(p, `${c.host}-${c.chat}-${p.id}`, c))
                 return cards.length || answered.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...answered, ...cards.map(one => small(one))] : []
               }),

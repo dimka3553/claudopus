@@ -1011,7 +1011,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
 // a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
 // such command: it may run until stopped
@@ -4864,6 +4864,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
+  // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
+  $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   void askGone($, one, said)
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
   const to = isReply ? `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your ask: ${ask.text}`
@@ -4898,6 +4900,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
+  // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
+  $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   // Said in the chat once; the ask is then done with there, so the work asking again is sent to the chat afresh
   if (inChat.has(one.id)) (inChat.delete(one.id), void sayInChat($, named(ASK_REPLIED(titleOf(one), `“${cut(said, 120)}”`))))
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
@@ -11084,12 +11088,20 @@ const panelHooks = (on: On) => {
     // done shows in the card, outlined green, and the card stays at the top until that goes
     const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
     const isWaitingPress = (one: Todo) => one.status === 'working' && Boolean(one.admins?.length)
-    const isUp = (one: Todo) => isAsking(one) || isWaitingPress(one) || (!one.chat && cardNotesOf(one.id, at).length > 0)
-    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)))
+    // An ask answered on its card keeps the card where it was, its answer said in it, for ANSWER_SHOWN: a press or a reply never
+    // takes the card from under the person's eyes, as a gate answered on its card does not
+    const answeredSince = (one: Todo) => {
+      const sent = one.chat ? undefined : sentReplies.get(one.id)
+      return sent?.isCard && sent.to !== 'lost' && at - sent.at < ANSWER_SHOWN ? sent.at : 0
+    }
+    const isUp = (one: Todo) => isAsking(one) || isWaitingPress(one) || (!one.chat && cardNotesOf(one.id, at).length > 0) || answeredSince(one) > 0
+    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)), answeredSince(one))
     const askingHere = shownWork.filter(isUp)
     const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
     const askCards = [...askingHere, ...askingThere].sort((a, b) => upSince(b) - upSince(a))
     const restHere = shownWork.filter(one => !isUp(one))
+    // Each card keeps the place it began in: work started again (Release it on an ended ask) never moves to the end
+    const begun = (one: Todo) => one.begunAt ?? one.startedAt
     // Notices and whole cards in one order, the newest first; a card that only says what was allowed comes under all that still
     // waits. A card is drawn when the panel is
     const top = [...notices.map(one => ({ at: one.at, draw: () => one.node })), ...askCards.map(one => ({ at: upSince(one) - (isAsking(one) || isWaitingPress(one) ? 0 : 1e15), draw: () => small(one) }))].sort((a, b) => b.at - a.at)
@@ -11185,10 +11197,10 @@ const panelHooks = (on: On) => {
               // person is above, at the top. Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
               ...(listedChats.length && (restHere.length || shownFlows.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...promptsAnswered.map(p => answeredCard(p, `this-${p.id}`)),
-              ...[...restHere.map(one => ({ at: one.startedAt, card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              ...[...restHere.map(one => ({ at: begun(one), card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, with what is left of it once its asks are at the top
               ...listedChats.flatMap(c => {
-                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => a.startedAt - b.startedAt)
+                const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => begun(a) - begun(b))
                 const answered = answeredOf(c.answeredPrompts).map(p => answeredCard(p, `${c.host}-${c.chat}-${p.id}`, c))
                 return cards.length || answered.length ? [chatHead(`${c.host}-${c.chat}`, chatName(c), chatSide(c, selfName()), c), ...answered, ...cards.map(one => small(one))] : []
               }),
