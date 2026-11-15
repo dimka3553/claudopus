@@ -645,7 +645,9 @@ const personLook = async ($: EngineInterface, by?: ToolCallInput): Promise<strin
     await personPut($, name, was, is)
     undone.push(name)
     await log($, `${name} was changed outside Claudopus${by ? ' by a command' : ''}, and put back`)
-    if (name !== 'admin-allowed.json') void offerUndone($, by, name, is).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
+    // Offered before the look ends, so the card is there once the call or the load that found it goes on (left to run on its own, a
+    // slow Mac drew it late, and one begun under an earlier load could land after the next load's and take its card away)
+    if (name !== 'admin-allowed.json') await offerUndone($, by, name, is).catch(err => log($, `change to ${name} not offered: ${String(err)}`))
   }
   for (const name of PERSON_FILES) if (now.has(name) && !known.has(name)) known.set(name, null)
   if (!sealedKnown) {
