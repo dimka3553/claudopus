@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.137 · 15 November 2026
+- claudopus.ai is now built only from main, not from every branch pushed, so a busy day no longer uses up Vercel's daily limit and leaves the site on an older version
+
 ## 0.2.136 · 15 November 2026
 - The Keys button beside Memory is gone. Claudopus still keeps the list of keys you have given, by name and where each is kept, in keys.md in the memory folder; work still reads it before asking, and an ask for a key you already gave is still refused with where it is.
 
