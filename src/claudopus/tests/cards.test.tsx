@@ -1119,8 +1119,7 @@ test('every run under a card says how it stands: a command held open shows its p
   const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Download the CT scans (about 3 min)' } as never)
   // The mod takes as the command held open only a shell started within 20 s of when the call began, as its hook saw it: the clock
   // moves only once the call is running, else on a slow machine (GitHub's) the hook ran a few steps late and no shell matched
-  for (let tries = 0; tries < 2000 && !held.has('dl'); tries += 1) await new Promise<void>(resolve => setTimeout(() => resolve(), 5))
-  expect(held.has('dl')).toBe(true)
+  expect(await until(async () => held.has('dl') || undefined)).toBe(true)
   // Five minutes, past the 1.5 times its three minutes where it turns amber, in steps of 5 s: the stand-in ps ages the shell from
   // `now`, which runs a step ahead of the clock while a step's timers fire. No longer: each second the clock moves runs the
   // panel's every-second look, and on GitHub's Mac nine minutes took past the time the kit lets a held call run, which ended it

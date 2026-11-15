@@ -1,1 +1,0 @@
-- Work is told to add a test only when no test already covers what it changes, to show each new test fails without the change, and to remove tests a change makes redundant.

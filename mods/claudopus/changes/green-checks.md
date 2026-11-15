@@ -1,2 +1,0 @@
-- A release now waits for GitHub's own checks on the exact version it is about to put out, and goes out only once they pass; a failed or unfinished check stops it and says which.
-- Tests that failed at random on GitHub's slower machines are steady again.

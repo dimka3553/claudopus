@@ -132,6 +132,11 @@ const figuresAt = atom({ plugin: 'claudopus', key: 'figures' } as const, 0, { sh
 // When the panel was last drawn, kept through a reload (drawnNow, written by the timer each second, never read while drawing)
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
 let drawnNow = 0
+// When the list was last given an older drawing again (held), and last drawn afresh: work that ended between the two was not seen
+let listHeldAt = 0
+let listFreshAt = 0
+// The titles of work in its moment at the top, as last drawn: the line above the prompt points at them when the list is scrolled away
+let finishedAtTop: string[] = []
 // The list of work is written only when it changes. Each write of a value the panel or Details read draws them again, and the app
 // builds a pane it is asked to draw whole afresh, even when it shows the same: the element under the pointer loses its hover look,
 // and a press on a button of the drawing replaced meanwhile reaches nothing. The list was written over with the same list every
@@ -144,11 +149,6 @@ const changeTodos = async ($: EngineInterface, fn: (list: Todo[]) => Todo[]) => 
   if (JSON.stringify(next) === before) return now
   return update($, todos, list => (JSON.stringify(list) === before ? next : fn(list)))
 }
-// When the list was last given an older drawing again (held), and last drawn afresh: work that ended between the two was not seen
-let listHeldAt = 0
-let listFreshAt = 0
-// The titles of work in its moment at the top, as last drawn: the line above the prompt points at them when the list is scrolled away
-let finishedAtTop: string[] = []
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
 // they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them
@@ -4526,6 +4526,8 @@ const freshPage = async ($: EngineInterface, version: string, step: 'download' |
 }
 // Download, pressed for the version the notice showed: the newest the page names now is what is fetched
 let downloadProgress: { version: string; pct: number; got: number; phase: string } | undefined
+// What the download's last drawing showed, and when
+const progressDrawn = { shown: '', phase: '', at: 0 }
 const downloadPress = ($: EngineInterface, version: string) => {
   presses += 1
   void atStep($, async () => {
@@ -4545,7 +4547,14 @@ const downloadPress = ($: EngineInterface, version: string) => {
       downloadProgress = { version: page.version, ...p }
       const at = await $.clock.now()
       if (at - wrote >= 1000) ((wrote = at), await writeSteps($, { version: page.version, stage: 'downloading', step: 'download', at, pct: p.pct, got: p.got, from: loaded }))
-      redraw($)
+      // Each drawing makes the panel's buttons new, and a click on one just replaced is lost: the figures move every 2 s, and not
+      // while the person is using the panel, unless the download moves to its next phase
+      const shown = `${Math.round(p.pct)}|${p.got ? sizeText(p.got) : ''}|${p.phase}`
+      const isPhase = p.phase !== progressDrawn.phase
+      if (shown !== progressDrawn.shown && (isPhase || (at - progressDrawn.at >= 2000 && at - engagedAt >= ENGAGED))) {
+        Object.assign(progressDrawn, { shown, phase: p.phase, at })
+        redraw($)
+      }
     })
     downloadProgress = undefined
     const at = await $.clock.now()
