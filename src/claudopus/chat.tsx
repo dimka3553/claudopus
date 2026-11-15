@@ -53,7 +53,7 @@ const heldLook = async ($: EngineInterface, id: string) => {
   const listed = (await $.agent.list().catch(() => undefined))?.find(one => one.id === id)?.status
   if (listed === 'idle' || listed === undefined) {
     const now = await $.clock.now()
-    await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
+    await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, 'done', now) : one)))
   }
   if ((await read($, todos)).find(one => one.id === id)?.status === 'working') return
   await replyUnread($, id)
@@ -249,13 +249,11 @@ const chatHooks = (on: On) => {
       // Held while the person types into a reply box (holdTimes)
       // A pane held while only its running times moved is drawn again once CALM is over (heldDrawings)
       const calmNow = await $.clock.now()
-      const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.length)
-      let isStale = false
-      if (!isTyping && isMoving) for (const [key, held] of heldDrawings) if (calmNow - held.at >= CALM) (heldDrawings.delete(key), (isStale = true))
+      const isMoving = isFlowing || (await read($, todos)).some(one => !one.parentId && one.status === 'working') || (await read($, others)).some(c => c.cards.some(card => card.status === 'working'))
       // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
       if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
-      if (isStale) $.ui.invalidate('ui.render')
-      if (!isTyping && isMoving) await update($, tick, n => n + 1)
+      // The mod alone says when its panes are drawn again, and only when what they show has moved (calmLook)
+      await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
       if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
@@ -339,7 +337,7 @@ const chatHooks = (on: On) => {
     // Their message lifts the hold on work they stopped: the chat is reminded it was stopped, and starts it again only if asked
     const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
     if ((await read($, todos)).some(isHeld)) {
-      await update($, todos, list => list.map(one => (isHeld(one) && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
+      await changeTodos($, list => list.map(one => (isHeld(one) && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
       if (stillHeld.length) context.push(named(STOPPED_EARLIER(stillHeld.map(one => `"${titleOf(one)}" (${one.id})`))))
     }
     let text = e.text
@@ -418,8 +416,8 @@ const chatHooks = (on: On) => {
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
       // Work nothing holds any more has nothing of its own left running in the background
-      if (!isHeld) await update($, todos, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
-      await update($, todos, list => {
+      if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
+      await changeTodos($, list => {
         const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
         // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
         // Work that gave its report waits on nothing it means to finish
