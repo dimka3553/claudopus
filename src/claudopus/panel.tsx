@@ -1325,6 +1325,8 @@ const panelHooks = (on: On) => {
     // A password or key box stays above it: the runner waits on it
     if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{boxesPart($, ui)}{gatesPart($, ui)}{doneNotesPart(ui, at)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
+    // A newer version the hourly look saw: its card under the header's lines, with Install
+    const outCard = alone ? null : newOutCard($, ui, await newOut($, versions.version, versions.installed).catch(() => ''))
 
     return (
       <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={e.props.scroll.bodyRows}>
@@ -1353,6 +1355,7 @@ const panelHooks = (on: On) => {
                 {isInline ? null : <Text dimColor wrap="truncate-end">{chat.tokens > 0 ? `This chat: ${fill(chat.tokens, chat.window)}` : 'This chat: just begun'}</Text>}
               </Box>
             </Box>
+            {outCard}
             {/* Wrapped rows keep the same gap as the buttons beside each other; a terminal's gap would be a whole blank line, so it has none */}
             <Box key="head-buttons" flexDirection="row" flexWrap="wrap" columnGap={isKeyed ? 2 : 1} rowGap={e.surface === 'terminal' ? 0 : 1}>
               {reportsButton($, ui, kept, isKeyed)}

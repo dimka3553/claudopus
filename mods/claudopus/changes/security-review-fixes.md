@@ -1,4 +1,4 @@
-- Claudopus no longer updates itself or reloads open chats by itself, and Config's Automatic updates switch is gone: update with Check for updates in Config or with `/plugin`, then type `/reload-plugins`, as the panel's header says.
+- When a newer Claudopus is out, the panel now says so at the top with an Install button, and nothing is downloaded or installed until you press it; Install updates it and reloads the chat you pressed it in, and other open chats keep their version until you type `/reload-plugins` there. Config's Look for new versions turns off the hourly look.
 - A release now waits for your press of Release on its work's card, and nothing is released without it (a release you run yourself in a terminal asks you there); a branch's own `.release` no longer runs anything.
 - Work that writes your settings, the principles, the chat's rules or the work rules now waits for your Allow on its card; a shell command that writes them is refused.
 - A prompt from the app is answered only in its own chat: other chats' panels and other Macs show it without Yes and No.
