@@ -9250,9 +9250,9 @@ const batteryAfter = (read: UsageBattery, b = batteryShown(read)) =>
 // The battery's state in full, for the line of more: a time only where the bar shows one, and what the system said in its place
 const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
   b.state === 'battery'
-    ? b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : read.left ? 'on battery, the system calls it empty' : 'on battery, the system is still estimating the time left'
+    ? b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : read.left ? 'on battery, at 0% as the system gives it' : 'on battery, the system is still estimating the time left'
     : b.state === 'charging'
-      ? b.left ? `charging, ${leftText(b.left)} to full` : read.left ? (b.finishing ? 'finishing the charge: the system calls it full and still tops it up' : 'charging: the system calls it full') : 'charging, the time to full still being estimated'
+      ? b.left ? `charging, ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge: the system calls it full and still tops it up' : 'charging: the system calls it full') : 'charging, the time to full still being estimated'
       : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'
 
 // More of each figure, for a pointer resting on it: who uses the most, Claude's part, the parts of a speed, and the battery's state

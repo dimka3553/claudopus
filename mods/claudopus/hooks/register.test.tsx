@@ -8376,6 +8376,24 @@ test('in a narrow terminal a figure that does not fit is left out whole, the net
   expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4:12$/)
   expect(await line(80)).toMatch(/bat 85% 4:12 disk 63M\/s net 1M\/s$/)
 })
+test('in a phone-narrow terminal the word for a charge the system calls full while it finishes is shown whole', async ($, on) => {
+  let n = 0
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, `${gpuAt(37)}\n${ac('100%; finishing charge; 0:00 remaining')}`) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const term = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 44 }, surface: 'terminal' } as never)
+  await until(async () => ((await term.find({ type: 'Text', text: /^mem/ })) ? true : undefined))
+  expect((await term.find({ type: 'Text', text: /^mem/ }))?.text).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 100% finishing$/)
+  await term.unmount()
+  // and the line of more says what the system said, with no estimate it did not give
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  expect((await desk.find({ type: 'Text', text: /^Battery 100% · / }))?.text).toBe('Battery 100% · finishing the charge: the system calls it full and still tops it up')
+  await desk.unmount()
+})
 
 // F-019 and F-020 of the security review, for the hourly look: it only reads the version page and shows a newer version with Install;
 // nothing is downloaded, installed or reloaded until that press, and a lock dated ahead of the clock holds none of it
