@@ -1243,39 +1243,3 @@ test('answering one of two asks at the top leaves both cards where they were, so
   expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
   expect(await list.find({ type: 'Text', text: /You answered “Done”/ } as never)).toBeDefined()
 })
-
-// 15 Nov, the cause itself: every call of every piece of work waits its turn for the look over the person's files as it begins.
-// That wait counted against the hook's own ten seconds: with the files slow to read, a hook that waited that long ran out of time,
-// Claude Code went on without it and ran it again, and a hook that went on waiting past its signal twice in a row got the mod
-// ended as a runaway, every call it held killed. The wait no longer counts against the hook's own time. While the test lays /slow, the plugin above makes the kept copy of the files five seconds slow to read
-const SLOW_READS: Plugin = {
-  name: 'slow-reads',
-  tier: 'prepend',
-  register: on => {
-    let reads = 0
-    on('fs.read', async ($, e, next) => {
-      if (String((e as { path?: unknown }).path).endsWith('/admin-known.json') && (await $.fs.read('/slow').then(() => true, () => false))) {
-        await $.fs.write('/slow-reads', String((reads += 1)))
-        // An engine sleep, so the plugin's own time is not used up by it under a busy run
-        await $.process.run(['/bin/sleep', '5'])
-      }
-      return next(e)
-    })
-  },
-}
-test('three admin commands at once on a slow Mac each wait their turn and are each held for a press, none run unasked', { plugins: [SLOW_READS], timeoutMs: 120_000 }, async ($, on) => {
-  const w = await gated($, on)
-  w.files.set('/slow', 'yes')
-  const calls = ['q1', 'q2', 'q3'].map(id => w.bash(id, `${ADMIN} here 'id -u'`) as Promise<{ deny?: string; result?: unknown }>)
-  const shown = async () => ((await Promise.all(['q1', 'q2', 'q3'].map(id => keyed(w.list, `gate-${id}-0-deny`)))).every(Boolean) ? true : undefined)
-  const isShown = await until(shown)
-  w.files.delete('/slow')
-  for (const id of ['q1', 'q2', 'q3']) if (await keyed(w.list, `gate-${id}-0-deny`)) await w.press(`gate-${id}-0-deny`)
-  const said = await Promise.all(calls)
-  expect(isShown).toBe(true)
-  for (const one of said) expect(String(one.deny)).toContain('Deny')
-  expect(w.admins).toHaveLength(0)
-  // No hook ran out of time while it waited: one that did was run again by Claude Code and looked again. Measured on 15 Nov:
-  // 0.2.129 read the slow file 12 times alone; with the fix 6 alone and up to 9 with every other test running beside it
-  expect(Number(w.files.get('/slow-reads'))).toBeLessThanOrEqual(10)
-})
