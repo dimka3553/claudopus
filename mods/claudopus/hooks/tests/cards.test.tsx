@@ -1757,7 +1757,9 @@ test('every run under a card says how it stands: a command held open shows its p
   await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'tail -n0 -F sheet.log', description: 'Azure jobs finishing' } as never)
   heldAt = now
   const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Download the CT scans (about 3 min)' } as never)
-  for (let n = 0; n < 27; n++) await advance(20_000)
+  // Five minutes in, past half as long again as the three it said: a held call that lives much longer in real time than this
+  // outlives the engine's budget for a hook on a slow runner, and is dropped
+  for (let n = 0; n < 15; n++) await advance(20_000)
   const texts = async () => {
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
     // (a run's name is a button, as a press opens its output)
@@ -1773,12 +1775,12 @@ test('every run under a card says how it stands: a command held open shows its p
   // Named in the work's own form: its kind already said, how long it should take beside its time, in amber well past it
   expect(shown).toContain('Download the CT scans')
   // past it, the run's own time left makes a fresh expectation, never the old figure as if it held
-  expect(shown).toContain('9m 00s of ~9m 53s')
+  expect(shown).toContain('5m 00s of ~5m 53s')
   expect(shown.some(text => /of ~3m/.test(text))).toBe(false)
   expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
-  expect(shown.some(text => /^nothing printed in 9m$/.test(text))).toBe(true)
+  expect(shown.some(text => /^nothing printed in 5m$/.test(text))).toBe(true)
   expect(shown.some(text => /updated/.test(text))).toBe(false)
   // The watch, its last event and when it came
   expect(shown.some(text => /^Watch · Azure jobs finishing/.test(text))).toBe(true)

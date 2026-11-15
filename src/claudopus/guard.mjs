@@ -46,13 +46,17 @@ const run = dir => {
   if (!isWhole) console.log(`Warning: ${ran} tests ran of ${declared} declared, or a file failed outside its tests: some tests did not run at all.`)
   return { passed: of('pass'), failed: of('fail').filter(name => name !== 'the file ran to its end') }
 }
-// The tests a file declares, by test('name' ...), each with its body to its closing line
-const testsIn = text =>
-  [...text.matchAll(/^test\(\s*(['"`])((?:\\.|(?!\1).)*)\1[\s\S]*?\n\}\)\n/gm)].map(m => ({
-    name: m[2].replace(/\\(['"`\\])/g, '$1'),
-    // from its function on: a time limit given or taken away is no change to what it guards
-    body: m[0].slice(m[0].indexOf('async (', m[0].indexOf(m[2]) + m[2].length)),
-  }))
+// The tests a file declares, by test('name' ...), each with its body: from its function's arrow to where the next test starts (or
+// the file ends), so a one-line test is one, and a time limit given or taken away is no change to what it guards
+const testsIn = text => {
+  const starts = [...text.matchAll(/^test\(\s*(['"`])((?:\\.|(?!\1).)*)\1/gm)]
+  return starts.map((m, i) => {
+    const end = i + 1 < starts.length ? starts[i + 1].index : text.length
+    const whole = text.slice(m.index, end)
+    const arrow = whole.indexOf('=>', m[0].length)
+    return { name: m[2].replace(/\\(['"`\\])/g, '$1'), body: whole.slice(arrow < 0 ? m[0].length : arrow).trimEnd() }
+  })
+}
 const testFiles = dir =>
   [join(dir, 'src/claudopus/tests'), join(dir, 'mods/claudopus/hooks')].flatMap(folder =>
     readdirSync(folder).filter(name => name.endsWith('.test.tsx') && name !== 'register.test.tsx').map(name => join(folder, name)),
