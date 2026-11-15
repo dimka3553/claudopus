@@ -486,13 +486,7 @@ test('a chat the app runs on another Mac over ssh tells every conversation that 
   expect(twice.instructionFiles?.length).toBe(1)
 })
 
-
 const go2 = ($: Parameters<TestBody>[0], e: Record<string, unknown>) => $.agent.spawn({ ...spawn, prompt: 'p', parentModel: 'claude-sonnet-5-5', ...e } as never) as Promise<{ deny?: string; agentId?: string }>
-const steps = async ($: Parameters<TestBody>[0], index: number, model: string, agentId?: string) => {
-  const chunks: { kind: string; name?: string; text?: string }[] = []
-  for await (const c of $.turn.step({ turnId: 't', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) chunks.push(c as never)
-  return chunks
-}
 
 test('a way to an older model a second look found is closed: settings name haiku, an older Haiku full id', async ($, on) => {
   const { files, agentModels, asked } = world(on)
