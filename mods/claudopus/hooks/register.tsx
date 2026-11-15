@@ -129,6 +129,9 @@ const tick = atom({ plugin: 'claudopus', key: 'tick' } as const, 0, { shape: 'ti
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
 let drawnNow = 0
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
+// What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
+// they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them
+const draftsKept = atom({ plugin: 'claudopus', key: 'drafts' } as const, {}, { shape: 'drafts-1' })
 // Each load of this code in a chat, first or a reload, is told by a mark of its own, kept in the session's state as the load now in
 // charge. A /reload-plugins starts the new copy but leaves the old copy's timers running in the same chat, and work an old copy wakes
 // with $.session.send runs under that copy, whose hooks the engine no longer calls: every panel tool of that work answered "no
@@ -4649,18 +4652,70 @@ const replies = new Map<string, number>()
 const askMark = (ask: NonNullable<Todo['ask']>) => `${ask.at}-${[...ask.text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)}`
 // What the person has typed into a reply box and not sent, by the work, so a redraw keeps it
 const drafts = new Map<string, string>()
-// While the person types into a reply box the list's running times stand still: the list is drawn again each second, and a box in
-// a list drawn that often lost its place and threw the panel to the bottom. Each letter typed, or the box taking the focus, holds
-// the times for TYPING more; sending lets them go
+// While the person types into a reply box or a key box the panel and every Details tab hold their drawing whole: nothing in them is
+// drawn again, the running times, other cards' lines, cards that start or end. The app builds a pane afresh at each drawing, the
+// box in it too, and a pane drawn every few seconds under the person's typing flickered the box's ring, put older letters over
+// newer ones, and threw the panel to its bottom, out of the person's reach (15 Nov, typing an answer while other work ran). Each
+// letter typed, or the box taking the focus, holds it for TYPING more; sending, any press, or the focus leaving the boxes lets it go
 const TYPING = 30_000
 let typing = 0
 let isTyping = false
+// The last drawing of each pane on each surface, with what it showed, which a held pane is drawn with again. Only a change in what
+// it shows, a card that starts, finishes, asks or leaves after its pause, a box or a prompt that comes or goes, draws it again
+// while the person types: a card's new line, its time, a command's output wait until they stop
+const heldDrawings = new Map<string, { shape: string; drawing: unknown }>()
+// The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
+// arrive, so a drawing never puts older letters over the newer ones the box already holds
+const drawnDrafts = new Map<string, string>()
+const draftShown = (id: string) => {
+  if (isTyping && drawnDrafts.has(id)) return drawnDrafts.get(id) ?? ''
+  const value = drafts.get(id) ?? ''
+  drawnDrafts.set(id, value)
+  return value
+}
+// What a pane shows, as far as it moves while the person types
+const paneShape = async ($: EngineInterface, paneId: string) => {
+  const at = await $.clock.now()
+  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at)]
+  const own = await read($, todos)
+  if (paneId !== LIST) {
+    const one = own.find(other => paneId.endsWith(other.id))
+    return JSON.stringify([paneId, one ? [card(one), one.items.map(item => item.state)] : null])
+  }
+  const chats = await read($, others)
+  const theirs = [cardsOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
+  const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at)])
+  const gone = [...lastRunning.keys()]
+  return JSON.stringify([own.filter(one => !one.parentId || one.ask).map(card), theirs, flowsNow, gone, boxes.map(one => one.id), [...boxSaid.keys()]])
+}
 const holdTimes = ($: EngineInterface) => {
   const made = (typing += 1)
   isTyping = true
-  $.clock.after(TYPING, () => void (typing === made && (isTyping = false)))
+  $.clock.after(TYPING, () => void (typing === made && ((isTyping = false), $.ui.invalidate('ui.render'))))
 }
-const freeTimes = () => void ((typing += 1), (isTyping = false))
+const freeTimes = ($: EngineInterface) => {
+  const wasHeld = isTyping
+  typing += 1
+  isTyping = false
+  if (wasHeld) $.ui.invalidate('ui.render')
+}
+// Whether an element of the mod's is a box the person types into: an ask's reply box or a key box
+const isTypedBox = (element: string | undefined) => /-reply-|^box-.*-field/.test(element ?? '')
+// The drafts as the last load left them, read back once as this load draws its first box
+let draftsRead = false
+const keepDraft = ($: EngineInterface, id: string, value: string | undefined) =>
+  void update($, draftsKept, kept => {
+    const next = { ...(kept as Record<string, string>) }
+    if (value) next[id] = value
+    else delete next[id]
+    return next
+  }).catch(() => undefined)
+const readDrafts = async ($: EngineInterface) => {
+  if (draftsRead) return
+  draftsRead = true
+  const kept = ((await read($, draftsKept).catch(() => ({}))) ?? {}) as Record<string, string>
+  for (const [id, value] of Object.entries(kept)) if (typeof value === 'string' && !drafts.has(id)) drafts.set(id, value)
+}
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
 type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean; isCard?: boolean }
@@ -4725,8 +4780,9 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   if (!isCleared) return
   answeredAt.set(one.id, ask.at)
   drafts.delete(one.id)
+  keepDraft($, one.id, undefined)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
-  if (isReply) freeTimes()
+  if (isReply) freeTimes($)
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
@@ -4758,7 +4814,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   if (!isHeld) return
   // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
   drafts.delete(one.id)
-  freeTimes()
+  keepDraft($, one.id, undefined)
+  freeTimes($)
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
@@ -4891,6 +4948,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   inChat.delete(a.card.id)
   await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   drafts.delete(a.card.id)
+  keepDraft($, a.card.id, undefined)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
   writtenIn(to, a.card.id)
   const helper = a.ask.from && a.ask.from !== to ? (await read($, todos)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
@@ -5758,8 +5816,9 @@ const boxHead = (text: string) => {
   const mac = text.match(/admin password of (.+?) to run/)?.[1]
   return mac ? `The admin password of ${mac}` : name ? `The key ${name}` : 'A key to save'
 }
-// What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
-const boxDrafts = new Map<string, string>()
+// What is typed in a box is kept by the surface alone, never here or drawn back: a drawing that carried it put older letters over
+// newer ones. Each try that left the box to be typed again gives its field a new key, so the field starts empty
+const boxTries = new Map<string, number>()
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map<string, string>()
 // Sent from here: the box goes at once, before the runner removes its request
@@ -5835,7 +5894,7 @@ const lookBoxes = async ($: EngineInterface) => {
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
-  for (const id of [...boxDrafts.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxDrafts.delete(id), boxSaid.delete(id))
+  for (const id of [...boxTries.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
   $.ui.invalidate('ui.render')
@@ -5851,12 +5910,12 @@ const boxKeyring = ($: EngineInterface, what: 'set' | 'has' | 'delete', id: stri
       : Promise.resolve({ exitCode: -1 })
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
-  boxDrafts.delete(id)
   if (!value) return
   const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That was longer than ${BOX_LONGEST} characters, so it was not sent.` : /[^\x20-\x7E]/.test(value) ? 'That held a line break, a curly quote or another character outside plain letters, digits and signs, so it was not sent. Type it again.' : ''
   if (refused) {
     boxSaid.set(id, refused)
     boxPresses += 1
+    boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
     return void $.ui.invalidate('ui.render')
   }
   const request = `${boxesDir()}/${id}.json`
@@ -5868,6 +5927,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   if (!sent) {
     boxSaid.set(id, 'It could not be sealed for the command that asked, so it was not sent.')
     boxPresses += 1
+    boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
     return void $.ui.invalidate('ui.render')
   }
   const escaped = sent.replace(/[\\"]/g, '\\$&')
@@ -5881,6 +5941,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   // and one whose runner stopped meanwhile is taken out again
   if (isKept && !(await $.fs.exists(request).catch(() => false))) await boxKeyring($, 'delete', id)
   boxPresses += 1
+  boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
   if (!isKept) {
     boxSaid.set(id, `It could not be put in ${keptWhere()}. Try again.`)
     await log($, `box ${id} not kept: security ended ${r.exitCode}`)
@@ -5896,7 +5957,6 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
 }
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
-  boxDrafts.delete(id)
   boxSent.add(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
@@ -5916,13 +5976,12 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
       <ui.Text dimColor wrap="wrap">{one.key ? 'What you type here shows as you type it. It goes only to the command that asked, sealed for it, never into a chat, and is not kept.' : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
-          key={`box-${one.id}-field-${boxPresses}`}
+          key={`box-${one.id}-field-${boxTries.get(one.id) ?? 0}`}
           placeholder="Type or paste it here"
-          value={boxDrafts.get(one.id) ?? ''}
           submitLabel="send"
           autoFocus={n === 0 ? true : undefined}
-          onInput={value => void boxDrafts.set(one.id, value)}
-          onSubmit={value => void sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`))}
+          onInput={() => holdTimes($)}
+          onSubmit={value => void (freeTimes($), sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`)))}
         />
       </ui.Box>
       {boxSaid.get(one.id) ? <ui.Text key={`box-${one.id}-said`} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
@@ -7215,6 +7274,8 @@ const chatHooks = (on: On) => {
     void recoverEnded($).catch(err => log($, `ended work not read back: ${String(err)}`))
     await sync($).catch(() => undefined)
     await loadReports($).catch(() => undefined)
+    // What the person had typed into a reply box before a reload of the mod is in its box again
+    await readDrafts($).catch(() => undefined)
     // Work that is running when the chat loads brings the panel up, if it has never opened
     // and comes back after a reload of the mod (which closes it) if it was open or work is running
     // Once the person has opened or closed the panel, every chat follows that choice instead, as it loads and every PANEL_EVERY
@@ -8808,11 +8869,17 @@ const commandHooks = (on: On) => {
     return { text: opened.isPlaced ? 'Claudopus panel opened.' : nowhere('Claudopus') }
   })
 
-  // A reply box the person moves the focus into holds the list's times, so the list is not drawn under them as they start typing
+  // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
+  // moved by them anywhere else, or out of the pane, lets it go
   on('ui.focus', async ($, e, next) => {
-    if (e.origin.kind === 'person' && e.plugin === 'claudopus' && /-reply-/.test(e.element ?? '')) holdTimes($)
+    if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
+      if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
+      else freeTimes($)
+    }
     return next(e)
   })
+  // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts
+  on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)))
   // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice
   on('ui.close', async ($, e, next) => {
     const r = await next(e)
@@ -9233,6 +9300,14 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
+    // While the person types into a box the pane is drawn as it last was, whole (heldDrawings)
+    const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}`
+    // Read first, held or not, so the drawing is asked for again at each pass of the timer and at each end of a pause
+    if (paneId === LIST) await read($, tick)
+    const shape = await paneShape($, paneId)
+    const held = isTyping ? heldDrawings.get(heldKey) : undefined
+    if (held && held.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
+    const drawing = await (async () => {
     const { Box, Button, Markdown, Text } = uiOf($, e)
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
@@ -9464,10 +9539,10 @@ const panelHooks = (on: On) => {
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
                 autoFocus={e.surface === 'terminal' && !askFocused ? ((askFocused = true), true) : undefined}
                 placeholder="Or reply in your own words"
-                value={drafts.get(one.id) ?? ''}
+                value={draftShown(one.id)}
                 submitLabel="send"
-                onInput={value => void (drafts.set(one.id, value), holdTimes($))}
-                onSubmit={value => void (drafts.delete(one.id), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+                onInput={value => void (drafts.set(one.id, value), keepDraft($, one.id, value), holdTimes($))}
+                onSubmit={value => void (drafts.delete(one.id), keepDraft($, one.id, undefined), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
               />
             </Box>
           ) : null}
@@ -10737,6 +10812,9 @@ const panelHooks = (on: On) => {
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
+    })()
+    heldDrawings.set(heldKey, { shape, drawing })
+    return drawing
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
@@ -10750,6 +10828,8 @@ const tabHooks = (on: On) => {
   on('ui.press', async ($, e, next) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
+    // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
+    if (e.plugin === 'claudopus') freeTimes($)
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>

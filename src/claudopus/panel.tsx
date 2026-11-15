@@ -40,6 +40,14 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
+    // While the person types into a box the pane is drawn as it last was, whole (heldDrawings)
+    const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}`
+    // Read first, held or not, so the drawing is asked for again at each pass of the timer and at each end of a pause
+    if (paneId === LIST) await read($, tick)
+    const shape = await paneShape($, paneId)
+    const held = isTyping ? heldDrawings.get(heldKey) : undefined
+    if (held && held.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
+    const drawing = await (async () => {
     const { Box, Button, Markdown, Text } = uiOf($, e)
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
@@ -271,10 +279,10 @@ const panelHooks = (on: On) => {
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
                 autoFocus={e.surface === 'terminal' && !askFocused ? ((askFocused = true), true) : undefined}
                 placeholder="Or reply in your own words"
-                value={drafts.get(one.id) ?? ''}
+                value={draftShown(one.id)}
                 submitLabel="send"
-                onInput={value => void (drafts.set(one.id, value), holdTimes($))}
-                onSubmit={value => void (drafts.delete(one.id), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+                onInput={value => void (drafts.set(one.id, value), keepDraft($, one.id, value), holdTimes($))}
+                onSubmit={value => void (drafts.delete(one.id), keepDraft($, one.id, undefined), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
               />
             </Box>
           ) : null}
@@ -1544,6 +1552,9 @@ const panelHooks = (on: On) => {
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
+    })()
+    heldDrawings.set(heldKey, { shape, drawing })
+    return drawing
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }

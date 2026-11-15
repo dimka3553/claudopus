@@ -1,0 +1,3 @@
+- While you type into an ask's reply box or a key box, the panel and Details hold still: other cards' lines, times and output wait until you stop, so the box no longer flickers, drops letters or throws the panel to its bottom; a card that starts, finishes or asks still shows at once.
+- What you typed into an ask's reply box stays in it through a reload of Claudopus.
+- A key box is drawn without the letters typed in it, so a redraw can never put older letters over newer ones.

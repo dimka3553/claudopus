@@ -4252,6 +4252,72 @@ test("while the person types into a card's reply box the list's running times st
   await list.unmount()
 })
 
+test('while the person types into an ask the panel holds its drawing whole, as other cards move, start and finish around it: the 15 Nov panel that jumped to its bottom and flickered with every letter typed', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two pieces of work', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Keep digging for head CTs', prompt: 'dig' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which source next?', details: 'A long explanation.\n\n- one\n- two\n- three', choices: ['Kaggle', 'TCIA', 'Not now'] } as never)
+  for (const surface of ['desktop', 'terminal'] as const) {
+    const list = await $.ui.mount({ ...LIST, surface } as never)
+    const ears = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface } as never)
+    await clock.advance(2000)
+    const drawing = async (pane: typeof list) => JSON.stringify([...(await pane.findAll({ type: 'Text' })).map(one => one.text), ...(await pane.findAll({ type: 'Input' } as never)).map(one => [one.key, one.props.value])])
+    const box = (await list.findAll({ type: 'Input' } as never)).find(one => /^ask-a1-reply-/.test(one.key ?? ''))
+    expect(box).toBeDefined()
+    const [before, beforeDetails] = [await drawing(list), await drawing(ears)]
+    // Each letter is one change: none of them draws the panel again, nor Details
+    for (const text of ['N', 'No', 'Non', 'Non-A']) await list.input({ key: box?.key ?? '', text, kind: 'change' } as never)
+    expect(await drawing(list)).toBe(before)
+    // The other card writes a new line and its time moves: the panel still holds its drawing, and so does Details
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `n-${surface}`, agentId: 'a2', text: `I am measuring the left ear on the ${surface}.` } as never)
+    await clock.advance(3000)
+    await list.input({ key: box?.key ?? '', text: 'Non-Asian', kind: 'change' } as never)
+    expect(await drawing(list)).toBe(before)
+    expect(await drawing(ears)).toBe(beforeDetails)
+    // A third piece of work starts: it is drawn, and the box is drawn with the text it had, never the letters as they come
+    await $.agent.spawn({ ...spawn, description: `Find more scans ${surface}`, prompt: 'more' } as never)
+    expect(await until(async () => list.find({ type: 'Text', text: `Find more scans ${surface}` }))).toBeDefined()
+    expect((await list.findAll({ type: 'Input' } as never)).find(one => /^ask-a1-reply-/.test(one.key ?? ''))?.props.value).toBe('')
+    // Typing stopped: the panel moves on, with the other card's new line, and the box holds what was typed
+    await clock.advance(31_000)
+    expect(await until(async () => list.find({ type: 'Text', text: `I am measuring the left ear on the ${surface}.` }))).toBeDefined()
+    expect((await list.findAll({ type: 'Input' } as never)).find(one => /^ask-a1-reply-/.test(one.key ?? ''))?.props.value).toBe('Non-Asian')
+    // A press is the person's own move: it lets the panel go at once
+    await list.input({ key: box?.key ?? '', text: 'Non-Asian heads', kind: 'change' } as never)
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `m-${surface}`, agentId: 'a2', text: `Both ears done on the ${surface}.` } as never)
+    await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'TCIA')?.key ?? '' })
+    expect(await until(async () => list.find({ type: 'Text', text: `Both ears done on the ${surface}.` }))).toBeDefined()
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${surface}`, agentId: 'a1', text: 'Which source next?', choices: ['Kaggle', 'TCIA', 'Not now'] } as never)
+    await Promise.all([list.unmount(), ears.unmount()])
+  }
+})
+
+test('a key box keeps what is typed in it without drawing it back, and holds the panel while it is typed into', async ($, on) => {
+  const { clock, files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'get the data', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Get the data', prompt: 'data' } as never)
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret SAMPLE_USER here fetch' } as never).catch(() => undefined)
+  const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'SAMPLE_USER', chat: 'engine-id', at: 1_700_000_000_000 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
+  expect(field).toBeDefined()
+  if (!field) return
+  // The surface keeps the letters itself: the box is drawn with no value, so a drawing never puts older letters over newer ones
+  expect(field.props.value).toBeUndefined()
+  const before = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  await list.input({ key: field.key ?? '', text: 'made-up-na', kind: 'change' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'I am waiting for the made-up name.' } as never)
+  await clock.advance(3000)
+  expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).toBe(before)
+  expect((await list.findAll({ type: 'Input' } as never)).find(one => one.key === field.key)).toBeDefined()
+  await list.unmount()
+})
+
 test('an ask outlives the work that made it: amber after the work ends, with or without buttons of its own, until the person answers', async ($, on) => {
   const { submitted, resumed, clock } = world(on)
   await $.session.start(start)
@@ -5217,8 +5283,9 @@ test("while the person types a reply into an ask, work finishing here and in ano
   expect(await drawn(list)).toContain('happy')
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
-  // The half reply is still in its box
-  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('Not ye')
+  // The half reply is still in its box: while typing the box holds the letters itself, and once typing stops it is drawn with them
+  await clock.advance(31_000)
+  expect(await until(async () => ((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value === 'Not ye' ? true : undefined))).toBe(true)
   await list.unmount()
 })
 

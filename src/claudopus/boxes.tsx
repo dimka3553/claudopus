@@ -98,8 +98,9 @@ const boxHead = (text: string) => {
   const mac = text.match(/admin password of (.+?) to run/)?.[1]
   return mac ? `The admin password of ${mac}` : name ? `The key ${name}` : 'A key to save'
 }
-// What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
-const boxDrafts = new Map<string, string>()
+// What is typed in a box is kept by the surface alone, never here or drawn back: a drawing that carried it put older letters over
+// newer ones. Each try that left the box to be typed again gives its field a new key, so the field starts empty
+const boxTries = new Map<string, number>()
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map<string, string>()
 // Sent from here: the box goes at once, before the runner removes its request
@@ -175,7 +176,7 @@ const lookBoxes = async ($: EngineInterface) => {
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
-  for (const id of [...boxDrafts.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxDrafts.delete(id), boxSaid.delete(id))
+  for (const id of [...boxTries.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
   $.ui.invalidate('ui.render')
@@ -191,12 +192,12 @@ const boxKeyring = ($: EngineInterface, what: 'set' | 'has' | 'delete', id: stri
       : Promise.resolve({ exitCode: -1 })
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
-  boxDrafts.delete(id)
   if (!value) return
   const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That was longer than ${BOX_LONGEST} characters, so it was not sent.` : /[^\x20-\x7E]/.test(value) ? 'That held a line break, a curly quote or another character outside plain letters, digits and signs, so it was not sent. Type it again.' : ''
   if (refused) {
     boxSaid.set(id, refused)
     boxPresses += 1
+    boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
     return void $.ui.invalidate('ui.render')
   }
   const request = `${boxesDir()}/${id}.json`
@@ -208,6 +209,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   if (!sent) {
     boxSaid.set(id, 'It could not be sealed for the command that asked, so it was not sent.')
     boxPresses += 1
+    boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
     return void $.ui.invalidate('ui.render')
   }
   const escaped = sent.replace(/[\\"]/g, '\\$&')
@@ -221,6 +223,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   // and one whose runner stopped meanwhile is taken out again
   if (isKept && !(await $.fs.exists(request).catch(() => false))) await boxKeyring($, 'delete', id)
   boxPresses += 1
+  boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
   if (!isKept) {
     boxSaid.set(id, `It could not be put in ${keptWhere()}. Try again.`)
     await log($, `box ${id} not kept: security ended ${r.exitCode}`)
@@ -236,7 +239,6 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
 }
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
-  boxDrafts.delete(id)
   boxSent.add(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
@@ -256,13 +258,12 @@ const boxesPart = ($: EngineInterface, ui: Ui) => {
       <ui.Text dimColor wrap="wrap">{one.key ? 'What you type here shows as you type it. It goes only to the command that asked, sealed for it, never into a chat, and is not kept.' : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
-          key={`box-${one.id}-field-${boxPresses}`}
+          key={`box-${one.id}-field-${boxTries.get(one.id) ?? 0}`}
           placeholder="Type or paste it here"
-          value={boxDrafts.get(one.id) ?? ''}
           submitLabel="send"
           autoFocus={n === 0 ? true : undefined}
-          onInput={value => void boxDrafts.set(one.id, value)}
-          onSubmit={value => void sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`))}
+          onInput={() => holdTimes($)}
+          onSubmit={value => void (freeTimes($), sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`)))}
         />
       </ui.Box>
       {boxSaid.get(one.id) ? <ui.Text key={`box-${one.id}-said`} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}

@@ -203,6 +203,8 @@ const chatHooks = (on: On) => {
     void recoverEnded($).catch(err => log($, `ended work not read back: ${String(err)}`))
     await sync($).catch(() => undefined)
     await loadReports($).catch(() => undefined)
+    // What the person had typed into a reply box before a reload of the mod is in its box again
+    await readDrafts($).catch(() => undefined)
     // Work that is running when the chat loads brings the panel up, if it has never opened
     // and comes back after a reload of the mod (which closes it) if it was open or work is running
     // Once the person has opened or closed the panel, every chat follows that choice instead, as it loads and every PANEL_EVERY

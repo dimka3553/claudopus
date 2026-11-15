@@ -77,18 +77,70 @@ const replies = new Map<string, number>()
 const askMark = (ask: NonNullable<Todo['ask']>) => `${ask.at}-${[...ask.text].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36)}`
 // What the person has typed into a reply box and not sent, by the work, so a redraw keeps it
 const drafts = new Map<string, string>()
-// While the person types into a reply box the list's running times stand still: the list is drawn again each second, and a box in
-// a list drawn that often lost its place and threw the panel to the bottom. Each letter typed, or the box taking the focus, holds
-// the times for TYPING more; sending lets them go
+// While the person types into a reply box or a key box the panel and every Details tab hold their drawing whole: nothing in them is
+// drawn again, the running times, other cards' lines, cards that start or end. The app builds a pane afresh at each drawing, the
+// box in it too, and a pane drawn every few seconds under the person's typing flickered the box's ring, put older letters over
+// newer ones, and threw the panel to its bottom, out of the person's reach (15 Nov, typing an answer while other work ran). Each
+// letter typed, or the box taking the focus, holds it for TYPING more; sending, any press, or the focus leaving the boxes lets it go
 const TYPING = 30_000
 let typing = 0
 let isTyping = false
+// The last drawing of each pane on each surface, with what it showed, which a held pane is drawn with again. Only a change in what
+// it shows, a card that starts, finishes, asks or leaves after its pause, a box or a prompt that comes or goes, draws it again
+// while the person types: a card's new line, its time, a command's output wait until they stop
+const heldDrawings = new Map<string, { shape: string; drawing: unknown }>()
+// The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
+// arrive, so a drawing never puts older letters over the newer ones the box already holds
+const drawnDrafts = new Map<string, string>()
+const draftShown = (id: string) => {
+  if (isTyping && drawnDrafts.has(id)) return drawnDrafts.get(id) ?? ''
+  const value = drafts.get(id) ?? ''
+  drawnDrafts.set(id, value)
+  return value
+}
+// What a pane shows, as far as it moves while the person types
+const paneShape = async ($: EngineInterface, paneId: string) => {
+  const at = await $.clock.now()
+  const card = (one: Todo) => [one.id, one.status, one.ask?.at ?? 0, one.ask?.replied?.at ?? 0, one.parentId ?? '', lingers(one, at)]
+  const own = await read($, todos)
+  if (paneId !== LIST) {
+    const one = own.find(other => paneId.endsWith(other.id))
+    return JSON.stringify([paneId, one ? [card(one), one.items.map(item => item.state)] : null])
+  }
+  const chats = await read($, others)
+  const theirs = [cardsOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
+  const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at)])
+  const gone = [...lastRunning.keys()]
+  return JSON.stringify([own.filter(one => !one.parentId || one.ask).map(card), theirs, flowsNow, gone, boxes.map(one => one.id), [...boxSaid.keys()]])
+}
 const holdTimes = ($: EngineInterface) => {
   const made = (typing += 1)
   isTyping = true
-  $.clock.after(TYPING, () => void (typing === made && (isTyping = false)))
+  $.clock.after(TYPING, () => void (typing === made && ((isTyping = false), $.ui.invalidate('ui.render'))))
 }
-const freeTimes = () => void ((typing += 1), (isTyping = false))
+const freeTimes = ($: EngineInterface) => {
+  const wasHeld = isTyping
+  typing += 1
+  isTyping = false
+  if (wasHeld) $.ui.invalidate('ui.render')
+}
+// Whether an element of the mod's is a box the person types into: an ask's reply box or a key box
+const isTypedBox = (element: string | undefined) => /-reply-|^box-.*-field/.test(element ?? '')
+// The drafts as the last load left them, read back once as this load draws its first box
+let draftsRead = false
+const keepDraft = ($: EngineInterface, id: string, value: string | undefined) =>
+  void update($, draftsKept, kept => {
+    const next = { ...(kept as Record<string, string>) }
+    if (value) next[id] = value
+    else delete next[id]
+    return next
+  }).catch(() => undefined)
+const readDrafts = async ($: EngineInterface) => {
+  if (draftsRead) return
+  draftsRead = true
+  const kept = ((await read($, draftsKept).catch(() => ({}))) ?? {}) as Record<string, string>
+  for (const [id, value] of Object.entries(kept)) if (typeof value === 'string' && !drafts.has(id)) drafts.set(id, value)
+}
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
 type Sent = { text: string; ask: string; to: 'work' | 'read' | 'chat' | 'other' | 'lost'; at: number; line?: string; isHeld?: boolean; isCard?: boolean }
@@ -153,8 +205,9 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   if (!isCleared) return
   answeredAt.set(one.id, ask.at)
   drafts.delete(one.id)
+  keepDraft($, one.id, undefined)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
-  if (isReply) freeTimes()
+  if (isReply) freeTimes($)
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
@@ -186,7 +239,8 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   if (!isHeld) return
   // The box goes with the buttons, as after a press; what was typed in it is not kept for the next ask
   drafts.delete(one.id)
-  freeTimes()
+  keepDraft($, one.id, undefined)
+  freeTimes($)
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true })
   redraw($)
@@ -319,6 +373,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   inChat.delete(a.card.id)
   await update($, todos, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   drafts.delete(a.card.id)
+  keepDraft($, a.card.id, undefined)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
   writtenIn(to, a.card.id)
   const helper = a.ask.from && a.ask.from !== to ? (await read($, todos)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
