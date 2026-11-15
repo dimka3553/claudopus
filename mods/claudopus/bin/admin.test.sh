@@ -277,7 +277,8 @@ case "\$*" in
 esac
 EOF
 chmod +x "$r/gh/gh"
-(cd "$r/work" && git checkout -q main && git pull -q origin main && printf 'CHECK=true\nGITHUB_CHECKS="check (ubuntu-latest), check (macos-latest)"\n' >.release && git commit -q -am "checks on GitHub" && git push -q origin main && git checkout -q -b gh-checks && echo four >file && git commit -q -am four)
+# (main of this test's own repo is pushed past the guard the release put in, as the test runs with CLAUDECODE set)
+(cd "$r/work" && git fetch -q origin && git checkout -q -B main origin/main && printf 'CHECK=true\nGITHUB_CHECKS="check (ubuntu-latest), check (macos-latest)"\n' >.release && git commit -q -am "checks on GitHub" && RELEASE_PUSH=1 git push -q origin main && git checkout -q -b gh-checks && echo four >file && git commit -q -am four) || { echo "NOT OK - the repo for GitHub's checks was not set up"; failed=1; }
 checks() { printf "$@" >"$r/checks"; rm -f "$r/checks.later" "$r/asks" "$r/asked"; }
 gh_release() { release_grant "rel-$1" release-grant gh-checks; (cd "$r/work" && RELEASE_CHECK_EVERY=1 RELEASE_CHECK_WAIT=4 "$here/release"); }
 main_was=$(git -C "$r/origin.git" rev-parse main)
