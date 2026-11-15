@@ -7182,6 +7182,14 @@ test('a gate answered on its card says what was allowed in that same card, outli
   // In its card, under the work's title, not a line of its own at the top
   expect(texts.indexOf('Fix the hosts file')).toBeLessThan(texts.indexOf('You allowed it once · it runs now'))
   expect(texts.filter(one => one === 'You allowed it once · it runs now').length).toBe(1)
+  // Under anything that still waits: another work's gate comes in, and its card is drawn above the answered one
+  await $.agent.spawn({ ...spawn, description: 'Tidy the logs', prompt: 'tidy the logs' } as never)
+  const call2 = bash('b2', `${ADMIN} here 'id -u'`, 'a2')
+  expect(await held('b2')).toBeDefined()
+  const now = await textOrder(list)
+  expect(now.indexOf('Tidy the logs')).toBeGreaterThan(-1)
+  expect(now.indexOf('Tidy the logs')).toBeLessThan(now.indexOf('Fix the hosts file'))
+  void call2.catch(() => undefined)
 })
 
 test('scrolled down a long list, the line above the prompt says how many wait at the top, and pressed takes the list there; at the top it says nothing', async ($, on) => {

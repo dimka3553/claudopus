@@ -10954,8 +10954,9 @@ const panelHooks = (on: On) => {
     const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
     const askCards = [...askingHere, ...askingThere].sort((a, b) => upSince(b) - upSince(a))
     const restHere = shownWork.filter(one => !isUp(one))
-    // Notices and whole cards in one order, the newest first; a card is drawn when the panel is
-    const top = [...notices.map(one => ({ at: one.at, draw: () => one.node })), ...askCards.map(one => ({ at: upSince(one), draw: () => small(one) }))].sort((a, b) => b.at - a.at)
+    // Notices and whole cards in one order, the newest first; a card that only says what was allowed comes under all that still
+    // waits. A card is drawn when the panel is
+    const top = [...notices.map(one => ({ at: one.at, draw: () => one.node })), ...askCards.map(one => ({ at: upSince(one) - (isAsking(one) || one.admins?.length ? 0 : 1e15), draw: () => small(one) }))].sort((a, b) => b.at - a.at)
     const waitsCount = notices.length + askCards.filter(one => isAsking(one) || one.admins?.length).length
     // The terminal's keys stay with the ask they were on while it waits
     if (keysAsk && !askingHere.some(one => one.id === keysAsk && isAsking(one))) keysAsk = ''
