@@ -16,7 +16,7 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isUpdateDue, loo
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { detachedOf, DOWNLOAD_CMD, foldJobs, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
+import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSaid, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
@@ -1061,6 +1061,14 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'c
     ? `${isMoving ? ring : ''}${shaped}`
     : `<circle cx="${at}" cy="${mid}" r="3" fill="none" stroke="#808080" stroke-width="1.5"/>`
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`
+}
+
+// The same tree's lines carried down past a row, for a second line of its own: the levels above that go on, and its own line when
+// rows under the same parent follow
+const railSvg = (t: Twig, line: number) => {
+  const x = (level: number) => level * TWIG_STEP + 9
+  const paths = [...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])), ...(t.isLast ? [] : [`M${x(t.rails.length)} 0V${line}`])]
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('') || 'M0 0'}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/></svg>`
 }
 
 // Work the chat's own record was already looked through for
@@ -7549,7 +7557,7 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; isEarlier?: boolean; isOwn?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -7563,13 +7571,20 @@ const shellMissed = new Map<string, number>()
 let tasksDir = ''
 let tasksOf = ''
 let tasksMissedAt = 0
+// The output a command held open writes while it runs, by its row's id: the engine writes it to a file of its own in the tasks
+// folder and names it only once the command ends or goes to the background, so it is found as the file its shell writes to
+const callFiles = new Map<string, { file: string; at: number }>()
+// The file each row's output was last read from, by its id, so a press on the row can show it whole
+const jobFiles = new Map<string, string>()
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false): Job => {
   const seen = jobLog.get(id)
   const wait = isWatch ? undefined : waitOf(cmd)
-  const kind: JobKind = isWatch ? 'watch' : wait ? 'wait' : jobKindOf(cmd, what)
-  return { id, label: labelOf(what || cmd, cmd), cmd, kind, at, ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
+  const said = describedOf(what)
+  const kind: JobKind = isWatch ? 'watch' : (said.kind ?? (wait ? 'wait' : jobKindOf(cmd, what)))
+  const label = labelOf(said.text || cmd, cmd)
+  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(said.expect ? { expect: said.expect, expectText: said.expectText } : {}), ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
 }
 // The jobs a card has running: what it sent to the background, and a command it has waited on a while; jobs alike are one
 const jobsOf = (one: Todo, at: number): Job[] =>
@@ -7587,6 +7602,8 @@ const jobsOf = (one: Todo, at: number): Job[] =>
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
+  // Its own words alone when they say its kind already (Download the CT scans, Wait for the deploy)
+  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
   // A wait leads with what it waits for, its own words after
   const label = job.kind === 'wait' ? (job.waitsFor ?? job.label.replace(/^wait(s|ing)?\s+/i, '')) : job.label
   return `${kind} · ${label}`
@@ -7633,14 +7650,39 @@ const lookJobs = async ($: EngineInterface) => {
   if (now - jobsLookedAt < JOB_LOOK) return
   jobsLookedAt = now
   const list = await read($, todos)
+  // Held open: a command a card has waited on long enough to be a row of its own
+  const held = list.flatMap(one => (one.status === 'working' && one.running?.cmd && now - one.running.at >= RUNNING_SHOWN ? [{ owner: one.id, id: `call-${one.id}`, cmd: one.running.cmd, at: one.running.at }] : []))
+  // A row's command that changed (another held call of the same card ran longest) starts afresh
+  for (const [id, was] of callFiles) if (!held.some(h => h.id === id && h.at === was.at)) (callFiles.delete(id), jobLog.delete(id))
   const owned = [
-    ...list.flatMap(one => (one.bg ?? []).filter(b => !b.isWatch).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
+    // A watch's output is its events, read as any other
+    ...list.flatMap(one => (one.bg ?? []).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
     ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid }))),
+    ...held.flatMap(h => (callFiles.get(h.id) ? [{ owner: h.owner, id: h.id, file: callFiles.get(h.id)?.file ?? '', pid: undefined as string | undefined }] : [])),
   ]
-  for (const id of jobLog.keys()) if (!owned.some(o => o.id === id)) jobLog.delete(id)
+  for (const id of jobLog.keys()) if (!owned.some(o => o.id === id) && !held.some(h => h.id === id)) jobLog.delete(id)
   for (const owner of jobNews.keys()) if (!owned.some(o => o.owner === owner)) jobNews.delete(owner)
   for (const id of shellMissed.keys()) if (!owned.some(o => o.id === id)) shellMissed.delete(id)
-  if (!owned.length) return
+  // A held-open command's shell, once the processes have been listed, and the file it writes to: only one in a tasks folder
+  const unfound = held.filter(h => !callFiles.has(h.id))
+  if (unfound.length && jobProcs.length) {
+    const pids = unfound.flatMap(h => {
+      const pid = heldShellOf(jobProcs, h.cmd, h.at)
+      return pid ? [{ id: h.id, pid, at: h.at }] : []
+    })
+    if (pids.length) {
+      const fd = await $.process
+        .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...pids.map(p => p.pid)], { timeoutMs: 5000 })
+        .catch(() => undefined)
+      for (const line of fd?.stdout.split('\n') ?? []) {
+        const [pid = '', ...path] = line.split(' ')
+        const file = path.join(' ').trim()
+        const one = pids.find(p => p.pid === pid)
+        if (one && /\/tasks\/[\w-]+\.output$/.test(file)) callFiles.set(one.id, { file, at: one.at })
+      }
+    }
+  }
+  if (!owned.length && !unfound.length) return
   const sid = await $.session.id().catch(() => '')
   if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
   if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
@@ -7649,6 +7691,8 @@ const lookJobs = async ($: EngineInterface) => {
   }
   const asked = owned.filter(o => o.file || tasksDir)
   const files = asked.map(o => o.file || `${tasksDir}/${o.id}.output`)
+  jobFiles.clear()
+  asked.forEach((o, n) => jobFiles.set(o.id, files[n] ?? ''))
   // The files the waits poll, to tell whether what they wait for still moves
   const waits = list.flatMap(one => [...(one.bg ?? []).filter(b => !b.isWatch), ...(one.detached ?? [])].flatMap(j => {
     const wait = waitOf(j.cmd ?? '')
@@ -7712,13 +7756,15 @@ const lookJobs = async ($: EngineInterface) => {
     const text = (parts[n + 1] ?? '').split('\n@@AT@@ ')[0] ?? ''
     if (!job?.pid && isOutputEnded(text)) ended.push(id)
     const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
-    const seen = latestOf(text)
+    // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote (on
+    // 15 Nov such rows read "updated 9m ago" for runs that sent all they printed elsewhere)
+    const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }
     const was = jobLog.get(id)
     const wait = waits.find(w => w.id === id)
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
     const next: Seen = { ...seen, ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true
@@ -7748,6 +7794,26 @@ const isLike = (command: string, pattern: string) => {
   } catch {
     return command.includes(pattern)
   }
+}
+
+// A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
+// it goes on; on this Mac only, as the window is this Mac's
+const canOpenJob = (job: Job) => Boolean(jobFiles.get(job.id)) && !isRunFromAfar && !isLinux
+const openJobOutput = async ($: EngineInterface, job: Job) => {
+  const file = jobFiles.get(job.id)
+  // A press moves the buttons' keys, so the panel does not keep pulling back to this row
+  presses += 1
+  $.ui.invalidate('ui.render')
+  if (!file || !canOpenJob(job)) return
+  const at = await $.clock.now()
+  const base = `${dir}/terminal`
+  const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
+  const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file)
+  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'Its output is not there (yet): this window shows it once it is written.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
+  await $.fs.write(`${home}/output.command`, script)
+  const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
+  if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
 }
 
 // Steps that could have gone out together: after each step of work, a line in its next request when the step shows a pattern that
@@ -7905,12 +7971,12 @@ const lookInDue = async ($: EngineInterface) => {
   await lookInOnHelpers($)
 }
 
-// What a card with helpers running says under its line: how many, when they were looked in on, and how many have gone quiet
+// What a card with helpers running says under its line: only how many have gone quiet, as those at work are rows on its tree
 const lookedInLine = (one: Todo, at: number) => {
   const l = one.lookedIn
-  if (!l || one.status !== 'working' || !l.running) return ''
-  const ago = at - l.at < 60_000 ? 'just now' : `${took(at - l.at)} ago`
-  return `${l.running === 1 ? '1 helper' : `${l.running} helpers`} running, looked in on ${ago}${l.quiet ? `: ${l.quiet} quiet for ${HELPER_QUIET / 60_000}+ min, the work was told` : ''}`
+  // Helpers at work are rows on its tree already; only one gone quiet is said, as the work was told of it
+  if (!l || one.status !== 'working' || !l.running || !l.quiet) return ''
+  return `${l.quiet === 1 ? '1 helper' : `${l.quiet} helpers`} quiet for ${HELPER_QUIET / 60_000}+ min, the work was told`
 }
 
 const stepHooks = (on: On) => {
@@ -9400,7 +9466,7 @@ const panelHooks = (on: On) => {
                 <Text dimColor wrap="wrap">{waitLine(one, at, jobsOf(one, at).length > 0)}</Text>
               </Box>
             ) : null}
-            {/* Its helpers running: how many, when they were last looked in on, and how many have gone quiet */}
+            {/* Its helpers gone quiet, in amber: those at work are rows on its tree */}
             {lookedInLine(one, at) && !one.chat ? (
               <Box key={`looked-${one.id}`} paddingLeft={lead}>
                 <Text dimColor={!one.lookedIn?.quiet} color={one.lookedIn?.quiet ? NEEDS : undefined} wrap="wrap">{lookedInLine(one, at)}</Text>
@@ -9519,7 +9585,7 @@ const panelHooks = (on: On) => {
     const jobLines = (t: Twig, key: string, job: Job) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
+          <table.Svg key={`${key}-svg`} source={twigSvg(t, LINE, JOB_COLOR[job.kind], !job.isPaused && job.kind !== 'wait' && !(job.isEmpty ? at - job.at >= JOB_QUIET : job.wroteAt && at - job.wroteAt >= JOB_QUIET), JOB_SHAPE[job.kind])} alt={JOB_WORD[job.kind]} width={twigWidth(t)} height={LINE} isInteractive />
         </Box>
       ) : (
         <Box key={key} flexDirection="row" flexShrink={0}>
@@ -9527,77 +9593,106 @@ const panelHooks = (on: On) => {
           <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>
       )
-    // Beside it, how it stands, so a glance tells whether it moves: paused, what a wait waits for gone or still, output that has
-    // not changed for long (in amber), or when it last changed; its percent when it shows progress, and its time last
-    const jobSide = (job: Job, width: number) => {
-      const time = took(at - job.at)
+    // Under its name, the tree's lines carried down past it, so its second line hangs in the same place
+    const jobRails = (t: Twig, key: string) =>
+      'Svg' in table && e.surface !== 'terminal' ? (
+        <Box key={key} flexShrink={0}>
+          <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt="" width={twigWidth(t)} height={LINE} />
+        </Box>
+      ) : (
+        <Box key={key} flexShrink={0}>
+          <Text dimColor>{`${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}  `}</Text>
+        </Box>
+      )
+    // How it stands, its second line, so a glance tells whether it moves and how far it is: how much of how much, its percent,
+    // speed and time left as the run printed them; then paused, a wait's target, a watch's last event, nothing printed since it
+    // began, quiet for minutes (in amber), or when it last printed. Quiet is told apart from working in words, never by a clock
+    const jobStand = (job: Job, width: number) => {
       const pct = job.pct ? [job.pct] : []
       const quiet = job.wroteAt ? at - job.wroteAt : 0
-      const [state, isWarn] =
-        job.isPaused ? ['paused', true]
-        : job.kind === 'wait' ? (job.target ? [job.target, true] : ['waiting', false])
-        : job.wroteAt && quiet >= JOB_QUIET ? [`no new output for ${shortAgo(quiet)}`, true]
-        : job.wroteAt ? [`updated ${shortAgo(quiet)} ago`, false]
-        // A job whose output cannot be found says so, so a blank row is never taken for one that moves (a command held open has no
-        // output to read until it ends)
-        : !job.id.startsWith('call-') && !job.id.startsWith('more-') && job.kind !== 'watch' && at - job.at >= JOB_UNREAD ? ['output not found', true]
-        : ['', false]
-      const short = state.replace(/^no new output for /, 'quiet ').replace(/^output not found$/, 'no output').replace(/^updated (.*) ago$/, '$1 ago').replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still ')
-      const warn = Boolean(isWarn) && Boolean(state)
-      // A run that says how far it is puts how much of how much first, before its name: in full, then as done/total, its speed
-      // only where there is room, and it keeps whether it moves before its time; its name keeps what is left, 12 columns at least
-      if (job.done && job.kind !== 'wait') {
-        const full = job.total ? `${job.done} of ${job.total}` : job.done
-        const compact = job.total ? `${job.done}/${job.total}` : job.done
-        // its speed only while it writes: a speed a minute old is no longer how fast it goes
-        const rate = job.rate && !warn && job.wroteAt && quiet < 60_000 ? [job.rate] : []
-        // the side takes about half the row, so the name stays readable; a third when the latest line is not the progress, so it shows
-        const most = job.isEarlier ? Math.max(12, Math.floor(width / 3)) : Math.max(12, Math.floor(width / 2) + 4, Math.min(width - 13, 26))
-        return { text: firstFit([[full, ...rate, ...pct, state, time], [full, ...pct, state, time], [full, ...pct, short, time], [compact, ...pct, short, time], [full, ...pct, short], [compact, ...pct, short], [compact, ...pct], warn ? [compact, short] : [...pct, short], [short || time]], most), isWarn: warn }
-      }
-      const text = firstFit([[...pct, state, time], [...pct, short, time], [...pct, short], [short || time]], Math.max(12, Math.floor(width / 2)))
+      const ran = at - job.at
+      const [state, short, isWarn]: [string, string, boolean] =
+        job.isPaused ? ['paused', 'paused', true]
+        : job.kind === 'wait' && (job.target || !job.wroteAt || job.isEmpty) ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
+        : job.kind === 'watch' ? (job.wroteAt && !job.isEmpty ? [`last event ${shortAgo(quiet)} ago`, `event ${shortAgo(quiet)} ago`, false] : ['no event yet', 'no event', false])
+        : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
+        // (a server prints only when asked, so its quiet is no warning)
+        : job.wroteAt && quiet >= JOB_QUIET && job.kind !== 'server' ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
+        : job.wroteAt ? [`printed ${shortAgo(quiet)} ago`, `printed ${shortAgo(quiet)} ago`, false]
+        // A job whose output cannot be found says so, so a blank row is never taken for one that moves
+        : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', 'no output', true]
+        : ['', '', false]
+      const warn = isWarn && Boolean(state)
+      // its speed and time left only while it prints: a minute old, they are no longer how it goes
+      const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
+      const left = job.left && isFresh ? [job.left] : []
+      const rate = job.rate && isFresh ? [job.rate] : []
+      const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
+      const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
+      const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], [...compact, ...pct, short], [...compact, ...pct], [short]], width)
       return { text, isWarn: warn }
     }
+    // A job's two lines: what it is, in the work's own words, with its time; and under it how it stands, then the latest line it
+    // printed where that is not the progress already said
     const jobRow = (t: Twig, scope: string) => {
       const job = t.job
       if (!job) return null
       const key = `${scope}-job-${job.id}`
       const width = perRow - 4 - t.depth * 2
-      const isMore = job.id.startsWith('more-')
-      const { text: side, isWarn } = isMore ? { text: took(at - job.at), isWarn: false } : jobSide(job, width)
-      const room = Math.max(12, width - side.length - 1)
-      // Its percent, in blue, where the side says it as a part of its own
-      const pctAt = job.pct && !isWarn ? (side.startsWith(`${job.pct} · `) || side === job.pct ? 0 : side.includes(` · ${job.pct}`) ? side.indexOf(` · ${job.pct}`) + 3 : -1) : -1
-      // The latest line, unless it is only a progress bar its percent already says, in the room the name leaves; a wait says what
-      // it waits for. A run that says how far it is has that beside its time instead
-      // (one read from a progress line above the last still shows the last, such as an error after it)
-      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
-      const name = cut(jobHead(job), room)
-      const rest = room - name.length - 3
-      const detail = latest && rest >= 10 ? cut(latest, rest) : ''
-      return (
+      // its time, and how long it said it should take: in amber once well past that
+      const ran = at - job.at
+      const isLong = Boolean(job.expect && ran > (job.expect ?? 0) * 1.5)
+      const time = job.expectText ? `${took(ran)} of ~${job.expectText}` : took(ran)
+      const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
+      const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
           {jobLines(t, `twig-lines-${key}`, job)}
-          <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
-            <Box flexShrink={1} minWidth={0}>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            {/* A press shows its output whole in a Terminal window, where this Mac can open one */}
+            {canOpenJob(job) ? (
+              <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => void openJobOutput($, job).catch(err => log($, `output not opened: ${String(err)}`))} />
+            ) : (
               <Text wrap="truncate-end">{name}</Text>
-            </Box>
-            {detail ? (
-              <Box flexShrink={1000} minWidth={0}>
-                <Text dimColor wrap="truncate-end">{` · ${detail}`}</Text>
-              </Box>
-            ) : null}
+            )}
           </Box>
           <Box flexShrink={0}>
-            {pctAt >= 0 && job.pct ? (
-              <Box flexDirection="row">
-                {pctAt > 0 ? <Text dimColor>{side.slice(0, pctAt)}</Text> : null}
-                <Text color={JOB_COLOR.download}>{job.pct}</Text>
-                <Text dimColor>{side.slice(pctAt + job.pct.length)}</Text>
-              </Box>
-            ) : (
-              <Text color={isWarn ? NEEDS : undefined} dimColor={!isWarn}>{side}</Text>
-            )}
+            <Text dimColor={!isLong} color={isLong ? NEEDS : undefined}>{time}</Text>
+          </Box>
+        </Box>
+      )
+      if (job.id.startsWith('more-')) return head
+      const { text: stand, isWarn } = jobStand(job, width)
+      // Its percent, in blue, where the line says it as a part of its own
+      const pctAt = job.pct && !isWarn ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
+      // The latest line, unless it is only a progress bar its percent already says; a wait says the work's own words for it.
+      // A run read from a progress line above its last still shows the last, such as an error after it
+      const latest = job.kind === 'wait' && job.waitsFor ? (job.isNamed && !isKindSaid(job.label) ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
+      const rest = width - stand.length - (stand ? 3 : 0)
+      const detail = latest && rest >= 10 ? cut(latest, rest) : ''
+      if (!stand && !detail) return head
+      return (
+        <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
+          {head}
+          <Box key={`stand-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+            {jobRails(t, `rails-${key}`)}
+            <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden">
+              {pctAt >= 0 && job.pct ? (
+                <Box flexDirection="row" flexShrink={0}>
+                  {pctAt > 0 ? <Text dimColor>{stand.slice(0, pctAt)}</Text> : null}
+                  <Text color={JOB_COLOR.download}>{job.pct}</Text>
+                  <Text dimColor>{stand.slice(pctAt + job.pct.length)}</Text>
+                </Box>
+              ) : stand ? (
+                <Box flexShrink={0}>
+                  <Text color={isWarn ? NEEDS : undefined} dimColor={!isWarn}>{stand}</Text>
+                </Box>
+              ) : null}
+              {detail ? (
+                <Box flexShrink={1000} minWidth={0}>
+                  <Text dimColor wrap="truncate-end">{stand ? ` · ${detail}` : detail}</Text>
+                </Box>
+              ) : null}
+            </Box>
           </Box>
         </Box>
       )

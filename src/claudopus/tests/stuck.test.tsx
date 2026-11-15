@@ -55,7 +55,8 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
   const rows = async () => {
     const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
     // The command a helper waits on is a row under it, in its own words, after the word that says it is a command
-    const r = (await pane.findAll({ type: 'Text', text: /^(Command · hold search|.* running · .*)$/ })).map(one => one.text)
+    // (its name a button, as a press opens its output)
+    const r = [...(await pane.findAll({ type: 'Text' })).map(one => one.text), ...(await pane.findAll({ type: 'Button' })).map(one => String(one.props.label))].filter(text => /^(Command · hold search|.* running · .*)$/.test(text))
     await pane.unmount()
     return r
   }

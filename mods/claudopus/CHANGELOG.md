@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.111 · 15 November 2026
+- Every run on a card is two lines: what it is and its time, then how it stands. A command held open shows its progress too, a watch its last event, and one that has printed nothing says "nothing printed in 9m" instead of "updated 9m ago".
+- A run's second line shows how much of how much (in GB, or a count of what it counts), its percent, its speed and the time left when the run says them, never worked out by Claudopus. A run quiet for three minutes says "quiet for 4m" in amber.
+- Work names every command in one form the card reads as it is: its kind first (Download, Upload, Wait for, Watch, Serve, Run), what it does, and how long it should take, such as "Download the CT scans (about 3 min)". The row shows that time beside its own, in amber once well past it. Work is told to run such commands in the background or detached and to print `progress:` lines, a wait each try.
+- Without that form, a row is named by what it runs (python rc.py), never by the head of a shell line, and only a command that keeps what it fetches in a file is a download: a wait or check that reads pages with curl no longer reads "Download".
+- Pressing a run's name opens a Terminal window with its output as it is, following it as it goes on.
+- A card no longer says "1 helper running, looked in on just now": helpers at work are rows on its tree; only one gone quiet is said.
+
 ## 0.2.110 · 15 November 2026
 - When a newer Claudopus is out, the panel now says so at the top with an Install button, and nothing is downloaded or installed until you press it; Install updates it and reloads the chat you pressed it in, and other open chats keep their version until you type `/reload-plugins` there. Config's Look for new versions turns off the hourly look.
 - A release now waits for your press of Release on its work's card, and nothing is released without it (a release you run yourself in a terminal asks you there); a branch's own `.release` no longer runs anything.
