@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.132 · 15 November 2026
+- In the desktop app, a figure's card above the prompt now floats over the chat, just above its figure: showing it no longer pushes the chat up or makes it spring back, and the row of figures stays in view, so you can move straight to the next one.
+- Only the card under the pointer shows: moving along the figures or the bar updating no longer leaves an earlier card up over the next.
+- The cards are just their rows: the long explanation under the battery card and the graphics card's "Time at work" line are gone.
+
 ## 0.2.131 · 15 November 2026
 - A chat run from Claudopus's own checkout now updates with one press, Update, then Reload: it fetches the release, checks it against what the release published and moves forward only if that holds, never over uncommitted changes. The box no longer talks about the folder; Config still says where the chat loads from.
 
