@@ -5657,17 +5657,17 @@ const noteCallEnded = async ($: EngineInterface, call: string) => {
 }
 // What was done is a line, as Claude Code reports a call's result under it: a mark and the words, with no box, fill or edge, so it is
 // never taken for a card of work. Green once allowed or given, grey once refused or cancelled
-const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, what: string) => (
+const reportLine = (ui: Ui, key: string, isOn: boolean, said: string, lines: string[]) => (
   <ui.Box key={key} flexDirection="row" gap={1} paddingX={2} flexShrink={0}>
     <ui.Text color={isOn ? DONE : undefined} dimColor={!isOn}>{isOn ? '✓' : '✕'}</ui.Text>
     <ui.Box flexDirection="column" minWidth={0} flexGrow={1} flexShrink={1}>
       <ui.Text wrap="wrap">{said}</ui.Text>
-      {what ? <ui.Text dimColor wrap="truncate-end">{what}</ui.Text> : null}
+      {lines.filter(Boolean).map((line, n) => <ui.Text key={`${key}-${n}`} dimColor wrap="truncate-end">{line}</ui.Text>)}
     </ui.Box>
   </ui.Box>
 )
 const doneNotesPart = (ui: Ui, at: number) =>
-  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [one.head, one.what].filter(Boolean).join(' · ')))
+  doneNotes.filter(one => isNoteShown(one, at)).map(one => reportLine(ui, `done-${one.id}`, Boolean(one.isOn), one.said, [[one.head, one.what].filter(Boolean).join(' · ')]))
 // What a box asks for, in a few words, for its note once answered
 const boxHead = (text: string) => {
   const name = text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
@@ -5817,7 +5817,8 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled �
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
-  if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said, what: '' })
+  // Cancelled, nothing more comes of it: it is over at once
+  if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call, endedAt: 0 } : {}), head: boxHead(one.text), said, what: '' })
   $.ui.invalidate('ui.render')
 }
 
@@ -6227,7 +6228,12 @@ const releaseCalls = (command: string, root: string, from: string): ReleaseCall[
   let folder = from
   const home = dir.replace(/\/\.claude\/claudopus$/, '')
   const found: ReleaseCall[] = []
-  for (const words of shellWords(command)) {
+  for (const said of shellWords(command)) {
+    // `release>log` is the runner and a redirection, as the shell reads it
+    const words = said.flatMap(word => {
+      const at = word.search(/[<>]/)
+      return at > 0 && !/^\d+$/.test(word.slice(0, at)) ? [word.slice(0, at), word.slice(at)] : [word]
+    })
     const i = commandAt(words)
     const name = (words[i] ?? '').split('/').pop() ?? ''
     if ((name === 'cd' || name === 'pushd') && words[i + 1]) {
@@ -10357,7 +10363,7 @@ const panelHooks = (on: On) => {
     }
     // Once answered it is a line of what was done, as the gate's notes are: no box, fill or edge
     const answeredCard = (p: Prompt, key: string, c?: Shared) =>
-      reportLine(table, `answered-${key}`, p.answered !== 'no' && p.answered !== 'stopped' && !p.isCut, saidOf(p), `${p.title || (c ? 'That chat itself' : 'This chat itself')} · ${p.text}`)
+      reportLine(table, `answered-${key}`, p.answered !== 'no' && p.answered !== 'stopped' && !p.isCut, saidOf(p), [p.title || (c ? 'That chat itself' : 'This chat itself'), p.text])
 
     // The name of a chat above its cards, with its folder and the Mac it runs on when another. Another chat's name opens that chat in
     // the Claude app when pressed, where its link opens here
