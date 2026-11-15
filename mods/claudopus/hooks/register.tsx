@@ -20,7 +20,7 @@ import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSai
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
-import { batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
+import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
 import type { UsageTop, UsageBattery, UsageFigures, UsageKept } from './usage'
 
 // What every part shares: the panel's names and limits, the state the panel draws from, the settings in force, small text
@@ -9239,10 +9239,21 @@ const usageWords = (f: UsageFigures) => ({
   gpu: f.gpu === undefined ? '' : `Graphics processor: ${pctText(f.gpu)}% busy`,
   battery: f.battery ? `Battery: ${f.battery.pct}%, ${batteryWords(f.battery)}` : '',
 })
-const batteryWords = (b: UsageBattery) =>
-  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
-// What follows the charge: the time left, the time to full, or that it is on power; nothing while the system still estimates
-const batteryAfter = (b: UsageBattery) => (b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : '')
+// Each takes the battery as the bar shows it, so a charge the system calls full or empty has no time beside it
+const batteryWords = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'battery' ? (b.left ? `${leftText(b.left)} left` : 'on battery') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : b.finishing ? 'finishing charge' : 'charging') : b.state === 'plugged' ? 'on power' : 'its state not said'
+// What follows the charge: the time left, the time to full, "finishing" once the system calls it full and still tops it up, or
+// nothing on power and while the system still estimates
+const batteryAfter = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : b.state === 'charging' && b.finishing && b.pct >= 100 ? ' finishing' : ''
+
+// The battery's state in full, for the line of more: a time only where the bar shows one, and what the system said in its place
+const batteryNote = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'battery'
+    ? b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : read.left ? 'on battery, at 0% as the system gives it' : 'on battery, the system is still estimating the time left'
+    : b.state === 'charging'
+      ? b.left ? `charging, ${leftText(b.left)} to full` : b.pct >= 100 ? (b.finishing ? 'finishing the charge: the system calls it full and still tops it up' : 'charging: the system calls it full') : 'charging, the time to full still being estimated'
+      : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'
 
 // More of each figure, for a pointer resting on it: who uses the most, Claude's part, the parts of a speed, and the battery's state
 // in full. Only what the looks gave; a part that is not known is left out
@@ -9253,7 +9264,7 @@ const usageMore = (f: UsageFigures) => {
     memory: `Memory ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use${most(f.memTop, n => `${gbText(n)} GB`)} · Claude with what it started ${gbText(f.memClaude)} GB`,
     cpu: f.cpu === undefined ? '' : `Processor ${pctText(f.cpu)}% busy${f.ncpu && f.ncpu > 1 ? ` across ${f.ncpu} cores` : ''}${most(f.cpuTop, n => `${pctText(n)}%`)} · Claude with what it started ${pctText(f.cpuClaude ?? 0)}%`,
     gpu: f.gpu === undefined ? '' : `Graphics processor ${pctText(f.gpu)}% busy${f.gpuMem === undefined ? '' : f.gpuMemTotal ? ` · ${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB of its memory in use` : ` · ${gbText(f.gpuMem)} GB of memory in use`}`,
-    battery: !b ? '' : `Battery ${b.pct}% · ${b.state === 'battery' ? (b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : 'on battery, the system is still estimating the time left') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging, the time to full still being estimated') : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'}`,
+    battery: !b ? '' : `Battery ${b.pct}% · ${batteryNote(b)}`,
     disk: f.disk === undefined ? '' : `Disk ${rateText(f.disk).join(' ')} read and written${f.disks?.length ? ` · ${f.disks.join(', ')}` : ''}`,
     net: f.net === undefined ? '' : `Network ${rateText(f.net).join(' ')}${f.netIn !== undefined && f.netOut !== undefined ? ` · in ${rateText(f.netIn).join(' ')}, out ${rateText(f.netOut).join(' ')}` : ''}${f.ports?.length ? ` · ${f.ports.join(', ')}` : ''}`,
   }
@@ -9335,7 +9346,8 @@ const usageText = (ui: Ui, f: UsageFigures, room = Infinity) => {
     </Text>
   )
 }
-// The battery in words, short: "bat 85% 4:12" on battery, "bat 62% ↑1:05" charging (↑ and the time to full), "bat 100% ac" on power
+// The battery in words, short: "bat 85% 4:12" on battery, "bat 62% ↑1:05" charging (↑ and the time to full), "bat 100% finishing"
+// while the system calls it full and still tops it up, "bat 100% ac" on power
 const batteryText = (ui: Ui, b: UsageBattery) => {
   const { Text } = ui
   const low = isBatteryLow(b) ? USAGE_AMBER : undefined
@@ -9347,7 +9359,8 @@ const batteryText = (ui: Ui, b: UsageBattery) => {
     after ? <Text key="ba" color={b.state === 'charging' ? USAGE_PURPLE : low} dimColor={!low && b.state !== 'charging'}>{after}</Text> : null,
   ]
 }
-const batteryAfterText = (b: UsageBattery) => (b.state === 'plugged' ? ' ac' : b.state === 'charging' ? ` ↑${b.left ? leftText(b.left) : ''}` : b.left ? ` ${leftText(b.left)}` : '')
+const batteryAfterText = (read: UsageBattery, b = batteryShown(read)) =>
+  b.state === 'plugged' ? ' ac' : b.state === 'charging' ? (!b.left && b.finishing && b.pct >= 100 ? ' finishing' : ` ↑${b.left ? leftText(b.left) : ''}`) : b.left ? ` ${leftText(b.left)}` : ''
 // A short mark of a drawing, so a new drawing is a new picture to the app
 const hashOf = (text: string) => {
   let h = 0

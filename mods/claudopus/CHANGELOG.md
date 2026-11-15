@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.118 · 15 November 2026
+- The battery above the prompt no longer shows a time to full beside 100%: while macOS calls it 100% and still tops it up, it says "finishing", and a battery macOS calls empty shows no time left beside 0%.
+
 ## 0.2.117 · 15 November 2026
 - Everything that waits for your press is at the top of the panel, right under its header, the newest first: a work that waits on an admin command, a release, a change to your files or a put-back change comes up whole, with its amber box in its own card, beside the cards of work that asked you something; password and key boxes, the chat's own gates and Claude Code's own permission prompts, every chat's, are there too. All other work stays below in the order it began.
 - Once you press Allow or Deny, the same card says what was allowed where the amber box was, outlined green (grey when refused), and the card goes back to its place when that note goes.
