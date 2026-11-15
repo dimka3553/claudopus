@@ -192,6 +192,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const [, , , said, ...messages] = rest
       // The kept copy of the settings and texts has its key apart, as keychain:known
       const item = String(said).startsWith('known-') ? 'keychain:known' : 'keychain:gate'
+      // A keychain that does not answer (locked over ssh, or refusing)
+      if (files.has('keychain:refused')) return ok('', 1)
       const mode = String(said).replace(/^known-/, '')
       if (mode === 'new' || (mode === 'make' && !files.has(item))) files.set(item, `key-${(gateKeys += 1)}`)
       const key = files.get(item)

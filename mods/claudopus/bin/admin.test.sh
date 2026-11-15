@@ -166,7 +166,7 @@ public=$(printf '%s\n' "$private" | openssl rsa -pubout -outform DER 2>/dev/null
 sealed_value=$(printf '%s' 'pw "with" \quotes' | /bin/bash -c "$seal_for" sh "$public")
 opened=$(printf '%s' "$sealed_value" | openssl base64 -d -A 2>/dev/null | openssl pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 3< <(printf '%s\n' "$private") 2>/dev/null)
 n=$((n + 1))
-if [ "$opened" = 'pw "with" \quotes' ] && [ "${sealed_value#pw}" = "$sealed_value" ]; then echo "ok $n - a box's value goes sealed and is opened only with the runner's key"; else echo "NOT OK $n - sealed '$sealed_value' opened as '$opened'"; failed=1; fi
+if [ "$opened" = 'pw "with" \quotes' ] && ! printf '%s' "$sealed_value" | grep -qF '"with"' ; then echo "ok $n - a box's value goes sealed and is opened only with the runner's key"; else echo "NOT OK $n - sealed '$sealed_value' opened as '$opened'"; failed=1; fi
 grep -q 'pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256' "$admin" || { echo "NOT OK - the runner opens a box's value another way than tested here"; failed=1; }
 unset private
 # Nothing in the runner keeps an admin password

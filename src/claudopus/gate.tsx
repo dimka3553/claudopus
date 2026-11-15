@@ -111,7 +111,7 @@ fi
 for m in "$@"; do
   printf '%s\\n%s' "$k" "$m" | /usr/bin/perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m // "", $k), "\\n"' || exit 1
 done`
-const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-make' | 'known-has', messages: string[]) => {
+const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-new', messages: string[]) => {
   const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
   const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
@@ -477,10 +477,27 @@ const knownRead = async ($: EngineInterface): Promise<Map<string, string | null>
     return undefined
   }
 }
+// Whether the kept copy's own key is there: 'no' only when the keychain answered that it is not, 'error' when it did not answer
+const knownKey = async ($: EngineInterface): Promise<'yes' | 'no' | 'error'> => {
+  const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', 'known-has'], { timeoutMs: 20_000 }).catch(() => undefined)
+  return r?.exitCode === 0 ? 'yes' : r?.exitCode === 3 ? 'no' : 'error'
+}
+// Said once in a chat, at the top of the panel: while the key cannot be made or read, a change made outside Claudopus is not caught
+let isKnownWarned = false
+const knownWarn = ($: EngineInterface, why: string) => {
+  void log($, `the kept copy of the settings and texts is not in force: ${why}`)
+  if (isKnownWarned) return
+  isKnownWarned = true
+  $.ui.log(`Claudopus could not use its key in ${keptWhere()} (${why}), so a change made to your settings, principles or rules outside Claudopus is not put back in this chat until it can. Unlock the keychain, or start a new chat once it is unlocked.`)
+}
+// Each copy is sealed under a new key, so no copy kept from before (a copy of the file put back later) is sealed right any more
 const knownWrite = async ($: EngineInterface, known: Map<string, string | null>) => {
   const files = Object.fromEntries(known)
-  const seal = (await sealed($, 'known-make', [knownMessage(files)]))?.[0]
-  if (!seal) throw new Error(`the kept copy could not be sealed in ${keptWhere()}`)
+  const seal = (await sealed($, 'known-new', [knownMessage(files)]))?.[0]
+  if (!seal) {
+    knownWarn($, 'it could not be sealed')
+    throw new Error(`the kept copy could not be sealed in ${keptWhere()}`)
+  }
   const text = `${JSON.stringify({ files, seal }, null, 2)}\n`
   await $.fs.write(knownPath(), text)
   knownSeen = { text, files: new Map(known) }
@@ -534,7 +551,13 @@ const personLook = async ($: EngineInterface, by?: ToolCallInput): Promise<strin
   const now = await personNow($)
   // No sealed copy, and this Mac never made one (no key of its own): the first load of a version that keeps one, and what is there
   // is the person's
-  if (!sealedKnown && !knownSeen && !(await sealed($, 'known-has', []))) {
+  const key = !sealedKnown && !knownSeen ? await knownKey($) : 'yes'
+  // The keychain did not answer (locked, or refusing): nothing can be told apart, so the files are left as they are, and said
+  if (key === 'error') {
+    knownWarn($, 'the keychain did not answer')
+    return []
+  }
+  if (key === 'no') {
     await knownSet($, kept => {
       kept.clear()
       for (const name of PERSON_FILES) if (now.has(name)) kept.set(name, now.get(name) ?? null)

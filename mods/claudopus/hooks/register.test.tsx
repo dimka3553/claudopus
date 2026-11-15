@@ -199,6 +199,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       const [, , , said, ...messages] = rest
       // The kept copy of the settings and texts has its key apart, as keychain:known
       const item = String(said).startsWith('known-') ? 'keychain:known' : 'keychain:gate'
+      // A keychain that does not answer (locked over ssh, or refusing)
+      if (files.has('keychain:refused')) return ok('', 1)
       const mode = String(said).replace(/^known-/, '')
       if (mode === 'new' || (mode === 'make' && !files.has(item))) files.set(item, `key-${(gateKeys += 1)}`)
       const key = files.get(item)
@@ -6874,6 +6876,30 @@ test('F-021 · what a chat or work is told, the gate and a Config press read the
   await pressed(config, 'config-sound-off')
   expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').sound === false ? true : undefined))).toBe(true)
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', sound: false })
+})
+
+test('F-021 · an old kept copy put back with the old file is not sealed right any more, and a keychain that does not answer is said, not passed over', async ($, on) => {
+  const { files, bash, list, logged } = await gated($, on)
+  const config = `${MEMORY}/config.json`
+  // A Mac the person had, then removed in Config: work kept a copy of both files from before
+  ownSet(files, 'config.json', JSON.stringify({ name: 'Sam', macs: ['old@mac'] }))
+  await $.session.start(start)
+  await bash('o0', 'ls')
+  const old = [files.get(`${MEMORY}/admin-known.json`) ?? '', files.get(config) ?? '']
+  const pane = await (async () => (await pressed(list, 'config-open'), $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 80 }, surface: 'desktop' } as never)))()
+  await pressed(pane, 'config-sound-off')
+  expect(await until(async () => (JSON.parse(files.get(config) ?? '{}').sound === false ? true : undefined))).toBe(true)
+  // Both put back later: the old seal was made under a key that is gone, so the settings as last set stay
+  files.set(`${MEMORY}/admin-known.json`, old[0] ?? '')
+  files.set(config, old[1] ?? '')
+  await bash('o1', 'ls')
+  expect(JSON.parse(files.get(config) ?? '{}').sound).toBe(false)
+  // The keychain refusing: the panel says once that changes are not caught
+  files.set('keychain:refused', 'yes')
+  files.delete(`${MEMORY}/admin-known.json`)
+  await $.session.start(start)
+  await bash('o2', 'ls')
+  expect(await until(async () => (logged.some(line => /could not use its key/.test(line)) ? true : undefined))).toBe(true)
 })
 
 test("F-021 · the person's own edit by hand stays once they press Allow on its card, and a later command leaves it", async ($, on) => {
