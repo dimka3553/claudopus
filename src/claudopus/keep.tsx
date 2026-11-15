@@ -125,7 +125,8 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   const live = await $.agent.list().catch(() => [])
   const back: string[] = []
   const lost: string[] = []
-  for (const one of ids.filter(one => !stoppedHere.has(one))) {
+  const heldNow = await read($, todos)
+  for (const one of ids.filter(one => !stoppedHere.has(one) && !isHeld(heldNow.find(card => card.id === one)))) {
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
     const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? back : lost).push(one)

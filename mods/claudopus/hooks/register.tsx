@@ -721,6 +721,15 @@ const drifted = (steps: number) =>
 // The chat is told once when nothing new has come back under a piece of work for a while
 const STUCK_IN_CHAT = (title: string, mins: number) =>
   `"${title}" has had nothing new come back to it or its helpers for ${mins} minutes: it may be stuck waiting on something that will not come. Its card shows where it stands.`
+// Work the person stopped with their own press on Stop: what the chat, or the work above a helper, is told, as the engine's notice
+// of the stop says only that it was stopped "by Claude"; what a call that would start it again is refused with; what their next
+// message carries while some is stopped so. `left` lists what it started detached that goes on running
+const STOPPED_BY_YOU = (title: string, id: string, left: string[] = []) =>
+  `{Name} stopped "${title}" (${id}) with Stop on its card: {name} stopped this; do not restart it, message it or start the same work again unless {name} asks.${left.length ? ` Left running, as it was started detached: ${left.join('; ')}.` : ''} Say nothing about the stop unless {name} asks.`
+const STOPPED_REFUSED = (title: string) =>
+  `Refused by Claudopus: {name} stopped "${title}" with Stop on its card. {Name} stopped this; do not restart it, message it or start the same work again unless {name} asks in a new message. Do not try another way.`
+const STOPPED_EARLIER = (titles: string[]) =>
+  `{Name} stopped earlier, with Stop on its card: ${titles.join('; ')}. Start it again, message it or start the same work afresh only if this message asks for that.`
 // The work is reminded after this many steps past a steer with no decision, and after this many without touching its to-dos
 const OWED_AFTER = 2
 const QUIET_STEPS = 12
@@ -1026,6 +1035,28 @@ const handedBack = new Map<string, string>()
 const endedByHandback = new Set<string>()
 // Work stopped by the chat or the panel: whatever the engine still lists of it is going, so it is never said to have left something running
 const stoppedHere = new Set<string>()
+// Work the person stopped, by what it left running detached, until the chat has been told of the stop
+const stopLeft = new Map<string, string[]>()
+// Held stopped by the person: stopped with their own press, and no message of theirs has come since
+const isHeld = (one: Todo | undefined) => Boolean(one?.byYou && !one.byYou.isLifted)
+// The words a task is named by, to know the same work started afresh under another title
+const taskWords = (text: string) => new Set((text.toLowerCase().match(/[a-z0-9]+/g) ?? []).filter(word => word.length > 2 && !['the', 'and', 'for', 'with', 'from', 'that', 'this'].includes(word)))
+const isSameTask = (held: Todo, title: string, prompt: string) => {
+  const a = taskWords(held.title)
+  const b = taskWords(title)
+  const shared = [...a].filter(word => b.has(word)).length
+  const isNamed = a.size > 0 && shared / Math.min(a.size, Math.max(1, b.size)) >= 0.6
+  // A brief that carries the message the stopped work was started for is that work again
+  const words = held.words.trim()
+  const isQuoted = words.length >= 12 && prompt.replace(/\s+/g, ' ').includes(words.replace(/\s+/g, ' ').slice(0, 200))
+  return isNamed || isQuoted || prompt.includes(held.id)
+}
+// A start or a message that would set work the person stopped going again: the stopped work it would wake, or undefined
+// `resume` is the agent it resumes or messages; `parent` the work that starts it, '' for the chat
+const heldFor = (list: Todo[], parent: string, resume: string, title: string, prompt: string) =>
+  resume
+    ? list.find(one => one.id === resume && isHeld(one))
+    : list.find(one => isHeld(one) && (one.parentId || '') === parent && isSameTask(one, title, prompt))
 // Work that ended with nothing of its own running that the mod or the engine's stop knew of: the engine still listing it as held
 // (once, for a whole evening, on nothing any tool showed open) is no sign it left something running
 const leftNothing = new Set<string>()
@@ -1209,12 +1240,41 @@ const stop = async ($: EngineInterface, id: string) => {
   const r = await $.tool.call({ tool: 'TaskStop', task_id: id }).catch(err => ({ deny: String(err) }))
   if (r.deny) return (pressed.delete(id), log($, `work ${id} not stopped: ${r.deny}`))
   stoppedHere.add(id)
+  const before = await read($, todos)
+  const card = before.find(one => one.id === id)
+  // A press on Stop is the person's own stop, kept on the card so a reload keeps it too: what was already finished stays finished
+  const isYours = Boolean(card && card.status === 'working' && !card.answeredAt)
+  // Its helpers and the commands it, or they, started in the background end with it; what it started detached goes on and is named
+  const under = [card, ...underOf(before, id)].filter((one): one is Todo => Boolean(one))
   await stopHelpers($, id)
+  if (isYours) for (const b of under.flatMap(one => one.bg ?? [])) await $.tool.call({ tool: 'TaskStop', task_id: b.id }).catch(() => undefined)
+  const left = isYours ? under.flatMap(one => one.detached ?? []).map(d => `${d.what || cut(d.cmd, 80)}${d.pid ? ` (process ${d.pid})` : ''}, its log ${d.log}`) : []
+  // Answers that were on their way to it before the stop are dropped: none wakes it
+  if (isYours) for (let at = wakes.length - 1; at >= 0; at -= 1) if (under.some(one => one.id === wakes[at]?.target)) wakes.splice(at, 1)
   const now = await $.clock.now()
   // What finished work left running is stopped with it
-  await update($, todos, list => list.map(one => (one.id === id && one.status === 'working' ? ended(one, stoppedAs(one), now) : one.id === id && one.leftSince ? { ...one, leftSince: undefined } : one)))
+  await update($, todos, list =>
+    list.map(one =>
+      one.id === id && one.status === 'working'
+        ? { ...ended(one, stoppedAs(one), now), ...(isYours ? { byYou: { at: now }, ask: undefined } : {}) }
+        : one.id === id && one.leftSince
+          ? { ...one, leftSince: undefined }
+          : one,
+    ),
+  )
+  // A helper stopped so: the work above it is told in its own chat; the chat is told as the engine's notice of the stop comes
+  if (isYours && card?.parentId && card.parentId !== HELPER) await tell($, card.parentId, named(STOPPED_BY_YOU(titleOf(card), id, left)))
+  if (isYours && card && !card.parentId) stopLeft.set(id, left)
   await keepStoppedReports($, now)
   await lookEnds($)
+}
+
+// Work the person stopped, started again by their press on its card: a message from the panel in their name, which lifts the hold
+const startAgain = async ($: EngineInterface, id: string) => {
+  const one = (await read($, todos)).find(todo => todo.id === id)
+  if (!one || one.status !== 'stopped' || !one.byYou) return
+  const target = one.parentId && one.parentId !== HELPER ? `the work "${titleOf((await read($, todos)).find(todo => todo.id === one.parentId) ?? one)}" (${one.parentId}), to start again its helper` : 'the work'
+  await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Start again" on "${titleOf(one)}" (${id}), which they had stopped. Start it again: send ${target} "${titleOf(one)}" (${id}) a message with SendMessage to carry on from where it stood.`)
 }
 
 // Moves running work to another model: its card names it at once, each step it sends from now on goes to it, and the work is
@@ -4867,6 +4927,8 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
   }
 }
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
+  // Work the person stopped is not woken by an answer that was on its way
+  if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`))
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: wake.target }, text: wake.text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
@@ -7470,12 +7532,28 @@ const chatHooks = (on: On) => {
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
     // The notice that a workflow ended ends its card
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))
+    // The engine's notice that work the person stopped has ended says it was stopped "by Claude": the chat is told it was them
+    if (dir && !isOff && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) {
+      const ids = [...e.text.matchAll(/<task-id>([^<]+)<\/task-id>/g)].map(m => m[1] ?? '')
+      const held = (await read($, todos)).filter(one => !one.parentId && isHeld(one) && ids.includes(one.id))
+      if (held.length) {
+        const told = held.map(one => named(STOPPED_BY_YOU(titleOf(one), one.id, stopLeft.get(one.id) ?? [])))
+        for (const one of held) stopLeft.delete(one.id)
+        return next({ ...e, context: [...(e.context ?? []), ...told] })
+      }
+    }
     if (e.isMeta || e.command || !dir) return next(e)
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
     const isPressed = e.origin.kind === 'plugin' && sentForPerson.delete(e.text)
     const isPerson = e.origin.kind === 'composer' || e.origin.kind === 'bridge' || isPressed
     if (!isPerson) return next(e)
     const context = [...(e.context ?? [])]
+    // Their message lifts the hold on work they stopped: the chat is reminded it was stopped, and starts it again only if asked
+    const stillHeld = (await read($, todos)).filter(one => isHeld(one) && !one.parentId)
+    if ((await read($, todos)).some(isHeld)) {
+      await update($, todos, list => list.map(one => (isHeld(one) && one.byYou ? { ...one, byYou: { ...one.byYou, isLifted: true } } : one)))
+      if (stillHeld.length) context.push(named(STOPPED_EARLIER(stillHeld.map(one => `"${titleOf(one)}" (${one.id})`))))
+    }
     let text = e.text
     const m = await read($, me)
 
@@ -8452,7 +8530,8 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   const live = await $.agent.list().catch(() => [])
   const back: string[] = []
   const lost: string[] = []
-  for (const one of ids.filter(one => !stoppedHere.has(one))) {
+  const heldNow = await read($, todos)
+  for (const one of ids.filter(one => !stoppedHere.has(one) && !isHeld(heldNow.find(card => card.id === one)))) {
     const isLive = live.some(agent => agent.id === one && WORKING.includes(agent.status))
     const r = isLive ? { isDelivered: true as const } : await $.session.send({ to: { agentId: one }, text: named(CUT_TELL(cutAt, isCopy)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
     ;(r.isDelivered ? back : lost).push(one)
@@ -8801,6 +8880,17 @@ const workHooks = (on: On) => {
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       return r
     }
+    // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
+    // no fresh agent for the same task, until their next message
+    if (dir && !isOff && (e.tool === 'SendMessage' || e.tool === 'Agent')) {
+      const call = e as unknown as { to?: unknown; resume?: unknown; description?: unknown; prompt?: unknown; subagent_type?: unknown }
+      const resume = e.tool === 'SendMessage' ? String(call.to ?? '') : String(call.resume ?? '')
+      const held = heldFor(await read($, todos), e.agentId ?? '', resume, String(call.description ?? ''), String(call.prompt ?? ''))
+      if (held) {
+        await log($, `refused ${e.tool} that would set going again ${held.id}, which the person stopped`)
+        return { deny: named(STOPPED_REFUSED(titleOf(held))) }
+      }
+    }
     // No agent, the chat's or a work's helper, is started on an older model or on Haiku: one named so starts on its family's newest
     // (Haiku's is Sonnet), by its alias, which the Agent tool takes
     const askedModel = !isOff && e.tool === 'Agent' && (e as { subagent_type?: unknown }).subagent_type !== 'fork' ? String((e as { model?: unknown }).model ?? '') : ''
@@ -8936,6 +9026,14 @@ const workHooks = (on: On) => {
 
   on('agent.spawn', async ($, asked, next) => {
     agentStarted($, asked.tool_use_id)
+    // Nothing starts again work the person stopped, whoever asks: the chat, a work, or the mod's own wakes and carrying on
+    if (dir && !isOff && !asked.workflow) {
+      const held = heldFor(await read($, todos), asked.parentAgentId ?? helperCalls.get(asked.tool_use_id) ?? '', asked.resume?.agentId ?? '', asked.description ?? '', asked.resume ? '' : (asked.prompt ?? ''))
+      if (held) {
+        await log($, `refused to start again ${held.id}, which the person stopped`)
+        return { deny: named(STOPPED_REFUSED(titleOf(held))) }
+      }
+    }
     // Every agent starts on a current model: one named an older model or Haiku on its family's newest, a copy of an agent on an
     // older model not at all, and one left to its parent's model, when that is older, on that family's newest. A check of what was
     // built, by a helper or a workflow's agent, runs on a model never weaker than its parent's, and at least on Opus
@@ -9584,7 +9682,7 @@ const panelHooks = (on: On) => {
     // Work the app sent to an older model says so, and which one; work that answers from one all the same says so
     const offModel = (one: Todo) => (one.flagged ? `ended after a safety flag, not carried on on ${one.flagged}` : one.moved ? `moved to ${one.moved} by the app` : rightModel(one.model ?? '') ? 'not a model work should run on' : '')
     const glance = (one: Todo, count = '') =>
-      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waits for your answer' : stood[isActingOnReply(one) ? 'working' : one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
+      [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waits for your answer' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
     // the line becomes the three models, the one it runs on ticked; a press on one moves the work to it and closes the choice
     const { picking = '' } = await read($, view)
@@ -9879,7 +9977,7 @@ const panelHooks = (on: On) => {
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
                 {(!one.ask && lingers(one, at)) || leftLine(one, at) ? (
                   <Text wrap="truncate-end" color={one.status === 'done' ? DONE : undefined} dimColor={one.status !== 'done'}>
-                    {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : 'Stopped'}
+                    {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : one.byYou ? 'Stopped by you' : 'Stopped'}
                   </Text>
                 ) : (
                   <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? 'Starting' : 'It wrote no line about itself')}</Text>
@@ -10643,9 +10741,11 @@ const panelHooks = (on: On) => {
                   {openTheirs(one, one.chat)}
                 </Box>
               ) : null}
-              {(one.status === 'working' && !one.chat) || left(one) ? (
+              {(one.status === 'working' && !one.chat) || left(one) || (one.status === 'stopped' && one.byYou && !one.chat) ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   {one.status === 'working' && !one.chat ? <Button key={`stop-${one.id}`} label="Stop" onPress={() => void stop($, one.id)} /> : null}
+                  {/* Work the person stopped stays stopped until they start it again from here or ask in a message */}
+                  {one.status === 'stopped' && one.byYou && !one.chat ? <Button key={`again-${one.id}-${presses}`} label="Start again" onPress={() => ((presses += 1), void startAgain($, one.id))} /> : null}
                   {left(one) ? <Button key={`artifact-${one.id}-${presses}`} label="Its result" onPress={() => void openReport($, left(one)?.id ?? '')} /> : null}
                 </Box>
               ) : null}

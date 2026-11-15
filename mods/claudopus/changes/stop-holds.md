@@ -1,0 +1,4 @@
+- A Stop you press on a card, or on a helper under it, now holds: the chat is told you stopped it, and it cannot start that work again, message it or start the same work afresh until you send a new message asking for it.
+- Nothing of Claudopus's own wakes stopped work: answers that were on their way to it are dropped, and it is not carried on after a cut-off.
+- The helpers and background commands of stopped work stop with it; anything it started detached is named to the chat as left running.
+- A card you stopped says "Stopped by you", keeps what it had done, and has Start again in its details.
