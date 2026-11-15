@@ -188,6 +188,17 @@ const workHooks = (on: On) => {
       if (dir && e.agentId !== undefined && !r.deny && !r.isError && !(call as { run_in_background?: unknown }).run_in_background) await keepDetached($, e.agentId, call as never, r.result).catch(err => log($, `detached work not followed: ${String(err)}`))
       return hideKept($, call, r)
     }
+    // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
+    // no fresh agent for the same task, until their next message
+    if (dir && !isOff && (e.tool === 'SendMessage' || e.tool === 'Agent')) {
+      const call = e as unknown as { to?: unknown; resume?: unknown; description?: unknown; prompt?: unknown; subagent_type?: unknown }
+      const resume = e.tool === 'SendMessage' ? String(call.to ?? '') : String(call.resume ?? '')
+      const held = heldFor(await read($, todos), e.agentId ?? '', resume, String(call.description ?? ''), String(call.prompt ?? ''))
+      if (held) {
+        await log($, `refused ${e.tool} that would set going again ${held.id}, which the person stopped`)
+        return { deny: named(STOPPED_REFUSED(titleOf(held))) }
+      }
+    }
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
     // a line saying what it decided. It is kept by the card in their words. Any other message to work under way, a helper's reply,
     // one between pieces of work or the chat's own note, is told as its sender's
@@ -304,17 +315,6 @@ const workHooks = (on: On) => {
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
       return r
-    }
-    // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
-    // no fresh agent for the same task, until their next message
-    if (dir && !isOff && (e.tool === 'SendMessage' || e.tool === 'Agent')) {
-      const call = e as unknown as { to?: unknown; resume?: unknown; description?: unknown; prompt?: unknown; subagent_type?: unknown }
-      const resume = e.tool === 'SendMessage' ? String(call.to ?? '') : String(call.resume ?? '')
-      const held = heldFor(await read($, todos), e.agentId ?? '', resume, String(call.description ?? ''), String(call.prompt ?? ''))
-      if (held) {
-        await log($, `refused ${e.tool} that would set going again ${held.id}, which the person stopped`)
-        return { deny: named(STOPPED_REFUSED(titleOf(held))) }
-      }
     }
     // No agent, the chat's or a work's helper, is started on an older model or on Haiku: one named so starts on its family's newest
     // (Haiku's is Sonnet), by its alias, which the Agent tool takes

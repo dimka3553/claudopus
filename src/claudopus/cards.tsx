@@ -23,7 +23,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
 const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one: Todo, at: number): Todo => ({ ...one, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
+const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
 // a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
 // such command: it may run until stopped
@@ -51,7 +51,8 @@ const isSameTask = (held: Todo, title: string, prompt: string) => {
   const a = taskWords(held.title)
   const b = taskWords(title)
   const shared = [...a].filter(word => b.has(word)).length
-  const isNamed = a.size > 0 && shared / Math.min(a.size, Math.max(1, b.size)) >= 0.6
+  // Only the same few words count: titles that share most words can still be other work
+  const isNamed = a.size > 0 && shared === a.size && shared === b.size
   // A brief that carries the message the stopped work was started for is that work again
   const words = held.words.trim()
   const isQuoted = words.length >= 12 && prompt.replace(/\s+/g, ' ').includes(words.replace(/\s+/g, ' ').slice(0, 200))
@@ -61,7 +62,8 @@ const isSameTask = (held: Todo, title: string, prompt: string) => {
 // `resume` is the agent it resumes or messages; `parent` the work that starts it, '' for the chat
 const heldFor = (list: Todo[], parent: string, resume: string, title: string, prompt: string) =>
   resume
-    ? list.find(one => one.id === resume && isHeld(one))
+    ? // By its id, the start of its id, or its title, as SendMessage takes any of them
+      list.find(one => isHeld(one) && (one.id === resume || (resume.length >= 6 && one.id.startsWith(resume)) || oneLine(one.title).toLowerCase() === oneLine(resume).toLowerCase()))
     : list.find(one => isHeld(one) && (one.parentId || '') === parent && isSameTask(one, title, prompt))
 // Work that ended with nothing of its own running that the mod or the engine's stop knew of: the engine still listing it as held
 // (once, for a whole evening, on nothing any tool showed open) is no sign it left something running
@@ -263,6 +265,9 @@ const stop = async ($: EngineInterface, id: string) => {
     list.map(one =>
       one.id === id && one.status === 'working'
         ? { ...ended(one, stoppedAs(one), now), ...(isYours ? { byYou: { at: now }, ask: undefined } : {}) }
+        : isYours && one.id !== id && under.some(kid => kid.id === one.id) && one.status !== 'done'
+          ? // Its helpers, stopped with it, are held with it
+            { ...(one.status === 'working' ? ended(one, 'stopped', now) : one), byYou: { at: now } }
         : one.id === id && one.leftSince
           ? { ...one, leftSince: undefined }
           : one,
@@ -352,7 +357,7 @@ const saveFinished = async ($: EngineInterface) => {
   // Its helpers are kept with it, so its Details still lists them after a reload
   const all = await read($, todos)
   const ended = all.filter(one => one.status !== 'working' && (!one.parentId || all.some(top => top.id === topOf(all, one.id) && !top.parentId && top.status !== 'working')))
-  const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title].join(':')).join(',')
+  const sign = ended.map(one => [one.id, one.status, one.endedAt, one.items.length, one.entries.length, one.answer.length, one.tokens, one.title, one.byYou ? `${one.byYou.at}${one.byYou.isLifted ? 'l' : ''}` : ''].join(':')).join(',')
   if (!id || !dir || !ended.length || sign === finishedSaved) return
   const old = JSON.parse((await readOr($, finishedPath(id))) || '[]') as Todo[]
   const kept = capped([...old.filter(one => !ended.some(card => card.id === one.id)), ...ended].sort((a, b) => a.endedAt - b.endedAt))

@@ -8556,3 +8556,33 @@ test('a helper the person stopped stays stopped: the work above it is told, and 
   const own = await $.tool.call({ tool: 'SendMessage', tool_use_id: 'h2', to: 'a1', message: 'how is it going?' } as never)
   expect(own.deny).toBeUndefined()
 })
+
+test('a stop holds while the chat\'s turn for that message is still open, by name, for its helpers, and lets other work by alike titles go', async ($, on) => {
+  const { sent } = world(on)
+  await $.session.start(start)
+  const BAR = 'The bar above the input box just disappeared completely now.'
+  await $.prompt.submit({ text: BAR, wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Bar above the input box disappeared', prompt: `Their words: "${BAR}"` } as never)
+  await $.agent.spawn({ ...spawn, description: 'Read the bar code', prompt: 'read', parentAgentId: 'a1' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pane.press({ key: 'stop-a1' })
+  // Their own words passed on in the same turn are no way round it
+  expect(String((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: BAR } as never)).deny)).toContain('the person stopped')
+  // nor its name instead of its id
+  expect(String((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm2', to: 'Bar above the input box disappeared', message: 'carry on' } as never)).deny)).toContain('the person stopped')
+  // nor its helper, by a message or a resume
+  expect(String((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm3', to: 'a2', message: 'go on' } as never)).deny)).toContain('the person stopped')
+  expect(String(((await $.agent.spawn({ ...spawn, description: '', resume: { agentId: 'a2' }, prompt: 'go on' } as never)) as { deny?: string }).deny)).toContain('the person stopped')
+  expect(sent).toHaveLength(0)
+  // Other work whose title shares most of its words is not held
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'm4', subagent_type: 'general-purpose', model: 'opus', description: 'Move the input box above the bar', prompt: 'move it' } as never)).deny).toBeUndefined()
+  // Once their message lifts it and the work goes on, a later stop by the chat is not theirs
+  await $.prompt.submit({ text: 'Go on with the bar.', wait: false, origin: composer })
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm5', to: 'a1', message: 'Go on with the bar.' } as never)
+  await $.agent.spawn({ ...spawn, resume: { agentId: 'a1' }, prompt: 'Go on with the bar.' } as never)
+  await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
+  const notice = '<task-notification><task-id>a1</task-id><status>killed</status></task-notification>'
+  const told = (await $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }
+  expect((told.context ?? []).join('\n')).not.toContain('stopped this')
+  expect(await pane.find({ type: 'Text', text: /Stopped by you/ })).toBeUndefined()
+})
