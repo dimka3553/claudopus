@@ -1,0 +1,1 @@
+- A chat run from Claudopus's own checkout now updates with one press, Update, then Reload: it fetches the release, checks it against what the release published and moves forward only if that holds, never over uncommitted changes. The box no longer talks about the folder; Config still says where the chat loads from.
