@@ -206,7 +206,7 @@ const askedIn = (text: string, listed: KeyEntry[]) => {
 }
 // The secret runner's calls in a text, by any path to it (bin/secret, ./secret from its folder, a doubled slash), each with the names
 // it takes and what it does with them; the word secret alone, as in a commit message or kubectl's, is none
-const SECRET_RUNS = /\/secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?(--add|[^\s'"-][^\s'"]*)/g
+const SECRET_RUNS = /\/secret['"]?\s+['"]?([A-Za-z_][A-Za-z0-9_,]*)['"]?\s+['"]?(--add|--forget|[^\s'"-][^\s'"]*)/g
 const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string> => {
   if (!dir) return ''
   const input = e as { command?: unknown; name?: unknown; text?: unknown; copy?: unknown; details?: unknown; for?: unknown; agent?: unknown }
@@ -239,6 +239,8 @@ const keyAsked = async ($: EngineInterface, e: { tool: string }): Promise<string
   const mine = (await listed()).filter(entry => entry.store === 'claudopus')
   for (const text of texts) {
     for (const run of text.matchAll(SECRET_RUNS)) {
+      // a forget asks for nothing
+      if (run[2] === '--forget') continue
       for (const name of (run[1] ?? '').split(',').filter(Boolean)) {
         const kept = mine.find(entry => entry.name === name)
         if (kept && run[2] === '--add') return KEY_KEPT(root, kept, name, AGAIN_FORGET(root, kept))
@@ -282,5 +284,14 @@ const keysLearn = async ($: EngineInterface, e: { tool: string }, r: { deny?: un
     // one SBOS already holds stays as it is
     if (e.tool.endsWith('ask_secret') && name) sbos.push(was ? { name, label: was.label, kind: was.kind, isPresent: was.isPresent } : { name, label: typeof label === 'string' && label.length <= 2000 ? label : undefined, isPresent: false })
     await refreshKeys($, sbos, false)
-  } else if (/\/secret\b/.test(command)) await refreshKeys($)
+  } else if ([...command.matchAll(SECRET_RUNS)].length) await refreshKeys($)
 }
+// As a chat starts, a list that is missing or a day old is made again a little later, so work that reads it finds one
+const KEYS_DAY = 24 * 60 * 60_000
+const keysOnStart = ($: EngineInterface) =>
+  $.clock.after(10_000, () =>
+    void (async () => {
+      const kept = await keysRead($)
+      if ((await $.clock.now()) - kept.at >= KEYS_DAY || !(await readOr($, `${dir}/${KEYS_FILE}`))) await refreshKeys($)
+    })().catch(err => log($, `keys not made again: ${String(err)}`)),
+  )
