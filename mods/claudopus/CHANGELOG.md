@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.115 · 15 November 2026
+- The line above the prompt now shows the battery: its charge, a bolt while charging or a plug on power, and the time left (or to full) as the system reports it; nothing while it is still estimating, and nothing at all on a computer without a battery.
+- It also shows how busy the graphics processor is, beside the processor.
+- In the desktop app, resting the pointer on a figure shows more of it in a line above: the programs using the most memory and processor, the graphics processor's memory, the network in and out, which disks and ports are counted, and the battery's state in full.
+
 ## 0.2.114 · 15 November 2026
 - Work and helpers start only on the newest models: one asked to run on an older model or on Haiku starts on its family's newest instead of being refused, and so does a helper left to a parent on an older model, a workflow's agent, or an agent whose own kind names an older model.
 - A helper that checks what was built runs on a model no weaker than the work that started it, and at least on Opus.
