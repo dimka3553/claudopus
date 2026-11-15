@@ -1105,6 +1105,36 @@ test('while the person uses the panel its running times stand still, and move ag
   await list.unmount()
 })
 
+test("a page of the panel scrolled for half a minute is never drawn anew under the scroll, with work running and asking; what came meanwhile shows the moment it rests: the 15 Nov Keys page whose scroll stopped partway", async ($, on) => {
+  const live = [{ id: 'claudopus', isShown: true, isPlaced: true }, { id: 'reports', isShown: true, isPlaced: true }]
+  const { clock } = world(on, { live })
+  const { writes, counting } = watchWrites(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two pieces of work', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const results = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Results' }, surface: 'desktop' } as never)
+  await clock.advance(20_000)
+  await Promise.all([list.findAll({ type: 'Text' }), results.findAll({ type: 'Text' })])
+  counting.isOn = true
+  // The person's steady scroll down a long page, a move every tenth of a second for half a minute, as work writes and asks
+  const scroll = (offset: number) =>
+    ($.ui as unknown as { scroll: (e: unknown) => Promise<unknown> }).scroll({ component: 'Pane', requestId: 'reports', offset, by: 1, bodyRows: 20, contentRows: 400, origin: { kind: 'person' } }).catch(() => undefined)
+  for (let i = 1; i <= 300; i++) {
+    await scroll(i)
+    await clock.advance(100)
+    if (i === 100) await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'I am looking at the left ear.' } as never)
+    if (i === 200) await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a2', text: 'May I go on?', choices: ['Approve', 'Not now'] } as never)
+  }
+  expect(writes.invalidate ?? 0).toBe(0)
+  // At rest it is drawn at once, the ask with it
+  await clock.advance(1000)
+  expect(writes.invalidate ?? 0).toBeGreaterThanOrEqual(1)
+  expect(await list.find({ type: 'Text', text: 'May I go on?' })).toBeDefined()
+  await Promise.all([list.unmount(), results.unmount()])
+})
+
 test('with only a Details tab in front, or the Servers tab open, the mod still asks for no more than a drawing every ten seconds', async ($, on) => {
   const live = [{ id: 'claudopus', isShown: true, isPlaced: true }, { id: 'servers', isShown: true, isPlaced: true }]
   const { clock } = world(on, { live })

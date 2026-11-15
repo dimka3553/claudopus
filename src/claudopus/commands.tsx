@@ -33,8 +33,9 @@ const commandHooks = (on: On) => {
     return next(e)
   })
   // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
+  // Every pane of the mod's counts, its tabs too: Results, Memory and Keys were drawn anew under a scroll and stopped it (scrollRest)
   on('ui.scroll', async ($, e, next) => {
-    if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
+    if (e.origin.kind === 'person' && isModPane(e.requestId)) (await engage($), await scrolled($))
     // The app pulling the pane back to the box the person types in, reported as their move, is refused: the window stays where
     // they scrolled it (scrolls.ts)
     if (e.origin.kind === 'person') {
@@ -45,6 +46,18 @@ const commandHooks = (on: On) => {
     }
     return next(e)
   }).catch(($, e, next) => next(e))
+  // Under a scroll in progress a pane of the mod's is given its last drawing again, whatever asked: its rows stay as the person is
+  // scrolling them. It is still drawn, so what it reads is still followed, and a drawing that moved is drawn once the scroll rests
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    const id = e.requestId ?? ''
+    if (!isModPane(id)) return next(e)
+    const key = `${scrollKey(e)}|${e.props.scroll.offset > 0 ? 1 : 0}`
+    const r = await next(e)
+    const last = scrollDrawings.get(key)
+    if (last !== undefined && last !== r && (await isScrolling($))) return (owe($, 'drawing-held'), last as typeof r)
+    scrollDrawings.set(key, r)
+    return r
+  })
   // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts
   on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)))
   // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice

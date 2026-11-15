@@ -487,6 +487,7 @@ const isRecording = async ($: EngineInterface) => {
     await recordFlush($)
     recording = undefined
     isPullGuardOff = false
+    isScrollHoldOff = false
     return false
   }
   if (!dir || at - recordLooked < 2000) return false
@@ -497,7 +498,9 @@ const isRecording = async ($: EngineInterface) => {
   // A switch left from long ago, its removal failed or its chat gone, starts nothing: it goes
   if (at - stat.mtimeMs > RECORD_FRESH) return void (await $.process.run(['rm', '-f', on]).catch(() => undefined)), false
   // A switch that says "unguarded" records with the pull back let through, to compare with and without it
-  isPullGuardOff = /unguarded/.test(await readOr($, on))
+  const said = await readOr($, on)
+  isPullGuardOff = /unguarded/.test(said)
+  isScrollHoldOff = /unheld/.test(said)
   const chat = (await $.session.id().catch(() => '')).slice(0, 8) || 'chat'
   recording = { path: `${dir}/panel-record/${chat}-${new Date(at).toISOString().replace(/[:.]/g, '-')}.jsonl`, until: at + RECORD_FOR, lines: [], written: 0, started: at }
   typedCount = new Map()
@@ -506,7 +509,7 @@ const isRecording = async ($: EngineInterface) => {
   const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
   const flushing = () => $.clock.after(2000, () => void (recording ? recordFlush($).then(() => (recording && ((void isRecording($)), flushing()))) : undefined))
   flushing()
-  await recordLine($, { ev: 'start', isPullGuardOff, version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
+  await recordLine($, { ev: 'start', isPullGuardOff, isScrollHoldOff, version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
   return true
 }
 // One event, with its time from the start
@@ -557,8 +560,9 @@ const drawingShape = (drawing: unknown) => {
 const recordDrawn = new Map<string, unknown>()
 const lastSign = new Map<string, string>()
 const recorderHooks = (on: On) => {
-  on('ui.render', { component: 'Pane', requestId: LIST }, async ($, e, next) => {
-    if (!(await isRecording($))) return next(e)
+  // Every pane of the mod's, its tabs too, so a scroll on Results, Memory or Keys is seen as one on the list is
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (!isModPane(e.requestId ?? '') || !(await isRecording($))) return next(e)
     const id = e.requestId ?? ''
     const began = await $.clock.now()
     const r = await next(e)
@@ -574,12 +578,15 @@ const recorderHooks = (on: On) => {
     })
     return r
   })
-  on('ui.scroll', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'scroll', id: e.requestId, origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows })
-    return next(e)
+  // and what the move's answer gave back: an offset in it is one the app writes into the pane's scroll itself
+  on('ui.scroll', { component: 'Pane' }, async ($, e, next) => {
+    if (!isModPane(e.requestId) || !(await isRecording($))) return next(e)
+    const r = await next(e)
+    await recordLine($, { ev: 'scroll', id: e.requestId, origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows, answer: (r as { offset?: number })?.offset, followEnd: (r as { followEnd?: boolean })?.followEnd })
+    return r
   })
-  on('ui.focus', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element) })
+  on('ui.focus', { plugin: 'claudopus' }, async ($, e, next) => {
+    if (isModPane(e.requestId) && await isRecording($)) await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element) })
     return next(e)
   })
   // Typing as a count by box: the value is never read
@@ -592,8 +599,8 @@ const recorderHooks = (on: On) => {
     }
     return next(e)
   })
-  on('ui.press', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'press', id: e.requestId, element: keyShown(e.element) })
+  on('ui.press', { plugin: 'claudopus' }, async ($, e, next) => {
+    if (isModPane(e.requestId) && await isRecording($)) await recordLine($, { ev: 'press', id: e.requestId, element: keyShown(e.element) })
     return next(e)
   })
 }
@@ -5374,7 +5381,48 @@ const freeTimes = ($: EngineInterface) => {
   if (wasHeld) drawAgain($)
 }
 // Every pane of the mod's is drawn again, from the values as they are now
-const drawFresh = async ($: EngineInterface) => (recordEvent($, 'redraw-all'), $.ui.invalidate('ui.render'))
+const drawFresh = async ($: EngineInterface) => {
+  // Under a scroll in progress nothing is drawn afresh: it is drawn once the scroll rests (scrollRest)
+  if (await isScrolling($)) return void owe($, 'redraw-owed')
+  recordEvent($, 'redraw-all')
+  return $.ui.invalidate('ui.render')
+}
+// While the person scrolls any pane of the mod's, none of them is drawn anew. The app swaps a pane's whole drawing for each answer,
+// and a drawing made afresh under a scroll (a redraw every CALM while work ran, anything written, another chat's work) stopped the
+// person's scroll partway on a long page, Results, Memory or Keys, and they had to start again (15 Nov). A scroll rests SCROLL_REST
+// after its last move; what was asked for meanwhile, an ask or an admin command too, is drawn then, at once
+const SCROLL_REST = 700
+let scrolledAt = 0
+let isOwed = false
+let isRestWatched = false
+// A recording that says "unheld" scrolls without the hold, to compare with and without it (recorder.tsx)
+let isScrollHoldOff = false
+const isScrolling = async ($: EngineInterface) => !isScrollHoldOff && (await $.clock.now()) - scrolledAt < SCROLL_REST
+const scrolled = async ($: EngineInterface) => void (scrolledAt = await $.clock.now())
+const owe = ($: EngineInterface, why: string) => {
+  if (!isOwed) recordEvent($, why)
+  isOwed = true
+  if (isRestWatched) return
+  isRestWatched = true
+  const look = async () => {
+    const left = SCROLL_REST - ((await $.clock.now()) - scrolledAt)
+    if (left > 0 && !isScrollHoldOff) return void $.clock.after(left + 20, () => void look())
+    isRestWatched = false
+    if (!isOwed) return
+    isOwed = false
+    recordEvent($, 'redraw-at-rest')
+    $.ui.invalidate('ui.render')
+  }
+  $.clock.after(SCROLL_REST, () => void look())
+}
+// The last drawing of each pane of the mod's, by its size: under a scroll the app's asks are given it again, so its rows and height
+// stay as they are; anything that moved meanwhile is drawn once the scroll rests
+const scrollDrawings = new Map<string, unknown>()
+const scrollKey = (e: { requestId?: string; surface?: string; props: { scroll: { offset: number; bodyRows: number }; placement?: string; isFocused?: boolean } }) =>
+  `${e.requestId ?? ''}|${e.surface ?? ''}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}`
+// The panes the mod draws: the list, a work's or workflow's Details, its tabs and a result or memory file opened in a tab
+const isModPane = (id: string) =>
+  id === LIST || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start)) || [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id)
 // What each pane showed when last drawn afresh: its shape, its content and when, so calmLook knows what has moved since
 const drawnPanes = new Map<string, { shape: string; content: string; at: number; side: string }>()
 // What the panel shows from the mod's own memory rather than its values: what the app's prompts, the admin and file gates, the boxes,
@@ -10419,8 +10467,9 @@ const commandHooks = (on: On) => {
     return next(e)
   })
   // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
+  // Every pane of the mod's counts, its tabs too: Results, Memory and Keys were drawn anew under a scroll and stopped it (scrollRest)
   on('ui.scroll', async ($, e, next) => {
-    if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
+    if (e.origin.kind === 'person' && isModPane(e.requestId)) (await engage($), await scrolled($))
     // The app pulling the pane back to the box the person types in, reported as their move, is refused: the window stays where
     // they scrolled it (scrolls.ts)
     if (e.origin.kind === 'person') {
@@ -10431,6 +10480,18 @@ const commandHooks = (on: On) => {
     }
     return next(e)
   }).catch(($, e, next) => next(e))
+  // Under a scroll in progress a pane of the mod's is given its last drawing again, whatever asked: its rows stay as the person is
+  // scrolling them. It is still drawn, so what it reads is still followed, and a drawing that moved is drawn once the scroll rests
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    const id = e.requestId ?? ''
+    if (!isModPane(id)) return next(e)
+    const key = `${scrollKey(e)}|${e.props.scroll.offset > 0 ? 1 : 0}`
+    const r = await next(e)
+    const last = scrollDrawings.get(key)
+    if (last !== undefined && last !== r && (await isScrolling($))) return (owe($, 'drawing-held'), last as typeof r)
+    scrollDrawings.set(key, r)
+    return r
+  })
   // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts
   on('ui.select', { plugin: 'claudopus' }, async ($, e, next) => (freeTimes($), next(e)))
   // Closed by the person's own hand, it closes in every chat and stays closed until asked for; a close of the mod's own is no choice

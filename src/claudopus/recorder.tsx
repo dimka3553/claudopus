@@ -22,6 +22,7 @@ const isRecording = async ($: EngineInterface) => {
     await recordFlush($)
     recording = undefined
     isPullGuardOff = false
+    isScrollHoldOff = false
     return false
   }
   if (!dir || at - recordLooked < 2000) return false
@@ -32,7 +33,9 @@ const isRecording = async ($: EngineInterface) => {
   // A switch left from long ago, its removal failed or its chat gone, starts nothing: it goes
   if (at - stat.mtimeMs > RECORD_FRESH) return void (await $.process.run(['rm', '-f', on]).catch(() => undefined)), false
   // A switch that says "unguarded" records with the pull back let through, to compare with and without it
-  isPullGuardOff = /unguarded/.test(await readOr($, on))
+  const said = await readOr($, on)
+  isPullGuardOff = /unguarded/.test(said)
+  isScrollHoldOff = /unheld/.test(said)
   const chat = (await $.session.id().catch(() => '')).slice(0, 8) || 'chat'
   recording = { path: `${dir}/panel-record/${chat}-${new Date(at).toISOString().replace(/[:.]/g, '-')}.jsonl`, until: at + RECORD_FOR, lines: [], written: 0, started: at }
   typedCount = new Map()
@@ -41,7 +44,7 @@ const isRecording = async ($: EngineInterface) => {
   const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
   const flushing = () => $.clock.after(2000, () => void (recording ? recordFlush($).then(() => (recording && ((void isRecording($)), flushing()))) : undefined))
   flushing()
-  await recordLine($, { ev: 'start', isPullGuardOff, version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
+  await recordLine($, { ev: 'start', isPullGuardOff, isScrollHoldOff, version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
   return true
 }
 // One event, with its time from the start
@@ -92,8 +95,9 @@ const drawingShape = (drawing: unknown) => {
 const recordDrawn = new Map<string, unknown>()
 const lastSign = new Map<string, string>()
 const recorderHooks = (on: On) => {
-  on('ui.render', { component: 'Pane', requestId: LIST }, async ($, e, next) => {
-    if (!(await isRecording($))) return next(e)
+  // Every pane of the mod's, its tabs too, so a scroll on Results, Memory or Keys is seen as one on the list is
+  on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (!isModPane(e.requestId ?? '') || !(await isRecording($))) return next(e)
     const id = e.requestId ?? ''
     const began = await $.clock.now()
     const r = await next(e)
@@ -109,12 +113,15 @@ const recorderHooks = (on: On) => {
     })
     return r
   })
-  on('ui.scroll', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'scroll', id: e.requestId, origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows })
-    return next(e)
+  // and what the move's answer gave back: an offset in it is one the app writes into the pane's scroll itself
+  on('ui.scroll', { component: 'Pane' }, async ($, e, next) => {
+    if (!isModPane(e.requestId) || !(await isRecording($))) return next(e)
+    const r = await next(e)
+    await recordLine($, { ev: 'scroll', id: e.requestId, origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows, answer: (r as { offset?: number })?.offset, followEnd: (r as { followEnd?: boolean })?.followEnd })
+    return r
   })
-  on('ui.focus', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element) })
+  on('ui.focus', { plugin: 'claudopus' }, async ($, e, next) => {
+    if (isModPane(e.requestId) && await isRecording($)) await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element) })
     return next(e)
   })
   // Typing as a count by box: the value is never read
@@ -127,8 +134,8 @@ const recorderHooks = (on: On) => {
     }
     return next(e)
   })
-  on('ui.press', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'press', id: e.requestId, element: keyShown(e.element) })
+  on('ui.press', { plugin: 'claudopus' }, async ($, e, next) => {
+    if (isModPane(e.requestId) && await isRecording($)) await recordLine($, { ev: 'press', id: e.requestId, element: keyShown(e.element) })
     return next(e)
   })
 }

@@ -1,0 +1,1 @@
+- A long page in the panel (Results, Memory, Keys, a work's Details, the list) is no longer redrawn while you scroll it, so a steady scroll no longer stops partway. What came meanwhile, an ask too, shows the moment the scroll rests.

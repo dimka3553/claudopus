@@ -146,7 +146,48 @@ const freeTimes = ($: EngineInterface) => {
   if (wasHeld) drawAgain($)
 }
 // Every pane of the mod's is drawn again, from the values as they are now
-const drawFresh = async ($: EngineInterface) => (recordEvent($, 'redraw-all'), $.ui.invalidate('ui.render'))
+const drawFresh = async ($: EngineInterface) => {
+  // Under a scroll in progress nothing is drawn afresh: it is drawn once the scroll rests (scrollRest)
+  if (await isScrolling($)) return void owe($, 'redraw-owed')
+  recordEvent($, 'redraw-all')
+  return $.ui.invalidate('ui.render')
+}
+// While the person scrolls any pane of the mod's, none of them is drawn anew. The app swaps a pane's whole drawing for each answer,
+// and a drawing made afresh under a scroll (a redraw every CALM while work ran, anything written, another chat's work) stopped the
+// person's scroll partway on a long page, Results, Memory or Keys, and they had to start again (15 Nov). A scroll rests SCROLL_REST
+// after its last move; what was asked for meanwhile, an ask or an admin command too, is drawn then, at once
+const SCROLL_REST = 700
+let scrolledAt = 0
+let isOwed = false
+let isRestWatched = false
+// A recording that says "unheld" scrolls without the hold, to compare with and without it (recorder.tsx)
+let isScrollHoldOff = false
+const isScrolling = async ($: EngineInterface) => !isScrollHoldOff && (await $.clock.now()) - scrolledAt < SCROLL_REST
+const scrolled = async ($: EngineInterface) => void (scrolledAt = await $.clock.now())
+const owe = ($: EngineInterface, why: string) => {
+  if (!isOwed) recordEvent($, why)
+  isOwed = true
+  if (isRestWatched) return
+  isRestWatched = true
+  const look = async () => {
+    const left = SCROLL_REST - ((await $.clock.now()) - scrolledAt)
+    if (left > 0 && !isScrollHoldOff) return void $.clock.after(left + 20, () => void look())
+    isRestWatched = false
+    if (!isOwed) return
+    isOwed = false
+    recordEvent($, 'redraw-at-rest')
+    $.ui.invalidate('ui.render')
+  }
+  $.clock.after(SCROLL_REST, () => void look())
+}
+// The last drawing of each pane of the mod's, by its size: under a scroll the app's asks are given it again, so its rows and height
+// stay as they are; anything that moved meanwhile is drawn once the scroll rests
+const scrollDrawings = new Map<string, unknown>()
+const scrollKey = (e: { requestId?: string; surface?: string; props: { scroll: { offset: number; bodyRows: number }; placement?: string; isFocused?: boolean } }) =>
+  `${e.requestId ?? ''}|${e.surface ?? ''}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}`
+// The panes the mod draws: the list, a work's or workflow's Details, its tabs and a result or memory file opened in a tab
+const isModPane = (id: string) =>
+  id === LIST || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start)) || [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id)
 // What each pane showed when last drawn afresh: its shape, its content and when, so calmLook knows what has moved since
 const drawnPanes = new Map<string, { shape: string; content: string; at: number; side: string }>()
 // What the panel shows from the mod's own memory rather than its values: what the app's prompts, the admin and file gates, the boxes,
