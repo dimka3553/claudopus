@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.122 · 15 November 2026
+- In the desktop app, resting the pointer on a figure above the prompt now really shows its card, one at a time, gone as the pointer leaves: who uses the most memory and processor, the battery in words, network download and upload
+- The cards show Claude's own part of the graphics processor, the disk and the network, and the strain on the battery: what the Mac draws and what Claude's processors draw, in watts
+- The bar above the prompt redraws only when new figures come, not every second
+
 ## 0.2.121 · 15 November 2026
 - Claudopus now remembers which keys, tokens and logins you have given, by name and where each is kept, never a value: Claudopus's keychain, keys you saved by hand in this Mac's keychain, SBOS, and the .env files in your subjects' folders. A Keys button beside Memory shows the list, and work reads it before asking.
 - The list is made again from each store's own list of names whenever you open it, a key is given or forgotten, or work asks for one, so a key taken out of a store stops being listed.
