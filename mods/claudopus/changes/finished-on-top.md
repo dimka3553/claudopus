@@ -1,0 +1,2 @@
+- Work that finishes comes to the top of the panel at once, right under anything that waits for you, outlined in green for its two seconds, then goes under Finished as before; several finishing together stack there newest first, each for its own two seconds
+- Work that was stopped or stopped by an error is not brought up: it pauses in its place as before, and an error now shows in red, on its edge too

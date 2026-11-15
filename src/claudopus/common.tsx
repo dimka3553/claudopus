@@ -106,6 +106,9 @@ const figuresAt = atom({ plugin: 'claudopus', key: 'figures' } as const, 0, { sh
 // When the panel was last drawn, kept through a reload (drawnNow, written by the timer each second, never read while drawing)
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })
 let drawnNow = 0
+// When the list was last given an older drawing again (held), and last drawn afresh: work that ended between the two was not seen
+let listHeldAt = 0
+let listFreshAt = 0
 const paneShown = atom({ plugin: 'claudopus', key: 'shown' } as const, false, { shape: 'shown-1' })
 // What the person has typed into an ask's reply box and not sent, by the work, kept through a reload of the mod (drafts, written as
 // they type, read back once as the mod loads, never while drawing). A key box's letters are never kept: its surface holds them
