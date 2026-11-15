@@ -255,8 +255,13 @@ const freshPage = async ($: EngineInterface, version: string, step: 'download' |
 let downloadProgress: { version: string; pct: number; got: number; phase: string } | undefined
 // What the download's last drawing showed, and when
 const progressDrawn = { shown: '', phase: '', at: 0 }
+// Update's press, from its fetch to the end of its move: the panel says Updating throughout, and offers no press in between
+let isUpdatePress = false
 const downloadPress = ($: EngineInterface, version: string) => {
   presses += 1
+  // Update's move, once its fetch was checked: each half takes the lock on its own, as two presses did, so neither holds it longer
+  let next: { version: string; commit: string } | undefined
+  isUpdatePress = true
   void atStep($, async () => {
     const now = await $.clock.now()
     const { src } = await knowSource($, true)
@@ -289,13 +294,15 @@ const downloadPress = ($: EngineInterface, version: string) => {
     if (got.ok) {
       await writeSteps($, { version: page.version, stage: 'downloaded', step: 'download', commit: got.commit, tree: page.tree, at, from: loaded })
       // Update's second half: the fetch was checked against the release, and the move reads the page and checks it again
-      if (isOnePress(src)) await installStep($, page.version, got.commit)
+      if (isOnePress(src)) next = { version: page.version, commit: got.commit }
     } else {
       // What git or GitHub said is kept in the log only: the panel shows what failed in its own words
       if (got.detail) await log($, `Claudopus ${page.version} download failed (${got.fail}): ${got.detail}`)
       await writeSteps($, { version: page.version, stage: 'failed', step: 'download', fail: got.fail, at, from: loaded })
     }
   })
+    .then(() => (next ? atStep($, () => installStep($, next!.version, next!.commit)) : undefined))
+    .finally(() => ((isUpdatePress = false), redraw($)))
 }
 // Install, pressed for the download the notice showed: checked against the page read now, then put in place
 const installPress = ($: EngineInterface, version: string, commit: string) => {
@@ -436,6 +443,9 @@ const ONE_PRESS_FAILS: Partial<Record<Fail, string>> = {
   'own-commits': "main has commits of its own that this version doesn't have, so it can't move forward",
   overwrite: 'your uncommitted changes touch files this version changes: commit them or set them aside, then try again',
   moved: "it couldn't be moved forward",
+  'newer-out': 'a newer version came out while it was updating',
+  gone: 'what was fetched is no longer there',
+  unchecked: 'the version page has no fingerprint to check it against',
 }
 const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loaded: string) => {
   const now = await $.clock.now()
@@ -445,9 +455,12 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   const { src } = known
   const isFolder = src.kind === 'folder'
   const isOne = isOnePress(src)
+  // A copy Claude Code installs from a folder of the code: its Install moves that folder's main, and its card says so
+  const isCopy = isFolder && !isOne
+  const folder = isFolder ? homeShort(src.repo) : ''
   const track = (at: number) => (
     <ui.Text key="update-track" dimColor wrap="truncate-end">
-      {(isOne ? ONE_PRESS_STEPS : STEPS).map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${one}`).join('   ')}
+      {(isOne ? ONE_PRESS_STEPS : STEPS).map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${isCopy && i === 0 ? 'Fetch' : isCopy && i === 1 ? 'Move forward' : one}`).join('   ')}
     </ui.Text>
   )
   const quiet = (key: string, version: string, withSkip = true) => [
@@ -479,7 +492,11 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     </ui.Text>
   )
   const v = n.version
-  if (n.kind === 'available' || n.kind === 'cannot') {
+  // Update's press between its fetch and its move: still updating
+  if (isOne && (n.kind === 'installing' || (n.kind === 'downloaded' && (isStepping || isUpdatePress)))) return box('installing', [title(`Updating Claudopus ${v}…`), track(0)], [])
+  // A fetch checked earlier, left by a copy before Update was one press, is offered as any version out: its Update moves it forward,
+  // after checking it once more
+  if (n.kind === 'available' || n.kind === 'cannot' || (isOne && n.kind === 'downloaded')) {
     const page = await pageFor($, v)
     const missed = page && page.version === v ? missedOn(page, loaded) : []
     const newest = missed[0]
@@ -492,8 +509,12 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
       'available',
       [head, what ? line('what', what) : null],
       [
-        <ui.Button key={`update-download-${presses}`} label={isOne ? 'Update' : page?.size ? `Download · ${sizeText(page.size)}` : 'Download'} onPress={() => downloadPress($, v)} />,
-        ...quiet('available', v),
+        n.kind === 'downloaded' ? (
+          <ui.Button key={`update-install-${presses}`} label="Update" onPress={() => installPress($, v, n.commit)} />
+        ) : (
+          <ui.Button key={`update-download-${presses}`} label={isOne ? 'Update' : isCopy ? 'Fetch into the folder' : page?.size ? `Download · ${sizeText(page.size)}` : 'Download'} onPress={() => downloadPress($, v)} />
+        ),
+        ...quiet(n.kind, v),
       ],
     )
   }
@@ -502,20 +523,19 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const pct = live?.pct ?? n.pct
     const got = live?.got ?? n.got
     const said = live?.phase === 'checking' ? 'checking it against what the release published' : [pct !== undefined ? `${Math.round(pct)}%` : '', got ? sizeText(got) : '', live?.phase === 'resolving' ? 'unpacking' : ''].filter(Boolean).join(' · ')
-    return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
+    return box('downloading', [title(`${isOne ? 'Updating' : isCopy ? 'Fetching' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
   }
-  // Update's press between its fetch and its move: still updating
-  if (isOne && (n.kind === 'installing' || (n.kind === 'downloaded' && isStepping))) return box('installing', [title(`Updating Claudopus ${v}…`), track(0)], [])
   if (n.kind === 'downloaded') {
-    // A fetch checked earlier, left by a copy before Update was one press: Update moves it forward, after checking it once more
-    if (isOne) return box('downloaded', [title(`Claudopus ${v} is out`)], [<ui.Button key={`update-install-${presses}`} label="Update" onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v)])
+    const replaces = isCopy
+      ? `Checked against the release. Move forward takes ${folder} from v${loaded} to v${v}, fast-forward only.`
+      : `Checked against the release. Install replaces v${loaded}; new chats start on v${v}.`
     return box(
       'downloaded',
-      [title(`Claudopus ${v} downloaded`), line('replaces', `Checked against the release. Install replaces v${loaded}; new chats start on v${v}.`), track(1)],
-      [<ui.Button key={`update-install-${presses}`} label="Install" onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
+      [title(`Claudopus ${v} ${isCopy ? 'fetched' : 'downloaded'}`), line('replaces', replaces), track(1)],
+      [<ui.Button key={`update-install-${presses}`} label={isCopy ? 'Move forward' : 'Install'} onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
     )
   }
-  if (n.kind === 'installing') return box('installing', [title(`Installing Claudopus ${v}…`), track(1)], [])
+  if (n.kind === 'installing') return box('installing', [title(`${isCopy ? 'Moving the folder to' : 'Installing'} Claudopus ${v}…`), track(1)], [])
   if (n.kind === 'reload') {
     const who = isOne ? `This chat still runs v${loaded}. Each open chat switches at its own Reload.` : `This chat still runs v${loaded}. Reload switches this chat only; new chats start on v${v}.`
     const typed = isRunFromAfar || isReloadRefused
@@ -532,11 +552,11 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   }
   // A step that failed: what failed, and that what this chat runs is as it was
   const detail = ''
-  const which = isOne ? 'update' : n.step === 'download' ? 'download' : 'install'
+  const which = isOne ? 'update' : n.step === 'download' ? (isCopy ? 'fetch' : 'download') : isCopy ? 'move the folder to' : 'install'
   const why = (isOne ? ONE_PRESS_FAILS[n.fail] : undefined) ?? FAILS[n.fail]
   const kept =
     n.fail === 'installed-mismatch'
-      ? `${isFolder ? `Claudopus moved to v${v}, but ` : ''}Claude Code's record was put back, so new chats keep v${loaded}.`
+      ? `${isOne ? `Claudopus moved to v${v}, but ` : isCopy ? `The folder moved to v${v}, but ` : ''}Claude Code's record was put back, so new chats keep v${loaded}.`
       : n.fail === 'kept-copy'
         ? `This chat still runs v${loaded}.`
         : `Nothing was changed: this chat still runs v${loaded}.`

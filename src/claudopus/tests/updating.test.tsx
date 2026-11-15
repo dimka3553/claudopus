@@ -121,40 +121,50 @@ test('Update is one press for a chat run from its checkout: the fetch, its check
 })
 
 // Update never overwrites uncommitted work nor moves a main with commits of its own: it says why it could not move forward, and nothing moves
-const STAYS = [
+const STAYS: { name: string; release: Release; said: string; isNewerAfterFetch?: boolean; title?: string }[] = [
   { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your uncommitted changes touch files this version changes: commit them or set them aside, then try again. Nothing was changed: this chat still runs v0.1.0.' },
+  { name: 'a newer version out between its fetch and its move', release: RELEASE, isNewerAfterFetch: true, title: 'Claudopus 0.1.3 is out', said: 'The bar shows the battery · and 3 more changes' },
   { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Main has commits of its own that this version doesn't have, so it can't move forward. Nothing was changed: this chat still runs v0.1.0." },
 ]
 for (const one of STAYS)
   test(`Update with ${one.name}: it says why it could not move forward, and nothing is overwritten or moved`, SLOW, async ($, on) => {
     const { files, clock, gitRan } = world(on, { release: one.release })
     const reloads = reloadsOf(on)
-    pageOn(on, () => pageText())
+    // The move reads the version page again: one naming a newer version by then moves nothing
+    pageOn(on, () => (one.isNewerAfterFetch && gitRan.some(ran => ran.includes('fetch')) ? pageText('0.1.3') : pageText()))
     await $.session.start(start)
     await clock.advance(3 * 60_000)
     const panel = await $.ui.mount(listAt())
     await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
     await pressed(panel, 'update-download')
-    await shownIn(panel, "Couldn't update Claudopus 0.1.2")
+    // Said why, or the newer version offered in its place
+    await shownIn(panel, one.title ?? "Couldn't update Claudopus 0.1.2")
     await shownIn(panel, one.said)
+    // A merge is tried only where git itself refuses to overwrite: a fast-forward that stops before touching a changed file
+    expect(gitRan.some(ran => ran.startsWith('merge '))).toBe(Boolean(one.release.overwrite))
     expect(gitRan.some(ran => /^(reset|checkout|pull|stash)\b/.test(ran) || ran.includes('--force') || ran.includes('--hard'))).toBe(false)
     expect(files.get('manifest')).toBeUndefined()
     expect(await keyed(panel, 'update-reload')).toBeUndefined()
-    expect(await keyed(panel, 'update-again')).toBeDefined()
+    expect(await keyed(panel, one.title ? 'update-download' : 'update-again')).toBeDefined()
     expect(reloads).toEqual([])
   })
 
-test('each step stands through a reload: a chat that loads finds the download waiting for Install, a step cut short said as stopped, and a copy newer than it runs offered its Reload', SLOW, async ($, on) => {
-  const { files, clock } = world(on, { release: RELEASE })
+test('each step stands through a reload: a chat that loads finds the download waiting for Update, a step cut short said as stopped, and a copy newer than it runs offered its Reload', SLOW, async ($, on) => {
+  const { files, clock, gitRan } = world(on, { release: RELEASE })
   pageOn(on, () => pageText())
   files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: UPD_NOW, version: '0.1.2', result: 'seen' }))
   files.set(`${MEMORY}/update-steps.json`, JSON.stringify({ version: '0.1.2', stage: 'downloaded', commit: COMMIT, tree: TREE, at: UPD_NOW - 5 * 3_600_000 }))
   files.set('git:ref', COMMIT)
   await $.session.start(start)
   const panel = await $.ui.mount(listAt())
-  // Fetched by a copy before Update was one press: Update moves it forward
+  // Fetched by a copy before Update was one press, or planted: offered as any version out, with what is new, and nothing moves until
+  // its Update is pressed
   await shownIn(panel, 'Claudopus 0.1.2 is out')
+  await shownIn(panel, 'The bar shows the battery · and 3 more changes')
   expect((await keyed(panel, 'update-install'))?.props.label).toBe('Update')
+  await later(clock, 16 * 60_000)
+  expect(gitRan.some(one => one.startsWith('merge '))).toBe(false)
+  expect(files.get('manifest')).toBeUndefined()
   // A download whose chat closed mid-way
   files.set(`${MEMORY}/update-steps.json`, JSON.stringify({ version: '0.1.2', stage: 'downloading', at: UPD_NOW - 10 * 60_000, pct: 40 }))
   await panel.unmount()
