@@ -1,4 +1,4 @@
-- In the desktop app a card's reply box is now in the bar above the chat's prompt, labelled with the work it goes to, so the panel scrolls freely while you type a reply and your cursor stays in the box; the card keeps its buttons
+- In the desktop app a card's reply box is now in the bar above the chat's prompt, named after the work it goes to, so the panel scrolls freely while you type a reply; the card keeps its buttons
 - With several cards asking, the box stays with the card you are replying to, and "Reply to this one in words" on another card points it there; each half-typed reply is kept
-- Taken out: the 0.2.135 change that made the panel bounce while a reply box held the cursor
+- Taken out: the 0.2.135 change that made the panel bounce while a reply box held the cursor. The box for a password or key is still at the top of the panel, which stays at its top while your cursor is in that box
 - The panel's recorder also notes which button each press reached, where the focus went, and what happens in the bar above the prompt

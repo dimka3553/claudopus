@@ -1260,10 +1260,11 @@ test('scrolled down, a finish at the top is pointed at in green above the prompt
   expect(mark?.props.color).toBe('success')
   await w.clock.advance(2_100)
   expect(await band.find({ type: 'Text', text: /finished/ })).toBeUndefined()
-  // With an ask waiting, the amber line says both
+  // With an ask waiting, the amber line says both, short, at the end of the line that names the work its reply box is for
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't9', reason: 'answer', agentId: 'a9' } as never)
-  expect((await until(async () => band.find({ type: 'Text', text: /just finished/ })))?.text).toBe('↑ 1 waits for you at the top of the panel · 1 just finished')
+  expect((await until(async () => band.find({ type: 'Text', text: /just finished/ })))?.text).toBe('↑ 1 waits at the top · 1 just finished')
+  expect(await band.find({ type: 'Text', text: '↳ Reply to “Piece 3”' })).toBeDefined()
   await band.unmount()
   await down.unmount()
 })

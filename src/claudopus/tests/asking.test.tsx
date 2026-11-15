@@ -1166,7 +1166,7 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
   // The bar above the prompt, where the desktop's reply box is drawn, is recorded the same way: its drawings with the box in them,
   // typing there as counts, and the panel's drawings beside it, which hold no reply box
   files.set(`${MEMORY}/record-panel.on`, '')
-  files.set(`mtime:${MEMORY}/record-panel.on`, String(1_700_000_222_000))
+  files.set(`mtime:${MEMORY}/record-panel.on`, String(clock.now()))
   const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   const barBox = async () => (await bar.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await clock.advance(3000)
@@ -1208,16 +1208,22 @@ test("where the bar above the prompt takes a box, an ask's reply is typed there 
   expect(await says(details, /^✎ Or reply in words in the bar above the chat's prompt$/)).toBe(true)
   // The card keeps its buttons
   expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label))).toEqual(expect.arrayContaining(['Left', 'Right']))
-  // Half typed: the same box through the bar's own drawings
+  // The terminal's panel keeps its own box: only the desktop app drags a pane to it
+  const term = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  expect((await boxesIn(term)).length).toBe(1)
+  await term.unmount()
+  // Half typed: the same box through the bar's own drawings, drawn with the text it was last drawn with, never with letters
+  // older than the box holds
   const [first] = await boxesIn(bar)
   await bar.input({ key: first?.key ?? '', text: 'The left, but ke', kind: 'change' } as never)
   await clock.advance(6000)
   expect((await boxesIn(bar))[0]?.key).toBe(first?.key)
+  expect((await boxesIn(bar))[0]?.props.value ?? '').toBe('')
   // A second piece of work asks while that reply is half typed: the box stays the first card's, the bar says one more asks, and
   // the newer card offers the box
   await $.agent.spawn({ ...spawn, description: 'Sort the invoices', prompt: 'sort the invoices' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which month?', choices: ['October', 'November'] } as never)
-  expect(await until(async () => ((await says(bar, /^ · 1 more question on its card · Which ear first\?$/)) ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await says(bar, /^ · 1 more waits in the panel · Which ear first\?$/)) ? true : undefined))).toBe(true)
   expect(await says(bar, /Reply to “Check the ears”/)).toBe(true)
   expect((await boxesIn(bar)).map(one => one.key)).toEqual([first?.key])
   expect((await boxesIn(list)).length).toBe(0)
@@ -1235,11 +1241,25 @@ test("where the bar above the prompt takes a box, an ask's reply is typed there 
   await bar.input({ key: (await boxesIn(bar))[0]?.key ?? '', text: 'The left, but keep the scan' })
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('in their own words: The left, but keep the scan')))).toBeDefined()
   expect(await until(async () => ((await says(bar, /Reply to “Sort the invoices”/)) ? true : undefined))).toBe(true)
-  expect(await says(bar, /more question/)).toBe(false)
+  expect(await says(bar, / more wait/)).toBe(false)
   // The bar folded by the person: nothing of it shows, so the card says how to get the box back
   await bar.unmount()
+  await clock.advance(2000)
   const folded = await $.ui.mount({ ...BAND, props: { ...BAND.props, isCollapsed: true }, surface: 'desktop' } as never)
-  expect(await until(async () => ((await says(list, /^✎ To reply in words, unfold the bar above the chat's prompt$/)) ? true : undefined))).toBe(true)
+  expect(await until(async () => ((await says(list, /^✎ To reply in words, open the folded bar above the chat's prompt$/)) ? true : undefined))).toBe(true)
   expect((await boxesIn(list)).length).toBe(0)
-  await Promise.all([list.unmount(), details.unmount(), folded.unmount()])
+  // One of the app's surveys in the bar: the box has no place there, and the card has its own again
+  await folded.unmount()
+  await clock.advance(2000)
+  const surveyed = await $.ui.mount({ ...BAND, props: { ...BAND.props, hasSurvey: true }, surface: 'desktop' } as never)
+  expect(await until(async () => ((await boxesIn(list)).length === 1 ? true : undefined))).toBe(true)
+  await surveyed.unmount()
+  await clock.advance(2000)
+  // The bar back: a button pressed on the card answers it, and the box leaves the bar with the ask
+  const again = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect(await until(async () => ((await boxesIn(again)).length === 1 && (await boxesIn(list)).length === 0 ? true : undefined))).toBe(true)
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'October')?.key ?? '' })
+  expect(await until(async () => appended.find(line => line.startsWith('a2: ') && line.includes('"October"')))).toBeDefined()
+  expect(await until(async () => ((await boxesIn(again)).length === 0 ? true : undefined))).toBe(true)
+  await Promise.all([list.unmount(), details.unmount(), again.unmount()])
 })

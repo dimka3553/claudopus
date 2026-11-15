@@ -204,7 +204,8 @@ const panelHooks = (on: On) => {
 
     // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button, then
     // the same three ways to answer on every ask, on the small card as in Details: the work's own buttons, or Done and Not now when
-    // it gave none, and a box for a reply in the person's own words. The list's times stand still while the person types (holdTimes)
+    // it gave none, and a box for a reply in the person's own words, which the desktop app has in the bar above the prompt and
+    // not on the card (repliesInBar). The list's times stand still while the person types (holdTimes)
     // In the terminal the first ask's reply box holds the keys as the panel takes them: what is typed then is the person's words,
     // never a button's letter, and Tab leaves it for the buttons and their keys
     let askFocused = false
@@ -310,7 +311,7 @@ const panelHooks = (on: On) => {
               panel to. With several asking, a press points the bar's box at this one */}
           {'Input' in table && !one.chat && repliesInBar(e.surface) ? (
             barShut.has(e.surface) ? (
-              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ To reply in words, unfold the bar above the chat's prompt</Text>
+              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ To reply in words, open the folded bar above the chat's prompt</Text>
             ) : barTarget(own)?.id === one.id ? (
               <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Or reply in words in the bar above the chat's prompt</Text>
             ) : (

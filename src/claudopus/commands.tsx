@@ -20,6 +20,8 @@ const commandHooks = (on: On) => {
       if (e.plugin === 'claudopus') await engage($)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
+      // The bar holds its drawing for as long as its reply box has the cursor (band.tsx)
+      barBoxAt = e.plugin === 'claudopus' && isBarBox(e.element) ? await $.clock.now() : 0
     }
     return next(e)
   })

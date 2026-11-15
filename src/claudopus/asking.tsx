@@ -85,7 +85,8 @@ const hasDraft = (id: string) => [...drafts].some(([key, value]) => key.startsWi
 // pane afresh at each drawing, the box in it too: a pane drawn every few seconds under the person's typing flickered the box's ring,
 // put older letters over newer ones, and, as Markdown came or went above, threw the panel to its bottom, out of the person's reach
 // (15 Nov, typing an answer while other work ran; measured on the app's own drawing, headless). Each letter typed, or the box taking
-// the focus, holds it for TYPING more; sending, any press, or the focus leaving the boxes lets it go
+// the focus, holds it for TYPING more; sending, any press, or the focus leaving the boxes lets it go. The desktop app's reply box is
+// in the bar above the prompt (repliesInBar), which is held the same way while it is typed in
 const TYPING = 30_000
 let typing = 0
 let isTyping = false
@@ -269,6 +270,12 @@ const barBoxes = new Set<string>()
 // Surfaces whose bar is folded by the person or held by a survey: nothing of the mod's shows there just now
 const barShut = new Set<string>()
 const repliesInBar = (surface: string) => barBoxes.has(surface)
+// When the bar's box last took the cursor or a letter, 0 once the cursor is known to have left it or its reply was sent: the bar
+// holds its drawing that long (band.tsx, barHeld). The app may say nothing when the cursor leaves for the chat's own box, so the
+// hold ends by itself BAR_BOX_HELD after the last sign of it
+let barBoxAt = 0
+const BAR_BOX_HELD = 300_000
+const isBarBox = (element: string | undefined) => /^band-.*-reply-/.test(element ?? '')
 // The card the bar's box is for: it stays with a card until that one is answered, so a newer question never takes the box from
 // under what the person is typing; then it goes to the one that asked last. A press on another card points it there (Reply to this one)
 let replyTo = ''
