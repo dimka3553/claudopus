@@ -256,10 +256,13 @@ const rightModel = (id: string): string | undefined => {
 const RANK: Record<string, number> = { Haiku: 0, Sonnet: 1, Opus: 2, Fable: 3 }
 // `opusplan` runs on Sonnet outside plan mode, so it counts as Sonnet
 const rankOf = (id: string) => (/opusplan/i.test(id) ? RANK.Sonnet! : (RANK[modelName(id).split(' ')[0] ?? ''] ?? -1))
-// A helper that looks over what was built, by its few words: a look, check, review or test of what is there, not legwork that only
-// names checking ("Check out the repo", "Check disk usage")
-const isChecker = (description: string) =>
-  /\b(second look|another look|look(s|ing)? (over|for what is wrong|for faults|for bugs)|(double[- ]?)?check(s|ing|ed)? (what|the|that|this|it|its|whether|if|for faults|for bugs|for what)\b(?! (out|in|disk|ci|logs?|balance|status|usage|version|price)\b)|review(s|ing|ed)? (what|the|that|this|it|its)\b(?! (pr|comments?)\b)|double[- ]?check(s|ing|ed)?|reviewer|auditor|verif(y|ies|ying|ication|ied)|validat(e|es|ing|ion)|critique|proofread|inspect(s|ing)?|find (bugs|faults|what is wrong)|hunt(s|ing)? for (faults|bugs)|test(s|ing)? the (fix|build|page|change)|qa)\b/i.test(description)
+// A helper that looks over what was built, by its few words: a checking word, then what was built ("Review my PR", "Test the fix"),
+// or a look that is only ever a check ("Sanity check", "What is wrong with the build"). Legwork that names checking something else
+// ("Check the Stripe balance", "Review the docs", "Check the PR status") is not one
+const CHECKS = /\b(second look|another look|look(s|ing)? (over|for)|(re-?|double[- ]?|spot[- ]?|sanity[- ]?)?check(s|ing|ed|er)?|(code )?review(s|ing|ed|er)?|audit(s|ing|or)?|verif(y|ies|ying|ication|ied)|validat(e|es|ing|ion)|critique|proofread|inspect(s|ing|ion)?|test(s|ing)?|qa|find|hunt(s|ing)?)\b.*\b(page|fix|fixes|fixed|change|changes|build|built|work|diff|pr|code|branch|commit|result|results|report|output|mod|app|feature|design|claims|draft|holes|bugs|faults|what was built)\b/i
+const ONLY_CHECKS = /\b(second look|sanity check|spot[- ]?check|what is wrong|is wrong with)\b|^(checker|reviewer|auditor|code review)\b/i
+const NOT_CHECKS = /\b(status|comments?|balance|quota|usage|logs?)\b/i
+const isChecker = (description: string) => ONLY_CHECKS.test(description) || (CHECKS.test(description) && !NOT_CHECKS.test(description))
 // Work a safety check flagged whose next steps the app would send to an older model: it is ended with this report instead, so its
 // parent starts what is left again on a current model. The steps of it answered so
 const FLAGGED = (on: string) =>

@@ -370,8 +370,10 @@ const workHooks = (on: On) => {
     // that started on an older model or on Haiku itself (its own kind's model, or an alias the settings point at an older version)
     // has its steps go to that family's newest, or to the model the person picked. An agent whose start the mod did not see is left
     // where the app sent it, and its card says so
-    const own = id !== undefined ? startedOn.get(id) : undefined
-    const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
+    // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
+    const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
+    const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
+    const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
     if (isMovedByApp && own !== undefined && id !== undefined) {
       const n = (flaggedSteps.get(id) ?? 0) + 1
@@ -482,7 +484,7 @@ const workHooks = (on: On) => {
       const old = list.find(one => one.id === id)
       // Its title is the few words the task was given; under it, the person's message as they wrote it
       const fresh = { ...started(id, parentId, e.description ?? '', isOwn ? said : '', now, e.fork), ...(isOwn && from ? { from } : {}) }
-      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model }])
+      return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model) }])
     })
     if (isOwn) await openList($)
     if (!isOwn) await writeRolls($, true).catch(err => log($, `helpers not written: ${String(err)}`))

@@ -44,6 +44,8 @@ export type Todo = {
   moved?: string
   // The older model the app would have carried it on after a safety check flagged a message, which it was ended rather than run on
   flagged?: string
+  // The model the engine first started it on, kept across reloads: a resume may come back on the model the app moved it to
+  startedOn?: string
   // How many tool steps it has made
   steps?: number
   // How many of them since it last touched its to-dos or said where it stands

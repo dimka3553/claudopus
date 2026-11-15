@@ -1104,6 +1104,37 @@ test('a way to an older model a second look found is closed: own older equal to 
   expect(true).toBe(true)
 })
 
+test('a check is known by a checking word and what was built, or a look that is only a check; legwork that names checking something else is not', async ($, on) => {
+  const { asked } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'x', wait: false, origin: composer })
+  const startOn = async (description: string) => {
+    await $.agent.spawn({ ...spawn, prompt: 'p', model: 'sonnet', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', description } as never)
+    return asked.at(-1)
+  }
+  for (const d of ['Check my work', 'Review my PR', 'Code review of the change', 'Checker for the branch', 'Re-check against commit 2752ee8', 'Recheck the fixes', 'Sanity check', 'Spot-check results', 'Audit the change', 'What is wrong with the build', 'Look for holes in the fix', 'Second look']) expect([d, await startOn(d)]).toEqual([d, 'claude-opus-5-5'])
+  for (const d of ['Check the Stripe balance', 'Check the weather API quota', 'Check the repo out', 'Review the docs and summarize', 'Inspect disk usage', 'Validate JSON schema files', 'Verify the domain DNS records', 'Check the PR status']) expect([d, await startOn(d)]).toEqual([d, 'sonnet'])
+})
+
+test('a resumed helper keeps the model it first started on: an Explore helper resumed still runs on Sonnet, a flagged one is never moved up', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5', startedOn: { Explore: 'claude-haiku-5-5' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix.' } as never)
+  const step = async (index: number, model: string, agentId: string) => {
+    for await (const _ of $.turn.step({ turnId: 't', index, model, messageCount: 2, agentId })) void _
+  }
+  const ex = (await $.agent.spawn({ ...spawn, prompt: 'look', description: 'Explore', parentAgentId: 'a1' } as never)) as { agentId: string }
+  await $.agent.spawn({ ...spawn, prompt: 'go on', description: 'Explore', resume: { agentId: ex.agentId }, parentAgentId: 'a1' } as never)
+  await step(0, 'claude-haiku-5-5', ex.agentId)
+  expect(stepped.at(-1)).toBe('claude-sonnet-5-5')
+  await step(1, 'claude-opus-4-8', 'a1')
+  await $.agent.spawn({ ...spawn, prompt: 'go on', resume: { agentId: 'a1' } } as never)
+  const before = stepped.length
+  await step(2, 'claude-opus-4-8', 'a1')
+  expect(stepped.length).toBe(before)
+})
+
 // Cards: work becoming a card, its to-dos, its own chat, steers, context and model, Details, stops, its pause, work the engine reports
 
 test('what I ask for becomes a box in the panel, the panel opens once, and the chat shows only that work is running', async ($, on) => {
