@@ -1,5 +1,11 @@
 // The /claudopus and /servers commands, and the panel's focus and close
 
+// Panes whose focus is in a box the person types in, and each pane's last move of the person's
+const boxFocused = new Set<string>()
+const lastMoves = new Map<string, { at: number; by: number }>()
+// Where the app's last refused pull would have put each pane: the focused box's place
+const pulledTo = new Map<string, number>()
+
 const commandHooks = (on: On) => {
 
   on('command.run', { command: 'claudopus' }, async $ => {
@@ -21,11 +27,22 @@ const commandHooks = (on: On) => {
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
     }
+    // Which panes have the focus in a box typed into, for the pull back below
+    if (e.plugin === 'claudopus' && isTypedBox(e.element)) boxFocused.add(e.requestId)
+    else boxFocused.delete(e.requestId)
     return next(e)
   })
   // The person scrolling the panel or a Details tab is using it: what moves on its own waits (engage)
   on('ui.scroll', async ($, e, next) => {
     if (e.origin.kind === 'person' && (e.requestId === LIST || e.requestId.startsWith(WORK_PANE) || e.requestId.startsWith(FLOW_PANE))) await engage($)
+    // The app pulling the pane back to the box the person types in, reported as their move, is refused: the window stays where
+    // they scrolled it (scrolls.ts)
+    if (e.origin.kind === 'person') {
+      const move = { at: await $.clock.now(), by: e.by, to: e.offset }
+      if (!isPullGuardOff && isPulledBack(lastMoves.get(e.requestId), move, boxFocused.has(e.requestId), pulledTo.get(e.requestId)))
+        return (Math.abs(e.by) >= PULL_MARKS && pulledTo.set(e.requestId, e.offset), recordEvent($, 'pull-refused', { by: e.by, to: e.offset }), {})
+      lastMoves.set(e.requestId, move)
+    }
     return next(e)
   }).catch(($, e, next) => next(e))
   // A pick of the person's in the mod's panes is their own move, as a press is (tabHooks): the drawing is let go before it acts

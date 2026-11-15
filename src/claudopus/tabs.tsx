@@ -25,6 +25,8 @@ const tabHooks = (on: On) => {
   on('ui.input', async ($, e, next) => {
     const r = await next(e)
     if (e.plugin !== 'claudopus' || e.kind !== 'submit') return r
+    // A box sent is gone: the pull back to it no longer applies (commands.tsx)
+    boxFocused.delete(e.requestId)
     // Two replies to ended work went from the timer with no sign of why: each submit says here what it found on its way
     void log($, `reply submitted: ${answersOnWay.size} answer(s) and ${wakes.length} wake(s) on the way`)
     if (answersOnWay.size || wakes.length) await sendWakes($, true).catch(err => log($, `reply not sent: ${String(err)}`))

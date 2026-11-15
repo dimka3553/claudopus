@@ -150,7 +150,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   on('fs.stat', (_, e) => {
     const kind = files.has(e.path) ? 'file' : [...files.keys()].some(path => path.startsWith(`${e.path}/`)) ? 'dir' : ''
     if (!kind) throw new Error(`ENOENT ${e.path}`)
-    return { value: { kind, size: 1, mtimeMs: 0, isLink: false } as never }
+    return { value: { kind, size: 1, mtimeMs: Number(files.get(`mtime:${e.path}`) ?? 0), isLink: false } as never }
   })
   on('mcp.call', (_, e) => {
     if (e.server === 'terminal') terminals.push(e.args)
@@ -1782,4 +1782,45 @@ test('with only a Details tab in front, or the Servers tab open, the mod still a
   expect(writes.invalidate ?? 0).toBeLessThanOrEqual(7)
   expect(writes.tick ?? 0).toBe(0)
   await Promise.all([details.unmount(), servers.unmount()])
+})
+
+test("the panel's recorder writes nothing unless switched on, and switched on writes the drawings, focus and typing as counts, never a letter typed, and switches itself off", async ($, on) => {
+  const { clock, files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which ear first?' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const box = async () => (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  const recorded = () => [...files.keys()].filter(path => path.includes('/panel-record/'))
+  await clock.advance(3000)
+  await list.input({ key: (await box())?.key ?? '', text: 'Zebra quartz 7731', kind: 'change' } as never)
+  await clock.advance(3000)
+  expect(recorded()).toEqual([])
+  // A switch left from long ago starts nothing, and goes
+  files.set(`${MEMORY}/record-panel.on`, '')
+  await clock.advance(3000)
+  await list.input({ key: (await box())?.key ?? '', text: 'Zebra quartz 7731 more', kind: 'change' } as never)
+  await clock.advance(7000)
+  expect(recorded()).toEqual([])
+  expect(files.has(`${MEMORY}/record-panel.on`)).toBe(false)
+  files.set(`${MEMORY}/record-panel.on`, '')
+  files.set(`mtime:${MEMORY}/record-panel.on`, String(1_700_000_016_000))
+  await clock.advance(3000)
+  await box()
+  for (const text of ['Q', 'Qu', 'Quiet lynx 4419']) await list.input({ key: (await box())?.key ?? '', text, kind: 'change' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'Looking at the left ear.' } as never)
+  await clock.advance(200_000)
+  await box()
+  await clock.advance(3000)
+  const [path] = recorded()
+  const text = files.get(path ?? '') ?? ''
+  const events = text.trim().split('\n').map(line => JSON.parse(line) as { ev: string; count?: number })
+  expect(events.some(one => one.ev === 'render')).toBe(true)
+  // The reply box is found in the drawing, by its key and where it sits among the drawing's elements
+  expect(events.some(one => (one as { inputs?: { key: string }[] }).inputs?.some(input => /-reply-/.test(input.key)))).toBe(true)
+  expect(events.filter(one => one.ev === 'input').map(one => one.count)).toEqual([1, 2, 3])
+  for (const typed of ['Quiet', 'lynx', '4419', 'Zebra', 'quartz', '7731', 'Qu"']) expect(text.includes(typed)).toBe(false)
+  expect(files.has(`${MEMORY}/record-panel.on`)).toBe(false)
+  await list.unmount()
 })
