@@ -194,6 +194,7 @@ declare global {
   export import isPid = M10.isPid
   export import isWaitOnly = M10.isWaitOnly
   export import labelOf = M10.labelOf
+  export import leftText = M10.leftText
   export import JOB_COLOR = M10.JOB_COLOR
   export import JOB_GLYPH = M10.JOB_GLYPH
   export import JOB_HEAD = M10.JOB_HEAD

@@ -1,0 +1,2 @@
+- A run's second line starts under its name, with the tree's line carried down beside it, in the app and in a terminal: the app had left out the line and started it at the card's edge
+- A run shows how long is left, its own or worked out from its percent, and no longer when it last printed; work's scripts print their progress at least every 10 seconds

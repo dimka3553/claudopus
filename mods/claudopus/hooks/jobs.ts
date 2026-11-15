@@ -47,7 +47,7 @@ export const JOB_HEAD: Record<JobKind, string> = { server: 'Server', download: '
 // Its mark on the tree, drawn: a square, a diamond, a down arrow, an open diamond, never a helper's round dot
 export const JOB_SHAPE: Record<JobKind, 'square' | 'diamond' | 'down' | 'open'> = { server: 'diamond', download: 'down', script: 'square', watch: 'open', wait: 'open' }
 // A job whose output has not changed for this long says, in amber, that it has gone quiet, and one that has printed nothing at all
-// says so: work is told to print progress at least every half minute, so a few minutes of nothing is worth a look
+// says so: work is told to print progress at least every 10 seconds, so a few minutes of nothing is worth a look
 export const JOB_QUIET = 3 * 60_000
 // A job whose output has not been found this long after it started says so on its row
 export const JOB_UNREAD = 60_000
@@ -129,14 +129,14 @@ const pctOf = (line: string) => {
 // pip, git, docker, tqdm and the like) and the line work's own scripts are told to print: `progress: 3/6 steps fitting`,
 // `progress: 4.2/10 GB uploading`, `progress: 45%`
 export type Progress = { pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean }
-// How long a run says it has left, as it says it (eta 55s, eta 0:00:55, [01:18<01:28], 3m left, curl's Time Left), in words: never
-// worked out by the mod
+// How long a run says it has left, as it says it (eta 55s, eta 0:00:55, [01:18<01:28], 3m left, curl's Time Left), in words; the
+// panel works one out from its percent only where the run says none
 const secondsIn = (text: string) => {
   if (/^\d+(:\d\d){1,2}$/.test(text)) return text.split(':').reduce((sum, part) => sum * 60 + Number(part), 0)
   const parts = [...text.matchAll(/(\d+(?:\.\d+)?)\s?(days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)(?![a-z])/gi)]
   return parts.length ? parts.reduce((sum, m) => sum + Number(m[1]) * ({ d: 86400, h: 3600, m: 60, s: 1 }[(m[2] ?? 's').charAt(0).toLowerCase()] ?? 1), 0) : undefined
 }
-const leftText = (seconds: number | undefined) => {
+export const leftText = (seconds: number | undefined) => {
   if (seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return undefined
   const all = Math.round(seconds)
   const text = all < 60 ? `${all}s` : all < 600 ? `${Math.floor(all / 60)}m${all % 60 ? ` ${String(all % 60).padStart(2, '0')}s` : ''}` : all < 3600 ? `${Math.round(all / 60)}m` : `${Math.floor(Math.round(all / 60) / 60)}h${Math.round(all / 60) % 60 ? ` ${String(Math.round(all / 60) % 60).padStart(2, '0')}m` : ''}`

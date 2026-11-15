@@ -1052,11 +1052,11 @@ test('a long run shows how far it is from what it prints: how much of how much, 
     await list.unmount()
     return all
   }
-  // How much of how much leads the side, its percent in blue, its speed and the time left curl gives, then when it last printed
+  // How much of how much leads the side, its percent in blue, its speed and the time left curl gives, and never when it printed
   expect(await until(async () => ((await texts()).includes('460 MB of 1 GB · ') || undefined))).toBe(true)
   const shown = await texts()
   expect(shown).toContain('45%')
-  expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · (printed )?\d+s ago$/.test(text))).toBe(true)
+  expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // In a narrower panel its speed gives way first
   expect((await texts(100)).some(text => /^460 MB(\/| of )1 GB · $/.test(text))).toBe(true)
   // The work's own line, as its scripts are told to print it
@@ -1127,11 +1127,11 @@ test('every run under a card says how it stands: a command held open shows its p
     const all = await texts()
     return all.includes('460 MB of 1 GB · ') ? all : undefined
   })) ?? []
-  // The download held open: how much of how much, its percent, speed and time left, as curl printed them
+  // The download held open: how much of how much, its percent, speed and time left, as curl printed them, and nothing of when
   // Named in the work's own form: its kind already said, how long it should take beside its time, in amber well past it
   expect(shown).toContain('Download the CT scans')
   expect(shown).toContain('9m 00s of ~3m')
-  expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · printed 2s ago$/.test(text))).toBe(true)
+  expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
   expect(shown.some(text => /^nothing printed in 9m$/.test(text))).toBe(true)
@@ -1152,4 +1152,81 @@ test('every run under a card says how it stands: a command held open shows its p
   await list.unmount()
   held.get('dl')?.('')
   await call
+})
+
+test("a run's second line starts under its name, with the tree's lines carried down beside it: not the last, the last, a run under a helper, a narrow panel, on a desktop and in a terminal; 15 Nov the app dropped the lines and the line started left of the tree", SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const outputs: Record<string, string> = { '/w/fit.log': 'loading\nprogress: 3/6 steps fitting\n', '/w/up.log': 'progress: 2/3 files uploading eta 4m\n', '/w/pics.log': 'progress: 10/40 pictures drawing\n' }
+  const { clock } = world(on, { jobs: { output: file => outputs[file] ?? '', wroteAt: () => now - 2_000 } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fit and upload', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fit and upload', prompt: 'go' } as never)
+  const detach = (agentId: string, id: string, log: string, description: string) =>
+    $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command: `cd /w && nohup python run.py > ${log} 2>&1 & echo $!`, description } as never)
+  await detach('a1', 'n1', 'fit.log', 'Run the fit of every head')
+  await detach('a1', 'n2', 'up.log', 'Upload the cleaned A, B, C over the old ones')
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Draw the pictures', prompt: 'go', parentAgentId: 'a1' } as never)
+  await detach('a2', 'n3', 'pics.log', 'Run the drawing of every picture')
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Check the drawing', prompt: 'go', parentAgentId: 'a1' } as never)
+  for (let n = 0; n < 6; n++) await advance(20_000)
+
+  type Node = { type?: string; key?: string; text?: string; props: Record<string, unknown>; children?: unknown[] }
+  const kids = (node: Node) => (node.children ?? []).filter(one => one && typeof one === 'object') as Node[]
+  const all = (node: Node): Node[] => [node, ...kids(node).flatMap(all)]
+  const textOf = (node: Node) => all(node).filter(one => one.type === 'Text').flatMap(one => (one.children ?? []).filter(part => typeof part === 'string')).join('')
+  // Each run's two lines: the head (its lines and mark, its name, its time) and how it stands (the lines carried down, the words)
+  const rows = async (surface: 'desktop' | 'terminal', columns: number) => {
+    const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: columns }, surface } as never)
+    const found = await until(async () => {
+      const boxes = (await pane.findAll({ type: 'Box' })) as unknown as Node[]
+      const runs = boxes.filter(one => /^job-list-job-/.test(String(one.key ?? '')) && kids(one).length === 2)
+      return runs.length === 3 ? runs : undefined
+    })
+    const svgs = (await pane.findAll({ type: 'Svg' })) as unknown as Node[]
+    await pane.unmount()
+    return { runs: (found ?? []).map(one => ({ head: kids(kids(one)[0] as Node)[0] as Node, stand: kids(one)[1] as Node })), svgs }
+  }
+  for (const columns of [72, 40]) {
+    // In a terminal: the carried lines are as wide as the head's lines and mark, so the words start in its name's column, a line
+    // under each line that goes on and none under the last
+    const { runs } = await rows('terminal', columns)
+    expect(runs).toHaveLength(3)
+    const seen = runs.map(({ head, stand }) => {
+      const lines = textOf(head)
+      const rails = textOf(kids(stand)[0] as Node)
+      expect(rails.length).toBe(lines.length)
+      expect([...rails].map((ch, n) => (ch === '│') === /[│├]/.test(lines[n] ?? ''))).toEqual([...rails].map(() => true))
+      expect(stand.props.height).toBe(1)
+      return lines
+    })
+    // every case is here: a run that is not the last, the last, and one under a helper with the work's own line going on beside it
+    expect(seen.some(lines => lines.startsWith('├'))).toBe(true)
+    expect(seen.some(lines => lines.startsWith('└') || /^│ └/.test(lines))).toBe(true)
+    expect(seen.some(lines => /^│ [├└]/.test(lines))).toBe(true)
+    // On a desktop: every picture has the words the app needs to draw it at all, and the carried lines are as wide as the head's
+    const drawn = await rows('desktop', columns)
+    for (const svg of drawn.svgs) {
+      expect(String(svg.props.alt ?? '').trim()).not.toBe('')
+      expect(Number(svg.props.width)).toBeGreaterThan(0)
+    }
+    for (const { head, stand } of drawn.runs) {
+      const [lines] = all(head).filter(one => one.type === 'Svg')
+      const [rails] = all(kids(stand)[0] as Node).filter(one => one.type === 'Svg')
+      expect(rails?.props.width).toBe(lines?.props.width)
+      expect(String(rails?.props.source)).toContain('<path')
+    }
+  }
+  // How it stands is now: how far and how long is left, the run's own or worked out from its percent, never when it printed
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
+  const shown = (await pane.findAll({ type: 'Text' })).map(one => one.text).join('\n')
+  await pane.unmount()
+  expect(shown).toContain('4m left')
+  expect(shown).toMatch(/~2m left/)
+  expect(shown).not.toMatch(/printed/)
+  // A narrow panel keeps how long is left before the percent
+  const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 40 }, surface: 'terminal' } as never)
+  expect((await narrow.findAll({ type: 'Text' })).map(one => one.text)).toContain('3/6 steps · ~2m left')
+  await narrow.unmount()
 })
