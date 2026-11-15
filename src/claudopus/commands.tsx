@@ -17,10 +17,8 @@ const commandHooks = (on: On) => {
   on('ui.focus', async ($, e, next) => {
     // Where the person's focus last moved in the mod's panes: a press on the desktop counts only on a button it just moved onto (pressSeen)
     if (e.origin.kind === 'person' && e.plugin === 'claudopus') {
-      const wasSaid = isButtonFocusSaid
       const timed = focusMoved(e.element, e.requestId)
       timed(await $.clock.now())
-      if (!wasSaid && isButtonFocusSaid) await update($, focusSaidKept, () => true).catch(() => undefined)
     }
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)

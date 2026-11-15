@@ -57,6 +57,8 @@ const bandHooks = (on: On) => {
         const press = async (n: number, choice: string) => {
           const now = await $.clock.now()
           if (picked === n && bandPick && now - bandPick.at >= STEADY) return (bandPick = undefined), void answerAsk($, first, choice).catch(err => log($, `answer not sent: ${String(err)}`))
+          // The same digit again too soon neither answers nor starts the pick afresh
+          if (picked === n) return
           const pick = (bandPick = { id, n, at: now })
           $.ui.invalidate('ui.render')
           // Left alone, the pick is let go

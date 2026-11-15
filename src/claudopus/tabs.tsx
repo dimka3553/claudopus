@@ -9,8 +9,8 @@ const tabHooks = (on: On) => {
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
     // Whether its pane held still as it landed is noted first, before anything it does draws the pane again (answerPress)
-    if (e.plugin === 'claudopus' && !isButtonFocusSaid) isButtonFocusSaid = Boolean(await read($, focusSaidKept).catch(() => false))
-    if (e.plugin === 'claudopus') pressSeen(e.element, e.requestId, e.surface, await $.clock.now())
+    if (e.plugin === 'claudopus' && !isFocusRead) (isFocusRead = true), (focusSurfaces = new Set([...focusSurfaces, ...((await read($, focusSaidKept).catch(() => [])) ?? [])]))
+    if (e.plugin === 'claudopus' && pressSeen(e.element, e.requestId, e.surface, await $.clock.now())) await update($, focusSaidKept, () => [...focusSurfaces]).catch(() => undefined)
     if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()

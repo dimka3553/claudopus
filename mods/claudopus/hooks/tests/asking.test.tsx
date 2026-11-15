@@ -858,18 +858,8 @@ test('a button answers only when deliberately pressed: never over a reply typed 
   await $.ui.scroll({ component: 'Pane', requestId: 'claudopus', offset: 0, by: -30, origin: { kind: 'person' } } as never).catch(() => undefined)
   await list.press({ key: await release() })
   expect(await shows('Not answered: the panel had just moved under your pointer.')).toBeDefined()
-  // On the desktop a click moves the focus onto its button just before the press. A press with no such move is a key on a button that
-  // held the focus, such as a space typed into what the person took for the box: it does not count either
+  // On the desktop a click moves the focus onto its button just before the press
   const focus = async (element: string) => $.ui.focus({ component: 'Pane', requestId: 'claudopus', plugin: 'claudopus', element, origin: { kind: 'person' } } as never)
-  const notNow = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Not now')?.key ?? ''
-  const box2 = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.key ?? ''
-  await focus(notNow)
-  await focus(box2)
-  await clock.advance(1000)
-  await list.press({ key: await release() })
-  expect(await shows('Not answered: no click reached “Release it”')).toBeDefined()
-  // and the keys go back to the reply box, so the rest of what is typed lands there
-  expect(await until(async () => (focused.at(-1) === box2 ? true : undefined))).toBe(true)
   // Clicked on a still panel: said back, and nothing goes yet; taken back, nothing goes at all and the buttons are back
   await clock.advance(1000)
   await focus(await release())
@@ -881,6 +871,17 @@ test('a button answers only when deliberately pressed: never over a reply typed 
   await clock.advance(6000)
   expect(sent().length).toBe(before)
   expect(await until(async () => ((await release()) ? true : undefined))).toBe(true)
+  // Once a click has been seen to move the focus so, a press with no such move is a key on a button that held the focus, such as a
+  // space typed into what the person took for the box: it does not count either
+  const notNow = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Not now')?.key ?? ''
+  const box2 = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.key ?? ''
+  await focus(notNow)
+  await focus(box2)
+  await clock.advance(1000)
+  await list.press({ key: await release() })
+  expect(await shows('Not answered: no click reached “Release it”')).toBeDefined()
+  // and the keys go back to the reply box, so the rest of what is typed lands there
+  expect(await until(async () => (focused.at(-1) === box2 ? true : undefined))).toBe(true)
   // Other work writing a line just before the click moves nothing under the pointer: the click counts
   await clock.advance(1000)
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a2', text: 'Measuring the left ear.' } as never)

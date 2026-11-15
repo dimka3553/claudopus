@@ -97,7 +97,7 @@ const CALM = 10_000
 // which call for a drawing of the mod's own it answered (freshness)
 const heldDrawings = new Map<string, { shape: string; content: string; at: number; fresh: number; drawing: unknown; askSign?: string }>()
 // What of an ask's card changes its layout beyond the pane's shape: what is said under its buttons, an answer held, an answer said back
-const askLayout = () => JSON.stringify([[...pressRefused].map(([id, r]) => [id, r.at]), [...answerHeld].map(([id, h]) => [id, h.askAt]), [...sentReplies].map(([id, r]) => [id, r.at, r.to])])
+const askLayout = () => JSON.stringify([[...askPics].map(([key, pics]) => [key, pics.length]), [...pictureIn.keys()], copiedKey, openedKey, [...pressRefused].map(([id, r]) => [id, r.at]), [...answerHeld].map(([id, h]) => [id, h.askAt]), [...sentReplies].map(([id, r]) => [id, r.at, r.to])])
 // Counts the mod's own calls for a drawing: a press, a reply, a picture made, a box that came. Each one is drawn at once
 let freshness = 0
 const drawAgain = ($: EngineInterface) => {
@@ -254,16 +254,18 @@ const paneMoved = (paneId: string, at: number) => paneMovedAt.set(paneId, Math.m
 // A press with no such move is a key (Space or Enter) on a button that held the focus already: the app gives the focus back to a button
 // by its place after each drawing, so a button that came where another was holds it, and the person typing a sentence presses it with
 // the first space. So on the desktop a press counts only within FOCUS_WINDOW of the person's focus moving onto that very button. A
-// copy of the app that never says a button took the focus (no such move seen since the mod loaded) is not held to it
+// surface is held to it once a click on it has been seen to move the focus so (focusSurfaces): one whose taps raise no focus move,
+// such as a phone, is never refused for it
 const FOCUS_WINDOW = 1500
 // Marked before the hook awaits anything, so a press hook running beside it finds it; its time is filled in once read (until then
 // it counts as now)
 let focusSeen: { element: string; requestId: string; at?: number } | undefined
-let isButtonFocusSaid = false
+// The surfaces on which a press has been seen to come with the person's focus moving onto its button, kept through a reload
+let focusSurfaces = new Set<string>()
+let isFocusRead = false
 const focusMoved = (element: string | undefined, requestId: string) => {
   const seen: typeof focusSeen = element ? { element, requestId } : undefined
   focusSeen = seen
-  if (element && !isTypedBox(element)) isButtonFocusSaid = true
   return (at: number) => void (seen && (seen.at = at))
 }
 // Each press, by its element, as the press hook found it before anything it does draws the pane again: whether its pane held still,
@@ -272,9 +274,13 @@ let pressSteady = new Map<string, 'steady' | 'moved' | 'unfocused'>()
 // Off only in the terminal, whose buttons are pressed by keys alone. A focus move counts for one press only
 const pressSeen = (element: string, requestId: string, surface: string, at: number) => {
   if (pressSteady.size > 50) pressSteady = new Map()
-  const isFocused = surface === 'terminal' || !isButtonFocusSaid || (focusSeen?.element === element && focusSeen.requestId === requestId && at - (focusSeen.at ?? at) <= FOCUS_WINDOW)
+  const isMatched = focusSeen?.element === element && focusSeen.requestId === requestId && at - (focusSeen.at ?? at) <= FOCUS_WINDOW
+  const isNewSurface = isMatched && surface !== 'terminal' && !focusSurfaces.has(surface)
+  if (isNewSurface) focusSurfaces.add(surface)
+  const isFocused = surface === 'terminal' || !focusSurfaces.has(surface) || isMatched
   focusSeen = undefined
   pressSteady.set(element, at - (paneMovedAt.get(requestId) ?? -Infinity) < STEADY ? 'moved' : isFocused ? 'steady' : 'unfocused')
+  return isNewSurface
 }
 // The reply box each pane last drew for each work's ask, so a press that did not count gives the keys back to it
 const replyBoxes = new Map<string, string>()
