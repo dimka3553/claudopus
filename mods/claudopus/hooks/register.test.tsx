@@ -8077,7 +8077,7 @@ test('a computer with no battery shows none, and a desktop plugged into a UPS do
   await term.unmount()
 })
 
-test('a pointer resting on a figure shows more of it in a line above: who uses the most, the parts of a speed, the battery in full', async ($, on) => {
+test('a pointer resting on a figure shows its card: who uses the most, the parts of a speed, the battery in full', async ($, on) => {
   let n = 0
   const extra = `${gpuAt(37)}\n"In use system memory"=1288490188\n${batt('85%; discharging; 4:12 remaining')}`
   const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, extra) })
@@ -8088,39 +8088,39 @@ test('a pointer resting on a figure shows more of it in a line above: who uses t
   await clock.advance(1000)
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
-  const more: Record<string, string> = {
-    memory: 'Memory 29 of 64 GB in use · most: Claude 3.3 GB, Safari 0.4 GB · Claude with what it started 3.3 GB',
-    cpu: 'Processor 50% busy across 10 cores · most: Safari 30%, Claude 20% · Claude with what it started 20%',
-    gpu: 'Graphics processor 37% busy · 1.2 GB of memory in use',
-    battery: 'Battery 85% · on battery, 4:12 left as the system estimates it',
-    disk: 'Disk 63 MB/s read and written · disk0',
-    net: 'Network 1 MB/s · in 1 MB/s, out 0 MB/s · en0',
+  const cards: Record<string, string[]> = {
+    memory: ['Memory', '29 of 64 GB', 'Claude and what it started', '3.3 GB', 'Using the most', 'Safari', '0.4 GB'],
+    cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
+    gpu: ['Graphics processor', '37% busy', 'Its memory in use', '1.2 GB'],
+    battery: ['Battery', '85%', 'On battery, about 4:12 left'],
+    disk: ['Disk', '63 MB/s', 'Read and written together', 'Disks', 'disk0'],
+    net: ['Network', '1 MB/s', 'In', 'Out', 'Connections', 'en0'],
   }
-  const boxes = await desk.findAll({ type: 'Box' })
-  // The hover of the drawn Box with this key, as the surface gets it
+  // The drawn tree as the surface gets it: each element's props, its hover, its children
+  type El = { type?: string; props?: Record<string, unknown> & { key?: string; children?: unknown }; hover?: Record<string, unknown>; children?: unknown }
   const drawn: unknown = await desk.drawn()
-  const hoverOf = (node: unknown, key: string): Record<string, unknown> | undefined => {
+  const kids = (el: El): El[] => [el.children, el.props?.children].flatMap(c => (Array.isArray(c) ? c : c && typeof c === 'object' ? [c] : [])) as El[]
+  const find = (node: unknown, key: string): El | undefined => {
     if (!node || typeof node !== 'object') return undefined
-    if (Array.isArray(node)) return node.map(n => hoverOf(n, key)).find(Boolean)
-    const el = node as { props?: { key?: string; children?: unknown }; hover?: Record<string, unknown>; children?: unknown }
-    if (el.props?.key === key) return el.hover ?? {}
-    return hoverOf(el.props?.children, key) ?? hoverOf(el.children, key)
+    if (Array.isArray(node)) return node.map(n => find(n, key)).find(Boolean)
+    const el = node as El
+    return el.props?.key === key ? el : kids(el).map(k => find(k, key)).find(Boolean)
   }
-  for (const [key, text] of Object.entries(more)) {
-    // Hidden until the pointer rests on its own figure (the test kit does not show the hover itself)
-    const line = boxes.find(b => b.props.key === `usage-more-${key}`)
-    expect(line?.props.display).toBe('none')
-    expect(line?.text).toBe(text)
-    // Shown by the figure's own hover group, and the desktop app wires a member to the pointer only when its hover changes a style:
-    // a hover that is a scope alone lights nothing
-    expect(hoverOf(drawn, `usage-more-${key}`)).toEqual({ scope: `usage-${key}`, display: 'flex' })
-    const figure = hoverOf(drawn, `usage-${key}`)
-    expect(figure?.scope).toBe(`usage-${key}`)
-    expect(Object.keys(figure ?? {}).filter(k => k !== 'scope').length).toBeGreaterThan(0)
+  const textOf = (node: unknown): string[] => (typeof node === 'string' ? [node] : !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(textOf) : kids(node as El).flatMap(textOf))
+  for (const [key, parts] of Object.entries(cards)) {
+    const figure = find(drawn, `usage-${key}`)
+    // The figure lights a faint fill under a resting pointer: a hover the app draws, so it is no bare group name
+    expect(Object.keys(figure?.hover ?? {})).toEqual(['backgroundColor'])
+    // Its card is the app's own hover card: placed absolutely inside the figure's keyed Box, hidden, shown on hover, and in no group,
+    // which the app would leave in the bar's own line instead of lifting it over the chat
+    const card = figure && kids(figure).find(k => k.props?.position === 'absolute')
+    expect(card?.props?.position).toBe('absolute')
+    expect(card?.props?.display).toBe('none')
+    expect(card?.hover).toEqual({ display: 'flex' })
+    for (const part of parts) expect(textOf(card)).toContain(part)
   }
-  // Above the figures, so they stay where they are when it shows
-  const band = boxes.find(b => b.props.flexDirection === 'column' && b.text.endsWith('1 MB/s'))
-  expect(band?.text.startsWith('Memory 29')).toBe(true)
+  // The bar stays one line: nothing is added above the figures
+  expect(find(drawn, 'usage-more-memory')).toBeUndefined()
   await desk.unmount()
 })
 

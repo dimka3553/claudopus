@@ -1,1 +1,1 @@
-- In the desktop app, resting the pointer on a figure above the prompt now really shows its line of more detail, and the figure takes a faint fill while it does
+- In the desktop app, resting the pointer on a figure above the prompt now opens a card with its detail: who uses the most memory and processor, Claude's part, graphics memory, network in and out, and the battery in words; the figure takes a faint fill while it shows

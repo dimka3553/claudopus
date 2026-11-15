@@ -63,33 +63,71 @@ const batteryWords = (b: UsageBattery) =>
 // What follows the charge: the time left, the time to full, or that it is on power; nothing while the system still estimates
 const batteryAfter = (b: UsageBattery) => (b.state === 'plugged' || b.state === 'unknown' ? '' : b.left ? ` ${leftText(b.left)}${b.state === 'charging' ? ' to full' : ' left'}` : '')
 
-// More of each figure, for a pointer resting on it: who uses the most, Claude's part, the parts of a speed, and the battery's state
-// in full. Only what the looks gave; a part that is not known is left out
-const usageMore = (f: UsageFigures) => {
-  const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? ` · most: ${top.map(([name, n]) => `${name} ${text(n)}`).join(', ')}` : '')
+// More of each figure, for a pointer resting on it: a heading with the figure in full, then rows of a name and its value (Claude's
+// part, the parts of a speed, who uses the most), and for the battery its state in words. Only what the looks gave: a part that is
+// not known is left out
+type UsageCard = { title: string; value: string; note?: string; rows: [string, string][]; most?: [string, string][] }
+const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
+  const most = (top: UsageTop | undefined, text: (n: number) => string) => (top?.length ? top.map(([name, n]): [string, string] => [name, text(n)]) : undefined)
   const b = f.battery
   return {
-    memory: `Memory ${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB in use${most(f.memTop, n => `${gbText(n)} GB`)} · Claude with what it started ${gbText(f.memClaude)} GB`,
-    cpu: f.cpu === undefined ? '' : `Processor ${pctText(f.cpu)}% busy${f.ncpu && f.ncpu > 1 ? ` across ${f.ncpu} cores` : ''}${most(f.cpuTop, n => `${pctText(n)}%`)} · Claude with what it started ${pctText(f.cpuClaude ?? 0)}%`,
-    gpu: f.gpu === undefined ? '' : `Graphics processor ${pctText(f.gpu)}% busy${f.gpuMem === undefined ? '' : f.gpuMemTotal ? ` · ${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB of its memory in use` : ` · ${gbText(f.gpuMem)} GB of memory in use`}`,
-    battery: !b ? '' : `Battery ${b.pct}% · ${b.state === 'battery' ? (b.left ? `on battery, ${leftText(b.left)} left as the system estimates it` : 'on battery, the system is still estimating the time left') : b.state === 'charging' ? (b.left ? `charging, ${leftText(b.left)} to full` : 'charging, the time to full still being estimated') : b.state === 'unknown' ? 'the system does not say whether it charges' : b.pct >= 100 ? 'fully charged, on power' : 'on power, not charging'}`,
-    disk: f.disk === undefined ? '' : `Disk ${rateText(f.disk).join(' ')} read and written${f.disks?.length ? ` · ${f.disks.join(', ')}` : ''}`,
-    net: f.net === undefined ? '' : `Network ${rateText(f.net).join(' ')}${f.netIn !== undefined && f.netOut !== undefined ? ` · in ${rateText(f.netIn).join(' ')}, out ${rateText(f.netOut).join(' ')}` : ''}${f.ports?.length ? ` · ${f.ports.join(', ')}` : ''}`,
+    memory: { title: 'Memory', value: `${gbText(f.memUsed)} of ${gbText(f.memTotal)} GB`, rows: [['Claude and what it started', `${gbText(f.memClaude)} GB`]], most: most(f.memTop, n => `${gbText(n)} GB`) },
+    cpu: f.cpu === undefined ? undefined : {
+      title: 'Processor',
+      value: `${pctText(f.cpu)}% busy`,
+      rows: [...(f.ncpu && f.ncpu > 1 ? [['Cores', `${f.ncpu}`] as [string, string]] : []), ['Claude and what it started', `${pctText(f.cpuClaude ?? 0)}%`]],
+      most: most(f.cpuTop, n => `${pctText(n)}%`),
+    },
+    gpu: f.gpu === undefined ? undefined : {
+      title: 'Graphics processor',
+      value: `${pctText(f.gpu)}% busy`,
+      rows: f.gpuMem === undefined ? [] : [['Its memory in use', f.gpuMemTotal ? `${gbText(f.gpuMem)} of ${gbText(f.gpuMemTotal)} GB` : `${gbText(f.gpuMem)} GB`]],
+    },
+    battery: !b ? undefined : {
+      title: 'Battery',
+      value: `${b.pct}%`,
+      note: b.state === 'battery' ? (b.left ? `On battery, about ${leftText(b.left)} left` : 'On battery, the time left is still being estimated') : b.state === 'charging' ? (b.left ? `Charging, about ${leftText(b.left)} to full` : 'Charging, the time to full is still being estimated') : b.state === 'unknown' ? 'The system does not say whether it charges' : b.pct >= 100 ? 'Fully charged, on power' : 'On power, not charging',
+      rows: [],
+    },
+    disk: f.disk === undefined ? undefined : { title: 'Disk', value: rateText(f.disk).join(' '), note: 'Read and written together', rows: f.disks?.length ? [['Disks', f.disks.join(', ')]] : [] },
+    net: f.net === undefined ? undefined : {
+      title: 'Network',
+      value: rateText(f.net).join(' '),
+      rows: [...(f.netIn !== undefined && f.netOut !== undefined ? [['In', rateText(f.netIn).join(' ')], ['Out', rateText(f.netOut).join(' ')]] as [string, string][] : []), ...(f.ports?.length ? [['Connections', f.ports.join(', ')]] as [string, string][] : [])],
+    },
   }
 }
-// The line of more, in place of nothing above the figures: drawn hidden, shown while the pointer rests on its figure
-const usageMoreDrawn = (ui: Ui, f: UsageFigures) => {
+// The card, the app's own hover card: a Box placed absolutely and drawn hidden inside the figure's keyed Box, shown while the pointer
+// rests on the figure. The app lifts it above the bar, gives it its own surface, edge and shadow, and keeps it in the window
+const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
   const { Box, Text } = ui
-  const more = usageMore(f)
-  return (Object.entries(more) as [string, string][]).filter(([, text]) => text).map(([key, text]) => (
-    <Box key={`usage-more-${key}`} display="none" hover={{ scope: `usage-${key}`, display: 'flex' }} height={1} overflow="hidden">
-      <Text dimColor wrap="truncate-end">{text}</Text>
+  const row = (name: string, value: string, n: number, kind: string) => (
+    <Box key={`${key}-${kind}-${n}`} flexDirection="row" justifyContent="space-between" gap={3}>
+      <Text dimColor wrap="truncate-end">{name}</Text>
+      <Text wrap="truncate-end">{value}</Text>
     </Box>
-  ))
+  )
+  return (
+    // No key of its own: a hidden keyed Box would be its own hover scope, which the pointer can never be over
+    <Box position="absolute" top={-1} left={0} display="none" hover={{ display: 'flex' }} flexDirection="column" gap={1}>
+      <Box key={`${key}-card-head`} flexDirection="row" justifyContent="space-between" gap={3}>
+        <Text bold>{card.title}</Text>
+        <Text bold>{card.value}</Text>
+      </Box>
+      {card.note ? <Text key={`${key}-card-note`} dimColor>{card.note}</Text> : null}
+      {card.rows.length ? <Box key={`${key}-card-rows`} flexDirection="column">{card.rows.map(([name, value], n) => row(name, value, n, 'row'))}</Box> : null}
+      {card.most?.length ? (
+        <Box key={`${key}-card-most`} flexDirection="column">
+          <Text dimColor>Using the most</Text>
+          {card.most.map(([name, value], n) => row(name, value, n, 'most'))}
+        </Box>
+      ) : null}
+    </Box>
+  )
 }
 
 // The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
-// for the disk and the network
+// for the disk and the network. Each figure is a keyed Box, so the pointer resting on it shows its card and a faint fill
 const usageDrawn = (ui: Ui, f: UsageFigures) => {
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const { Box, Text } = ui
@@ -97,24 +135,24 @@ const usageDrawn = (ui: Ui, f: UsageFigures) => {
   const Svg = table.Svg
   const isHigh = isMemoryHigh(f)
   const words = usageWords(f)
-  const one = (key: string, svg: { source: string; width: number; height: number }, alt: string, value: string, unit: string, color?: string) => (
-    // The desktop app lights a hover group only from a member whose hover changes how it looks: a bare scope is never wired to the
-    // pointer. So the figure takes a faint fill while the pointer rests on it, and that lights the line of more above
-    <Box key={key} flexDirection="row" flexShrink={0} alignItems="center" hover={{ scope: key, backgroundColor: FILL }}>
-      <Svg key={`${key}-${svg.source.length}-${hashOf(svg.source)}`} source={svg.source} alt={alt} width={svg.width} height={svg.height} />
+  const cards = usageCards(f)
+  const one = (key: string, card: UsageCard | undefined, svg: { source: string; width: number; height: number }, alt: string, value: string, unit: string, color?: string) => (
+    <Box key={`usage-${key}`} flexDirection="row" flexShrink={0} alignItems="center" hover={{ backgroundColor: FILL }}>
+      <Svg key={`usage-${key}-${svg.source.length}-${hashOf(svg.source)}`} source={svg.source} alt={alt} width={svg.width} height={svg.height} />
       <Text color={color} wrap="truncate-end">
         {value}
         <Text dimColor={!color} color={color}>{unit}</Text>
       </Text>
+      {card ? usageCardDrawn(ui, `usage-${key}`, card) : null}
     </Box>
   )
   return [
-    one('usage-memory', usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),
-    f.cpu === undefined ? null : one('usage-cpu', usageSvg('cpu', { claude: f.cpuClaude ?? 0, used: f.cpu }), words.cpu, pctText(f.cpu), '%'),
-    f.gpu === undefined ? null : one('usage-gpu', usageSvg('gpu', { claude: 0, used: f.gpu }), words.gpu, pctText(f.gpu), '%'),
-    f.battery ? one('usage-battery', batterySvg(f.battery), words.battery, `${f.battery.pct}`, `%${batteryAfter(f.battery)}`, isBatteryLow(f.battery) ? USAGE_AMBER : undefined) : null,
-    f.disk === undefined ? null : one('usage-disk', usageSvg('disk'), words.disk, rateText(f.disk)[0], ` ${rateText(f.disk)[1]}`),
-    f.net === undefined ? null : one('usage-net', usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
+    one('memory', cards.memory, usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),
+    f.cpu === undefined ? null : one('cpu', cards.cpu, usageSvg('cpu', { claude: f.cpuClaude ?? 0, used: f.cpu }), words.cpu, pctText(f.cpu), '%'),
+    f.gpu === undefined ? null : one('gpu', cards.gpu, usageSvg('gpu', { claude: 0, used: f.gpu }), words.gpu, pctText(f.gpu), '%'),
+    f.battery ? one('battery', cards.battery, batterySvg(f.battery), words.battery, `${f.battery.pct}`, `%${batteryAfter(f.battery)}`, isBatteryLow(f.battery) ? USAGE_AMBER : undefined) : null,
+    f.disk === undefined ? null : one('disk', cards.disk, usageSvg('disk'), words.disk, rateText(f.disk)[0], ` ${rateText(f.disk)[1]}`),
+    f.net === undefined ? null : one('net', cards.net, usageSvg('net'), words.net, rateText(f.net)[0], ` ${rateText(f.net)[1]}`),
   ]
 }
 // The line as text, for the terminal, in a phone's 50 columns with the octopus: a word for each, units cut to G and M/s, and three-cell meters with Claude's cells purple

@@ -95,15 +95,8 @@ const bandHooks = (on: On) => {
         ) : null}
       </Box>
     )
-    // Where the figures are drawn, a pointer resting on one shows more of it in a line above, so the figures stay where they are
-    return drawn && figures ? (
-      <Box flexDirection="column">
-        {usageMoreDrawn(ui, figures)}
-        {row}
-      </Box>
-    ) : (
-      row
-    )
+    // Where the figures are drawn, a pointer resting on one shows its card above it, lifted over the chat by the app
+    return row
   })
 
 }
