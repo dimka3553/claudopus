@@ -123,7 +123,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed]])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], [...barShut], replyTo])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -259,6 +259,25 @@ const asPressed = (one: Todo): Todo => {
   const admins = one.admins?.filter(gate => !gatePressed.has(gate.id))
   if (!isAnswered && admins?.length === one.admins?.length) return one
   return { ...one, ask: isAnswered ? undefined : one.ask, admins: admins?.length ? admins : undefined }
+}
+// Where a reply in words is typed. The desktop app keeps moving a pane's window back to a box that holds the cursor inside it, many
+// times a second, and reports each move as the person's own scroll (found live, 15 Nov: stuck at the box while typing, a bounce
+// once the moves were refused). A pane has no part that stays still, so on a surface whose bar above the prompt takes a box
+// (barBoxes: the bar was drawn there with an Input in its table) an ask's reply box is drawn in that bar, a site of its own that the
+// pane's scrolling does not reach, and never in the pane
+const barBoxes = new Set<string>()
+// Surfaces whose bar is folded by the person or held by a survey: nothing of the mod's shows there just now
+const barShut = new Set<string>()
+const repliesInBar = (surface: string) => barBoxes.has(surface)
+// The card the bar's box is for: it stays with a card until that one is answered, so a newer question never takes the box from
+// under what the person is typing; then it goes to the one that asked last. A press on another card points it there (Reply to this one)
+let replyTo = ''
+// This chat's cards that wait for a reply, the newest ask first, as the panel orders them
+const asksForBar = (cards: Todo[]) =>
+  cards.filter(one => !one.parentId && !one.chat && Boolean(asPressed(one).ask) && !isActingOnReply(one)).sort((a, b) => (b.ask?.at ?? 0) - (a.ask?.at ?? 0))
+const barTarget = (cards: Todo[]) => {
+  const asking = asksForBar(cards)
+  return asking.find(one => one.id === replyTo) ?? asking[0]
 }
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another

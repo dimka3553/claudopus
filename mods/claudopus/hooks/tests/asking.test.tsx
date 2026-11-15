@@ -1822,5 +1822,83 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
   expect(events.filter(one => one.ev === 'input').map(one => one.count)).toEqual([1, 2, 3])
   for (const typed of ['Quiet', 'lynx', '4419', 'Zebra', 'quartz', '7731', 'Qu"']) expect(text.includes(typed)).toBe(false)
   expect(files.has(`${MEMORY}/record-panel.on`)).toBe(false)
+  // The bar above the prompt, where the desktop's reply box is drawn, is recorded the same way: its drawings with the box in them,
+  // typing there as counts, and the panel's drawings beside it, which hold no reply box
+  files.set(`${MEMORY}/record-panel.on`, '')
+  files.set(`mtime:${MEMORY}/record-panel.on`, String(1_700_000_222_000))
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  const barBox = async () => (await bar.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  await clock.advance(3000)
+  await barBox()
+  await box()
+  for (const typed of ['M', 'Mo', 'Mossy heron 2203']) await bar.input({ key: (await barBox())?.key ?? '', text: typed, kind: 'change' } as never)
+  await clock.advance(200_000)
+  await barBox()
+  await clock.advance(3000)
+  const second = files.get(recorded().find(one => one !== path) ?? '') ?? ''
+  const barEvents = second.trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as { ev: string; component?: string; site?: string; count?: number; inputs?: { key: string }[] })
+  expect(barEvents.some(one => one.ev === 'render' && one.component === 'AbovePrompt' && one.inputs?.some(input => /^band-.*-reply-/.test(input.key)))).toBe(true)
+  expect(barEvents.filter(one => one.ev === 'input' && one.site === 'bar').map(one => one.count)).toEqual([1, 2, 3])
+  expect(barEvents.some(one => one.ev === 'render' && one.component === 'Pane' && one.inputs?.some(input => /-reply-/.test(input.key)))).toBe(false)
+  for (const typed of ['Mossy', 'heron', '2203']) expect(second.includes(typed)).toBe(false)
+  await bar.unmount()
   await list.unmount()
+})
+
+test("where the bar above the prompt takes a box, an ask's reply is typed there and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); with several asking a card's press points the bar's box at it and each draft is kept; a folded bar is said on the card", async ($, on) => {
+  const { appended, clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which ear first?', choices: ['Left', 'Right'] } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
+  type Site = typeof list
+  const boxesIn = async (site: Site) => (await site.findAll({ type: 'Input' } as never)).filter(one => /-reply-/.test(one.key ?? ''))
+  const says = async (site: Site, text: RegExp) => (await site.findAll({ type: 'Text' })).some(one => text.test(one.text ?? ''))
+  // A surface whose bar was never drawn keeps the card's own box: a reply in words can always be typed somewhere
+  expect((await boxesIn(list)).length).toBe(1)
+  // The bar drawn on the desktop: the box is in it, under a line naming the work, and gone from the panel and Details
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  expect(await until(async () => ((await boxesIn(list)).length === 0 && (await boxesIn(details)).length === 0 ? true : undefined))).toBe(true)
+  expect((await boxesIn(bar)).length).toBe(1)
+  expect(await says(bar, /Reply to “Check the ears”/)).toBe(true)
+  expect(await says(list, /^✎ Or reply in words in the bar above the chat's prompt$/)).toBe(true)
+  expect(await says(details, /^✎ Or reply in words in the bar above the chat's prompt$/)).toBe(true)
+  // The card keeps its buttons
+  expect((await list.findAll({ type: 'Button' })).map(b => String(b.props.label))).toEqual(expect.arrayContaining(['Left', 'Right']))
+  // Half typed: the same box through the bar's own drawings
+  const [first] = await boxesIn(bar)
+  await bar.input({ key: first?.key ?? '', text: 'The left, but ke', kind: 'change' } as never)
+  await clock.advance(6000)
+  expect((await boxesIn(bar))[0]?.key).toBe(first?.key)
+  // A second piece of work asks while that reply is half typed: the box stays the first card's, the bar says one more asks, and
+  // the newer card offers the box
+  await $.agent.spawn({ ...spawn, description: 'Sort the invoices', prompt: 'sort the invoices' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Which month?', choices: ['October', 'November'] } as never)
+  expect(await until(async () => ((await says(bar, /^ · 1 more question on its card · Which ear first\?$/)) ? true : undefined))).toBe(true)
+  expect(await says(bar, /Reply to “Check the ears”/)).toBe(true)
+  expect((await boxesIn(bar)).map(one => one.key)).toEqual([first?.key])
+  expect((await boxesIn(list)).length).toBe(0)
+  const offer = async () => (await list.findAll({ type: 'Button' })).filter(b => b.props.label === '✎ Reply to this one in words')
+  expect(await until(async () => ((await offer()).length === 1 ? true : undefined))).toBe(true)
+  // Pressed, the box is the newer card's, empty; pressed on the first card again, its half-typed reply is back
+  await list.press({ key: (await offer())[0]?.key ?? '' })
+  expect(await until(async () => ((await says(bar, /Reply to “Sort the invoices”/)) ? true : undefined))).toBe(true)
+  expect((await boxesIn(bar))[0]?.props.value ?? '').toBe('')
+  expect((await offer()).length).toBe(1)
+  await list.press({ key: (await offer())[0]?.key ?? '' })
+  expect(await until(async () => ((await says(bar, /Reply to “Check the ears”/)) ? true : undefined))).toBe(true)
+  expect((await boxesIn(bar))[0]?.props.value).toBe('The left, but ke')
+  // Sent from the bar: it reaches the work in the person's own words, and the box moves on to the card that still asks
+  await bar.input({ key: (await boxesIn(bar))[0]?.key ?? '', text: 'The left, but keep the scan' })
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('in their own words: The left, but keep the scan')))).toBeDefined()
+  expect(await until(async () => ((await says(bar, /Reply to “Sort the invoices”/)) ? true : undefined))).toBe(true)
+  expect(await says(bar, /more question/)).toBe(false)
+  // The bar folded by the person: nothing of it shows, so the card says how to get the box back
+  await bar.unmount()
+  const folded = await $.ui.mount({ ...BAND, props: { ...BAND.props, isCollapsed: true }, surface: 'desktop' } as never)
+  expect(await until(async () => ((await says(list, /^✎ To reply in words, unfold the bar above the chat's prompt$/)) ? true : undefined))).toBe(true)
+  expect((await boxesIn(list)).length).toBe(0)
+  await Promise.all([list.unmount(), details.unmount(), folded.unmount()])
 })

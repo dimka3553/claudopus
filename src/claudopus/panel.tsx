@@ -306,7 +306,19 @@ const panelHooks = (on: On) => {
             ))}
           </Box>
           )}
-          {'Input' in table && !one.chat ? (
+          {/* Where the bar above the prompt holds the reply box, the card only says so: a box typed in here is what the app drags the
+              panel to. With several asking, a press points the bar's box at this one */}
+          {'Input' in table && !one.chat && repliesInBar(e.surface) ? (
+            barShut.has(e.surface) ? (
+              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ To reply in words, unfold the bar above the chat's prompt</Text>
+            ) : barTarget(own)?.id === one.id ? (
+              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Or reply in words in the bar above the chat's prompt</Text>
+            ) : (
+              <Box flexDirection="row">
+                <Button key={`${key}-inbar-${presses}`} label="✎ Reply to this one in words" plain onPress={() => void ((replyTo = one.id), (presses += 1), redraw($))} />
+              </Box>
+            )
+          ) : 'Input' in table && !one.chat ? (
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}

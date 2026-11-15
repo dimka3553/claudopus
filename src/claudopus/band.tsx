@@ -23,14 +23,59 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
       </ui.Button>
     </ui.Box>
   ) : null
+// The reply box of the card that asks, in the bar above the prompt (asking.tsx, repliesInBar): one line naming the work the reply goes
+// to, with the line that points at the panel's top at its end so the bar keeps its height as the panel is scrolled, and the box
+// under it. The box is the card's own: the same drafts, the same answer, a new one for each ask
+const barReply = ($: EngineInterface, ui: Ui, one: Todo, ask: NonNullable<Todo['ask']>, more: number, marker: JSX.Element | null) => {
+  const draft = draftOf(one.id, ask)
+  return (
+    <ui.Box key="band-reply" flexDirection="column" flexShrink={0}>
+      <ui.Box key="band-reply-to" flexDirection="row" gap={2} height={1} overflow="hidden">
+        <ui.Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <ui.Text wrap="truncate-end">
+            <ui.Text color={NEEDS} bold>{`↳ Reply to “${cut(titleOf(one), 48)}”`}</ui.Text>
+            <ui.Text dimColor>{`${more > 0 ? ` · ${more} more ${more === 1 ? 'question on its card' : 'questions on their cards'}` : ''} · ${oneLine(ask.text)}`}</ui.Text>
+          </ui.Text>
+        </ui.Box>
+        {marker}
+      </ui.Box>
+      {'Input' in ui ? (
+        <ui.Box width="100%" flexDirection="column">
+          <ui.Input
+            key={`band-${one.id}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
+            placeholder="Reply in your own words"
+            value={draftShown(one.id, ask)}
+            submitLabel="send"
+            onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($))}
+            onSubmit={value => void (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+          />
+        </ui.Box>
+      ) : null}
+    </ui.Box>
+  )
+}
+// The bar as last drawn on each surface while a reply box was in it: while the person types it is drawn as it was, whole, but for a
+// change in what it holds, as a pane is (heldDrawings): each drawing is a new box under the cursor
+const barHeld = new Map<string, { shape: string; drawing: unknown }>()
 // The cells the small octopus takes in the terminal (six dots wide, three braille cells), before the figures
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
   // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
+    // Whether this surface's bar takes the reply box, and whether it shows just now: the cards draw their asks by it (repliesInBar)
+    const canBox = e.surface === 'desktop' && 'Input' in uiOf($, e)
+    const isShut = canBox && Boolean(e.props.hasSurvey || e.props.isCollapsed)
     const cards = await read($, todos)
+    if (canBox !== barBoxes.has(e.surface) || isShut !== barShut.has(e.surface)) {
+      if (canBox) barBoxes.add(e.surface)
+      else barBoxes.delete(e.surface)
+      if (isShut) barShut.add(e.surface)
+      else barShut.delete(e.surface)
+      // Only a card that asks is drawn differently for it
+      if (asksForBar(cards).length) drawAgain($)
+    }
+    if (e.props.hasSurvey) return next(e)
     const working = cards.filter(one => !one.parentId && one.status === 'working')
     // Work that just finished makes the octopus happy for its pause, the band staying that long even when nothing else runs;
     // the redraw set for the pause's end is read so the band leaves or goes back to work then
@@ -93,6 +138,38 @@ const bandHooks = (on: On) => {
         )
       }
     }
+    // Where the bar takes the reply box: the card that asks, or the one the person pointed it at, and how many more ask
+    const asking = canBox && !isShut ? asksForBar(cards) : []
+    const target = asking.length ? barTarget(cards) : undefined
+    if (target?.ask) {
+      // The box stays this card's until it is answered
+      replyTo = target.id
+      const marker = await waitMarker($, ui, e.surface)
+      const shape = JSON.stringify([target.id, askMark(target.ask), replies.get(target.id) ?? 0, asking.length, Boolean(marker), waitsAtTop, finishedAtTop, working.length > 0, happy])
+      const held = barHeld.get(e.surface)
+      if (isTyping && held?.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
+      const reply = barReply($, ui, target, target.ask, asking.length - 1, marker)
+      let drawing: JSX.Element = reply
+      if (working.length || happy) {
+        await read($, figuresAt)
+        const figures = usageNow(await $.clock.now())
+        if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
+        const drawn = figures ? usageDrawn(ui, figures) : null
+        drawing = (
+          <Box flexDirection="column">
+            {reply}
+            <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
+              {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
+              {drawn ? usageSpacersDrawn(ui) : null}
+              {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, Infinity)}</Box>) : null}
+            </Box>
+          </Box>
+        )
+      }
+      barHeld.set(e.surface, { shape, drawing })
+      return drawing
+    }
+    barHeld.delete(e.surface)
     if (!working.length && !happy) return (await waitMarker($, ui, e.surface)) ?? next(e)
     // A narrow terminal seats no panel until it is asked for: the band says how
     const isPanelAway = e.surface === 'terminal' && !(await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST && pane.isPlaced)
