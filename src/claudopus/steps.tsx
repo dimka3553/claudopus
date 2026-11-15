@@ -153,7 +153,7 @@ const lookInDue = async ($: EngineInterface) => {
   await lookInOnHelpers($)
 }
 
-// What a card with helpers running says under its line: how many, when they were looked in on, and how many have gone quiet
+// What a card with helpers running says under its line: only how many have gone quiet, as those at work are rows on its tree
 const lookedInLine = (one: Todo, at: number) => {
   const l = one.lookedIn
   // Helpers at work are rows on its tree already; only one gone quiet is said, as the work was told of it

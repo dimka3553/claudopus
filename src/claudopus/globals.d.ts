@@ -186,6 +186,7 @@ declare global {
   export import detachedOf = M10.detachedOf
   export import DOWNLOAD_CMD = M10.DOWNLOAD_CMD
   export import foldJobs = M10.foldJobs
+  export import heldShellOf = M10.heldShellOf
   export import isOutputEnded = M10.isOutputEnded
   export import isPausedProc = M10.isPausedProc
   export import isPid = M10.isPid

@@ -1096,7 +1096,7 @@ test('every run under a card says how it stands: a command held open shows its p
     jobs: {
       output: file => outputs[file]?.() ?? '',
       wroteAt: file => wrote[file]?.() ?? 0,
-      ps: () => (heldAt ? `  4242   900 S    ${etime()} /bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'hold curl --location --output scans.zip https://example.com/scans.zip' < /dev/null` : ''),
+      ps: () => (heldAt ? `  4242   900 S    ${etime()} /bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'curl -L -o scans.zip https://example.com/scans.zip # hold dl' < /dev/null && pwd -P >| /tmp/claude-1-cwd` : ''),
       fd: () => `4242 ${TASKS}/bheld.output\n`,
     },
   })
@@ -1109,7 +1109,7 @@ test('every run under a card says how it stands: a command held open shows its p
   await $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a1', command: 'bash /s/round3b_figs.sh', description: 'Redraw all pictures', run_in_background: true } as never)
   await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'tail -n0 -F sheet.log', description: 'Azure jobs finishing' } as never)
   heldAt = now
-  const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'hold curl --location --output scans.zip https://example.com/scans.zip', description: 'Download the CT scans' } as never)
+  const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Fetch the CT scans' } as never)
   for (let n = 0; n < 27; n++) await advance(20_000)
   const texts = async () => {
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
@@ -1122,7 +1122,7 @@ test('every run under a card says how it stands: a command held open shows its p
     return all.includes('460 MB of 1 GB · ') ? all : undefined
   })) ?? []
   // The download held open: how much of how much, its percent, speed and time left, as curl printed them
-  expect(shown.some(text => /^Download · Download the CT scans/.test(text))).toBe(true)
+  expect(shown.some(text => /^Download · Fetch the CT scans/.test(text))).toBe(true)
   expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · printed 2s ago$/.test(text))).toBe(true)
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
@@ -1132,6 +1132,6 @@ test('every run under a card says how it stands: a command held open shows its p
   expect(shown.some(text => /^Watch · Azure jobs finishing/.test(text))).toBe(true)
     expect(shown).toContain('last event 30s ago')
   expect(shown).toContain(' · wrote vsd-02.png')
-  held.get('curl --location --output scans.zip https://example.com/scans.zip')?.('')
+  held.get('dl')?.('')
   await call
 })

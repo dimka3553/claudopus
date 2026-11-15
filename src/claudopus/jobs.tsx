@@ -21,14 +21,15 @@ let tasksOf = ''
 let tasksMissedAt = 0
 // The output a command held open writes while it runs, by its row's id: the engine writes it to a file of its own in the tasks
 // folder and names it only once the command ends or goes to the background, so it is found as the file its shell writes to
-const callFiles = new Map<string, string>()
+const callFiles = new Map<string, { file: string; at: number }>()
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false): Job => {
   const seen = jobLog.get(id)
   const wait = isWatch ? undefined : waitOf(cmd)
   const kind: JobKind = isWatch ? 'watch' : wait ? 'wait' : jobKindOf(cmd, what)
-  return { id, label: labelOf(what || cmd, cmd), cmd, kind, at, ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
+  const label = labelOf(what || cmd, cmd)
+  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
 }
 // The jobs a card has running: what it sent to the background, and a command it has waited on a while; jobs alike are one
 const jobsOf = (one: Todo, at: number): Job[] =>
@@ -94,12 +95,13 @@ const lookJobs = async ($: EngineInterface) => {
   const list = await read($, todos)
   // Held open: a command a card has waited on long enough to be a row of its own
   const held = list.flatMap(one => (one.status === 'working' && one.running?.cmd && now - one.running.at >= RUNNING_SHOWN ? [{ owner: one.id, id: `call-${one.id}`, cmd: one.running.cmd, at: one.running.at }] : []))
-  for (const id of callFiles.keys()) if (!held.some(h => h.id === id)) callFiles.delete(id)
+  // A row's command that changed (another held call of the same card ran longest) starts afresh
+  for (const [id, was] of callFiles) if (!held.some(h => h.id === id && h.at === was.at)) (callFiles.delete(id), jobLog.delete(id))
   const owned = [
     // A watch's output is its events, read as any other
     ...list.flatMap(one => (one.bg ?? []).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
     ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid }))),
-    ...held.flatMap(h => (callFiles.get(h.id) ? [{ owner: h.owner, id: h.id, file: callFiles.get(h.id) ?? '', pid: undefined as string | undefined }] : [])),
+    ...held.flatMap(h => (callFiles.get(h.id) ? [{ owner: h.owner, id: h.id, file: callFiles.get(h.id)?.file ?? '', pid: undefined as string | undefined }] : [])),
   ]
   for (const id of jobLog.keys()) if (!owned.some(o => o.id === id) && !held.some(h => h.id === id)) jobLog.delete(id)
   for (const owner of jobNews.keys()) if (!owned.some(o => o.owner === owner)) jobNews.delete(owner)
@@ -107,8 +109,10 @@ const lookJobs = async ($: EngineInterface) => {
   // A held-open command's shell, once the processes have been listed, and the file it writes to: only one in a tasks folder
   const unfound = held.filter(h => !callFiles.has(h.id))
   if (unfound.length && jobProcs.length) {
-    const shells = shellsOf(jobProcs, unfound)
-    const pids = unfound.flatMap(h => (typeof shells.get(h.id) === 'string' ? [{ id: h.id, pid: String(shells.get(h.id)) }] : []))
+    const pids = unfound.flatMap(h => {
+      const pid = heldShellOf(jobProcs, h.cmd, h.at)
+      return pid ? [{ id: h.id, pid, at: h.at }] : []
+    })
     if (pids.length) {
       const fd = await $.process
         .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...pids.map(p => p.pid)], { timeoutMs: 5000 })
@@ -116,8 +120,8 @@ const lookJobs = async ($: EngineInterface) => {
       for (const line of fd?.stdout.split('\n') ?? []) {
         const [pid = '', ...path] = line.split(' ')
         const file = path.join(' ').trim()
-        const id = pids.find(p => p.pid === pid)?.id
-        if (id && /\/tasks\/[\w-]+\.output$/.test(file)) callFiles.set(id, file)
+        const one = pids.find(p => p.pid === pid)
+        if (one && /\/tasks\/[\w-]+\.output$/.test(file)) callFiles.set(one.id, { file, at: one.at })
       }
     }
   }

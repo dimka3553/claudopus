@@ -395,6 +395,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       else files.delete(`${MEMORY}/${name}`)
       return { result: { stdout: '', stderr: '', interrupted: false } } as never
     }
+    // (or a real command marked to be held by a comment at its end: curl ... # hold dl)
+    if (e.tool === 'Bash' && / # hold (\S+)$/.test(command)) return { result: { stdout: await new Promise<string>(done => held.set(command.match(/ # hold (\S+)$/)?.[1] ?? '', done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.startsWith('hold ')) return { result: { stdout: await new Promise<string>(done => held.set(command.slice(5), done)), stderr: '', interrupted: false } } as never
     if (e.tool === 'Bash' && command.includes('admin')) admins.push({ command, grants: [...files].filter(([path]) => path.startsWith(`${MEMORY}/admin-grants/`)).map(([, text]) => JSON.parse(text)) })
     if (e.tool === 'TaskStop') stopped.push(String((e as { task_id?: string }).task_id))

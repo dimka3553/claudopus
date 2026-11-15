@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { commandName, detachedOf, foldJobs, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
+import { commandName, detachedOf, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
 import type { Job } from './jobs'
 
 test('a job is told by its command: a server with its port, a download, else a script; its latest line is what a progress bar shows last', async () => {
@@ -144,7 +144,7 @@ test('how far a run is, read from the progress tools print and the line work is 
   // More shapes: Keras, a plain sentence, a count with what it counts after it, make's percent, az's long percent
   expect(of('450/1000 [=====>....] - ETA: 12s')).toMatchObject({ done: '450', total: '1,000', pct: '45%' })
   expect(of('Downloaded 460 MB of 1 GB (45%)')).toMatchObject({ done: '460 MB', total: '1 GB', pct: '45%' })
-  expect(of('Processed 450/1000 images')).toMatchObject({ done: '450', total: '1,000' })
+  expect(of('Processed 450/1000 images')).toMatchObject({ done: '450', total: '1,000 images' })
   expect(of('[ 45%] Building CXX object').pct).toBe('45%')
   expect(of('Alive[#####      ]  8.0123%').pct).toBe('8%')
   // The work's own line with a unit after each number, and a word after the total that is no unit
@@ -197,4 +197,28 @@ test('a row is named by what it does and its kind by its own program; time left 
   // No time said, none shown; a percent alone is never made into one
   expect(latestOf('progress: 3/6 steps fitting').left).toBeUndefined()
   expect(latestOf('Receiving objects:  45% (450/1000), 460.00 MiB | 10.20 MiB/s').left).toBeUndefined()
+})
+
+test('a command held open is found by its own shell however few its words; times past an hour, units and names read true', async () => {
+  // A real shell line as ps listed it on 15 Nov, quotes and new lines as ps writes them
+  const shell = (pid: string, etime: string, body: string) => `${pid}  1423 Ss      ${etime} /bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1-ab.sh 2>/dev/null || true && \\builtin setopt NO_EXTENDED_GLOB 2>/dev/null || true && eval '${body}' < /dev/null && pwd -P >| /tmp/claude-a9a2-cwd`
+  const now = 1_700_000_100_000
+  const procs = procsOf([shell('31654', '00:08', 'python3 train.py'), shell('31700', '00:08', 'python3 train.py --epochs 4'), shell('31800', '00:30', `bash -c '"'"'echo hi'"'"'\\012sleep 9`)].join('\n'), now)
+  expect(heldShellOf(procs, 'python3 train.py', now - 8_000)).toBe('31654')
+  expect(heldShellOf(procs, "bash -c 'echo hi' sleep 9", now - 30_000)).toBe('31800')
+  // never one started far from when the call began
+  expect(heldShellOf(procs, 'python3 train.py', now - 120_000)).toBeUndefined()
+  // Time left past an hour, as it was said
+  expect(latestOf('progress: 3/60 scans fitting eta 1:59:59').left).toBe('2h 00m left')
+  expect(latestOf('fit:   5%|  | 1/20 [00:08<1:59:40, 0.2it/s]').left).toBe('2h 00m left')
+  expect(latestOf('progress: 3/6 steps fitting eta 5m20s').left).toBe('5m 20s left')
+  expect(latestOf('Copied 3 of 9 files, 5 minutes left').left).toBe('5m left')
+  // What a count counts is kept
+  expect(latestOf('Processed 9 of 20 files').total).toBe('20 files')
+  // Names and kinds
+  expect(labelOf('', 'for i in $(seq 1 20); do echo "progress: $i/20 x"; sleep 1; done')).toBe('a shell loop')
+  expect(labelOf('', 'uv run python train.py')).toBe('python train.py')
+  expect(labelOf('', 'git -C /repo pull')).toBe('git pull')
+  expect(labelOf('', '"/Applications/Some App/bin/tool" --go')).toBe('tool')
+  expect(jobKindOf('azcopy copy ./scans https://acct.blob.core.windows.net/c --recursive', 'Send the scans to Azure')).toBe('download')
 })

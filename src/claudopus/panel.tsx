@@ -528,9 +528,10 @@ const panelHooks = (on: On) => {
         : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', 'no output', true]
         : ['', '', false]
       const warn = isWarn && Boolean(state)
-      const left = job.left && !warn ? [job.left] : []
-      // its speed only while it prints: a speed a minute old is no longer how fast it goes
-      const rate = job.rate && !warn && job.wroteAt && quiet < 60_000 ? [job.rate] : []
+      // its speed and time left only while it prints: a minute old, they are no longer how it goes
+      const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
+      const left = job.left && isFresh ? [job.left] : []
+      const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done && job.kind !== 'wait' ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done && job.kind !== 'wait' ? [job.total ? `${job.done}/${job.total}` : job.done] : []
       const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], [...compact, ...pct, short], [...compact, ...pct], [short]], width)
@@ -562,7 +563,7 @@ const panelHooks = (on: On) => {
       const pctAt = job.pct && !isWarn ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
       // The latest line, unless it is only a progress bar its percent already says; a wait says the work's own words for it.
       // A run read from a progress line above its last still shows the last, such as an error after it
-      const latest = job.kind === 'wait' ? (job.waitsFor ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
+      const latest = job.kind === 'wait' ? (job.waitsFor && job.isNamed ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
       const rest = width - stand.length - (stand ? 3 : 0)
       const detail = latest && rest >= 10 ? cut(latest, rest) : ''
       if (!stand && !detail) return head
