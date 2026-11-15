@@ -179,7 +179,9 @@ const PAGE_VERSIONS = 30
 const lineOf = text => {
   const plain = text.replace(/`/g, '').replace(/\s+/g, ' ').trim()
   const first = /^(.{20,}?[.;:])(\s|$)/.exec(plain)?.[1] ?? plain
-  return first.length <= 110 ? first.replace(/[.;:]$/, '') : `${first.slice(0, 107).replace(/\s+\S*$/, '')}…`
+  if (first.length <= 110) return first.replace(/[.;:]$/, '')
+  const comma = first.slice(0, 110).lastIndexOf(',')
+  return comma > 40 ? first.slice(0, comma) : `${first.slice(0, 107).replace(/\s+\S*$/, '')}…`
 }
 const treeOf = () => {
   const root = join(here, '../..')
