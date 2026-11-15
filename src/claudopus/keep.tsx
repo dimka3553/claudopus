@@ -134,7 +134,7 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   }
   if (!back.length && !lost.length) return
   const now = await $.clock.now()
-  await update($, todos, list => {
+  await changeTodos($, list => {
     const known = new Set(list.map(one => one.id))
     const added = [...back, ...lost].filter(one => !known.has(one)).map(one => ({ ...started(one, '', '', '', cutAt), status: 'stopped' as const, endedAt: cutAt }))
     return [...list, ...added].map(one =>

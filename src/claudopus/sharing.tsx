@@ -229,8 +229,24 @@ const readOthers = async ($: EngineInterface) => {
   for (const key of [...endSeen.keys()]) if (!ids.has(key)) endSeen.delete(key)
   const isAppChanged = found.some(s => s.host) && (await readAppIds($, now).catch(err => (void log($, `app's chats not listed: ${String(err)}`), false)))
   const next = ordered(found)
-  if (JSON.stringify(next) !== JSON.stringify(await read($, others))) await update($, others, () => next)
-  else if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) redraw($)
+  const was = await read($, others)
+  if (JSON.stringify(next) === JSON.stringify(was)) {
+    othersHeld = undefined
+    if (`${isMulti()}:${selfName()}` !== wasSelf || isAppChanged || isOffChanged) redraw($)
+  } else if (calmOthers(next) !== calmOthers(was) || next.some(s => now - (was.find(w => w.host === s.host && w.chat === s.chat)?.at ?? 0) > STALE / 2)) {
+    othersHeld = undefined
+    await update($, others, () => next)
+  } else othersHeld = next
+}
+// Other chats' work as the panel shows it, but for what moves by itself as it runs (their beats, times, tokens and output): a change
+// in only that is not written at once, as each write draws the panel afresh under the pointer. It is held here and written with the
+// panel's running times (calmLook), and at the latest once a chat's beat is half way to being taken for gone
+let othersHeld: Shared[] | undefined
+const calmOthers = (list: Shared[]) => JSON.stringify(list.map(c => ({ ...c, at: 0, cards: c.cards.map(calmCard), helpers: c.helpers?.map(calmCard) })))
+const writeHeldOthers = async ($: EngineInterface) => {
+  const held = othersHeld
+  othersHeld = undefined
+  if (held) await update($, others, () => held)
 }
 
 // The chats this Mac's Claude app holds: its session files, one per chat, under
