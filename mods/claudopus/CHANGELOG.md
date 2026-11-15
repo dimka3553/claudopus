@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.125 · 15 November 2026
+- The battery card now shows what the whole Mac draws, what the processors and the graphics processor each draw, and Claude's part of each; Claude's graphics power is marked as estimated, and the card says what "Claude" covers and that the screen, memory and storage count only in the whole.
+- Claude's watts, disk and network now count work a chat left running after its command ended, and processes that started between two readings, which were missed before.
+- The graphics card says busy is time at work at any speed, shows what the graphics processor draws, and lists who uses it most, with macOS drawing the screen named as such.
+
 ## 0.2.124 · 15 November 2026
 - After you answer an ask on its card (a button such as Release it or Done, or a reply from its box), the card stays where it was at the top for a minute, saying what you answered, instead of jumping away under your pointer.
 - A piece of work started again by your answer, such as Release it on work that had ended, keeps its place among the cards instead of moving to the very bottom of the panel.
