@@ -6275,18 +6275,27 @@ const personNow = async ($: EngineInterface) => {
   }
   return now
 }
-// What this chat last found sealed, or sealed itself: the kept copy is checked again only when its text changed. Each copy carries
-// a count one past the copy it replaced, and a copy counting less than one this chat has seen (an older copy put back) is not taken
+// What this chat last found sealed, or sealed itself: the kept copy is checked again only when its text changed. A copy this chat
+// took before and that was replaced since (an older copy put back) is not taken again; each carries a count one past the one before
 let knownSeen: { text: string; files: Map<string, string | null>; count: number } | undefined
+const knownPast = new Set<string>()
+// The last read could not be checked (the keychain did not answer): not the same as a seal that is wrong
+let isKnownUnsure = false
 // What each file is known to hold: undefined when no sealed copy is there (missing, changed by hand, or never made)
 const knownRead = async ($: EngineInterface): Promise<Map<string, string | null> | undefined> => {
+  isKnownUnsure = false
   const text = await $.fs.read(knownPath()).catch(() => '')
   if (knownSeen && knownSeen.text === text) return new Map(knownSeen.files)
+  if (knownPast.has(text)) return undefined
   try {
     const kept = JSON.parse(text) as { files?: Record<string, unknown>; count?: unknown; seal?: unknown }
     const files = Object.fromEntries(Object.entries(kept.files ?? {}).filter(([name, one]) => PERSON_FILES.includes(name) && (one === null || typeof one === 'string'))) as Record<string, string | null>
     const count = typeof kept.count === 'number' && Number.isSafeInteger(kept.count) ? kept.count : -1
-    if (count < (knownSeen?.count ?? 0) || typeof kept.seal !== 'string' || (await sealed($, 'known-read', [knownMessage(files, count)]))?.[0] !== kept.seal) return undefined
+    if (typeof kept.seal !== 'string') return undefined
+    const seal = (await sealed($, 'known-read', [knownMessage(files, count)]))?.[0]
+    if (seal === undefined) isKnownUnsure = true
+    if (seal !== kept.seal) return undefined
+    if (knownSeen) knownPast.add(knownSeen.text)
     knownSeen = { text, files: new Map(Object.entries(files)), count }
     return new Map(knownSeen.files)
   } catch {
@@ -6315,7 +6324,12 @@ const knownWrite = async ($: EngineInterface, known: Map<string, string | null>,
     throw new Error(`the kept copy could not be sealed in ${keptWhere()}`)
   }
   const text = `${JSON.stringify({ files, count, seal }, null, 2)}\n`
-  await $.fs.write(knownPath(), text)
+  // Written beside it and moved into place, so no chat ever reads half of it
+  const aside = `${knownPath()}.${count}-${Math.random().toString(36).slice(2)}.new`
+  await $.fs.write(aside, text)
+  const moved = await $.process.run(['mv', '-f', aside, knownPath()], { timeoutMs: 10_000 }).catch(() => undefined)
+  if (moved?.exitCode !== 0) await $.fs.write(knownPath(), text)
+  if (knownSeen) knownPast.add(knownSeen.text)
   knownSeen = { text, files: new Map(known), count }
 }
 // One chat's changes to it at a time, so two never lose each other's
@@ -6339,8 +6353,8 @@ const personWrote = async ($: EngineInterface, memory: string, name: string, tex
 // Put back as it was; what it held is kept beside it, so nothing the person wrote is ever lost, whatever is pressed
 const personPut = async ($: EngineInterface, name: string, text: string | null, is: string | null) => {
   if (is !== null) {
-    const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
-    await $.fs.write(`${dir}/${name}.${at}.put-back`, is).catch(() => undefined)
+    const at = new Date(await $.clock.now()).toISOString().slice(0, 23).replace(/[-:]/g, '').replace('T', '-').replace('.', '')
+    await $.fs.write(`${dir}/${name}.${at}${Math.random().toString(36).slice(2, 6)}.put-back`, is).catch(() => undefined)
   }
   // Taken away first, so a link put in its place is replaced, never written through
   await $.process.run(['rm', '-f', `${dir}/${name}`], { timeoutMs: 10_000 }).catch(() => undefined)
@@ -6364,6 +6378,9 @@ const personCheck = async ($: EngineInterface, by?: ToolCallInput): Promise<stri
 const personLook = async ($: EngineInterface, by?: ToolCallInput): Promise<string[]> => {
   await knownQueue
   let sealedKnown = await knownRead($)
+  // Not checked, as the keychain did not answer: a chat that knows what they hold leaves them for the next look, and reads what it
+  // knows meanwhile; one that knows nothing yet says so below
+  if (!sealedKnown && isKnownUnsure && knownSeen) return []
   // No sealed copy, and this Mac never made one (no key of its own): the first load of a version that keeps one, and what is there
   // is the person's
   const key = !sealedKnown && !knownSeen ? await knownKey($) : 'yes'

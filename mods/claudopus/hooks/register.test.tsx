@@ -6827,7 +6827,7 @@ test('F-021 · a kept copy written, taken away or broken by work never decides w
   ownSet(files, 'rules/CLAUDE.md', 'my rules')
   await bash('s0', 'ls')
   expect(files.get(rules)).toBe('my rules')
-  const putBack = () => [...files.keys()].filter(path => /\/rules\/CLAUDE\.md\.\d{8}-\d{6}\.put-back$/.test(path)).map(path => files.get(path))
+  const putBack = () => [...files.keys()].filter(path => /\/rules\/CLAUDE\.md\.\d{8}-\d{9}\w*\.put-back$/.test(path)).map(path => files.get(path))
   // A copy written by a command with its own text, unsealed: the rules stay as known
   await bash('s1', `effect admin-known.json {"files":{"rules/CLAUDE.md":"PLANTED-K"},"seal":"${'0'.repeat(64)}"}`)
   expect(files.get(rules)).toBe('my rules')
@@ -6911,6 +6911,28 @@ test('F-021 · an old kept copy put back with the old file is not taken by a cha
   await $.session.start(start)
   await bash('o2', 'ls')
   expect(await until(async () => (logged.some(line => /could not use its key/.test(line)) ? true : undefined))).toBe(true)
+})
+
+test("F-021 · another chat's Config change is never undone here: not while the keychain does not answer, nor when it lands with a lower count", async ($, on) => {
+  const { files, bash } = await gated($, on)
+  const config = `${MEMORY}/config.json`
+  await bash('k0', 'ls')
+  // Another chat presses Sound off while this chat's keychain does not answer for a moment
+  ownSet(files, 'config.json', JSON.stringify({ name: 'Sam', sound: false }))
+  files.set('keychain:refused', 'yes')
+  await bash('k1', 'ls')
+  expect(JSON.parse(files.get(config) ?? '{}')).toEqual({ name: 'Sam', sound: false })
+  files.delete('keychain:refused')
+  await bash('k2', 'ls')
+  expect(JSON.parse(files.get(config) ?? '{}')).toEqual({ name: 'Sam', sound: false })
+  // A copy another chat made from an older count is new to this chat, and taken
+  const kept = JSON.parse(files.get(`${MEMORY}/admin-known.json`) ?? '{}') as { files: Record<string, string | null> }
+  const older = { ...kept.files, 'config.json': JSON.stringify({ name: 'Sam', sound: false, agents: false }) }
+  files.set(`${MEMORY}/admin-known.json`, JSON.stringify({ files: older, count: 1, seal: fakeSeal(files.get('keychain:known') ?? '', `known\n1\n${JSON.stringify(older)}`) }))
+  files.set(config, older['config.json'] ?? '')
+  await bash('k3', 'ls')
+  expect(JSON.parse(files.get(config) ?? '{}')).toEqual({ name: 'Sam', sound: false, agents: false })
+  expect([...files.keys()].some(path => path.includes('config.json.') && path.endsWith('.put-back'))).toBe(false)
 })
 
 test("F-021 · the person's own edit by hand stays once they press Allow on its card, and a later command leaves it", async ($, on) => {
