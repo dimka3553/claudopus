@@ -58,7 +58,7 @@ const panelHooks = (on: On) => {
     const shape = await paneShape($, paneId)
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
-    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return held.drawing as Awaited<ReturnType<typeof next>>
+    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
@@ -87,6 +87,17 @@ const panelHooks = (on: On) => {
       $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
     }
     const { isFinishedOpen = false } = await read($, view)
+    // Work that ended while the list was held (an older drawing given again) was not seen ended: its moment at the top begins with
+    // this drawing, the first to show it, never before
+    if (paneId === LIST) {
+      const from = await $.clock.now()
+      for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)]) {
+        const key = `${one.id}:${one.endedAt}`
+        if (one.status !== 'working' && one.endedAt > listFreshAt && one.endedAt < listHeldAt && !lateFrom.has(key) && from - one.endedAt < RELOAD_GRACE * 2)
+          (lateFrom.set(key, from), $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1))))
+      }
+      listFreshAt = from
+    }
     // Every piece of work this chat keeps; its own are the ones the chat's thread started, the rest are their helpers
     const all = await read($, todos)
     const own = all.filter(one => !one.parentId)
@@ -109,6 +120,12 @@ const panelHooks = (on: On) => {
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)
+    // Work that finished, in its moment: for its two seconds it is at the top under all that waits on the person, outlined green;
+    // then it goes under Finished. Work stopped or stopped by an error is not: it pauses in its place, in its own look
+    // In the few rows above the prompt a narrow terminal gives the panel, the outline would take two of them
+    const isAbovePrompt = e.surface === 'terminal' && (e.props as { placement?: string }).placement === 'inline'
+    const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && lingers(one, at)
+    const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     // Work under way says nothing of its state: the moving dots do
     const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
     // Work the app sent to an older model says so, and which one; work that answers from one all the same says so
@@ -339,14 +356,17 @@ const panelHooks = (on: On) => {
     }
     const small = (one: Todo) => {
       // In the terminal, while the letters are keys, the first nine cards are numbered and the number opens the card's Details
-      cardNo += 1
-      const digit = keyed && cardNo <= 9 ? String(cardNo) : undefined
+      // A card in its moment at the top is not numbered, so the others keep their numbers through it
+      if (!isFinishMoment(one)) cardNo += 1
+      const digit = keyed && cardNo <= 9 && !isFinishMoment(one) ? String(cardNo) : undefined
       const kept = one.items.filter(item => item.state !== 'dropped')
       const done = kept.filter(item => item.state === 'done').length
       const tree = treeUnder(one)
       const scope = `card-${one.id}`
+      // Just finished, in its moment at the top: outlined in the green of what is done, as an allowed notice is
+      const isMoment = isFinishMoment(one) && !isAbovePrompt
       return (
-        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+        <Box key={`todo-${one.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isMoment ? { borderStyle: 'round' as const, borderColor: DONE } : {})}>
           {edge(one, kept.length, done, kept.some(item => item.state === 'doing'))}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
             <Box flexDirection="column">
@@ -408,8 +428,8 @@ const panelHooks = (on: On) => {
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
                 {(!one.ask && lingers(one, at)) || leftLine(one, at) ? (
-                  <Text wrap="truncate-end" color={one.status === 'done' ? DONE : undefined} dimColor={one.status !== 'done'}>
-                    {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? 'Stopped by an error' : one.byYou ? 'Stopped by you' : 'Stopped'}
+                  <Text wrap="truncate-end" color={one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed'}>
+                    {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? '✕ Stopped by an error' : one.byYou ? 'Stopped by you' : 'Stopped'}
                   </Text>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
@@ -441,6 +461,8 @@ const panelHooks = (on: On) => {
     // More than EDGE_PARTS to-dos are one edge filled as far as they are done. The parts are boxes that share the card's
     // height, whatever it is; a terminal has no part thinner than a row, so there the edge is whole
     const edge = (one: Todo, count: number, done: number, isDoing: boolean) => {
+      // An error that stopped it is said in red, on its edge too
+      if (one.status === 'failed') return <Box width={1} flexShrink={0} backgroundColor="error" />
       if (one.status !== 'working' && one.status !== 'done') return <Box width={1} flexShrink={0} />
       if (needsPerson(one) || one.status === 'done' || !count || e.surface === 'terminal') return <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : one.status === 'working' || isActingOnReply(one) ? LIVE : DONE} />
       const shade = (n: number) => (n < done ? LIVE : n === done && isDoing ? `${LIVE}AD` : `${LIVE}5C`)
@@ -836,7 +858,7 @@ const panelHooks = (on: On) => {
       const isPassed = f.status === 'done' && flowPassed(f, rounds) === true
       const scope = `flow-${f.id}`
       return (
-        <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0}>
+        <Box key={`flow-${f.id}`} flexDirection="row" backgroundColor={FILL} flexShrink={0} {...(isFlowMoment(f) && !isAbovePrompt ? { borderStyle: 'round' as const, borderColor: DONE } : {})}>
           {/* Blue while it runs, green only when it finished and its last round did not fail */}
           {f.status === 'working' || (f.status === 'done' && flowPassed(f, rounds) !== false) ? <Box width={1} flexShrink={0} backgroundColor={f.status === 'working' ? FLOW : DONE} /> : <Box width={1} flexShrink={0} />}
           <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
@@ -1547,17 +1569,29 @@ const panelHooks = (on: On) => {
     }
     // An answered card keeps the place its ask had among what waits, so nothing still waiting slides into the spot just pressed
     const answeredPlace = (one: Todo) => (answeredSince(one) ? (sentReplies.get(one.id)?.askAt ?? answeredSince(one)) : 0)
-    const isUp = (one: Todo) => isAsking(one) || isWaitingPress(one) || (!one.chat && cardNotesOf(one.id, at).length > 0) || answeredSince(one) > 0
+    const isWaits = (one: Todo) => isAsking(one) || isWaitingPress(one) || answeredSince(one) > 0
+    // Just finished: up at the top, right under what waits, the newest first, each for its own two seconds
+    const isFinishing = (one: Todo) => !isWaits(one) && isFinishMoment(one)
+    const finishFrom = (one: Todo) => (one.chat ? (endSeen.get(`${one.id}:${one.endedAt}`) ?? one.endedAt) : pauseFrom(one))
+    // Finished but left something running: after its moment it stays up, under what waits, with its Stop it, never back among the rest
+    const isLeftUp = (one: Todo) => !one.chat && one.status !== 'working' && Boolean(one.leftSince) && !isWaits(one) && !isFinishing(one)
+    const isUp = (one: Todo) => isWaits(one) || isFinishing(one) || isLeftUp(one) || (!one.chat && cardNotesOf(one.id, at).length > 0)
     const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)), answeredPlace(one))
     const askingHere = shownWork.filter(isUp)
     const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
     const askCards = [...askingHere, ...askingThere].sort((a, b) => upSince(b) - upSince(a))
     const restHere = shownWork.filter(one => !isUp(one))
+    const restFlows = shownFlows.filter(f => !isFlowMoment(f))
     // Each card keeps the place it began in: work started again (Release it on an ended ask) never moves to the end
     const begun = (one: Todo) => one.begunAt ?? one.startedAt
     // Notices and whole cards in one order, the newest first; a card that only says what was allowed comes under all that still
     // waits. A card is drawn when the panel is
-    const top = [...notices.map(one => ({ at: one.at, draw: () => one.node })), ...askCards.map(one => ({ at: upSince(one) - (isAsking(one) || isWaitingPress(one) || answeredSince(one) ? 0 : 1e15), draw: () => small(one) }))].sort((a, b) => b.at - a.at)
+    const finishingFlows = shownFlows.filter(isFlowMoment)
+    const top = [
+      ...notices.map(one => ({ at: one.at, draw: () => one.node })),
+      ...askCards.map(one => ({ at: isWaits(one) ? upSince(one) : isFinishing(one) ? finishFrom(one) - 1e14 : Math.max(upSince(one), isLeftUp(one) ? one.endedAt : 0) - 1e15, draw: () => small(one) })),
+      ...finishingFlows.map(f => ({ at: pauseFrom(f) - 1e14, draw: () => flowSmall(f) })),
+    ].sort((a, b) => b.at - a.at)
     const waitsCount = notices.length + askCards.filter(one => isAsking(one) || isWaitingPress(one)).length
     // The terminal's keys stay with the ask they were on while it waits
     if (keysAsk && !askingHere.some(one => one.id === keysAsk && isAsking(one))) keysAsk = ''
@@ -1570,7 +1604,7 @@ const panelHooks = (on: On) => {
       chats: new Set(runningThere.map(one => `${one.chat?.host}/${one.chat?.id}`)).size,
       // Each thing at the top counts once, as the line above the prompt counts them
       asks: waitsCount,
-      isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(f => f.status === 'done' && isLingering(f, at) && roundsOf(f).at(-1)?.pass !== false),
+      isDone: isHappy(own, at) || elsewhere.some(one => one.status === 'done' && lingers(one, at)) || flowList.some(isFlowMoment),
     }
     const mood = headMood(head)
     // A letter for each header button, in the terminal alone, and only while the panel has no password box to type in: there the
@@ -1586,6 +1620,8 @@ const panelHooks = (on: On) => {
       const was = listOffsets.get(e.surface) ?? 0
       listOffsets.set(e.surface, Math.max(0, e.props.scroll.offset))
       const count = waitsCount
+      const finishedNow = [...askCards.filter(isFinishing).map(titleOf), ...finishingFlows.map(f => f.title)]
+      if (finishedNow.join('\n') !== finishedAtTop.join('\n')) ((finishedAtTop = finishedNow), drawAgain($))
       if (count !== waitsAtTop || (was > 0) !== ((listOffsets.get(e.surface) ?? 0) > 0)) ((waitsAtTop = count), drawAgain($))
     }
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
@@ -1648,9 +1684,9 @@ const panelHooks = (on: On) => {
           : [
               // This chat's work first, named as this chat's once another chat's is shown, in the order it began; what waits on the
               // person is above, at the top. Beside other Macs' chats it is named with nothing running too, and every chat says which Mac it is on
-              ...(listedChats.length && (restHere.length || shownFlows.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
+              ...(listedChats.length && (restHere.length || restFlows.length || promptsAnswered.length) ? [chatHead('this', 'This chat', selfName() ? `on ${selfName()}` : '')] : []),
               ...promptsAnswered.map(p => answeredCard(p, `this-${p.id}`)),
-              ...[...restHere.map(one => ({ at: begun(one), card: () => small(one) })), ...shownFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
+              ...[...restHere.map(one => ({ at: begun(one), card: () => small(one) })), ...restFlows.map(f => ({ at: f.startedAt, card: () => flowSmall(f) }))].sort((a, b) => a.at - b.at).map(one => one.card()),
               // Then each other chat under its name, with what is left of it once its asks are at the top
               ...listedChats.flatMap(c => {
                 const cards = shownOf(c).filter(one => !isUp(one)).sort((a, b) => begun(a) - begun(b))
