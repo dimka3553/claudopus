@@ -7,8 +7,12 @@ const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url)
 // (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
 // SLOW is that limit, kept for the tests that name it
 const SLOW = { timeoutMs: 60_000 }
-const test = (name: string, options: unknown, body?: unknown) =>
-  body === undefined ? kitTest(name, SLOW, options as TestBody) : kitTest(name, { ...SLOW, ...(options as object) }, body as TestBody)
+function test(name: string, body: TestBody): void
+function test(name: string, options: { timeoutMs?: number }, body: TestBody): void
+function test(name: string, options: TestBody | { timeoutMs?: number }, body?: TestBody) {
+  if (typeof options === 'function') kitTest(name, SLOW, options)
+  else kitTest(name, { ...SLOW, ...options }, body as TestBody)
+}
 const MEMORY = `${HOME}/.claude/claudopus`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
@@ -568,7 +572,7 @@ const spawn = { subagentType: 'general-purpose', fork: false, background: true, 
 // What the panel shows after work that is not awaited, such as a look at the servers. It waits by the wall clock, up to 40 seconds
 // (inside a test's minute), not by a count of tries: on a loaded machine or GitHub's slower runner a
 // count of tries ran out before the work did
-declare const Date: { now: () => number }
+declare const Date: { now: () => number; UTC: (year: number, month: number, day?: number, hours?: number) => number }
 const until = async <T,>(look: () => Promise<T | undefined>) => {
   for (const end = Date.now() + 40_000; ; ) {
     const got = await look()
