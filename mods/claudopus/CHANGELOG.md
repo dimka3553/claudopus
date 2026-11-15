@@ -28,7 +28,7 @@ What changed in each version of Claudopus, newest first.
 - The cards are just their rows: the long explanation under the battery card and the graphics card's "Time at work" line are gone.
 
 ## 0.2.131 · 15 November 2026
-- A chat run from Claudopus's own checkout now updates with one press, Update, then Reload: it fetches the release, checks it against what the release published and moves forward only if that holds, never over uncommitted changes. The box no longer talks about the folder; Config still says where the chat loads from.
+- Updating is now one press, Update, then Reload: it downloads the new version, checks it against what the release published and puts it in place only if that holds, never over changes of your own.
 
 ## 0.2.130 · 15 November 2026
 - Work that finishes comes to the top of the panel at once, right under anything that waits for you, outlined in green for its two seconds, then goes under Finished as before; several finishing together stack there newest first, each for its own two seconds
@@ -54,7 +54,7 @@ What changed in each version of Claudopus, newest first.
 - A newer Claudopus is now a small grey box in the panel's header, not a big notice: the version, how many versions it covers since yours, and in a line what is new.
 - Updating is three steps, each your press, the box showing where it stands: Download (with its size and progress as it comes), Install (saying what it replaces), and Reload (saying whether this chat or every chat needs it). Not now keeps it quiet for a day, Skip this version until a newer one.
 - A download is checked against the fingerprint the release published before it can be installed, and checked again at Install; one that does not match is thrown away, and an installed copy that does not match has Claude Code's record put back. A failed step says what failed and that what your chat runs is unchanged.
-- A chat run from a folder of the code says so, and its steps fetch into that folder and move it forward, a fast-forward only; a worktree or another branch is told a release never reaches it and is offered no download.
+- A chat that runs Claudopus's own code updates the same way, never over changes of your own; a test build is told Update leaves it alone, and is offered no download.
 - Config's Updates: look every hour, every 6 hours, once a day, once a week or only when you ask; Check now only looks; it says which version this chat runs and where it loads from.
 - After a chat moves to a newer version, one quiet line says so with What's new, in place of the screen that covered the whole panel.
 
@@ -250,7 +250,7 @@ What changed in each version of Claudopus, newest first.
 - The to-do reminder now asks for the to-do and note calls to go with the next work call, never in a step of their own.
 
 ## 0.2.89 · 14 November 2026
-- A copy run from a folder of its code now updates itself: Check for updates and automatic updates bring that folder up to the newest release with git, and the box says so. Work in the folder that isn't committed is never touched; if the update would overwrite it, the box says why and nothing changes.
+- A chat that runs Claudopus's own code now updates too: Check for updates and automatic updates bring it to the newest version, and the box says so. Changes of your own are never touched; if the update would overwrite them, the box says why and nothing changes.
 
 ## 0.2.88 · 14 November 2026
 - In a narrow terminal, as on a phone over ssh, a button in the panel that opens a tab (Results, Stats, Memory, Config, About, a card's Details, a result) now opens it where you can see it, instead of opening nothing or making the panel vanish.
@@ -508,7 +508,7 @@ What changed in each version of Claudopus, newest first.
 ## 0.2.28 · 12 November 2026
 - Claudopus now updates itself: every few hours one chat runs Claude Code's own update for it, and chats that start afterwards load the new version.
 - About says when a newer version is installed.
-- A copy loaded straight from a folder of code is never updated.
+- A copy loaded straight from its code is never updated.
 
 ## 0.2.27 · 12 November 2026
 - Behind-the-scenes reorganisation of the mod's code; nothing changes in how it behaves or looks.

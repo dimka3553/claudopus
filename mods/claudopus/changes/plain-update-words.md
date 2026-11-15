@@ -1,0 +1,2 @@
+- Everything Claudopus says about updating speaks one plain way: which version your chats run, which is the newest, press Update, then type /reload-plugins. No more folders, checkouts or fetching in the update box, About, Config, the changelog, the release's last line or what chats and work say.
+- A chat running a test build is told Update leaves it alone until a chat puts the released version back.

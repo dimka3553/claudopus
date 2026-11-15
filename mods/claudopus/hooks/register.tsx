@@ -3143,7 +3143,7 @@ const aboutView = async ($: EngineInterface, ui: Ui, surface?: string) => {
         {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving', $, { surface, requestId: ABOUT_PANE })}
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold>Claudopus</Text>
-          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} is installed, new chats use it` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
+          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} ready, type /reload-plugins` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
         </Box>
       </Box>
       {band(
@@ -4562,7 +4562,6 @@ const pageFor = async ($: EngineInterface, version: string) => {
 // Known once a load and again at each look and step: where this chat's copy comes from, and, for a set-up a release never reaches,
 // what it is and why
 let sourceKnown: { src: Source; cannot?: { what: string; why: string }; where: string } | undefined
-const homeShort = (path: string) => path.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, '~')
 const knowSource = async ($: EngineInterface, isAgain = false) => {
   if (sourceKnown && !isAgain) return sourceKnown
   const root = $.plugin.root.replace(/\/+$/, '')
@@ -4588,8 +4587,8 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       const ready = await folderReady(io, repo)
       return done({
         src: { kind: 'folder', repo, sub: 'mods/claudopus', runs: 'copy', record },
-        cannot: ready.ok ? undefined : { what: `Claude Code installs it from ${ready.what}`, why: ready.why },
-        where: ready.ok ? `Claude Code's installed copy, made from the folder ${homeShort(repo)}` : "Claude Code's installed copy, made from a folder of the code",
+        cannot: ready.ok ? undefined : { what: `Claude Code's copy is made from ${ready.what}`, why: ready.why },
+        where: ready.ok ? "Claude Code's installed copy, made from Claudopus's released code on this Mac" : `Claude Code's installed copy, made from ${ready.what}`,
       })
     }
     const location = typeof entry?.installLocation === 'string' ? entry.installLocation.replace(/\/+$/, '') : ''
@@ -4610,7 +4609,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
   }
   // Run from a folder of the code: the folder is what a release has to reach
   const top = (await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim()
-  const ready = top ? await folderReady(io, top) : ({ ok: false, what: 'a folder', why: "it isn't a git checkout, so a release can't be brought into it" } as const)
+  const ready = top ? await folderReady(io, top) : ({ ok: false, what: "a copy of Claudopus that Update can't change", why: "it isn't Claudopus's released code" } as const)
   const marketplace = folderMarketplace(known, root)
   const scopes = (() => {
     try {
@@ -4623,8 +4622,8 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
   const sub = top && root.startsWith(`${top}/`) ? root.slice(top.length + 1) : 'mods/claudopus'
   return done({
     src: { kind: 'folder', repo: top || root, sub, runs: 'folder', ...(marketplace && scope ? { record: { plugins, marketplace, plugin: 'claudopus', scope } } : {}) },
-    cannot: ready.ok ? undefined : { what: `This chat runs from ${ready.what}`, why: ready.why },
-    where: `the folder ${homeShort(root)}${ready.ok ? ", Claudopus's own checkout on main" : `, ${ready.what}`}`,
+    cannot: ready.ok ? undefined : { what: `This chat runs ${ready.what}`, why: ready.why },
+    where: ready.ok ? "Claudopus's released code on this Mac" : ready.what,
   })
 }
 
@@ -4836,13 +4835,9 @@ const updateShape = async ($: EngineInterface) =>
 const NOTICE_EDGE = '#80808070'
 // The last step, switching this chat, is no press: the header says to type /reload-plugins
 const STEPS = ['Download', 'Install'] as const
-// Why Update could not move this chat's checkout forward, in Update's own words; the rest are FAILS'
+// Why Update could not update this chat, where Update's own words differ from FAILS'
 const ONE_PRESS_FAILS: Partial<Record<Fail, string>> = {
-  'own-commits': "main has commits of its own that this version doesn't have, so it can't move forward",
-  overwrite: 'your uncommitted changes touch files this version changes: commit them or set them aside, then try again',
-  moved: "it couldn't be moved forward",
   'newer-out': 'a newer version came out while it was updating',
-  gone: 'what was fetched is no longer there',
   unchecked: 'the version page has no fingerprint to check it against',
 }
 const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loaded: string) => {
@@ -4851,16 +4846,13 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
   if (!n) return null
   const known = await knowSource($)
   const { src } = known
-  const isFolder = src.kind === 'folder'
   const isOne = isOnePress(src)
-  // A copy Claude Code installs from a folder of the code: its Install moves that folder's main, and its card says so
-  const isCopy = isFolder && !isOne
-  const folder = isFolder ? homeShort(src.repo) : ''
+  // A copy Claude Code installs from Claudopus's code on this Mac keeps Download and Install, in the same words as any installed copy
   // Update is one press: it has no steps to show
   const track = (at: number) =>
     isOne ? null : (
     <ui.Text key="update-track" dimColor wrap="truncate-end">
-      {STEPS.map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${isCopy && i === 0 ? 'Fetch' : isCopy && i === 1 ? 'Move forward' : one}`).join('   ')}
+      {STEPS.map((one, i) => `${i < at ? '✓' : i === at ? '●' : '○'} ${one}`).join('   ')}
     </ui.Text>
   )
   const quiet = (key: string, version: string, withSkip = true) => [
@@ -4912,7 +4904,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
         n.kind === 'downloaded' ? (
           <ui.Button key={`update-install-${presses}`} label="Update" onPress={() => installPress($, v, n.commit)} />
         ) : (
-          <ui.Button key={`update-download-${presses}`} label={isOne ? 'Update' : isCopy ? 'Fetch into the folder' : page?.size ? `Download · ${sizeText(page.size)}` : 'Download'} onPress={() => downloadPress($, v)} />
+          <ui.Button key={`update-download-${presses}`} label={isOne ? 'Update' : page?.size ? `Download · ${sizeText(page.size)}` : 'Download'} onPress={() => downloadPress($, v)} />
         ),
         ...quiet(n.kind, v),
       ],
@@ -4923,28 +4915,26 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const pct = live?.pct ?? n.pct
     const got = live?.got ?? n.got
     const said = live?.phase === 'checking' ? 'checking it against what the release published' : [pct !== undefined ? `${Math.round(pct)}%` : '', got ? sizeText(got) : '', live?.phase === 'resolving' ? 'unpacking' : ''].filter(Boolean).join(' · ')
-    return box('downloading', [title(`${isOne ? 'Updating' : isCopy ? 'Fetching' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
+    return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
   }
   if (n.kind === 'downloaded') {
-    const replaces = isCopy
-      ? `Checked against the release. Move forward takes ${folder} from v${loaded} to v${v}, fast-forward only.`
-      : `Checked against the release. Install replaces v${loaded}; new chats start on v${v}.`
+    const replaces = `Checked against the release. Install replaces v${loaded}; new chats start on v${v}.`
     return box(
       'downloaded',
-      [title(`Claudopus ${v} ${isCopy ? 'fetched' : 'downloaded'}`), line('replaces', replaces), track(1)],
-      [<ui.Button key={`update-install-${presses}`} label={isCopy ? 'Move forward' : 'Install'} onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
+      [title(`Claudopus ${v} downloaded`), line('replaces', replaces), track(1)],
+      [<ui.Button key={`update-install-${presses}`} label="Install" onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
     )
   }
-  if (n.kind === 'installing') return box('installing', [title(`${isCopy ? 'Moving the folder to' : 'Installing'} Claudopus ${v}…`), track(1)], [])
+  if (n.kind === 'installing') return box('installing', [title(`Installing Claudopus ${v}…`), track(1)], [])
   // The Mac has it and this chat still runs the older one: the header says so beside the version, and to type /reload-plugins
   if (n.kind === 'reload') return null
   // A step that failed: what failed, and that what this chat runs is as it was
   const detail = ''
-  const which = isOne ? 'update' : n.step === 'download' ? (isCopy ? 'fetch' : 'download') : isCopy ? 'move the folder to' : 'install'
+  const which = isOne ? 'update' : n.step === 'download' ? 'download' : 'install'
   const why = (isOne ? ONE_PRESS_FAILS[n.fail] : undefined) ?? FAILS[n.fail]
   const kept =
     n.fail === 'installed-mismatch'
-      ? `${isOne ? `Claudopus moved to v${v}, but ` : isCopy ? `The folder moved to v${v}, but ` : ''}Claude Code's record was put back, so new chats keep v${loaded}.`
+      ? `${isOne ? `Claudopus ${v} was put in place, but ` : ''}Claude Code's record was put back, so new chats keep v${loaded}.`
       : n.fail === 'kept-copy'
         ? `This chat still runs v${loaded}.`
         : `Nothing was changed: this chat still runs v${loaded}.`

@@ -110,7 +110,7 @@ test('Update is one press for a chat run from its checkout: the fetch, its check
   expect(JSON.parse(files.get('manifest') ?? '{}').version).toBe('0.1.2')
   expect(JSON.parse(files.get(`${MEMORY}/update-steps.json`) ?? '{}')).toMatchObject({ version: '0.1.2', stage: 'installed', commit: COMMIT, tree: TREE })
   expect(await keyed(panel, 'update-install')).toBeUndefined()
-  expect(await panel.find({ type: 'Text', text: /folder|Fetch|Move forward/ })).toBeUndefined()
+  expect(await panel.find({ type: 'Text', text: UPDATE_JARGON })).toBeUndefined()
   // No box and no press is left: only the line beside the version, and the chat is never reloaded for the person
   expect(await panel.find({ type: 'Text', text: /^Claudopus 0\.1\.2/ })).toBeUndefined()
   expect((await panel.findAll({ type: 'Button' })).some(one => /^update-/.test(one.key ?? ''))).toBe(false)
@@ -118,11 +118,13 @@ test('Update is one press for a chat run from its checkout: the fetch, its check
   expect(reloads).toEqual([])
 })
 
+// What updating says speaks only of versions, Update and /reload-plugins: never of where the code sits or how git moves it
+const UPDATE_JARGON = /folder|checkout|fetch|forward|detached|brought|commit|\bmain\b|branch/i
 // Update never overwrites uncommitted work nor moves a main with commits of its own: it says why it could not move forward, and nothing moves
 const STAYS: { name: string; release: Release; said: string; isNewerAfterFetch?: boolean; title?: string }[] = [
-  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your uncommitted changes touch files this version changes: commit them or set them aside, then try again. Nothing was changed: this chat still runs v0.1.0.' },
+  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes of its own in files this version changes, so updating would lose them. Nothing was changed: this chat still runs v0.1.0.' },
   { name: 'a newer version out between its fetch and its move', release: RELEASE, isNewerAfterFetch: true, title: 'Claudopus 0.1.3 is out', said: 'The bar shows the battery · and 3 more changes' },
-  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Main has commits of its own that this version doesn't have, so it can't move forward. Nothing was changed: this chat still runs v0.1.0." },
+  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes of its own that this version doesn't have, so updating would lose them. Nothing was changed: this chat still runs v0.1.0." },
 ]
 for (const one of STAYS)
   test(`Update with ${one.name}: it says why it could not move forward, and nothing is overwritten or moved`, SLOW, async ($, on) => {
@@ -138,6 +140,7 @@ for (const one of STAYS)
     // Said why, or the newer version offered in its place
     await shownIn(panel, one.title ?? "Couldn't update Claudopus 0.1.2")
     await shownIn(panel, one.said)
+    expect(await panel.find({ type: 'Text', text: UPDATE_JARGON })).toBeUndefined()
     // A merge is tried only where git itself refuses to overwrite: a fast-forward that stops before touching a changed file
     expect(gitRan.some(ran => ran.startsWith('merge '))).toBe(Boolean(one.release.overwrite))
     expect(gitRan.some(ran => /^(reset|checkout|pull|stash)\b/.test(ran) || ran.includes('--force') || ran.includes('--hard'))).toBe(false)
@@ -216,17 +219,24 @@ test('Not now keeps a version quiet for a day, Skip this version until a newer o
   await shownIn(term, 'Claudopus 0.1.3 is out')
 })
 
-test('a chat run from a worktree of the code is told a release never reaches it, and offered no download', SLOW, async ($, on) => {
-  const { clock, gitRan } = world(on, { release: { ...RELEASE, worktree: true } })
-  pageOn(on, () => pageText())
-  await $.session.start(start)
-  await clock.advance(3 * 60_000)
-  const panel = await $.ui.mount(listAt())
-  await shownIn(panel, 'Claudopus 0.1.2 is out')
-  await shownIn(panel, 'This chat runs from a worktree of the code, on branch fix-bar: it gets a release only when main is merged into it.')
-  expect(await keyed(panel, 'update-download')).toBeUndefined()
-  expect(changing(gitRan)).toEqual([])
-})
+// A chat whose code Update must leave alone is told so in plain words, and offered no download
+const LEFT_ALONE: { name: string; release: Release; said: string }[] = [
+  { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a build of Claudopus that a piece of work is changing: Update leaves it alone, and it gets new versions from that work.' },
+  { name: 'a test build', release: { ...RELEASE, noBranch: true }, said: 'This chat runs a test build of Claudopus: Update leaves it alone until a chat puts the released version back.' },
+]
+for (const one of LEFT_ALONE)
+  test(`a chat run from ${one.name} is told Update leaves it alone, and offered no download`, SLOW, async ($, on) => {
+    const { clock, gitRan } = world(on, { release: one.release })
+    pageOn(on, () => pageText())
+    await $.session.start(start)
+    await clock.advance(3 * 60_000)
+    const panel = await $.ui.mount(listAt())
+    await shownIn(panel, 'Claudopus 0.1.2 is out')
+    await shownIn(panel, one.said)
+    expect(await panel.find({ type: 'Text', text: UPDATE_JARGON })).toBeUndefined()
+    expect(await keyed(panel, 'update-download')).toBeUndefined()
+    expect(changing(gitRan)).toEqual([])
+  })
 
 test('F-019 · a chat run from another Mac moves at Install but is not sent a reload: it says to type /reload-plugins', SLOW, async ($, on) => {
   const { files, clock } = world(on, { release: RELEASE, env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
