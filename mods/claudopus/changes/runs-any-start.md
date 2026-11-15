@@ -1,0 +1,3 @@
+- A script a piece of work leaves running shows under its card however it was started (a launcher's children, a shell loop with &, nohup without its process number, xargs, a pool, a background command whose shell ended): with what it is for, its progress where it writes to a file, or "running, no progress given", and the memory it holds; it leaves the card as it ends.
+- Work whose context was compacted, or that started before the work rules changed, is handed the current rules again at its next step.
+- Work is told to add up the memory of heavy or parallel runs on this Mac and keep within the person's limit, sending heavy work where their rules say.

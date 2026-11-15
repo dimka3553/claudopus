@@ -5,7 +5,7 @@
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; mem?: string; isUntold?: boolean; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -107,7 +107,7 @@ const lookJobs = async ($: EngineInterface) => {
   const owned = [
     // A watch's output is its events, read as any other
     ...list.flatMap(one => (one.bg ?? []).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
-    ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid }))),
+    ...list.flatMap(one => (one.detached ?? []).map(d => ({ owner: one.id, id: d.id, file: d.log, pid: d.pid, isUntold: Boolean(d.isLeft && !d.log) }))),
     ...held.flatMap(h => (callFiles.get(h.id) ? [{ owner: h.owner, id: h.id, file: callFiles.get(h.id)?.file ?? '', pid: undefined as string | undefined }] : [])),
   ]
   for (const id of jobLog.keys()) if (!owned.some(o => o.id === id) && !held.some(h => h.id === id)) jobLog.delete(id)
@@ -132,14 +132,15 @@ const lookJobs = async ($: EngineInterface) => {
       }
     }
   }
-  if (!owned.length && !unfound.length) return
+  await pruneSpans($, now)
+  if (!owned.length && !unfound.length && !spans.length) return
   const sid = await $.session.id().catch(() => '')
   if (sid !== tasksOf) ((tasksOf = sid), (tasksDir = ''), (tasksMissedAt = 0))
   if (owned.some(o => !o.file) && !tasksDir && now - tasksMissedAt >= JOB_NEWS) {
     tasksDir = await findTasks($)
     if (!tasksDir) tasksMissedAt = now
   }
-  const asked = owned.filter(o => o.file || tasksDir)
+  const asked = owned.filter(o => !('isUntold' in o && o.isUntold) && (o.file || tasksDir))
   const files = asked.map(o => o.file || `${tasksDir}/${o.id}.output`)
   jobFiles.clear()
   asked.forEach((o, n) => jobFiles.set(o.id, files[n] ?? ''))
@@ -156,7 +157,7 @@ const lookJobs = async ($: EngineInterface) => {
   // run, and now and then every process with its state
   const mtime = 'm=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)'
   const home = 'case $f in "~/"*) f="$HOME/${f#\\~/}";; esac'
-  const script = `n=$1; shift; i=0; for f; do i=$((i+1)); o=$f; ${home}; ${mtime}; if [ $i -le $n ]; then printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; else printf '\\n@@AT@@ %s %s' "$m" "$o"; fi; done; printf '\\n@@ALIVE@@'; for p in ${pids.map(p => p.replace(/\D/g, '')).join(' ')}; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; printf '\\n'${isPs ? "; printf '@@PS@@\\n'; ps -axww -o pid=,ppid=,stat=,etime=,command=" : ''}`
+  const script = `n=$1; shift; i=0; for f; do i=$((i+1)); o=$f; ${home}; ${mtime}; if [ $i -le $n ]; then printf '\\n@@JOB@@ %s %s\\n' "$m" "$f"; tail -c ${JOB_TAIL} "$f" 2>/dev/null; else printf '\\n@@AT@@ %s %s' "$m" "$o"; fi; done; printf '\\n@@ALIVE@@'; for p in ${pids.map(p => p.replace(/\D/g, '')).join(' ')}; do kill -0 "$p" 2>/dev/null && printf ' %s' "$p"; done; printf '\\n'${isPs ? `; printf '@@PS@@\\n'; ps -axww -o ${PS_COLUMNS}` : ''}`
   const r = await $.process.run(['sh', '-c', script, 'sh', String(files.length), ...files, ...targets], { timeoutMs: 5000 }).catch(() => undefined)
   if (!r) return
   const [body = '', tail = ''] = r.stdout.split('\n@@ALIVE@@')
@@ -164,6 +165,8 @@ const lookJobs = async ($: EngineInterface) => {
   // ps gives each process's age: its start is that age before ps answered, not before this look began (on a slow Mac the look can
   // start well before its ps runs, and every shell then seemed to start earlier than it did, too early to be the command held open)
   if (psText !== undefined) ((jobProcs = procsOf(psText, await $.clock.now())), (jobProcsAt = now))
+  // What a command left going, however it was started, becomes a run of its card as soon as the processes show it
+  if (psText !== undefined && spans.length) await adoptLeft($, jobProcs, now).catch(err => log($, `left runs not followed: ${String(err)}`))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
   // A detached job whose process ended leaves its card, kept as ended (how its process ended is not known)
@@ -222,13 +225,22 @@ const lookJobs = async ($: EngineInterface) => {
     const wait = waits.find(w => w.id === id)
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
-    const next: Seen = { ...seen, tail: tailOf(text), ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
+    const next: Seen = { ...seen, ...memSeen(job?.pid), tail: tailOf(text), ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
+    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.mem === next.mem && was?.tail?.join('\n') === next.tail?.join('\n')
     if (isSame) continue
     jobLog.set(id, next)
     isChanged = true
     const owner = job?.owner
     if (seen.latest && owner && was && was.latest !== seen.latest && now - (jobNews.get(owner) ?? 0) >= JOB_NEWS) moved.add(owner)
+  }
+  // A left run whose output goes nowhere it can be read runs with no progress given, with its memory
+  for (const o of owned) {
+    if (!('isUntold' in o && o.isUntold) || gone.includes(o.id)) continue
+    const was = jobLog.get(o.id)
+    const next: Seen = { latest: '', isUntold: true, ...memSeen(o.pid), ...(states.has(o.id) ? { isPaused: states.get(o.id) } : {}) }
+    if (was?.isUntold && was.mem === next.mem && was.isPaused === next.isPaused) continue
+    jobLog.set(o.id, next)
+    isChanged = true
   }
   // A background command that has ended, by the engine's last line on its output or as no shell runs it, leaves its card
   if (ended.length) {
@@ -239,6 +251,87 @@ const lookJobs = async ($: EngineInterface) => {
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
   if (isChanged) void drawFresh($)
+}
+
+// The memory a followed process and all it started hold, as the processes were last listed
+const memSeen = (pid?: string) => {
+  const mem = pid && jobProcs.length ? memOf(treeOf(jobProcs, pid)) : undefined
+  return mem ? { mem } : {}
+}
+
+// Each piece of work's commands, by the process numbers handed out while each ran, kept a while so what one leaves going is
+// found when the processes show it: at once for a command that has ended, later for one sent to the background whose shell ends
+// A command that has ended is looked at once more after a while; one sent to the background until a little after it ends
+type KeptSpan = Span & { agent: string; what: string; bgId?: string }
+let spans: KeptSpan[] = []
+const SPANS_KEPT = 300
+const SPAN_KEPT_FOR = 2 * 60_000
+// The commands of work still running, by their call, and every process already made a run, so none is added twice
+const openCalls = new Map<string, OpenCall>()
+const adopted = new Set<string>()
+const pruneSpans = async ($: EngineInterface, now: number) => {
+  // One sent to the background is open until its row has left every card
+  const list = spans.some(s => s.bgId && s.until === undefined) ? await read($, todos) : []
+  spans = spans.map(s => (s.bgId && s.until === undefined && !list.some(one => one.bg?.some(b => b.id === s.bgId)) ? { ...s, until: now } : s))
+  if (spans.some(s => s.until !== undefined && now - s.until > SPAN_KEPT_FOR)) spans = spans.filter(s => s.until === undefined || now - s.until <= SPAN_KEPT_FOR)
+}
+// The newest process number on this Mac, as a shell started now is handed it; 0 where it cannot be told
+const pidNow = async ($: EngineInterface) => {
+  const r = await $.process.run(['sh', '-c', 'echo $$ # pid now'], { timeoutMs: 3000 }).catch(() => undefined)
+  const n = Number(r?.stdout.trim())
+  return Number.isInteger(n) && n > 1 ? n : 0
+}
+// A piece of work's Bash call has ended (or gone to the background): kept by the numbers handed out while it ran, and what a
+// command that has ended left going is followed at once
+const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string; command?: unknown; description?: unknown; tool_use_id?: unknown; run_in_background?: unknown }, from: number, at: number, result?: unknown) => {
+  if (call.tool !== 'Bash' || !from) return
+  const to = await pidNow($)
+  openCalls.delete(String(call.tool_use_id ?? ''))
+  if (!to) return
+  const now = await $.clock.now()
+  const command = String(call.command ?? '')
+  // Started on another Mac over ssh, what it leaves runs there
+  if (/^\s*(\S*\/)?ssh\b/.test(command)) return
+  const bgId = (result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
+  const isBackground = Boolean(call.run_in_background) && typeof bgId === 'string'
+  const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 400), from, to, at, endAt: now, ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
+  spans = [...spans.filter(s => s.id !== span.id), span].slice(-SPANS_KEPT)
+  if (call.run_in_background) return
+  const r = await $.process.run(['sh', '-c', `printf '@@LEFT@@\\n'; ps -axww -o ${PS_COLUMNS}`], { timeoutMs: 5000 }).catch(() => undefined)
+  if (!r || r.exitCode !== 0 || !r.stdout.includes('@@LEFT@@')) return
+  const procs = procsOf(r.stdout.split('@@LEFT@@\n')[1] ?? '', now)
+  // Among every command kept, so a run held back while another ran goes to its own
+  await adoptLeft($, procs, now)
+}
+// What commands left going becomes runs on their cards: each topmost process, with its command's words when it left one, else
+// its own program and script; its log where its output goes to a file, so its progress line is read as any other
+const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: KeptSpan[]) => {
+  const list = await read($, todos)
+  // A process number gone from the list may be handed out again: it no longer stands for a run made already
+  for (const pid of adopted) if (!procs.some(p => p.pid === pid)) adopted.delete(pid)
+  const known = new Set([...adopted, ...list.flatMap(one => (one.detached ?? []).flatMap(d => (d.pid ? [d.pid] : [])))])
+  const left = leftoversOf(procs, only ?? spans, known, [...openCalls.values()])
+  if (!left.length) return
+  const fd = await $.process
+    .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...left.map(l => l.top.pid)], { timeoutMs: 5000 })
+    .catch(() => undefined)
+  const logs = new Map((fd?.stdout.split('\n') ?? []).map(line => [line.split(' ')[0] ?? '', line.split(' ').slice(1).join(' ').trim()]))
+  const added = new Map<string, NonNullable<Todo['detached']>>()
+  for (const one of left) {
+    const span = spans.find(s => s.id === one.span) ?? only?.find(s => s.id === one.span)
+    if (!span || !list.some(card => card.id === span.agent)) continue
+    const file = logs.get(one.top.pid) ?? ''
+    const log = file.startsWith('/') && !file.startsWith('/dev/') ? file : ''
+    const several = left.filter(l => l.span === one.span).length > 1
+    const what = several || !span.what ? leftName(one.top.command) : span.what
+    adopted.add(one.top.pid)
+    added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true }])
+  }
+  if (!added.size) return
+  await changeTodos($, cards => cards.map(one => (added.has(one.id) ? { ...one, detached: [...(one.detached ?? []).filter(d => !added.get(one.id)?.some(a => a.id === d.id)), ...(added.get(one.id) ?? [])].slice(-BG_KEPT) } : one)))
+  for (const [agent, runs] of added) await log($, `work ${agent} left ${runs.length} run(s) going: ${runs.map(r => r.what).join(' / ').slice(0, 160)}`)
+  jobsLookedAt = 0
+  void drawFresh($)
 }
 
 // A short time since, for a row's side: seconds, minutes, or hours and minutes
