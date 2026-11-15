@@ -7264,6 +7264,24 @@ test('in the terminal, a password box that comes while a reply is being typed le
   expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([reply?.key])
 })
 
+test('in the terminal, an ask that comes while a password is being typed leaves the keys with the password box', async ($, on) => {
+  const w = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two things', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Hide the repo', prompt: 'make the repo private' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: `hold /plug/claudopus/bin/admin m4 'id -u'` } as never).catch(() => undefined)
+  const id = '9f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  w.files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'admin', host: 'm4', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }))
+  await w.clock.advance(1000)
+  const inputs = async () => (await list.findAll({ type: 'Input' } as never)).map(one => ({ key: one.key ?? '', focus: Boolean(one.props.autoFocus) }))
+  const box = await until(async () => (await inputs()).find(one => one.key.startsWith('box-')))
+  await list.input({ key: box?.key ?? '', text: 'hunt', kind: 'change' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
+  expect(await until(async () => ((await inputs()).some(one => one.key.startsWith('ask-')) ? true : undefined))).toBe(true)
+  expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([box?.key])
+})
+
 // Each finding of the security review of 0.2.100 (F-001 to F-022), held by a test that fails on the code before its fix. The findings
 // the runners hold (F-006, F-008, F-009, F-017, F-018) are tested in mods/claudopus/bin/admin.test.sh too, on a real keychain or keyring
 

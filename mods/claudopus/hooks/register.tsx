@@ -9762,7 +9762,7 @@ const panelHooks = (on: On) => {
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
-                autoFocus={e.surface === 'terminal' && !askFocused && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
+                autoFocus={e.surface === 'terminal' && !askFocused && ![...boxDrafts.values()].some(Boolean) && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
                 placeholder="Or reply in your own words"
                 value={drafts.get(one.id) ?? ''}
                 submitLabel="send"
@@ -10948,16 +10948,17 @@ const panelHooks = (on: On) => {
     // A work that waits on the person comes to the top whole, its ask or its gate in it as ever; once a gate is answered, what was
     // done shows in the card, outlined green, and the card stays at the top until that goes
     const isAsking = (one: Todo) => Boolean(one.ask) && !isActingOnReply(one)
-    const isUp = (one: Todo) => isAsking(one) || Boolean(one.admins?.length) || (!one.chat && cardNotesOf(one.id, at).length > 0)
-    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(one.admins ?? []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)))
+    const isWaitingPress = (one: Todo) => one.status === 'working' && Boolean(one.admins?.length)
+    const isUp = (one: Todo) => isAsking(one) || isWaitingPress(one) || (!one.chat && cardNotesOf(one.id, at).length > 0)
+    const upSince = (one: Todo) => Math.max(isAsking(one) ? (one.ask?.at ?? 0) : 0, ...(isWaitingPress(one) ? one.admins ?? [] : []).map(gate => gate.at), ...(one.chat ? [] : cardNotesOf(one.id, at).map(note => note.at)))
     const askingHere = shownWork.filter(isUp)
     const askingThere = listedChats.flatMap(c => shownOf(c).filter(isUp))
     const askCards = [...askingHere, ...askingThere].sort((a, b) => upSince(b) - upSince(a))
     const restHere = shownWork.filter(one => !isUp(one))
     // Notices and whole cards in one order, the newest first; a card that only says what was allowed comes under all that still
     // waits. A card is drawn when the panel is
-    const top = [...notices.map(one => ({ at: one.at, draw: () => one.node })), ...askCards.map(one => ({ at: upSince(one) - (isAsking(one) || one.admins?.length ? 0 : 1e15), draw: () => small(one) }))].sort((a, b) => b.at - a.at)
-    const waitsCount = notices.length + askCards.filter(one => isAsking(one) || one.admins?.length).length
+    const top = [...notices.map(one => ({ at: one.at, draw: () => one.node })), ...askCards.map(one => ({ at: upSince(one) - (isAsking(one) || isWaitingPress(one) ? 0 : 1e15), draw: () => small(one) }))].sort((a, b) => b.at - a.at)
+    const waitsCount = notices.length + askCards.filter(one => isAsking(one) || isWaitingPress(one)).length
     // The terminal's keys stay with the ask they were on while it waits
     if (keysAsk && !askingHere.some(one => one.id === keysAsk && isAsking(one))) keysAsk = ''
     // The header says what every card under it says, every chat's: what needs the person, what runs here and in other chats, and
