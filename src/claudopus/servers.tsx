@@ -100,7 +100,8 @@ const refresh = async ($: EngineInterface) => {
   const open = await $.ui.panes().catch(() => [])
   if (!open.some(one => one.id === PANE && one.isShown)) return
   await scanServers($)
-  await update($, tick, n => n + 1)
+  // Its own value, which only the Servers tab reads: the panel is not drawn again with it
+  await update($, servers, list => [...list])
 }
 
 const stopServer = async ($: EngineInterface, pid: number) => {

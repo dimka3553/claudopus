@@ -88,7 +88,7 @@ const keepDetached = async ($: EngineInterface, agent: string, call: { tool: str
   const what = oneLine(String(call.description ?? '') || found.core).slice(0, 160)
   const now = await $.clock.now()
   const id = `detached-${String(call.tool_use_id ?? now)}`
-  await update($, todos, list =>
+  await changeTodos($, list =>
     list.map(one => (one.id === agent ? { ...one, detached: [...(one.detached ?? []), { id, what, at: now, cmd: oneLine(command).slice(0, 400), log: logFile, pid }].slice(-BG_KEPT) } : one)),
   )
 }
@@ -161,15 +161,17 @@ const lookJobs = async ($: EngineInterface) => {
   if (!r) return
   const [body = '', tail = ''] = r.stdout.split('\n@@ALIVE@@')
   const [aliveText = '', psText] = tail.split('@@PS@@\n')
-  if (psText !== undefined) ((jobProcs = procsOf(psText, now)), (jobProcsAt = now))
+  // ps gives each process's age: its start is that age before ps answered, not before this look began (on a slow Mac the look can
+  // start well before its ps runs, and every shell then seemed to start earlier than it did, too early to be the command held open)
+  if (psText !== undefined) ((jobProcs = procsOf(psText, await $.clock.now())), (jobProcsAt = now))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
   // A detached job whose process ended leaves its card, kept as ended (how its process ended is not known)
   const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
   if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
     const runsOf = (one: Todo) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' as const }))
-    await update($, todos, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined, ...keepEnded(one, runsOf(one)) } : one)))
-    $.ui.invalidate('ui.render')
+    await changeTodos($, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined, ...keepEnded(one, runsOf(one)) } : one)))
+    void drawFresh($)
   }
   // Each background command's shell, found by its words among the engine's shells: paused when any of its processes is, and gone
   // when no shell has been found for it twice in a row while others were (so a way of running the engine has not changed), as one the engine never said ended (only once a minute has passed)
@@ -235,8 +237,8 @@ const lookJobs = async ($: EngineInterface) => {
     isChanged = true
   }
   for (const owner of moved) jobNews.set(owner, now)
-  if (moved.size) await update($, todos, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
-  if (isChanged) $.ui.invalidate('ui.render')
+  if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
+  if (isChanged) void drawFresh($)
 }
 
 // A short time since, for a row's side: seconds, minutes, or hours and minutes
@@ -260,7 +262,7 @@ const openJobOutput = async ($: EngineInterface, job: Job) => {
   const file = jobFiles.get(job.id)
   // A press moves the buttons' keys, so the panel does not keep pulling back to this row
   presses += 1
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   if (!file || !canOpenJob(job)) return
   const at = await $.clock.now()
   const base = `${dir}/terminal`
