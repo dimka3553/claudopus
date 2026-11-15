@@ -335,7 +335,8 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             ),
             false,
             () => undefined,
-            shown.check.said ? (
+            // What Check now found, unless that version was skipped since: then the Skipped line says it
+            shown.check.said && !(config.skipVersion && shown.updates?.seen === config.skipVersion) ? (
               <Text key="config-check-said" color={shown.check.isError ? 'error' : undefined} wrap="wrap">{shown.check.said}</Text>
             ) : null,
           )}

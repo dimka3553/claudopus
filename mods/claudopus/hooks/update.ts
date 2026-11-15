@@ -233,7 +233,7 @@ export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Prom
   const named = (text: string) => text.replace(/[^\w./-]/g, '').slice(0, 40)
   const branch = named((await git(['symbolic-ref', '-q', '--short', 'HEAD'])).stdout.trim())
   if (gitDir.trim() !== commonDir.trim())
-    return { ok: false, what: `a worktree of the code${branch ? `, on branch ${branch}` : ''}`, why: 'releases come out on main and never reach a worktree: merge main there, then reload' }
+    return { ok: false, what: `a worktree of the code${branch ? `, on branch ${branch}` : ''}`, why: 'it gets a release only when main is merged into it' }
   if (!branch) return { ok: false, what: 'a checkout of the code on no branch', why: 'releases come out on main: switch it to main, then check again' }
   const upstream = named((await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim())
   if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream))

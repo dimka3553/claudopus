@@ -190,7 +190,7 @@ test('a chat run from a worktree of the code is told a release never reaches it,
   await clock.advance(3 * 60_000)
   const panel = await $.ui.mount(listAt())
   await shownIn(panel, 'Claudopus 0.1.2 is out')
-  await shownIn(panel, 'This chat runs from a worktree of the code, on branch fix-bar: releases come out on main and never reach a worktree: merge main there, then reload.')
+  await shownIn(panel, 'This chat runs from a worktree of the code, on branch fix-bar: it gets a release only when main is merged into it.')
   expect(await keyed(panel, 'update-download')).toBeUndefined()
   expect(changing(gitRan)).toEqual([])
 })
