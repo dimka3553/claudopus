@@ -16,7 +16,7 @@ import { checkSaid, copyOf, folderLook, installedFrom, isNewer, isUpdateDue, loo
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { detachedOf, DOWNLOAD_CMD, foldJobs, heldShellOf, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
+import { detachedOf, DOWNLOAD_CMD, describedOf, foldJobs, heldShellOf, isKindSaid, isOutputEnded, isPausedProc, isPid, isWaitOnly, labelOf, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import type { Proc } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
@@ -7574,14 +7574,17 @@ let tasksMissedAt = 0
 // The output a command held open writes while it runs, by its row's id: the engine writes it to a file of its own in the tasks
 // folder and names it only once the command ends or goes to the background, so it is found as the file its shell writes to
 const callFiles = new Map<string, { file: string; at: number }>()
+// The file each row's output was last read from, by its id, so a press on the row can show it whole
+const jobFiles = new Map<string, string>()
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false): Job => {
   const seen = jobLog.get(id)
   const wait = isWatch ? undefined : waitOf(cmd)
-  const kind: JobKind = isWatch ? 'watch' : wait ? 'wait' : jobKindOf(cmd, what)
-  const label = labelOf(what || cmd, cmd)
-  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
+  const said = describedOf(what)
+  const kind: JobKind = isWatch ? 'watch' : (said.kind ?? (wait ? 'wait' : jobKindOf(cmd, what)))
+  const label = labelOf(said.text || cmd, cmd)
+  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(said.expect ? { expect: said.expect, expectText: said.expectText } : {}), ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
 }
 // The jobs a card has running: what it sent to the background, and a command it has waited on a while; jobs alike are one
 const jobsOf = (one: Todo, at: number): Job[] =>
@@ -7599,6 +7602,8 @@ const jobsOf = (one: Todo, at: number): Job[] =>
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
+  // Its own words alone when they say its kind already (Download the CT scans, Wait for the deploy)
+  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
   // A wait leads with what it waits for, its own words after
   const label = job.kind === 'wait' ? (job.waitsFor ?? job.label.replace(/^wait(s|ing)?\s+/i, '')) : job.label
   return `${kind} · ${label}`
@@ -7686,6 +7691,8 @@ const lookJobs = async ($: EngineInterface) => {
   }
   const asked = owned.filter(o => o.file || tasksDir)
   const files = asked.map(o => o.file || `${tasksDir}/${o.id}.output`)
+  jobFiles.clear()
+  asked.forEach((o, n) => jobFiles.set(o.id, files[n] ?? ''))
   // The files the waits poll, to tell whether what they wait for still moves
   const waits = list.flatMap(one => [...(one.bg ?? []).filter(b => !b.isWatch), ...(one.detached ?? [])].flatMap(j => {
     const wait = waitOf(j.cmd ?? '')
@@ -7787,6 +7794,22 @@ const isLike = (command: string, pattern: string) => {
   } catch {
     return command.includes(pattern)
   }
+}
+
+// A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
+// it goes on; on this Mac only, as the window is this Mac's
+const openJobOutput = async ($: EngineInterface, job: Job) => {
+  const file = jobFiles.get(job.id)
+  if (!file || isRunFromAfar || isLinux) return
+  const at = await $.clock.now()
+  const base = `${dir}/terminal`
+  const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
+  const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file)
+  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
+  await $.fs.write(`${home}/output.command`, script)
+  const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
+  if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
 }
 
 // Steps that could have gone out together: after each step of work, a line in its next request when the step shows a pattern that
@@ -9586,7 +9609,7 @@ const panelHooks = (on: On) => {
       const ran = at - job.at
       const [state, short, isWarn]: [string, string, boolean] =
         job.isPaused ? ['paused', 'paused', true]
-        : job.kind === 'wait' ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
+        : job.kind === 'wait' && (job.target || !(job.wroteAt || job.isEmpty)) ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
         : job.kind === 'watch' ? (job.wroteAt && !job.isEmpty ? [`last event ${shortAgo(quiet)} ago`, `event ${shortAgo(quiet)} ago`, false] : ['no event yet', 'no event', false])
         : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
         : job.wroteAt && quiet >= JOB_QUIET ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
@@ -9599,8 +9622,8 @@ const panelHooks = (on: On) => {
       const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
       const left = job.left && isFresh ? [job.left] : []
       const rate = job.rate && isFresh ? [job.rate] : []
-      const full = job.done && job.kind !== 'wait' ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
-      const compact = job.done && job.kind !== 'wait' ? [job.total ? `${job.done}/${job.total}` : job.done] : []
+      const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
+      const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
       const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], [...compact, ...pct, short], [...compact, ...pct], [short]], width)
       return { text, isWarn: warn }
     }
@@ -9611,16 +9634,20 @@ const panelHooks = (on: On) => {
       if (!job) return null
       const key = `${scope}-job-${job.id}`
       const width = perRow - 4 - t.depth * 2
-      const time = took(at - job.at)
+      // its time, and how long it said it should take: in amber once well past that
+      const ran = at - job.at
+      const isLong = Boolean(job.expect && ran > (job.expect ?? 0) * 1.5)
+      const time = job.expectText ? `${took(ran)} of ~${job.expectText}` : took(ran)
       const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
       const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
           {jobLines(t, `twig-lines-${key}`, job)}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
-            <Text wrap="truncate-end">{name}</Text>
+            {/* A press shows its output whole in a Terminal window */}
+            <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => void openJobOutput($, job).catch(err => log($, `output not opened: ${String(err)}`))} />
           </Box>
           <Box flexShrink={0}>
-            <Text dimColor>{time}</Text>
+            <Text dimColor={!isLong} color={isLong ? NEEDS : undefined}>{time}</Text>
           </Box>
         </Box>
       )
@@ -9630,7 +9657,7 @@ const panelHooks = (on: On) => {
       const pctAt = job.pct && !isWarn ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
       // The latest line, unless it is only a progress bar its percent already says; a wait says the work's own words for it.
       // A run read from a progress line above its last still shows the last, such as an error after it
-      const latest = job.kind === 'wait' ? (job.waitsFor && job.isNamed ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
+      const latest = job.kind === 'wait' && job.waitsFor ? (job.isNamed && !isKindSaid(job.label) ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
       const rest = width - stand.length - (stand ? 3 : 0)
       const detail = latest && rest >= 10 ? cut(latest, rest) : ''
       if (!stand && !detail) return head

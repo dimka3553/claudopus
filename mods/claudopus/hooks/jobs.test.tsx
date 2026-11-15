@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { commandName, detachedOf, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
+import { commandName, describedOf, detachedOf, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
 import type { Job } from './jobs'
 
 test('a job is told by its command: a server with its port, a download, else a script; its latest line is what a progress bar shows last', async () => {
@@ -225,7 +225,8 @@ test('a command held open is found by its own shell however few its words; times
 
 test('a wait or check that reads pages with curl is no download: the 15 Nov "Download · Wait for deploy and verify the live pages"', async () => {
   const deploy = `for i in $(seq 1 50); do n=$(curl -s --max-time 30 "https://example.com/support/terms?v=$i" | grep -c 'Governors'); [ "$n" -gt 0 ] && break; sleep 10; done; for p in terms privacy; do printf "$p %s\\n" $(curl -s "https://example.com/support/$p" | tee /tmp/p.html | grep -o 'Governors' | wc -l); done`
-  expect(jobKindOf(deploy, 'Wait for deploy and verify the live pages')).toBe('script')
+  expect(jobKindOf(deploy, 'Wait for deploy and verify the live pages')).toBe('wait')
+  expect(jobKindOf(deploy, 'Verify the live pages')).toBe('script')
   expect(jobKindOf('curl -s https://example.com/health | grep ok', 'Look at the site')).toBe('script')
   expect(jobKindOf('wget --spider https://example.com/a.zip', 'See the file is there')).toBe('script')
   expect(jobKindOf('curl -sL https://example.com/a.zip -o a.zip', 'Get the archive')).toBe('download')
@@ -233,4 +234,16 @@ test('a wait or check that reads pages with curl is no download: the 15 Nov "Dow
   expect(jobKindOf('curl -LO https://example.com/a.zip', 'Get the archive')).toBe('download')
   expect(jobKindOf('wget https://example.com/a.zip', 'Get the archive')).toBe('download')
   expect(jobKindOf('python3 check.py', 'Check the download finished')).toBe('script')
+})
+
+test('the work names each run in one form, its kind first and how long it should take in brackets, and the card reads that as it is', async () => {
+  expect(describedOf('Download the CT scans (about 3 min)')).toEqual({ text: 'Download the CT scans', kind: 'download', expect: 180_000, expectText: '3m' })
+  expect(describedOf('Wait for the deploy to go live (about 90s)')).toMatchObject({ text: 'Wait for the deploy to go live', kind: 'wait', expect: 90_000 })
+  expect(describedOf('Upload the fits to Azure (~1h 30m)')).toMatchObject({ kind: 'download', expectText: '1h 30m' })
+  expect(describedOf('Run the fit on all scans (about 20 min)')).toMatchObject({ kind: 'script', expectText: '20m' })
+  // Its words decide its kind, whatever the command: a wait that polls with curl is a wait
+  expect(jobKindOf('for i in $(seq 1 50); do curl -L -o p.html https://e.com; sleep 10; done', 'Wait for the deploy to go live (about 2 min)')).toBe('wait')
+  expect(jobKindOf('python3 fetch.py', 'Download the weights (about 5 min)')).toBe('download')
+  // Words in another form keep their own name and no time
+  expect(describedOf('Redraw all pictures')).toEqual({ text: 'Redraw all pictures', kind: undefined })
 })

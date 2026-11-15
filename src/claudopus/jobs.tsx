@@ -22,14 +22,17 @@ let tasksMissedAt = 0
 // The output a command held open writes while it runs, by its row's id: the engine writes it to a file of its own in the tasks
 // folder and names it only once the command ends or goes to the background, so it is found as the file its shell writes to
 const callFiles = new Map<string, { file: string; at: number }>()
+// The file each row's output was last read from, by its id, so a press on the row can show it whole
+const jobFiles = new Map<string, string>()
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false): Job => {
   const seen = jobLog.get(id)
   const wait = isWatch ? undefined : waitOf(cmd)
-  const kind: JobKind = isWatch ? 'watch' : wait ? 'wait' : jobKindOf(cmd, what)
-  const label = labelOf(what || cmd, cmd)
-  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
+  const said = describedOf(what)
+  const kind: JobKind = isWatch ? 'watch' : (said.kind ?? (wait ? 'wait' : jobKindOf(cmd, what)))
+  const label = labelOf(said.text || cmd, cmd)
+  return { id, label, isNamed: Boolean(what) && label !== labelOf('', cmd), cmd, kind, at, ...(said.expect ? { expect: said.expect, expectText: said.expectText } : {}), ...(seen ?? {}), ...(wait ? { waitsFor: wait.what, ...(wait.file ? { waitFile: wait.file } : {}) } : {}), port: portOf(cmd) ?? seen?.port }
 }
 // The jobs a card has running: what it sent to the background, and a command it has waited on a while; jobs alike are one
 const jobsOf = (one: Todo, at: number): Job[] =>
@@ -47,6 +50,8 @@ const jobsOf = (one: Todo, at: number): Job[] =>
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
   const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
+  // Its own words alone when they say its kind already (Download the CT scans, Wait for the deploy)
+  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
   // A wait leads with what it waits for, its own words after
   const label = job.kind === 'wait' ? (job.waitsFor ?? job.label.replace(/^wait(s|ing)?\s+/i, '')) : job.label
   return `${kind} · ${label}`
@@ -134,6 +139,8 @@ const lookJobs = async ($: EngineInterface) => {
   }
   const asked = owned.filter(o => o.file || tasksDir)
   const files = asked.map(o => o.file || `${tasksDir}/${o.id}.output`)
+  jobFiles.clear()
+  asked.forEach((o, n) => jobFiles.set(o.id, files[n] ?? ''))
   // The files the waits poll, to tell whether what they wait for still moves
   const waits = list.flatMap(one => [...(one.bg ?? []).filter(b => !b.isWatch), ...(one.detached ?? [])].flatMap(j => {
     const wait = waitOf(j.cmd ?? '')
@@ -235,4 +242,20 @@ const isLike = (command: string, pattern: string) => {
   } catch {
     return command.includes(pattern)
   }
+}
+
+// A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
+// it goes on; on this Mac only, as the window is this Mac's
+const openJobOutput = async ($: EngineInterface, job: Job) => {
+  const file = jobFiles.get(job.id)
+  if (!file || isRunFromAfar || isLinux) return
+  const at = await $.clock.now()
+  const base = `${dir}/terminal`
+  const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
+  const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file)
+  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
+  await $.fs.write(`${home}/output.command`, script)
+  const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
+  const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
+  if (r.exitCode !== 0) void log($, `output not opened: ${r.stderr.trim().slice(0, 160)}`)
 }

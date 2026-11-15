@@ -21,6 +21,8 @@ export type Job = {
   isOwn?: boolean
   isEmpty?: boolean
   isNamed?: boolean
+  expect?: number
+  expectText?: string
   wroteAt?: number
   isPaused?: boolean
   count?: number
@@ -69,8 +71,27 @@ const isFetching = (step: string) => {
   if (/^wget\b/.test(head)) return !/\s--spider\b|\s-[a-zA-Z]*O\s*-(\s|$)|\s-qO-/.test(head)
   return true
 }
+// The work's own words for a run, in the one form it is told to write them, so its card reads them as they are and guesses
+// nothing from the command: its kind first (Download, Upload, Wait for, Watch, Serve, Run), what it does, and how long it
+// should take in brackets: `Download the CT scans (about 3 min)`
+const KIND_WORDS: [RegExp, JobKind][] = [
+  [/^(download|upload|fetch|copy|sync|clone)\b/i, 'download'],
+  [/^(wait|poll)\b/i, 'wait'],
+  [/^watch\b/i, 'watch'],
+  [/^serve\b/i, 'server'],
+  [/^run\b/i, 'script'],
+]
+export const describedOf = (what: string) => {
+  const m = what.match(/\s*\((?:about|around|roughly|up to|~)\s*([^)]+)\)\s*$/i)
+  const seconds = m ? secondsIn((m[1] ?? '').trim()) : undefined
+  const text = m ? what.slice(0, m.index).trim() : what.trim()
+  return { text, kind: KIND_WORDS.find(([re]) => re.test(text))?.[1], ...(seconds ? { expect: seconds * 1000, expectText: (leftText(seconds) ?? '').replace(/ left$/, '') } : {}) }
+}
+// Words that lead a run's own name and say its kind already, so its row does not say it twice
+export const isKindSaid = (label: string) => KIND_WORDS.some(([re]) => re.test(label.trim()))
+// Else, for words written another way or none, its kind is told from its command
 export const jobKindOf = (cmd: string, label: string): JobKind =>
-  SERVER_CMD.test(cmd) || /\bserver\b/i.test(label) ? 'server' : !CHECKS.test(label.trim()) && (stepsOf(cmd).some(isFetching) || /\bdownload/i.test(label)) ? 'download' : 'script'
+  describedOf(label).kind ?? (SERVER_CMD.test(cmd) || /\bserver\b/i.test(label) ? 'server' : !CHECKS.test(label.trim()) && (stepsOf(cmd).some(isFetching) || /\bdownload/i.test(label)) ? 'download' : 'script')
 // Each step of a shell line with what only sets it up taken off its head (a variable, env, nohup, time, sudo, exec), never a `cd`
 const SETUP = /^(?:(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)|env|nohup|setsid|exec|sudo|command|(?:\/usr\/bin\/)?time(?:\s+-\w+)*|timeout\s+\S+|caffeinate(?:\s+-\w+)*)\s+)+/
 const stepsOf = (cmd: string) =>

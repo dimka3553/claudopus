@@ -519,7 +519,7 @@ const panelHooks = (on: On) => {
       const ran = at - job.at
       const [state, short, isWarn]: [string, string, boolean] =
         job.isPaused ? ['paused', 'paused', true]
-        : job.kind === 'wait' ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
+        : job.kind === 'wait' && (job.target || !(job.wroteAt || job.isEmpty)) ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
         : job.kind === 'watch' ? (job.wroteAt && !job.isEmpty ? [`last event ${shortAgo(quiet)} ago`, `event ${shortAgo(quiet)} ago`, false] : ['no event yet', 'no event', false])
         : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
         : job.wroteAt && quiet >= JOB_QUIET ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
@@ -532,8 +532,8 @@ const panelHooks = (on: On) => {
       const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
       const left = job.left && isFresh ? [job.left] : []
       const rate = job.rate && isFresh ? [job.rate] : []
-      const full = job.done && job.kind !== 'wait' ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
-      const compact = job.done && job.kind !== 'wait' ? [job.total ? `${job.done}/${job.total}` : job.done] : []
+      const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
+      const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
       const text = firstFit([[...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], [...compact, ...pct, short], [...compact, ...pct], [short]], width)
       return { text, isWarn: warn }
     }
@@ -544,16 +544,20 @@ const panelHooks = (on: On) => {
       if (!job) return null
       const key = `${scope}-job-${job.id}`
       const width = perRow - 4 - t.depth * 2
-      const time = took(at - job.at)
+      // its time, and how long it said it should take: in amber once well past that
+      const ran = at - job.at
+      const isLong = Boolean(job.expect && ran > (job.expect ?? 0) * 1.5)
+      const time = job.expectText ? `${took(ran)} of ~${job.expectText}` : took(ran)
       const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
       const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
           {jobLines(t, `twig-lines-${key}`, job)}
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
-            <Text wrap="truncate-end">{name}</Text>
+            {/* A press shows its output whole in a Terminal window */}
+            <Button key={`output-${key}-${presses}`} label={name} plain hover={{ scope: `twig-${key}`, underline: true }} onPress={() => void openJobOutput($, job).catch(err => log($, `output not opened: ${String(err)}`))} />
           </Box>
           <Box flexShrink={0}>
-            <Text dimColor>{time}</Text>
+            <Text dimColor={!isLong} color={isLong ? NEEDS : undefined}>{time}</Text>
           </Box>
         </Box>
       )
@@ -563,7 +567,7 @@ const panelHooks = (on: On) => {
       const pctAt = job.pct && !isWarn ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
       // The latest line, unless it is only a progress bar its percent already says; a wait says the work's own words for it.
       // A run read from a progress line above its last still shows the last, such as an error after it
-      const latest = job.kind === 'wait' ? (job.waitsFor && job.isNamed ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
+      const latest = job.kind === 'wait' && job.waitsFor ? (job.isNamed && !isKindSaid(job.label) ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
       const rest = width - stand.length - (stand ? 3 : 0)
       const detail = latest && rest >= 10 ? cut(latest, rest) : ''
       if (!stand && !detail) return head

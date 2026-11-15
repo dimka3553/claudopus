@@ -980,13 +980,16 @@ test('what a piece of work and its helpers have running is in its Details too, e
     $.tool.call({ tool: 'Bash', tool_use_id: id, agentId, command, description, run_in_background: true } as never)
   await call('a1', 'b1', 'npm run dev', 'Serve the site')
   for (const n of [1, 2, 3, 4, 5]) await call('a2', `d${n}`, `curl -o w${n}.bin https://example.com/w${n}.bin`, `Download weights ${n}`)
-  const texts = async (view: { findAll: (q: { type: 'Text' }) => Promise<{ text: string }[]> }) => (await view.findAll({ type: 'Text' })).map(one => one.text)
+  // (a run's name is a button, as a press opens its output)
+  const texts = async (view: { findAll: (q: { type: 'Text' | 'Button' }) => Promise<{ text: string; props: Record<string, unknown> }[]> }) => [...(await view.findAll({ type: 'Text' })).map(one => one.text), ...(await view.findAll({ type: 'Button' })).map(one => String(one.props.label))]
   // The work's Details: its own server first under it, then the helper with all five of its downloads, none folded into a count
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   // In drawing order, with the tree's lines: the server on the work's own line, the helper, its downloads one level under it
   const rows = (await tab.findAll({ type: 'Text' })).map(one => one.text)
-  const picked = rows.flatMap((text, i) => (/^Server · |^Download · /.test(text) ? [`${rows[i - 2]} ${text}`] : []))
-  expect(picked).toEqual(['├─── Server · Serve the site', ...[1, 2, 3, 4].map(n => `  ├─── Download · Download weights ${n}`), '  └─── Download · Download weights 5'])
+  const picked = (await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /^Serve the site|^Download weights/.test(text))
+  // the server on the work's own line, the helper's downloads a level under it
+  expect(rows.filter(text => /^ *[├└]───$/.test(text)).slice(0, 1)).toEqual(['├───'])
+  expect(picked.sort()).toEqual([...[1, 2, 3, 4, 5].map(n => `Download weights ${n}`), 'Serve the site'])
   const shown = await texts(tab)
   expect(shown.some(text => /more (running|jobs)/.test(text))).toBe(false)
   expect((await tab.find({ type: 'Text', text: /^Helpers and jobs$/ }))?.props.bold).toBe(true)
@@ -1044,7 +1047,8 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   await advance(20_000)
   const texts = async (columns = 140) => {
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: columns }, surface: 'terminal' } as never)
-    const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
+    // (a run's name is a button, as a press opens its output)
+    const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
     await list.unmount()
     return all
   }
@@ -1075,8 +1079,9 @@ test('a run whose output cannot be found says so after a minute, so a blank row 
   await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'a1', command: 'cd /w && nohup curl -L -o scans.zip https://example.com/scans.zip > fetch.log 2>&1 & echo $!', description: 'Fetch the CT scans' } as never)
   await clock.advance(70_000)
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
-  const shown = (await list.findAll({ type: 'Text' })).map(one => one.text)
-  expect(shown.some(text => /^Download · Fetch the CT scans/.test(text))).toBe(true)
+  const shown = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
+  // Its name, its kind already said in the work's own words
+  expect(shown.some(text => /^Fetch the CT scans/.test(text))).toBe(true)
   expect(shown.some(text => /^output not found$/.test(text))).toBe(true)
   await list.unmount()
 })
@@ -1092,7 +1097,7 @@ test('every run under a card says how it stands: a command held open shows its p
     const s = Math.max(1, Math.floor((now - heldAt) / 1000))
     return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
   }
-  const { clock, held } = world(on, {
+  const { clock, held, shown: opened, files } = world(on, {
     jobs: {
       output: file => outputs[file]?.() ?? '',
       wroteAt: file => wrote[file]?.() ?? 0,
@@ -1109,11 +1114,12 @@ test('every run under a card says how it stands: a command held open shows its p
   await $.tool.call({ tool: 'Bash', tool_use_id: 'r1', agentId: 'a1', command: 'bash /s/round3b_figs.sh', description: 'Redraw all pictures', run_in_background: true } as never)
   await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'tail -n0 -F sheet.log', description: 'Azure jobs finishing' } as never)
   heldAt = now
-  const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Fetch the CT scans' } as never)
+  const call = $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a1', command: 'curl -L -o scans.zip https://example.com/scans.zip # hold dl', description: 'Download the CT scans (about 3 min)' } as never)
   for (let n = 0; n < 27; n++) await advance(20_000)
   const texts = async () => {
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
-    const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
+    // (a run's name is a button, as a press opens its output)
+    const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
     await list.unmount()
     return all
   }
@@ -1122,7 +1128,9 @@ test('every run under a card says how it stands: a command held open shows its p
     return all.includes('460 MB of 1 GB · ') ? all : undefined
   })) ?? []
   // The download held open: how much of how much, its percent, speed and time left, as curl printed them
-  expect(shown.some(text => /^Download · Fetch the CT scans/.test(text))).toBe(true)
+  // Named in the work's own form: its kind already said, how long it should take beside its time, in amber well past it
+  expect(shown).toContain('Download the CT scans')
+  expect(shown).toContain('9m 00s of ~3m')
   expect(shown.some(text => /^ · 10.5 MB\/s · 55s left · printed 2s ago$/.test(text))).toBe(true)
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
@@ -1132,6 +1140,12 @@ test('every run under a card says how it stands: a command held open shows its p
   expect(shown.some(text => /^Watch · Azure jobs finishing/.test(text))).toBe(true)
     expect(shown).toContain('last event 30s ago')
   expect(shown).toContain(' · wrote vsd-02.png')
+  // A press on a run's name shows its output whole in a Terminal window, as it goes on
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Command · Redraw all pictures')?.key ?? '' })
+  const argv = await until(async () => opened.find(one => String(one[1]).endsWith('/output.command')))
+  expect(files.get(String(argv?.[1]))).toContain(`exec tail -n 1000 -F '${TASKS}/bg-r1.output'`)
+  await list.unmount()
   held.get('dl')?.('')
   await call
 })

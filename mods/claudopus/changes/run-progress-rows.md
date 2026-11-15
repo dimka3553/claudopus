@@ -1,6 +1,6 @@
 - Every run on a card is two lines: what it is and its time, then how it stands. A command held open shows its progress too, a watch its last event, and one that has printed nothing says "nothing printed in 9m" instead of "updated 9m ago".
-- A run's row shows the time left when the run says it (curl, wget, rsync, tqdm, pip, or `eta` on a `progress:` line), beside how much of how much, its percent and speed.
-- A run quiet for three minutes says "quiet for 4m" in amber, so quiet is told apart from working.
-- A row is named by the work's own words for it, or by what it runs (python rc.py), never by the head of a shell line; a download is only a command whose own program downloads, and a wait led by `cd <folder>;` is known as a wait.
-- Work is told to give each command a description of what it does, to make any command longer than a minute print progress the card reads, and to say on its card what a long command is and how long it should take.
+- A run's second line shows how much of how much (in GB, or a count of what it counts), its percent, its speed and the time left when the run says them, never worked out by Claudopus. A run quiet for three minutes says "quiet for 4m" in amber.
+- Work names every command in one form the card reads as it is: its kind first (Download, Upload, Wait for, Watch, Serve, Run), what it does, and how long it should take, such as "Download the CT scans (about 3 min)". The row shows that time beside its own, in amber once well past it. Work is told to run such commands in the background or detached and to print `progress:` lines, a wait each try.
+- Without that form, a row is named by what it runs (python rc.py), never by the head of a shell line, and only a command that keeps what it fetches in a file is a download: a wait or check that reads pages with curl no longer reads "Download".
+- Pressing a run's name opens a Terminal window with its output as it is, following it as it goes on.
 - A card no longer says "1 helper running, looked in on just now": helpers at work are rows on its tree; only one gone quiet is said.
