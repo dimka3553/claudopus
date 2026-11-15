@@ -1,1 +1,3 @@
-- In the desktop app, a figure's card above the prompt now floats over the chat: showing it no longer pushes the chat up or makes it spring back, and the row of figures stays in sight under it, so you can move straight to the next figure.
+- In the desktop app, a figure's card above the prompt now floats over the chat, just above its figure: showing it no longer pushes the chat up or makes it spring back, and the row of figures stays in view, so you can move straight to the next one.
+- Only the card under the pointer shows: moving along the figures or the bar updating no longer leaves an earlier card up over the next.
+- The cards are just their rows: the long explanation under the battery card and the graphics card's "Time at work" line are gone.
