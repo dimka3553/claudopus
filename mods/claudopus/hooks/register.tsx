@@ -10390,18 +10390,16 @@ const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
   )
 }
 
-// The desktop app draws the bar anew with each look, and shows again each lifted card whose figure's place (its count among the
-// keyed Boxes drawn) held a card that was up as the old drawing went: so a card the pointer had just left, or another figure's card,
-// stayed up with nothing under the pointer to put it away, and one shown again before its words were lit was placed too low, over
-// the figures. A run of hidden keyed Boxes before the figures, there in every other drawing, moves every figure past the places the
-// last drawing had, more than all the keyed Boxes of the figures and their cards, so no card is shown again but the one under the
-// pointer, which the app measures whole
+// The desktop app draws the bar anew whenever anything in it changes (new figures, the work under it, the octopus), and shows again
+// each lifted card whose figure's place (its count among the keyed Boxes drawn) held a card that was up as the old drawing went: so
+// a card the pointer had just left stayed up with nothing under the pointer to put it away, and one shown again before its words
+// were lit was placed too low, over the figures. A run of hidden keyed Boxes before the figures, there in every other drawing, moves every figure past the places the last drawing had, more than all the keyed Boxes of the figures and
+// their cards, so no card is shown again but the one under the pointer, which the app measures whole
 const USAGE_SPACERS = 120
-let usageSpacedAt = 0
 let usageSpaced = false
-const usageSpacersDrawn = (ui: Ui, at: number) => {
+const usageSpacersDrawn = (ui: Ui) => {
   const { Box, Text } = ui
-  if (at !== usageSpacedAt) (usageSpacedAt = at), (usageSpaced = !usageSpaced)
+  usageSpaced = !usageSpaced
   return usageSpaced ? (
     <Box display="none">
       {Array.from({ length: USAGE_SPACERS }, (_, n) => (
@@ -10415,7 +10413,7 @@ const usageSpacersDrawn = (ui: Ui, at: number) => {
 
 // The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
 // for the disk and the network. The pointer resting on a figure lights its group: a faint fill under it, and its card above
-const usageDrawn = (ui: Ui, f: UsageFigures, at = 0) => {
+const usageDrawn = (ui: Ui, f: UsageFigures) => {
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const { Box, Text } = ui
   if (!table.Svg) return null
@@ -10435,7 +10433,6 @@ const usageDrawn = (ui: Ui, f: UsageFigures, at = 0) => {
     </Box>
   )
   return [
-    usageSpacersDrawn(ui, at),
     one('memory', cards.memory, usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),
     f.cpu === undefined ? null : one('cpu', cards.cpu, usageSvg('cpu', { claude: f.cpuClaude ?? 0, used: f.cpu }), words.cpu, pctText(f.cpu), '%'),
     f.gpu === undefined ? null : one('gpu', cards.gpu, usageSvg('gpu', { claude: f.gpuClaude ?? 0, used: f.gpu }), words.gpu, pctText(f.gpu), '%'),
@@ -10606,33 +10603,38 @@ const bandHooks = (on: On) => {
 
     // How Claude uses this computer: memory in use and Claude's part, how busy the processor is and Claude's part, the disk's and the
     // network's speed, looked at every few seconds while work runs. New figures redraw it
-    const at = await read($, figuresAt)
+    await read($, figuresAt)
     const figures = usageNow(await $.clock.now())
     if (!figures) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
 
     const marker = await waitMarker($, ui, e.surface)
-    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures, at) : null
-    const row = (
-      <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-        {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
-        {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
-        {/* The figures fill a phone's terminal: the hint shows until they come */}
-        {isPanelAway && !figures ? (
-          <Box flexShrink={0}>
-            <Text dimColor>· /claudopus shows the panel</Text>
-          </Box>
-        ) : null}
-      </Box>
-    )
-    // Where the figures are drawn, a pointer resting on one shows its card floating over the chat above them, taking no room
-    return marker ? (
-      <Box flexDirection="column">
-        {marker}
-        {row}
-      </Box>
-    ) : (
-      row
-    )
+    const drawn = figures && e.surface !== 'terminal' ? usageDrawn(ui, figures) : null
+    const drawing = (spacers: JSX.Element | null) => {
+      const row = (
+        <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
+          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
+          {spacers}
+          {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
+          {/* The figures fill a phone's terminal: the hint shows until they come */}
+          {isPanelAway && !figures ? (
+            <Box flexShrink={0}>
+              <Text dimColor>· /claudopus shows the panel</Text>
+            </Box>
+          ) : null}
+        </Box>
+      )
+      // Where the figures are drawn, a pointer resting on one shows its card floating over the chat above them, taking no room
+      return marker ? (
+        <Box flexDirection="column">
+          {marker}
+          {row}
+        </Box>
+      ) : (
+        row
+      )
+    }
+    // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
+    return drawing(drawn ? usageSpacersDrawn(ui) : null)
   })
 
 }

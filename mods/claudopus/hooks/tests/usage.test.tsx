@@ -875,7 +875,7 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
   await desk.unmount()
 })
 
-test('each new look moves the figures past the places they had, so the app shows again no card the pointer has left', async ($, on) => {
+test('each drawing of the bar moves the figures past the places they had, so the app shows again no card the pointer has left', async ($, on) => {
   let n = 0
   const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`) })
   await $.session.start(start)
@@ -895,6 +895,10 @@ test('each new look moves the figures past the places they had, so the app shows
   await clock.advance(1000)
   expect(await until(async () => ((await spacers()) !== first ? true : undefined))).toBe(true)
   expect([first, await spacers()].sort((a, b) => a - b)).toEqual([0, 120])
+  // and a drawing for anything else, here more work under the bar, with the same figures
+  const before = await spacers()
+  await $.agent.spawn({ ...spawn, prompt: 'fix the ears' } as never)
+  expect(await until(async () => ((await spacers()) !== before ? true : undefined))).toBe(true)
   await desk.unmount()
 })
 

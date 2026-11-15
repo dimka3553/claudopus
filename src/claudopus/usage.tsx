@@ -180,18 +180,16 @@ const usageCardDrawn = (ui: Ui, key: string, card: UsageCard) => {
   )
 }
 
-// The desktop app draws the bar anew with each look, and shows again each lifted card whose figure's place (its count among the
-// keyed Boxes drawn) held a card that was up as the old drawing went: so a card the pointer had just left, or another figure's card,
-// stayed up with nothing under the pointer to put it away, and one shown again before its words were lit was placed too low, over
-// the figures. A run of hidden keyed Boxes before the figures, there in every other drawing, moves every figure past the places the
-// last drawing had, more than all the keyed Boxes of the figures and their cards, so no card is shown again but the one under the
-// pointer, which the app measures whole
+// The desktop app draws the bar anew whenever anything in it changes (new figures, the work under it, the octopus), and shows again
+// each lifted card whose figure's place (its count among the keyed Boxes drawn) held a card that was up as the old drawing went: so
+// a card the pointer had just left stayed up with nothing under the pointer to put it away, and one shown again before its words
+// were lit was placed too low, over the figures. A run of hidden keyed Boxes before the figures, there in every other drawing, moves every figure past the places the last drawing had, more than all the keyed Boxes of the figures and
+// their cards, so no card is shown again but the one under the pointer, which the app measures whole
 const USAGE_SPACERS = 120
-let usageSpacedAt = 0
 let usageSpaced = false
-const usageSpacersDrawn = (ui: Ui, at: number) => {
+const usageSpacersDrawn = (ui: Ui) => {
   const { Box, Text } = ui
-  if (at !== usageSpacedAt) (usageSpacedAt = at), (usageSpaced = !usageSpaced)
+  usageSpaced = !usageSpaced
   return usageSpaced ? (
     <Box display="none">
       {Array.from({ length: USAGE_SPACERS }, (_, n) => (
@@ -205,7 +203,7 @@ const usageSpacersDrawn = (ui: Ui, at: number) => {
 
 // The line on a surface that draws SVG: an icon and its meter, then the figure, for memory and the processor; an icon and the speed
 // for the disk and the network. The pointer resting on a figure lights its group: a faint fill under it, and its card above
-const usageDrawn = (ui: Ui, f: UsageFigures, at = 0) => {
+const usageDrawn = (ui: Ui, f: UsageFigures) => {
   const table = ui as Ui & { Svg?: (props: { key?: string; source: string; alt: string; width?: number; height?: number }) => JSX.Element }
   const { Box, Text } = ui
   if (!table.Svg) return null
@@ -225,7 +223,6 @@ const usageDrawn = (ui: Ui, f: UsageFigures, at = 0) => {
     </Box>
   )
   return [
-    usageSpacersDrawn(ui, at),
     one('memory', cards.memory, usageSvg('memory', { claude: f.memClaude / f.memTotal, used: f.memUsed / f.memTotal, isHigh }), words.memory, gbText(f.memUsed), ' GB', isHigh ? USAGE_AMBER : undefined),
     f.cpu === undefined ? null : one('cpu', cards.cpu, usageSvg('cpu', { claude: f.cpuClaude ?? 0, used: f.cpu }), words.cpu, pctText(f.cpu), '%'),
     f.gpu === undefined ? null : one('gpu', cards.gpu, usageSvg('gpu', { claude: f.gpuClaude ?? 0, used: f.gpu }), words.gpu, pctText(f.gpu), '%'),
