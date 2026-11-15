@@ -5,16 +5,15 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.previousOf = exports.isScreenDue = exports.seenIn = exports.missedOf = exports.fitted = exports.TAB_BUDGET = exports.SCREEN_BUDGET = exports.changelogOf = void 0;
 // Its versions, newest first as written: a heading "## x.y.z · date" each, then its changes, a "- " line each
 var changelogOf = function (text) {
-    var _a, _b;
+    var _a;
     var versions = [];
-    for (var _i = 0, _c = text.split('\n'); _i < _c.length; _i++) {
-        var line = _c[_i];
+    for (var _i = 0, _b = text.split('\n'); _i < _b.length; _i++) {
+        var line = _b[_i];
         var head = /^## (\d+\.\d+\.\d+)(?:\s+·\s+(.+))?\s*$/.exec(line);
-        var last = versions.at(-1);
         if (head)
-            versions.push({ version: (_a = head[1]) !== null && _a !== void 0 ? _a : '', date: ((_b = head[2]) !== null && _b !== void 0 ? _b : '').trim(), changes: [] });
-        else if (last && /^- \S/.test(line))
-            last.changes.push(line.slice(2).trim());
+            versions.push({ version: head[1], date: ((_a = head[2]) !== null && _a !== void 0 ? _a : '').trim(), changes: [] });
+        else if (versions.length && /^- \S/.test(line))
+            versions[versions.length - 1].changes.push(line.slice(2).trim());
     }
     return versions;
 };
