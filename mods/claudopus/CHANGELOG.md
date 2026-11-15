@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.119 · 15 November 2026
+- While you type into an ask's reply box or a key box, the panel and Details hold still: other cards' lines, times and output wait until you stop, so the box no longer flickers, drops letters or throws the panel to its bottom; a card that starts, finishes or asks, and an admin command waiting, still show at once.
+- With nobody typing, the panel is drawn again at once for anything new, but for running times and command output only every ten seconds, so a button under the pointer keeps its hover and takes the first click.
+- A reply box is empty after you send from it, and stays empty when it comes back.
+- What you typed into an ask's reply box stays in it through a reload of Claudopus, and does not turn up in the work's next ask.
+- A key box is drawn without the letters typed in it, so a redraw can never put older letters over newer ones.
+
 ## 0.2.118 · 15 November 2026
 - The battery above the prompt no longer shows a time to full beside 100%: while macOS calls it 100% and still tops it up, it says "finishing", and a battery macOS calls empty shows no time left beside 0%.
 

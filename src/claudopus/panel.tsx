@@ -48,6 +48,18 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
+    // While the person types into a box the pane is drawn as it last was, whole, but for a change in its shape; not typing, as it last
+    // was while only its running times moved, for CALM at most (heldDrawings)
+    const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}|${e.props.scroll.offset > 0 ? 1 : 0}`
+    const heldAt = await $.clock.now()
+    if (paneId === LIST) drawnNow = heldAt
+    const shape = await paneShape($, paneId)
+    const content = await paneContent($)
+    const held = heldDrawings.get(heldKey)
+    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return held.drawing as Awaited<ReturnType<typeof next>>
+    // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
+    if (paneId === LIST) await read($, tick)
+    const drawing = await (async () => {
     const { Box, Button, Markdown, Text } = uiOf($, e)
     // A picture pressed open large in this Details tab is drawn over it, with a row back above and below it
     const large = pictureIn.get(paneId)
@@ -69,7 +81,7 @@ const panelHooks = (on: On) => {
       const from = await $.clock.now()
       // Only while the reload is recent: a panel first opened long after shows no finish of then
       for (const [key, value] of lateFrom) if (value === Infinity) from - Number(key.split(':').at(-1)) < RELOAD_GRACE * 2 ? lateFrom.set(key, from) : lateFrom.delete(key)
-      $.clock.after(LINGER + 20, () => void update($, tick, n => n + 1))
+      $.clock.after(LINGER + 20, () => void (drawAgain($), update($, tick, n => n + 1)))
     }
     const { isFinishedOpen = false } = await read($, view)
     // Every piece of work this chat keeps; its own are the ones the chat's thread started, the rest are their helpers
@@ -277,12 +289,12 @@ const panelHooks = (on: On) => {
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
-                autoFocus={e.surface === 'terminal' && !askFocused && ![...boxDrafts.values()].some(Boolean) && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
+                autoFocus={e.surface === 'terminal' && !askFocused && !boxTyped.size && (paneId !== LIST || !keysAsk || keysAsk === one.id) ? ((askFocused = true), (keysAsk = paneId === LIST ? one.id : keysAsk), true) : undefined}
                 placeholder="Or reply in your own words"
-                value={drafts.get(one.id) ?? ''}
+                value={draftShown(one.id, ask)}
                 submitLabel="send"
-                onInput={value => void (drafts.set(one.id, value), holdTimes($))}
-                onSubmit={value => void (drafts.delete(one.id), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
+                onInput={value => void (drafts.set(draftOf(one.id, ask), value), keepDraft($, draftOf(one.id, ask), value), holdTimes($))}
+                onSubmit={value => void (dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), value.trim() ? answerAsk($, one, value, true).catch(err => log($, `reply not sent: ${String(err)}`)) : undefined)}
               />
             </Box>
           ) : null}
@@ -1462,7 +1474,7 @@ const panelHooks = (on: On) => {
     // then leaves the top; a card goes back to its own place among the rest, which keep their order
     const notices = [
       // A box that comes while the person types a reply in the terminal leaves the keys with that reply
-      ...boxRows($, ui, e.surface === 'terminal' && Boolean(keysAsk && drafts.get(keysAsk))),
+      ...boxRows($, ui, e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk))),
       ...looseGates.map(gate => ({ at: gate.at, node: gateRow($, ui, gate, `gate-${gate.id}`, false) })),
       ...waiting.map(p => ({ at: p.at, node: promptCard(p, `this-${p.id}`, answerHere(p)) })),
       ...otherChats.flatMap(c => {
@@ -1511,7 +1523,7 @@ const panelHooks = (on: On) => {
       const was = listOffsets.get(e.surface) ?? 0
       listOffsets.set(e.surface, Math.max(0, e.props.scroll.offset))
       const count = waitsCount
-      if (count !== waitsAtTop || (was > 0) !== ((listOffsets.get(e.surface) ?? 0) > 0)) ((waitsAtTop = count), $.ui.invalidate('ui.render'))
+      if (count !== waitsAtTop || (was > 0) !== ((listOffsets.get(e.surface) ?? 0) > 0)) ((waitsAtTop = count), drawAgain($))
     }
     if (screen) return <Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>{notices.map(one => one.node)}{doneNotesPart(ui, at)}{screen}</Box>
     const updated = alone || !versions.version ? undefined : await updatedPieces($, versions.version)
@@ -1588,6 +1600,9 @@ const panelHooks = (on: On) => {
         {!alone ? finishedPart(isFinishedOpen) : null}
       </Box>
     )
+    })()
+    heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    return drawing
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }

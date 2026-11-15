@@ -85,7 +85,7 @@ async function loadStats($: EngineInterface, scope: Scope, home: string, memory:
     held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Stats reads Claude’s records with jq, and jq was not found on ${thisMac()}.` : `The records could not be read: ${String(err)}` })
   } finally {
     reading.delete(scope)
-    $.ui.invalidate('ui.render')
+    drawAgain($)
   }
 }
 async function loadMemorySizes($: EngineInterface, memory: string) {
