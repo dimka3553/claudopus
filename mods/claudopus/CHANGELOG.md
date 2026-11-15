@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.117 · 15 November 2026
+- Everything that waits for your press is at the top of the panel, right under its header, the newest first: a work that waits on an admin command, a release, a change to your files or a put-back change comes up whole, with its amber box in its own card, beside the cards of work that asked you something; password and key boxes, the chat's own gates and Claude Code's own permission prompts, every chat's, are there too. All other work stays below in the order it began.
+- Once you press Allow or Deny, the same card says what was allowed where the amber box was, outlined green (grey when refused), and the card goes back to its place when that note goes.
+- Scrolled down a long panel, the line above the prompt says how many things wait at the top; pressing it takes the panel back there. Nothing else moves the panel.
+- In the terminal, an ask or a password box that comes in while you type a reply no longer takes the keys from it.
+
 ## 0.2.116 · 15 November 2026
 - A run's second line starts under its name, with the tree's line carried down beside it, in the app and in a terminal: the app had left out the line and started it at the card's edge
 - A run shows how long is left, its own or worked out from its percent, and no longer when it last printed; work's scripts print their progress at least every 10 seconds
