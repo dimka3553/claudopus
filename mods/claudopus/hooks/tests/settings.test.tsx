@@ -44,8 +44,12 @@ const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my pri
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
+// A release on GitHub as the test world gives it: its version, commit and the tree it published; `got` a different tree that came
+// down instead, `manifest` a different version in it, `online` a newer commit online, and a fetch that fails, a folder with commits of its
+// own, or uncommitted changes the move would overwrite
+type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string; startedOn?: Record<string, string> } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -120,6 +124,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
     if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: options.shipped ? SHIPPED_PRINCIPLES : PRINCIPLES }
     if (isShipped && options.changelog !== undefined && e.path.endsWith('/CHANGELOG.md')) return { value: options.changelog }
+    // A release on GitHub, where the test gives one: the mod's folder is a main checkout, whose version a reload loads
+    if (options.release && e.path.endsWith('/.git/HEAD')) return { value: 'ref: refs/heads/main\n' }
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: files.get('manifest') ?? '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
@@ -255,6 +261,46 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return { value: { exitCode: 0, stdout: rest.includes('--targets') ? options.tailscale : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (tool === 'kill') killed.push(String(rest[0]))
+    // A release on GitHub, where the test gives one: the mod's folder is Claudopus's main checkout on main, a fetch of the release's
+    // tag lays its commit under the download ref (and git's progress where the step reads it), and the folder's tree in that commit
+    // is the one the release published unless the test says what came down instead
+    const release = options.release
+    if (release && tool === 'sh' && rest[1] === '"$@" 2>"$0"') {
+      const argv = rest.slice(3).map(String)
+      gitRan.push(argv.slice(argv.indexOf('-C') + 2).join(' '))
+      if (release.fetchFails) return (files.set(String(rest[2]), 'fatal: unable to access GitHub: Could not resolve host'), ok('', 128))
+      files.set(String(rest[2]), 'Receiving objects:  50% (10/20), 1.00 MiB | 2.00 MiB/s\rReceiving objects: 100% (20/20), 2.00 MiB | 2.00 MiB/s, done.\nResolving deltas: 100% (5/5), done.\n')
+      files.set('git:ref', release.commit)
+      return ok()
+    }
+    if (release && tool === 'git' && rest.includes('--show-toplevel')) return ok('/plugins-src\n')
+    if (release && tool === 'sh' && String(rest[1]).includes('write-tree')) return ok(`${files.get('tree:installed') ?? release.tree}\n`)
+    if (release && tool === 'env' && rest.includes('git')) {
+      const args = rest.slice(rest.indexOf('-C') + 2).map(String)
+      gitRan.push(args.join(' '))
+      const at = (arg?: string) => (arg ?? '').replace(/\^\{commit\}$/, '')
+      if (args[0] === 'rev-parse' && args.includes('--show-toplevel')) return ok('/plugins-src\n')
+      if (args[0] === 'ls-files') return ok('mods/claudopus/.claude-plugin/plugin.json\n')
+      if (args[0] === 'rev-parse' && args.includes('--git-dir')) return ok(release.worktree ? '/plugins-src/.git/worktrees/fix\n/plugins-src/.git\n' : '/plugins-src/.git\n/plugins-src/.git\n')
+      if (args[0] === 'symbolic-ref') return ok(release.worktree ? 'fix-bar\n' : 'main\n')
+      if (args.includes('--symbolic-full-name')) return ok('origin/main\n')
+      if (args[0] === 'rev-parse' && args.includes('--verify')) {
+        const what = args.at(-1) ?? ''
+        if (what.startsWith('refs/claudopus/update')) return files.has('git:ref') ? ok(`${files.get('git:ref')}\n`) : ok('', 1)
+        if (what.includes(':')) return what.startsWith(`${release.commit}:`) && files.has('git:ref') ? ok(`${release.got ?? release.tree}\n`) : ok('', 1)
+        return ok(`${at(what)}\n`)
+      }
+      if (args[0] === 'show') return ok(JSON.stringify({ name: 'claudopus', version: release.manifest ?? release.version }))
+      if (args[0] === 'update-ref' && args[1] === '-d') return (files.delete('git:ref'), ok())
+      if (args[0] === 'merge-base') return ok('', release.ownCommits ? 1 : 0)
+      if (args[0] === 'merge') {
+        if (release.overwrite) return { value: { exitCode: 1, stdout: '', stderr: 'error: Your local changes to the following files would be overwritten by merge', isStdoutTruncated: false, isStderrTruncated: false } }
+        files.set('manifest', JSON.stringify({ name: 'claudopus', version: release.version }))
+        return ok()
+      }
+      if (args[0] === 'ls-remote') return ok(`${release.online ?? release.commit}\tHEAD\n`)
+      return ok()
+    }
     // git in the mod's folder: no checkout unless the test lays git:online, the version its branch online has; then the folder is on
     // main following origin/main, behind it, and a fast-forward (refused with what git:merge says, where laid) moves the manifest there
     if (tool === 'env' && rest.includes('git')) {
@@ -687,10 +733,9 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })
 
-test('Check for updates in Config shows it is checking, then what it found; a second press meanwhile starts no second look', async ($, on) => {
-  const { files, gitRan } = world(on)
-  // The tests run the mod from a folder of its code, as its maker does: a newer version brings that folder up to date with git
-  let page = '{"version":"0.1.0"}'
+test('Check now in Config only looks: it shows it is checking, then what it found, and a second press meanwhile starts no second look; nothing is fetched or moved', async ($, on) => {
+  const { files, gitRan } = world(on, { release: { version: '0.1.2', commit: 'c'.repeat(40), tree: 'a'.repeat(40) } })
+  let page = JSON.stringify({ version: '0.1.0', tree: 'a'.repeat(40) })
   let answer: (() => void) | undefined
   let fetches = 0
   on('http.fetch', async () => {
@@ -705,40 +750,35 @@ test('Check for updates in Config shows it is checking, then what it found; a se
   }
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  expect(await config.find({ type: 'Text', text: 'This chat runs v0.1.0' })).toBeDefined()
+  expect(await until(() => config.find({ type: 'Text', text: 'This chat runs v0.1.0' }))).toBeDefined()
+  // Where it loads from, said as it is
+  expect(await until(() => config.find({ type: 'Text', text: /^It loads from the folder .*, Claudopus's own checkout on main\. Not looked yet\.$/ }))).toBeDefined()
   await pressed(config, 'config-check')
   expect(await until(() => config.find({ type: 'Text', text: 'Checking…' }))).toBeDefined()
-  // While it checks there is no button to press again
-  expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check for updates')).toBe(false)
+  expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check now')).toBe(false)
   release()
   expect(await until(() => config.find({ type: 'Text', text: /^You're on the newest version \(v0\.1\.0\)/ }))).toBeDefined()
   expect(fetches).toBe(1)
-  // The folder is newest already: git is never run
-  expect(gitRan).toEqual([])
-  // A newer release, with changes in the folder that the update would overwrite: git refuses and nothing is changed
-  page = '{"version":"0.1.2"}'
-  files.set('git:online', '0.1.2')
-  files.set('git:merge', 'error: Your local changes to the following files would be overwritten by merge:\n\ta.tsx')
+  // A newer release: Check now says so and the panel offers it; nothing was fetched, moved or installed
+  page = JSON.stringify({ version: '0.1.2', tree: 'a'.repeat(40) })
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  const kept = await until(() => config.find({ type: 'Text', text: /^Couldn't update to v0\.1\.2: changes in its folder that aren't committed/ }))
-  expect(kept?.props.color).toBe('error')
+  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is out: the panel offers it.' }))).toBeDefined()
+  expect(gitRan.filter(one => /^(fetch|merge)/.test(one) || one.includes('fetch --progress'))).toEqual([])
   expect(files.get('manifest')).toBeUndefined()
-  // Pressed again once that is sorted: the folder moves forward to it, and the box says so
-  files.delete('git:merge')
+  // An older page with no fingerprint is no release: said as a failure, in the error colour
+  page = '{"version":"0.1.3"}'
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  // With automatic updates off, as shipped, a chat switches only when /reload-plugins is typed in it
-  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it.' }))).toBeDefined()
-  expect(gitRan).toContain('merge --ff-only --quiet @{u}')
-  files.delete('git:online')
-  // No answer that reads as a version: said as a failure, in the error colour
-  page = 'oops'
-  await pressed(config, 'config-check')
-  await until(async () => answer)
-  release()
-  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check/ }))
+  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page has no fingerprint/ }))
   expect(failed?.props.color).toBe('error')
+  // How often: one choice, written as the two keys; Only when I ask is updates false
+  await config.select({ key: 'config-look-pick', value: '24' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toMatchObject({ updateEvery: 24 })
+  await config.select({ key: 'config-look-pick', value: '0' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toMatchObject({ updates: false })
+  await config.select({ key: 'config-look-pick', value: '1' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })

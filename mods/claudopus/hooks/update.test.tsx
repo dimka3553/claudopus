@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { checkSaid, copyOf, folderLook, folderMarketplace, installedFrom, installedVersionOf, isNewer, isReloadDue, lookOnce, RELOAD_AGAIN, isUpdateDue, scopeOf, stampOf, UPDATE_EVERY, updatedArt, updatedFrom, updatedLook, updatedTo, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, versionOnPage } from './update'
+import { copyOf, download, DOWNLOAD_REF, fetchProgress, folderMarketplace, folderReady, install, installedFrom, installedVersionOf, isNewer, isReloadDue, isUpdateDue, lookEveryOf, missedOn, noticeOf, publishedOf, RELOAD_AGAIN, scopeOf, sizeText, stampOf, STEP_STALE, stepsOf, UPDATE_EVERY, updatedArt, updatedFrom, updatedLook, updateSteps, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, versionOnPage } from './update'
 import type { LookIo } from './update'
 
 test('only a copy installed from a marketplace is updated, read off its cache folder', async () => {
@@ -23,12 +23,6 @@ test('the scope is the one this very copy was installed at', async () => {
   expect(scopeOf(installed, 'claudopus@m', '/p/cache/m/claudopus/0.2.2/')).toBe('project')
   expect(scopeOf(installed, 'claudopus@m', '/p/cache/m/claudopus/0.2.9')).toBeUndefined()
   expect(scopeOf('not json', 'claudopus@m', '/p')).toBeUndefined()
-})
-
-test("what plugin update printed is read as the version it moved to or found", async () => {
-  expect(updatedTo('Checking for updates for plugin "claudopus@claudopus"…\n✔ Plugin "claudopus" updated from 0.2.22 to 0.2.25 for scope user. Restart to apply changes.')).toEqual({ version: '0.2.25', isNew: true })
-  expect(updatedTo('✔ claudopus is already at the latest version (0.2.22).')).toEqual({ version: '0.2.22', isNew: false })
-  expect(updatedTo('✘ Failed to update')).toBeUndefined()
 })
 
 test('a look is due every hour, at once when none was made or the clock moved back', async () => {
@@ -159,164 +153,6 @@ test('the octopus of the moment is the happy one in blue, jumping all through it
   expect(art.match(/repeatCount="4"/g)?.length).toBe(happy.match(/<animate /g)?.length)
 })
 
-// A Mac for one look: installed_plugins.json naming `have`, the version page naming `page` (or not answering), and what the two
-// update steps print
-const mac = (have: string, page: string | undefined, steps: { refresh?: number; update?: string } = {}) => {
-  const files = new Map<string, string>([['/p/installed_plugins.json', JSON.stringify({ plugins: { 'claudopus@m': [{ scope: 'user', version: have, installPath: `/p/cache/m/claudopus/${have}` }] } })]])
-  const ran: string[][] = []
-  const io: LookIo = {
-    read: async path => files.get(path) ?? '',
-    write: async (path, text) => void files.set(path, text),
-    run: async argv => {
-      ran.push(argv)
-      if (argv[2] === 'marketplace') return { exitCode: steps.refresh ?? 0, stdout: '', stderr: steps.refresh ? 'fatal: could not read from remote' : '' }
-      return { exitCode: 0, stdout: steps.update ?? '', stderr: '' }
-    },
-    page: async () => (page === undefined ? { ok: false, status: 0, text: 'no answer' } : { ok: true, status: 200, text: JSON.stringify({ version: page }) }),
-    now: async () => 5,
-    log: async () => undefined,
-  }
-  const at = { from: { plugins: '/p', marketplace: 'm', plugin: 'claudopus' }, root: `/p/cache/m/claudopus/${have}`, engine: 'claude', stampPath: '/u/update.json' }
-  return { io, at, files, ran }
-}
-
-test('a look runs nothing when the page names the installed version, and says it is the newest', async () => {
-  const { io, at, files, ran } = mac('0.2.70', '0.2.70')
-  const look = await lookOnce(io, at)
-  expect(look).toEqual({ kind: 'latest', version: '0.2.70' })
-  expect(ran).toEqual([])
-  expect(stampOf(files.get('/u/update.json') ?? '')).toEqual({ at: 5, version: '0.2.70', result: 'latest' })
-  expect(checkSaid(look, '0.2.70')).toEqual({ text: "You're on the newest version (v0.2.70).", isError: false })
-})
-
-test('a look for a newer version runs both steps and says to type /reload-plugins', async () => {
-  const { io, at, files, ran } = mac('0.2.69', '0.2.71', { update: '✔ Plugin "claudopus" updated from 0.2.69 to 0.2.71 for scope user. Restart to apply changes.' })
-  const look = await lookOnce(io, at)
-  expect(look).toEqual({ kind: 'updated', version: '0.2.71' })
-  expect(ran).toEqual(updateSteps('claude', at.from, 'user'))
-  expect(stampOf(files.get('/u/update.json') ?? '')?.result).toBe('updated')
-  expect(checkSaid(look, '0.2.69')).toEqual({ text: 'v0.2.71 downloaded. Type /reload-plugins to switch this chat to it, or it switches by itself in a moment.', isError: false })
-  // In a chat run from another Mac it only switches when typed
-  expect(checkSaid(look, '0.2.69', true).text).toBe('v0.2.71 downloaded. Type /reload-plugins to switch this chat to it.')
-  // Downloaded before by another chat while this one still runs the old copy: the same words, since this chat has yet to switch
-  expect(checkSaid({ kind: 'latest', version: '0.2.71' }, '0.2.69', true).text).toBe('v0.2.71 downloaded. Type /reload-plugins to switch this chat to it.')
-})
-
-test('a chat on a copy another update replaced compares the copy it would load, at that copy\'s scope', async () => {
-  // Installed only for the project, already moved to 0.2.71 by another chat; this chat still runs the 0.2.69 folder
-  const { io, at, files, ran } = mac('0.2.69', '0.2.71')
-  files.set('/p/installed_plugins.json', JSON.stringify({ plugins: { 'claudopus@m': [{ scope: 'project', projectPath: '/repo', version: '0.2.71', installPath: '/p/cache/m/claudopus/0.2.71' }] } }))
-  const look = await lookOnce(io, { ...at, cwd: '/repo/src' })
-  expect(look).toEqual({ kind: 'latest', version: '0.2.71' })
-  expect(ran).toEqual([])
-  expect(checkSaid(look, '0.2.69', true).text).toBe('v0.2.71 downloaded. Type /reload-plugins to switch this chat to it.')
-})
-
-test('a look that cannot read the page or download says why, plainly', async () => {
-  const silent = mac('0.2.70', undefined)
-  const unread = await lookOnce(silent.io, silent.at)
-  expect(unread).toEqual({ kind: 'failed', why: 'claudopus.ai did not answer' })
-  expect(silent.ran).toEqual([])
-  expect(checkSaid(unread, '0.2.70')).toEqual({ text: "Couldn't check: claudopus.ai did not answer. Try again later.", isError: true })
-  const offline = mac('0.2.70', '0.2.71', { refresh: 1 })
-  const refused = await lookOnce(offline.io, offline.at)
-  expect(offline.ran.length).toBe(1)
-  expect(checkSaid(refused, '0.2.70')).toEqual({ text: "Couldn't download v0.2.71: Claude Code could not refresh where it comes from (fatal: could not read from remote). Try again later.", isError: true })
-  // A source left behind (a folder of its code not brought up to date) is no "newest"
-  const behind = mac('0.2.64', '0.2.71', { update: '✔ claudopus is already at the latest version (0.2.64).' })
-  expect(checkSaid(await lookOnce(behind.io, behind.at), '0.2.64').text).toBe("Couldn't download v0.2.71: where Claude Code installs it from still has v0.2.64. Bring that up to date, then check again.")
-  const odd = mac('0.2.70', '0.2.71', { update: '✘ Failed to update' })
-  expect(checkSaid(await lookOnce(odd.io, odd.at), '0.2.70').text).toBe("Couldn't download v0.2.71: Claude Code did not update it (✘ Failed to update). Try again later.")
-})
-
-// A folder of the code for one look: a git checkout on main following origin/main, its manifest at `have`; `git` says how each git
-// command answers (by its first word after -C <folder>), and a merge that succeeds moves the manifest to `online`
-const folder = (have: string, page: string | undefined, online: string, git: Record<string, { exitCode?: number; stdout?: string; stderr?: string }> = {}) => {
-  const root = '/code/claudopus/mods/claudopus'
-  const files = new Map<string, string>([
-    [`${root}/.claude-plugin/plugin.json`, JSON.stringify({ name: 'claudopus', version: have })],
-    ['/p/known_marketplaces.json', JSON.stringify({ claudopus: { source: { source: 'directory', path: '/code/claudopus' } } })],
-    ['/p/installed_plugins.json', JSON.stringify({ plugins: { 'claudopus@claudopus': [{ scope: 'user', version: have, installPath: `/p/cache/claudopus/claudopus/${have}` }] } })],
-  ])
-  const ran: string[][] = []
-  const io: LookIo = {
-    read: async path => files.get(path) ?? '',
-    write: async (path, text) => void files.set(path, text),
-    run: async argv => {
-      ran.push(argv)
-      if (argv[0] !== 'env') return { exitCode: 0, stdout: '', stderr: '' }
-      const args = argv.slice(argv.indexOf('-C') + 2)
-      const key = args.includes('--symbolic-full-name') ? 'upstream' : args[0] === 'rev-parse' ? `rev-parse ${args.at(-1)}` : (args[0] ?? '')
-      const plain: Record<string, string> = { 'rev-parse --show-toplevel': '/code/claudopus', 'symbolic-ref': 'main\n', upstream: 'origin/main\n', 'rev-parse @{u}': have === online ? 'aaa\n' : 'bbb\n', 'rev-parse HEAD': 'aaa\n' }
-      const said = git[key] ?? { stdout: plain[key] ?? '' }
-      const out = { exitCode: said.exitCode ?? 0, stdout: said.stdout ?? '', stderr: said.stderr ?? '' }
-      if (key === 'merge' && out.exitCode === 0) files.set(`${root}/.claude-plugin/plugin.json`, JSON.stringify({ name: 'claudopus', version: online }))
-      return out
-    },
-    page: async () => (page === undefined ? { ok: false, status: 0, text: 'no answer' } : { ok: true, status: 200, text: JSON.stringify({ version: page }) }),
-    now: async () => 5,
-    log: async () => undefined,
-  }
-  return { io, at: { root, plugins: '/p', engine: 'claude', stampPath: '/u/update.json' }, files, ran }
-}
-const gitRan = (ran: string[][]) => ran.filter(argv => argv[0] === 'env').map(argv => argv.slice(argv.indexOf('-C') + 2)[0])
-
-test('a copy run from a folder of its code brings that folder up to date by a fast-forward, then refreshes Claude Code\'s record', async () => {
-  const { io, at, files, ran } = folder('0.2.76', '0.2.88', '0.2.88')
-  const look = await folderLook(io, at)
-  expect(look).toEqual({ kind: 'updated', version: '0.2.88' })
-  expect(gitRan(ran)).toEqual(['rev-parse', 'ls-files', 'rev-parse', 'symbolic-ref', 'rev-parse', 'fetch', 'rev-parse', 'rev-parse', 'merge-base', 'merge', 'status'])
-  expect(ran.find(argv => argv.includes('merge'))?.slice(-3)).toEqual(['--ff-only', '--quiet', '@{u}'])
-  // Never asks for a password at the terminal
-  expect(ran.filter(argv => argv[0] === 'env').every(argv => argv.includes('GIT_TERMINAL_PROMPT=0'))).toBe(true)
-  expect(ran.filter(argv => argv[0] === 'claude')).toEqual(updateSteps('claude', { marketplace: 'claudopus', plugin: 'claudopus' }, 'user'))
-  expect(stampOf(files.get('/u/update.json') ?? '')).toEqual({ at: 5, version: '0.2.88', result: 'updated' })
-  expect(checkSaid(look, '0.2.76', false, true)).toEqual({ text: 'v0.2.88 is in its folder now. Type /reload-plugins to switch this chat to it, or it switches by itself in a moment.', isError: false })
-})
-
-test('a folder already at the version the page names runs nothing, and says it is the newest', async () => {
-  const { io, at, ran } = folder('0.2.88', '0.2.88', '0.2.88')
-  const look = await folderLook(io, at)
-  expect(look).toEqual({ kind: 'latest', version: '0.2.88' })
-  expect(ran).toEqual([])
-  expect(checkSaid(look, '0.2.88', false, true).text).toBe("You're on the newest version (v0.2.88).")
-  // Brought up to date by another chat while this one runs the old copy: this chat has yet to switch
-  expect(checkSaid(look, '0.2.76', false, true).text).toBe('v0.2.88 is in its folder now. Type /reload-plugins to switch this chat to it, or it switches by itself in a moment.')
-})
-
-test('a folder is never changed when git would overwrite work there, or its branch has commits of its own', async () => {
-  const dirty = folder('0.2.76', '0.2.88', '0.2.88', { merge: { exitCode: 1, stderr: 'error: Your local changes to the following files would be overwritten by merge:\n\tsrc/a.tsx\nAborting' } })
-  const refused = await folderLook(dirty.io, dirty.at)
-  expect(checkSaid(refused, '0.2.76', false, true)).toEqual({ text: "Couldn't update to v0.2.88: changes in its folder that aren't committed touch files the update changes. Nothing in it was changed.", isError: true })
-  expect(dirty.ran.filter(argv => argv[0] === 'claude')).toEqual([])
-  const ahead = folder('0.2.76', '0.2.88', '0.2.88', { 'merge-base': { exitCode: 1 } })
-  expect(checkSaid(await folderLook(ahead.io, ahead.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder's main has commits of its own that origin/main does not have. Nothing in it was changed.")
-  expect(gitRan(ahead.ran)).not.toContain('merge')
-  const branch = folder('0.2.76', '0.2.88', '0.2.88', { 'symbolic-ref': { stdout: 'card-alignment\n' } })
-  expect(checkSaid(await folderLook(branch.io, branch.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder is on card-alignment, following origin/main, and releases come out on main. Nothing in it was changed.")
-  const worktree = folder('0.2.76', '0.2.88', '0.2.88', { 'rev-parse --git-common-dir': { stdout: '/code/claudopus/.git/worktrees/x\n/code/claudopus/.git\n' } })
-  expect(checkSaid(await folderLook(worktree.io, worktree.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder is a git worktree, not the main checkout. Nothing in it was changed.")
-  const other = folder('0.2.76', '0.2.88', '0.2.88', { 'ls-files': { exitCode: 1 } })
-  expect(checkSaid(await folderLook(other.io, other.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder is in a git checkout that isn't Claudopus's. Nothing in it was changed.")
-  expect(gitRan([...branch.ran, ...worktree.ran, ...other.ran])).not.toContain('fetch')
-  // Pulled with uncommitted changes elsewhere in the folder: they stay, and Claude Code's record is not copied from it
-  const edited = folder('0.2.76', '0.2.88', '0.2.88', { status: { stdout: ' M src/a.tsx\n' } })
-  expect((await folderLook(edited.io, edited.at)).kind).toBe('updated')
-  expect(edited.ran.filter(argv => argv[0] === 'claude')).toEqual([])
-  const loose = folder('0.2.76', '0.2.88', '0.2.88', { 'symbolic-ref': { exitCode: 1, stdout: '' } })
-  expect(checkSaid(await folderLook(loose.io, loose.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder is on no branch. Nothing in it was changed.")
-  const offline = folder('0.2.76', '0.2.88', '0.2.88', { fetch: { exitCode: 128, stderr: 'fatal: unable to access github.com' } })
-  expect(checkSaid(await folderLook(offline.io, offline.at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder could not fetch origin/main (unable to access github.com). Nothing in it was changed.")
-  const silent = folder('0.2.76', undefined, '0.2.88')
-  expect(checkSaid(await folderLook(silent.io, silent.at), '0.2.76', false, true).text).toBe("Couldn't check: claudopus.ai did not answer. Try again later.")
-  expect(silent.ran).toEqual([])
-})
-
-test('a folder whose branch online is still behind the page says so, not newest', async () => {
-  const { io, at } = folder('0.2.76', '0.2.88', '0.2.87')
-  expect(checkSaid(await folderLook(io, at), '0.2.76', false, true).text).toBe("Couldn't update to v0.2.88: its folder's main online still has v0.2.87. Check again in a few minutes.")
-})
-
 test('the directory marketplace a folder belongs to is found by its path', async () => {
   const known = JSON.stringify({ other: { source: { source: 'github', repo: 'a/b' } }, claudopus: { source: { source: 'directory', path: '/code/claudopus/' } } })
   expect(folderMarketplace(known, '/code/claudopus/mods/claudopus')).toBe('claudopus')
@@ -326,16 +162,181 @@ test('the directory marketplace a folder belongs to is found by its path', async
   expect(folderMarketplace('not json', '/code')).toBeUndefined()
 })
 
-test('an installed copy whose marketplace is a folder of the code brings that folder up to date before refreshing', async () => {
-  const { io, at, files, ran } = mac('0.2.64', '0.2.71', { update: '✔ claudopus is already at the latest version (0.2.64).' })
-  files.set('/p/known_marketplaces.json', JSON.stringify({ m: { source: { source: 'directory', path: '/code/claudopus' } } }))
-  const look = await lookOnce({ ...io, run: async (argv, t) => (argv[0] === 'env' ? (argv.includes('merge-base') ? { exitCode: 1, stdout: '', stderr: '' } : { exitCode: 0, stdout: argv.includes('symbolic-ref') ? 'main' : argv.includes('--symbolic-full-name') ? 'origin/main' : argv.includes('--git-dir') ? '/code/.git\n/code/.git' : argv.at(-1) === 'HEAD' ? 'aaa' : 'bbb', stderr: '' }) : io.run(argv, t)) }, at)
-  expect(checkSaid(look, '0.2.64').text).toBe("Couldn't download v0.2.71: where Claude Code installs it from still has v0.2.64: its folder's main has commits of its own that origin/main does not have. Nothing in it was changed.")
-  expect(ran).toEqual(updateSteps('claude', at.from, 'user'))
+// ---- What a release published, and the three steps ----
+
+const T = 'a'.repeat(40)
+const C = 'c'.repeat(40)
+const PAGE = { version: '0.2.121', tree: T, size: 4_200_000, versions: [{ version: '0.2.121', line: 'The bar shows the battery', more: 1 }, { version: '0.2.120', line: 'Runs show time left', more: 0 }, { version: '0.2.119', line: 'x', more: 0 }, { version: '0.2.118', line: 'y', more: 0 }] }
+
+test('the version page is read as a release only with its fingerprint, every line plain text of a bounded length', async () => {
+  expect(publishedOf(JSON.stringify(PAGE))).toEqual(PAGE)
+  // An older page names a version and no fingerprint: no download can be checked against it
+  expect(publishedOf('{"version":"0.2.121"}')).toBeUndefined()
+  expect(publishedOf(JSON.stringify({ ...PAGE, tree: 'not-a-tree' }))).toBeUndefined()
+  expect(publishedOf(JSON.stringify({ ...PAGE, version: '; rm -rf ~' }))).toBeUndefined()
+  const odd = publishedOf(JSON.stringify({ ...PAGE, versions: [{ version: '0.2.121', line: `Run‮ this\n${'x'.repeat(400)}`, more: 1e9 }, { version: 'evil' }] }))
+  expect(odd?.versions.length).toBe(1)
+  expect(odd?.versions[0]?.line.length).toBeLessThanOrEqual(140)
+  expect(odd?.versions[0]?.line).not.toMatch(/[‮\n]/)
+  expect(odd?.versions[0]?.more).toBe(99)
+  expect(missedOn(PAGE, '0.2.118').map(one => one.version)).toEqual(['0.2.121', '0.2.120', '0.2.119'])
+  expect(sizeText(4_200_000)).toBe('4.2 MB')
 })
 
-test('a page that answered with an error is said with its status, not as no answer', async () => {
-  const { io, at } = mac('0.2.70', '0.2.70')
-  const look = await lookOnce({ ...io, page: async () => ({ ok: false, status: 404, text: 'Not Found' }) }, at)
-  expect(look).toEqual({ kind: 'failed', why: 'claudopus.ai answered 404' })
+test("git's progress is read as a download comes", async () => {
+  expect(fetchProgress('remote: Counting objects\rReceiving objects:  45% (1887/4193), 1.20 MiB | 2.30 MiB/s\r')).toEqual({ pct: 45, got: Math.round(1.2 * 1024 * 1024), phase: 'receiving' })
+  expect(fetchProgress('Receiving objects: 100% (4193/4193), 3.10 MiB | 2 MiB/s, done.\nResolving deltas:  60% (10/17)\r')).toEqual({ pct: 60, got: 0, phase: 'resolving' })
+  expect(fetchProgress('')).toBeUndefined()
+})
+
+// A repo for the steps: the release's tag fetched gives `commit`, whose mod folder is `got` (the release's tree unless said)
+const repo = (o: { got?: string; manifest?: string; fetch?: number; online?: string; tag?: string; installed?: string; worktree?: boolean; overwrite?: boolean; ahead?: boolean; dirty?: boolean; held?: string; scope?: string } = {}) => {
+  const scope = o.scope ?? 'user'
+  const files = new Map<string, string>([['/p/installed_plugins.json', JSON.stringify({ plugins: { 'claudopus@m': [{ scope, version: '0.2.118', installPath: '/p/cache/m/claudopus/0.2.118' }] } })]])
+  const ran: string[] = []
+  let ref = o.held ?? ''
+  const io: LookIo = {
+    read: async path => files.get(path) ?? '',
+    write: async (path, text) => void files.set(path, text),
+    run: async argv => {
+      const ok = (stdout = '', exitCode = 0) => ({ exitCode, stdout, stderr: '' })
+      if (argv[0] === 'sh' && argv[2] === '"$@" 2>"$0"') {
+        ran.push('fetch')
+        files.set(String(argv[3]), 'Receiving objects: 100% (2/2), 1.00 MiB')
+        if (o.fetch) return { exitCode: o.fetch, stdout: '', stderr: '' }
+        ref = C
+        return ok()
+      }
+      if (argv[0] === 'sh') return ok(`${o.installed ?? T}\n`)
+      if (argv[0] === 'claude') {
+        ran.push(argv.slice(1, 3).join(' '))
+        if (argv[2] === 'update') files.set('/p/installed_plugins.json', JSON.stringify({ plugins: { 'claudopus@m': [{ scope, version: '0.2.121', installPath: '/p/cache/m/claudopus/0.2.121' }] } }))
+        return ok()
+      }
+      const args = argv.slice(argv.indexOf('-C') + 2)
+      ran.push(args.join(' '))
+      const what = args.at(-1) ?? ''
+      if (args[0] === 'rev-parse' && args.includes('--show-toplevel')) return ok('/code\n')
+      if (args[0] === 'ls-files') return ok()
+      if (args.includes('--git-dir')) return ok(o.worktree ? '/code/.git/worktrees/x\n/code/.git\n' : '/code/.git\n/code/.git\n')
+      if (args[0] === 'symbolic-ref') return ok('main\n')
+      if (args.includes('--symbolic-full-name')) return ok('origin/main\n')
+      if (args[0] === 'rev-parse' && what === `${DOWNLOAD_REF}^{commit}`) return ref ? ok(`${ref}\n`) : ok('', 1)
+      if (args[0] === 'rev-parse' && what === `${C}:mods/claudopus`) return ok(`${o.got ?? T}\n`)
+      if (args[0] === 'show') return ok(JSON.stringify({ version: o.manifest ?? '0.2.121' }))
+      if (args[0] === 'update-ref') return ((ref = ''), ok())
+      if (args[0] === 'merge-base') return ok('', o.ahead ? 1 : 0)
+      if (args[0] === 'merge') return o.overwrite ? { exitCode: 1, stdout: '', stderr: 'error: would be overwritten by merge' } : ok()
+      if (args[0] === 'status') return ok(o.dirty ? ' M mods/claudopus/README.md\n' : '')
+      if (args[0] === 'ls-remote' && args[2] === 'HEAD') return ok(`${o.online ?? C}\tHEAD\n`)
+      if (args[0] === 'ls-remote') return ok(`${o.tag ?? C}\trefs/tags/v0.2.121^{}\n`)
+      return ok()
+    },
+    page: async () => ({ ok: true, status: 200, text: JSON.stringify(PAGE) }),
+    now: async () => 5,
+    log: async () => undefined,
+  }
+  return { io, files, ran }
+}
+const CLONE = { kind: 'clone' as const, repo: '/p/marketplaces/m', sub: 'mods/claudopus', plugins: '/p', marketplace: 'm', plugin: 'claudopus', scope: 'user' }
+const FOLDER = { kind: 'folder' as const, repo: '/code', sub: 'mods/claudopus', runs: 'folder' as const }
+const moves = (ran: string[]) => ran.filter(one => /^(merge|reset|checkout|pull)\b|^plugin /.test(one))
+
+test('a download is the release fetched under its own ref and checked: the very tree and version the page published, nothing else moved', async () => {
+  const { io, ran } = repo()
+  const seen: number[] = []
+  expect(await download(io, CLONE, PAGE, '/u/progress', p => void seen.push(p.pct))).toEqual({ ok: true, commit: C })
+  expect(ran[0]).toBe('fetch')
+  expect(seen.at(-1)).toBe(100)
+  expect(moves(ran)).toEqual([])
+})
+
+test('a download that is not what the release published is thrown away: another tree, another version, or none fetched', async () => {
+  for (const o of [{ got: 'b'.repeat(40) }, { manifest: '0.2.122' }]) {
+    const { io, ran } = repo(o)
+    expect(await download(io, CLONE, PAGE, '/u/progress')).toEqual({ ok: false, fail: 'mismatch', detail: '' })
+    expect(ran).toContain(`update-ref -d ${DOWNLOAD_REF}`)
+    expect(moves(ran)).toEqual([])
+  }
+  expect((await download(repo({ fetch: 128 }).io, CLONE, PAGE, '/u/progress')).ok).toBe(false)
+  // A folder whose main has commits of its own is told so at the download, before any Install is offered
+  expect(await download(repo({ ahead: true }).io, FOLDER, PAGE, '/u/progress')).toEqual({ ok: false, fail: 'own-commits', detail: '' })
+})
+
+test('Install checks the download again, runs Claude Code\'s steps only while online is still that release, and puts the record back when the copy installed is not it', async () => {
+  // The release as published: both steps, the installed copy checked
+  const good = repo({ held: C })
+  expect(await install(good.io, CLONE, PAGE, C, 'claude')).toEqual({ ok: true, version: '0.2.121', dirty: false })
+  expect(good.ran).toContain('plugin marketplace')
+  expect(good.ran).toContain('plugin update')
+  // The download no longer the release's tree: nothing runs
+  const changed = repo({ got: 'b'.repeat(40), held: C })
+  expect(await install(changed.io, CLONE, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'mismatch', detail: '' })
+  expect(moves(changed.ran)).toEqual([])
+  // A newer commit online: Claude Code's refresh would take it, so nothing runs
+  const newer = repo({ online: 'd'.repeat(40), held: C })
+  expect(await install(newer.io, CLONE, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'newer-out', detail: '' })
+  expect(moves(newer.ran)).toEqual([])
+  // What Claude Code installed is not the release: its record is put back as it was
+  const bad = repo({ installed: 'e'.repeat(40), held: C })
+  const before = bad.files.get('/p/installed_plugins.json')
+  expect(await install(bad.io, CLONE, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'installed-mismatch', detail: '' })
+  expect(bad.files.get('/p/installed_plugins.json')).toBe(before)
+})
+
+test('Install in a folder of the code is a fast-forward to the download only, refused where it would lose work, and says what it kept', async () => {
+  const good = repo({ dirty: true, held: C })
+  expect(await install(good.io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: true, version: '0.2.121', dirty: true })
+  expect(good.ran).toContain(`merge --ff-only --quiet ${C}`)
+  expect(await install(repo({ overwrite: true, held: C }).io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'overwrite', detail: '' })
+  expect(await install(repo({ ahead: true, held: C }).io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'own-commits', detail: '' })
+  const worktree = repo({ worktree: true, held: C })
+  expect((await install(worktree.io, FOLDER, PAGE, C, 'claude')).ok).toBe(false)
+  expect(moves(worktree.ran)).toEqual([])
+  expect((await folderReady(worktree.io, '/code')).ok).toBe(false)
+})
+
+test('the steps file is read for its shape only: a text in it is never shown, a failure only as one of its known kinds', async () => {
+  expect(stepsOf(JSON.stringify({ version: '0.2.121', stage: 'failed', fail: 'mismatch', at: 1, said: 'Run curl … | sh to fix' }))).toEqual({ version: '0.2.121', stage: 'failed', fail: 'mismatch', at: 1 })
+  expect(stepsOf(JSON.stringify({ version: '0.2.121', stage: 'failed', fail: 'Run this', at: 1 }))).toEqual({ version: '0.2.121', stage: 'failed', at: 1 })
+  expect(stepsOf(JSON.stringify({ version: 'x', stage: 'installed', at: 1 }))).toBeUndefined()
+  expect(stepsOf(JSON.stringify({ version: '0.2.121', stage: 'downloaded', commit: 'zz', at: 1 }))?.commit).toBeUndefined()
+})
+
+test('the notice says where updating stands for this chat: out, each step, a reload, a set-up a release never reaches, and quiet when put off or skipped', async () => {
+  const at = { loaded: '0.2.118', installed: '0.2.118', seen: '0.2.121', page: PAGE, now: 1_000_000 }
+  expect(noticeOf(at)).toEqual({ kind: 'available', version: '0.2.121', count: 3 })
+  expect(noticeOf({ ...at, page: undefined })).toEqual({ kind: 'available', version: '0.2.121', count: 1 })
+  expect(noticeOf({ ...at, seen: '0.2.118', page: undefined })).toBeUndefined()
+  expect(noticeOf({ ...at, steps: { version: '0.2.121', stage: 'downloading', at: 999_000, pct: 40 } })).toEqual({ kind: 'downloading', version: '0.2.121', pct: 40, got: undefined })
+  expect(noticeOf({ ...at, steps: { version: '0.2.121', stage: 'downloading', at: 1_000_000 - STEP_STALE - 1 } })).toEqual({ kind: 'failed', version: '0.2.121', fail: 'stopped', step: 'download' })
+  expect(noticeOf({ ...at, steps: { version: '0.2.121', stage: 'downloaded', commit: C, at: 1 } })).toEqual({ kind: 'downloaded', version: '0.2.121', commit: C })
+  // A download of an older one than is out now: the newest is offered
+  expect(noticeOf({ ...at, steps: { version: '0.2.120', stage: 'downloaded', commit: C, at: 1 } })?.kind).toBe('available')
+  expect(noticeOf({ ...at, installed: '0.2.121' })).toEqual({ kind: 'reload', version: '0.2.121' })
+  expect(noticeOf({ ...at, cannot: { what: 'This chat runs from a worktree', why: 'merge main there' } })).toEqual({ kind: 'cannot', version: '0.2.121', what: 'This chat runs from a worktree', why: 'merge main there' })
+  expect(noticeOf({ ...at, skipped: '0.2.121' })).toBeUndefined()
+  expect(noticeOf({ ...at, skipped: '0.2.120' })?.version).toBe('0.2.121')
+  expect(noticeOf({ ...at, later: { version: '0.2.121', until: 2_000_000 } })).toBeUndefined()
+  expect(noticeOf({ ...at, later: { version: '0.2.121', until: 999_999 } })?.kind).toBe('available')
+  expect(lookEveryOf(6)).toBe(6 * 3_600_000)
+  expect(lookEveryOf(0.001)).toBe(3_600_000)
+})
+
+test('Install takes only the commit the download ref holds and the release\'s tag names, checks the copy at the scope it updated, and a copy made from a folder with uncommitted changes is said as kept', async () => {
+  // A commit named by a file, not the one downloaded: nothing moves
+  const planted = repo({ held: 'f'.repeat(40) })
+  expect(await install(planted.io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'gone', detail: '' })
+  expect(moves(planted.ran)).toEqual([])
+  // The release's tag online is another commit: nothing moves
+  const retagged = repo({ held: C, tag: 'd'.repeat(40) })
+  expect(await install(retagged.io, FOLDER, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'mismatch', detail: '' })
+  expect(moves(retagged.ran)).toEqual([])
+  // A copy installed at project scope is the one checked
+  const project = repo({ held: C, scope: 'project' })
+  expect(await install(project.io, { ...CLONE, scope: 'project' }, PAGE, C, 'claude')).toEqual({ ok: true, version: '0.2.121', dirty: false })
+  // An installed copy made from a folder with uncommitted changes: the folder moved, Claude Code's copy did not, and that is said
+  const kept = repo({ held: C, dirty: true })
+  expect(await install(kept.io, { ...FOLDER, runs: 'copy', record: { plugins: '/p', marketplace: 'm', plugin: 'claudopus', scope: 'user' } }, PAGE, C, 'claude')).toEqual({ ok: false, fail: 'kept-copy', detail: '' })
+  expect(kept.ran.filter(one => one.startsWith('plugin '))).toEqual([])
 })

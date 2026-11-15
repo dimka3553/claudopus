@@ -524,3 +524,62 @@ test('in the terminal, an ask that comes while a password is being typed leaves 
   expect(await until(async () => ((await inputs()).some(one => one.key.startsWith('ask-')) ? true : undefined))).toBe(true)
   expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([box?.key])
 })
+
+// Five pieces of work, the fourth asking: the 15 Nov "Release it" on an ended ask took the card from the top to the very end of a long
+// panel, which read as the panel jumping to the bottom
+const askingFourth = async ($: Parameters<TestBody>[0], on: On, choices?: string[], ended = false) => {
+  const w = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'five things', wait: false, origin: composer })
+  for (const n of [1, 2, 3, 4, 5]) await $.agent.spawn({ ...spawn, description: `Piece ${n}`, prompt: `piece ${n}` } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a4', text: 'Release piece four?', ...(choices ? { choices } : {}) } as never)
+  if (ended) await $.turn.complete({ answer: 'Waits for your Release it.', durationMs: 1, isAborted: false, turnId: 'turn-a4', reason: 'answer', agentId: 'a4' } as never)
+  await w.clock.advance(5000)
+  const order = async () => (await textOrder(list)).filter(one => /^Piece \d$/.test(one)).filter((one, n, all) => all.indexOf(one) === n)
+  expect(await until(async () => ((await order())[0] === 'Piece 4' ? true : undefined))).toBe(true)
+  return { ...w, list, order }
+}
+
+test('Release it on an ended ask leaves its card where it was, saying the answer, and the work started again keeps its place, never the end', async ($, on) => {
+  const { list, order, clock, resumed } = await askingFourth($, on, ['Release it', 'Not now'], true)
+  const release = ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Release it')
+  await list.press({ key: release?.key ?? '' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('pressed "Release it"')))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: /You answered “Release it”/ } as never))).toBeDefined()
+  expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5'])
+  // A minute on, it takes its own place among the others: where it began, not after them
+  await clock.advance(65_000)
+  expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
+})
+
+const answeredStays = async ($: Parameters<TestBody>[0], on: On, how: 'press' | 'reply') => {
+  const { list, order, clock } = await askingFourth($, on)
+  if (how === 'press') await pressed(list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
+  else await list.input({ key: ((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).find(one => /-reply-/.test(one.key ?? ''))?.key ?? '', text: 'It is pasted' })
+  expect(await until(async () => list.find({ type: 'Text', text: /You answered/ } as never))).toBeDefined()
+  expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5'])
+  await clock.advance(30_000)
+  expect((await order())[0]).toBe('Piece 4')
+  // A minute on, it takes its own place among the others
+  await clock.advance(35_000)
+  expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
+}
+test('Done on an ask leaves the card at the top saying the answer for a minute, then in its own place', async ($, on) => answeredStays($, on, 'press'))
+test('an answer sent from an ask\'s box leaves the card at the top saying the answer for a minute, then in its own place', async ($, on) => answeredStays($, on, 'reply'))
+test('answering one of two asks at the top leaves both cards where they were, so nothing still waiting slides into the spot just pressed', async ($, on) => {
+  const { list, order, clock } = await askingFourth($, on)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release piece two?', choices: ['Release it', 'Not now'] } as never)
+  await clock.advance(5000)
+  expect(await until(async () => ((await order())[0] === 'Piece 2' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
+  // The older ask, second at the top, is answered: it stays second, the newer ask above it, and it still says the answer under the line its work then writes
+  await pressed(list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
+  expect(await until(async () => list.find({ type: 'Text', text: /You answered “Done”/ } as never))).toBeDefined()
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n4', agentId: 'a4', text: 'Now doing the next part' } as never)
+  await clock.advance(5000)
+  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
+  expect(await list.find({ type: 'Text', text: /You answered “Done”/ } as never)).toBeDefined()
+})

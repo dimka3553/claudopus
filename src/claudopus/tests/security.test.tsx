@@ -505,10 +505,10 @@ test('F-017 · a release waits for the person\'s press on its card, and its gran
 
 // F-019 is held in updating.test.tsx, with the hourly look and the panel's Install
 
-test('F-020 · a lock on the update dated ahead of this clock holds nothing: Check for updates looks at once', async ($, on) => {
+test('F-020 · a lock on the update dated ahead of this clock holds nothing: Check now looks at once', async ($, on) => {
   const { files } = world(on)
   let fetches = 0
-  on('http.fetch', () => ((fetches += 1), { value: { status: 200, ok: true, headers: {}, text: '{"version":"0.1.0"}' } }) as never)
+  on('http.fetch', () => ((fetches += 1), { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ version: '0.1.0', tree: 'a'.repeat(40) }) } }) as never)
   files.set(`${MEMORY}/update.lock`, `${SEC_NOW + 365 * 24 * 3_600_000} planted`)
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
