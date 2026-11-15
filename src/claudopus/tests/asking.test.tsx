@@ -934,3 +934,83 @@ test('in a chat run from another Mac a command for the person is given whole, wi
   expect(shown.some(argv => String(argv[1]).endsWith('/open.command'))).toBe(false)
   await list.unmount()
 })
+
+// A press on an ask draws the card answered from the press itself: its buttons and box go in the press's own drawing, before the
+// answer is written to the card's file or reaches the work
+const askScene = async ($: Parameters<TestBody>[0], on: On) => {
+  const w = world(on)
+  // The card's file can be held or made to fail, as a slow or failing write would
+  let hold: Promise<void> | undefined
+  let fails = 0
+  on('state.set', async (_, e, next) => {
+    if ((e as { key?: string }).key !== 'todos') return next(e)
+    // Refused, as a write another copy beat would be, again and again: the card's file is never written
+    if (fails > 0) {
+      fails -= 1
+      return { value: { isSet: false, version: -1 } } as never
+    }
+    if (hold) await hold
+    return next(e)
+  })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'release it', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Ship the branch', prompt: 'ship it' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release the branch?', choices: ['Release it', 'Not now'] } as never)
+  const key = async (label: string) => String((await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === label)))?.key ?? '')
+  const answers = () => w.appended.filter(line => line.startsWith('a1: ') && line.includes('in answer to your ask'))
+  return { ...w, list, key, answers, holdWrites: (until: Promise<void>) => void (hold = until), failWrites: (n: number) => void (fails = n), freeWrites: () => void (hold = undefined) }
+}
+
+test("a press on an ask shows it answered in the press's own drawing, before the answer is written, with no buttons or box left", async ($, on) => {
+  const s = await askScene($, on)
+  const release = await s.key('Release it')
+  let free = () => undefined as void
+  s.holdWrites(new Promise<void>(done => (free = done)))
+  const pressing = s.list.press({ key: release })
+  // The card's file is not yet written: the card says what was pressed, and nothing is left to press
+  expect(await until(async () => s.list.find({ type: 'Text', text: '✓ You answered “Release it” · on its way to the work' }))).toBeDefined()
+  expect((await s.list.findAll({ type: 'Button' })).some(b => b.props.label === 'Release it' || b.props.label === 'Not now')).toBe(false)
+  expect(await s.list.find({ type: 'Text', text: 'Release the branch?' })).toBeUndefined()
+  expect(s.answers()).toEqual([])
+  s.freeWrites()
+  free()
+  await pressing
+  expect(await until(async () => (s.answers().length ? s.answers() : undefined))).toHaveLength(1)
+  expect(await until(async () => s.list.find({ type: 'Text', text: '✓ You answered “Release it” · it reads this at its next step' }))).toBeDefined()
+})
+
+test('an answer that could not be written says so on the card and puts its buttons back; pressed again it goes', async ($, on) => {
+  const s = await askScene($, on)
+  const release = await s.key('Release it')
+  s.failWrites(1000)
+  await s.list.press({ key: release }).catch(() => undefined)
+  expect(await until(async () => s.list.find({ type: 'Text', text: 'Not sent: “Release it” did not reach the work. Press it again' }))).toBeDefined()
+  expect(await s.list.find({ type: 'Text', text: /^✓ You answered/ })).toBeUndefined()
+  expect(s.answers()).toEqual([])
+  // Its buttons are back, and a press now answers it
+  s.failWrites(0)
+  const again = await s.key('Release it')
+  expect(again).not.toBe('')
+  await s.list.press({ key: again })
+  expect(await until(async () => (s.answers().length ? s.answers() : undefined))).toHaveLength(1)
+  expect(await until(async () => s.list.find({ type: 'Text', text: '✓ You answered “Release it” · it reads this at its next step' }))).toBeDefined()
+})
+
+test('two presses on an ask, the second on the drawing before the first was taken, send one answer', async ($, on) => {
+  const s = await askScene($, on)
+  const release = await s.key('Release it')
+  const notNow = await s.key('Not now')
+  let free = () => undefined as void
+  s.holdWrites(new Promise<void>(done => (free = done)))
+  const first = s.list.press({ key: release })
+  const second = s.list.press({ key: notNow }).catch(() => undefined)
+  const third = s.list.press({ key: release }).catch(() => undefined)
+  s.freeWrites()
+  free()
+  await Promise.all([first, second, third])
+  expect(await until(async () => (s.answers().length ? s.answers() : undefined))).toHaveLength(1)
+  expect(s.answers()[0]).toContain('pressed "Release it"')
+  await new Promise<void>(done => setTimeout(done, 50))
+  expect(s.answers()).toHaveLength(1)
+})
