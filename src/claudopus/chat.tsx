@@ -380,9 +380,13 @@ const chatHooks = (on: On) => {
       // what it hands back on the way (an answer to a question while it waits) is no report, and its card stays at work
       const isGoingOn = how === 'done' && isHeld && goesOn(await read($, todos), id)
       const isReport = how === 'done' && isHeld && !isGoingOn && (handedBack.has(id) || answer.length >= REPORT_LEAST)
+      // A report in words, with nothing of its own running, has finished the work as a handback does: the engine may hold it on what
+      // no tool shows open, and the chat need not stop it. Its card ends with its clock, and an ask it leaves stays to be answered
+      const isIdleReport = isReport && ownsNothing(await read($, todos), id)
       // SubagentHandback ends the work's run: its card ends done with its report, though what it left running in the background (a
       // server, a watch, a helper) goes on and is not stopped. Should that wake the work, its next step brings the card back
-      const isHandedBack = how === 'done' && handedBack.has(id) && !isGoingOn
+      const isHandedBack = how === 'done' && (handedBack.has(id) || isIdleReport) && !isGoingOn
+      if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
       // Work nothing holds any more has nothing of its own left running in the background

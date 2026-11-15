@@ -2070,6 +2070,7 @@ test('work that answered while only its own background work held it, then stoppe
   const report = `The hover is gone and idle chats are no longer listed. ${'All tests pass and the version is pushed to main, installed on both Macs. '.repeat(8)}`
   // Its turn ends with its report while a watcher it started still runs: the engine holds it, and its card goes on working
   const answer = async (id: string, turnId: string) => {
+    await $.tool.call({ tool: 'Monitor', tool_use_id: `w-${turnId}`, agentId: id, command: 'tail -f build.log', description: 'watch the build', timeout_ms: 0 } as never)
     agents[id] = 'waiting'
     kinds[id] = 'general-purpose'
     await $.turn.complete({ answer: report, durationMs: 1, isAborted: false, turnId, reason: 'answer', agentId: id } as never)
@@ -2129,6 +2130,7 @@ test('work that answered while only its own background work held it, then stoppe
   await $.agent.spawn({ ...spawn, description: 'Name the octopus', prompt: 'name it' } as never)
   agents.a4 = 'waiting'
   kinds.a4 = 'general-purpose'
+  await $.tool.call({ tool: 'Monitor', tool_use_id: 'w4', agentId: 'a4', command: 'tail -f names.log', description: 'watch the names', timeout_ms: 0 } as never)
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a4', message: 'Named it Otto.' } as never)
   // Its turn may end with no text of its own: the handback is its answer
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't4s', reason: 'answer', agentId: 'a4' } as never)
@@ -2344,6 +2346,101 @@ test('work that answers on the way while a helper of its still works, with its t
   await clock.advance(20_000)
   expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined()
   await pane.unmount()
+})
+
+test('work that reports with nothing of its own running finishes, though the engine still holds it: the 14 Nov Azure card, which an answer passed on twice kept at work for hours, its clock running', SLOW, async ($, on) => {
+  const agents: Record<string, string> = {}
+  const kinds: Record<string, string> = {}
+  const { clock, resumed } = world(on, { art: true, agents, kinds })
+  on('classic.SubagentStop', () => ({ value: {} }) as never)
+  await $.session.start(start)
+  const drawn = async (view: { findAll: (q: { type: 'Svg' }) => Promise<{ props: { source?: unknown } }[]> }) =>
+    (await view.findAll({ type: 'Svg' })).map(one => /<title>([\w-]+)<\/title>/.exec(String(one.props.source))?.[1]).filter(Boolean)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const call = (tool: string, id: string, input: Record<string, unknown> = {}) => $.tool.call({ tool, tool_use_id: id, agentId: 'a1', ...input } as never)
+  const labels = async () => (await pane.findAll({ type: 'Button' })).map(b => String(b.props.label))
+  // The card's line with its clock
+  const line = async () => (await pane.findAll({ type: 'Text' })).map(one => one.text ?? '').find(text => / · (\d+m )?\d+s$/.test(text))
+  // As the engine stops any work, it lists everything in flight in the whole session: here another work and its command
+  const stop = (id: string) =>
+    $.classic.SubagentStop({ agent_id: id, agent_type: 'general-purpose', agent_transcript_path: '', stop_hook_active: false, background_tasks: [{ id: 'a2', type: 'local_agent', status: 'running', description: 'Eyes, next round' }, { id: 'b9', type: 'local_bash', status: 'running', description: 'Fit the eyes' }] } as never)
+  await $.prompt.submit({ text: 'use the cloud for heavy work', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Heavy work on Azure', prompt: 'use azure' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Eyes, next round', prompt: 'eyes' } as never)
+  kinds.a1 = 'general-purpose'
+  agents.a2 = 'running'
+  // As at 22:24: everything it set out to do is done, it asks for the release and hands in its report. Every command and helper of
+  // its had ended, yet the engine went on listing it as held on background work of its own
+  await call('mcp__claudopus__todo', 't1', { item: 'One command that runs a job on Azure', state: 'done' })
+  await call('mcp__claudopus__ask', 'k1', { text: 'Release the Azure heavy-jobs route?', choices: ['Release it', 'Not now'] })
+  await call('SubagentHandback', 'h1', { message: 'Heavy work can now run on Azure. Built, tested and pushed on its own branch; it waits for your Release it.' })
+  agents.a1 = 'waiting'
+  await stop('a1')
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(20_000)
+  // Ended, its question on its card to answer, its clock stopped, and never said to have left something running: nothing of its own runs
+  expect(await drawn(pane)).toEqual(['wave'])
+  expect(await labels()).toContain('Release it')
+  expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined()
+  const asking = await line()
+  expect(asking).toMatch(/^Waits for your answer/)
+  await clock.advance(10 * 60_000)
+  expect(await line()).toBe(asking)
+
+  // The press starts it again with the answer, once
+  const release = (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')
+  await pane.press({ key: release?.key ?? '' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined()
+  // It finds the release already done and reports in words, still held by the engine
+  await call('mcp__claudopus__note', 'n1', { text: 'Released: the route is on main.' })
+  await clock.advance(70_000)
+  const report = `The Azure heavy-jobs route is on main and its deploy succeeded. ${'Any worktree that merged main can send a job to its own large Azure machine. '.repeat(7)}`
+  await stop('a1')
+  await $.turn.complete({ answer: report, durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a1' } as never)
+  // It has finished: not at work, its clock stopped
+  expect(await drawn(pane)).toEqual(['happy'])
+  expect(await pane.find({ type: 'Text', text: /^Still at work/ })).toBeUndefined()
+  expect((await pane.findAll({ type: 'Button' })).some(b => b.key === 'stop-a1')).toBe(false)
+  expect(await line()).toMatch(/^Finished · /)
+  // and once its moment is over it leaves the list, as finished work does, never counting on
+  await clock.advance(60_000)
+  expect(await line()).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /left something running/ })).toBeUndefined()
+
+  // The chat, told of the press, passes the same answer on: it is not sent, so the ended work is not started a third time
+  const sends = resumed.length
+  const again = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Release it' } as never)
+  expect(String((again as { deny?: unknown }).deny)).toContain('gave on that work\'s card')
+  expect(resumed.length).toBe(sends)
+  expect(await line()).toBeUndefined()
+  // Words of the person's own that say something new still go
+  const steer = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'Also file the quota request.' } as never)
+  expect((steer as { deny?: unknown }).deny).toBeUndefined()
+  await pane.unmount()
+})
+
+test('the same words as a card answer still go when they answer a newer question, or when the person typed them in the chat', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Merge the branch', prompt: 'merge' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Proceed?', choices: ['Yes', 'Not now'] } as never)
+  const yes = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Yes')
+  await list.press({ key: yes?.key ?? '' })
+  await clock.advance(5_000)
+  // The work asks again, with the same answer to give: the chat passing the person's "Yes" on goes
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Also merge it?', choices: ['Yes', 'Not now'] } as never)
+  const sent = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Yes' } as never)
+  expect((sent as { deny?: unknown }).deny).toBeUndefined()
+  // An answer typed in the chat and passed on, then passed on again in the same words: only a card's answer is refused as a repeat
+  await clock.advance(5_000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a1', text: 'Tag it?', choices: ['Yes', 'Not now'] } as never)
+  await $.prompt.submit({ text: 'Yes', wait: false, origin: composer })
+  const first = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a1', message: 'Yes' } as never)
+  const second = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a1', message: 'Yes' } as never)
+  expect((first as { deny?: unknown }).deny).toBeUndefined()
+  expect((second as { deny?: unknown }).deny).toBeUndefined()
+  await list.unmount()
 })
 
 // Sounds and notifications: work that is ready, and work that needs the person
