@@ -245,28 +245,33 @@ test('a question or a plan has no Yes or No on its card: it says where to answer
   await list.unmount()
 })
 
-test("another chat's held prompt has Yes and No, which leave the answer for that chat; this chat takes such an answer for its own", async ($, on) => {
-  const { files, clock, wake } = world(on)
+test("another chat's held prompt has no Yes or No here, only where to answer it; an answer a file leaves for this chat's own prompt answers nothing", async ($, on) => {
+  const { files, clock, wake, logged } = world(on)
   await $.session.start(start)
-  files.set(`${MEMORY}/live/chat-o.json`, JSON.stringify({ chat: 'chat-o', title: 'Other chat', folder: '/x', host: '', at: NOW, cards: [], prompts: [{ id: 'toolu_9', text: 'Run a command: Count files', kind: 'allow', at: NOW, isHeld: true }, { id: 'toolu_7', text: 'Run a command: Old one', kind: 'allow', at: NOW }] }))
+  files.set(`${MEMORY}/live/chat-o.json`, JSON.stringify({ chat: 'chat-o', title: 'Other chat', folder: '/x', host: '', at: NOW, cards: [], prompts: [{ id: 'toolu_9', text: 'Run a command: Count files', kind: 'allow', at: NOW, isHeld: true }] }))
   await clock.advance(5000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => button(list, 'prompt-yes--chat-o-toolu_9'))).toBeDefined()
-  // One its chat does not hold, as from an older version, keeps saying where to answer it
-  expect(await button(list, 'prompt-yes--chat-o-toolu_7')).toBeUndefined()
-  await list.press({ key: String((await button(list, 'prompt-yes--chat-o-toolu_9'))?.key) })
-  const left = await until(async () => [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/live/answers/chat-o/`) && path.endsWith('.json'))?.[1])
-  expect(JSON.parse(left ?? '{}')).toEqual(expect.objectContaining({ card: 'prompt:toolu_9', choice: 'yes' }))
-  expect(await until(async () => list.find({ type: 'Text', text: 'You said yes · it goes to that chat' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Count files' }))).toBeDefined()
   expect(await button(list, 'prompt-yes--chat-o-toolu_9')).toBeUndefined()
-  // This chat's own prompt, answered by a press another chat left for it
-  const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'make', description: 'Build it' } } as never)
+  expect(await list.find({ type: 'Text', text: 'Answer it in that chat' })).toBeDefined()
+  // This chat's own prompt: a Yes left in a file, as another chat or another Mac could leave one, does not answer it
+  let settled = false
+  const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'make', description: 'Build it' } } as never).then(r => ((settled = true), r))
   expect(await until(async () => button(list, 'prompt-yes-this-'))).toBeDefined()
   const id = String((await button(list, 'prompt-yes-this-'))?.key ?? '').replace(/^prompt-yes-this-/, '').replace(/-\d+$/, '')
   files.set(`${MEMORY}/live/answers/engine-id/1-a.json`, JSON.stringify({ card: `prompt:${id}`, choice: 'yes', isReply: false, ask: 'Run a command: Build it', askAt: NOW, at: NOW + 6000 }))
   await clock.advance(5000)
   wake()
+  await clock.advance(1000)
+  wake()
+  expect(settled).toBe(false)
+  expect(files.has(`${MEMORY}/live/answers/engine-id/1-a.json`)).toBe(false)
+  expect((files.get(`${MEMORY}/log.md`) ?? '')).toContain('left in a file put away unread')
+  // Its own Yes, pressed in this chat's panel, still answers it
+  await list.press({ key: String((await button(list, 'prompt-yes-this-'))?.key) })
+  wake()
   expect(((await asked) as { decision?: unknown }).decision).toEqual({ behavior: 'allow' })
+  void logged
   await list.unmount()
 })
 

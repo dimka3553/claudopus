@@ -66,6 +66,8 @@ const chatHooks = (on: On) => {
     lastSeen = undefined
     // and reads its own copy's version again
     loadedVersion = undefined
+    // and takes nothing it knew of the person's settings and texts as sealed: the kept copy is checked again
+    knownSeen = undefined
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
@@ -277,12 +279,9 @@ const chatHooks = (on: On) => {
     await knowSession($)
     await loadFlows($).catch(err => log($, `workflows not read back: ${String(err)}`))
     everyLoad($, FLOW_EVERY, () => followFlows($).catch(err => log($, `workflows not followed: ${String(err)}`)))
-    // Claudopus updates itself: a look a little after the chat starts, then whenever one is due
-    afterLoad($, UPDATE_AFTER, () => void selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
-    everyLoad($, UPDATE_LOOK, () => selfUpdate($).catch(err => log($, `update not looked for: ${String(err)}`)))
-    // and an open chat moves to a newer copy installed while it runs, by itself, once it is idle
-    reloadAsked = ''
-    everyLoad($, RELOAD_EVERY, () => reloadToInstalled($).catch(err => log($, `reload not looked for: ${String(err)}`)))
+    // Every hour one chat looks at the version page, and only looks: an update is installed, and a chat reloaded to it, only by a press
+    afterLoad($, UPDATE_AFTER, () => void lookForNew($).catch(err => log($, `update not looked for: ${String(err)}`)))
+    everyLoad($, UPDATE_LOOK, () => lookForNew($).catch(err => log($, `update not looked for: ${String(err)}`)))
     if (isRunFromAfar) {
       await holdOldCopies($).catch(() => undefined)
       everyLoad($, HOLD_EVERY, () => holdOldCopies($).catch(err => log($, `old copies not held: ${String(err)}`)))
@@ -305,6 +304,8 @@ const chatHooks = (on: On) => {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    // The texts a message is answered with are the ones known: a change made since is put back first
+    if (dir) await personCheck($).catch(err => log($, `files not compared as a message came: ${String(err)}`))
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
     // The notice that a workflow ended ends its card
     if (dir && e.origin.kind === 'task-notification' && e.text.includes('<task-notification')) await flowEnded($, e.text).catch(err => log($, `workflow end not read: ${String(err)}`))

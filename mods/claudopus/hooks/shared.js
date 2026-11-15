@@ -10,17 +10,6 @@ var __assign = (this && this.__assign) || function () {
     };
     return __assign.apply(this, arguments);
 };
-var __rest = (this && this.__rest) || function (s, e) {
-    var t = {};
-    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
-        t[p] = s[p];
-    if (s != null && typeof Object.getOwnPropertySymbols === "function")
-        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
-            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
-                t[p[i]] = s[p[i]];
-        }
-    return t;
-};
 var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
         if (ar || !(i in from)) {
@@ -66,7 +55,7 @@ var shareable = function (list, now) {
 exports.shareable = shareable;
 // What tells one shared state from another, the running times aside: a file is written again when it changes or its beat is due
 var signOf = function (cards) {
-    return JSON.stringify(cards.map(function (one) { var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q; return [one.id, one.status, one.title, one.model, one.tokens, one.items, (_b = (_a = one.entries.at(-1)) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '', (_d = (_c = one.ask) === null || _c === void 0 ? void 0 : _c.text) !== null && _d !== void 0 ? _d : '', (_f = (_e = one.ask) === null || _e === void 0 ? void 0 : _e.at) !== null && _f !== void 0 ? _f : 0, (_h = (_g = one.ask) === null || _g === void 0 ? void 0 : _g.copy) !== null && _h !== void 0 ? _h : '', (_k = (_j = one.ask) === null || _j === void 0 ? void 0 : _j.choices) !== null && _k !== void 0 ? _k : [], (_o = (_m = (_l = one.ask) === null || _l === void 0 ? void 0 : _l.replied) === null || _m === void 0 ? void 0 : _m.at) !== null && _o !== void 0 ? _o : 0, Boolean((_q = (_p = one.ask) === null || _p === void 0 ? void 0 : _p.replied) === null || _q === void 0 ? void 0 : _q.isWaking)]; }));
+    return JSON.stringify(cards.map(function (one) { var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k; return [one.id, one.status, one.title, one.model, one.tokens, one.items, (_b = (_a = one.entries.at(-1)) === null || _a === void 0 ? void 0 : _a.text) !== null && _b !== void 0 ? _b : '', (_d = (_c = one.ask) === null || _c === void 0 ? void 0 : _c.text) !== null && _d !== void 0 ? _d : '', (_f = (_e = one.ask) === null || _e === void 0 ? void 0 : _e.at) !== null && _f !== void 0 ? _f : 0, (_h = (_g = one.ask) === null || _g === void 0 ? void 0 : _g.copy) !== null && _h !== void 0 ? _h : '', (_k = (_j = one.ask) === null || _j === void 0 ? void 0 : _j.choices) !== null && _k !== void 0 ? _k : []]; }));
 };
 exports.signOf = signOf;
 // The prompts a chat's file carries, as far as they are whole: at most a few, each cut short
@@ -76,13 +65,7 @@ var promptsOf = function (list) {
         .filter(function (one) { return Boolean(one && typeof one.id === 'string' && one.id && typeof one.text === 'string' && one.text && typeof one.at === 'number'); })
         .filter(function (one, i, all) { return all.findIndex(function (other) { return other.id === one.id; }) === i; })
         .slice(0, PROMPTS_SHARED)
-        .map(function (one) {
-        var words = function (key, max) {
-            var _a;
-            return (typeof one[key] === 'string' && plain(one[key]) ? (_a = {}, _a[key] = plain(one[key]).slice(0, max), _a) : {});
-        };
-        return __assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign(__assign({ id: one.id.slice(0, 80), text: plain(one.text).slice(0, 200) }, (typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {})), { at: one.at }), (one.kind === 'allow' || one.kind === 'question' || one.kind === 'plan' ? { kind: one.kind } : {})), words('detail', 400)), words('yes', 200)), words('no', 200)), words('done', 60)), (one.answered === 'yes' || one.answered === 'no' || one.answered === 'stopped' ? { answered: one.answered } : {})), (one.isRunning === true ? { isRunning: true } : {})), (one.isCut === true ? { isCut: true } : {})), (one.isHeld === true ? { isHeld: true } : {})), (typeof one.endedAt === 'number' ? { endedAt: one.endedAt } : {}));
-    });
+        .map(function (one) { return (__assign(__assign({ id: one.id.slice(0, 80), text: plain(one.text).slice(0, 200) }, (typeof one.title === 'string' && plain(one.title) ? { title: plain(one.title).slice(0, 120) } : {})), { at: one.at })); });
 };
 exports.promptsOf = promptsOf;
 // Text from another chat's file with no control characters, so nothing in it can move or colour the terminal
@@ -99,18 +82,13 @@ var sharedOf = function (text, now, host) {
         if (now - one.at > exports.STALE)
             return undefined;
         // Running work under `cards`, ended work apart under `ended`, so a version that reads `cards` alone never shows ended work as running
-        var cards = __spreadArray(__spreadArray([], one.cards, true), (Array.isArray(one.ended) ? one.ended : []), true).filter(function (card) { return typeof card === 'object' && card !== null && 'id' in card && typeof card.id === 'string' && Boolean(card.id) && 'items' in card && Array.isArray(card.items) && 'entries' in card && Array.isArray(card.entries); });
+        var cards = __spreadArray(__spreadArray([], one.cards, true), (Array.isArray(one.ended) ? one.ended : []), true).filter(function (card) { return Boolean(card && typeof card.id === 'string' && card.id && Array.isArray(card.items) && Array.isArray(card.entries)); });
         // A chat waiting on its own prompt is listed whether or not it has work
-        var prompts_1 = (0, exports.promptsOf)(one.prompts).map(function (_a) {
-            var _answered = _a.answered, _running = _a.isRunning, _cut = _a.isCut, _ended = _a.endedAt, open = __rest(_a, ["answered", "isRunning", "isCut", "endedAt"]);
-            return open;
-        });
-        // Prompts answered there lately, said for a minute, so a chat is listed for them too
-        var answeredPrompts = (0, exports.promptsOf)(one.answeredPrompts).filter(function (p) { return p.answered; });
-        if (!cards.length && !prompts_1.length && !answeredPrompts.length)
+        var prompts_1 = (0, exports.promptsOf)(one.prompts);
+        if (!cards.length && !prompts_1.length)
             return undefined;
         var link = (0, exports.linkOf)(one.link);
-        return __assign(__assign(__assign({ chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards: cards }, (prompts_1.length ? { prompts: prompts_1 } : {})), (answeredPrompts.length ? { answeredPrompts: answeredPrompts } : {})), (link ? { link: link } : {}));
+        return __assign(__assign({ chat: one.chat, title: typeof one.title === 'string' ? one.title : '', folder: typeof one.folder === 'string' ? one.folder : '', host: host || (typeof one.host === 'string' ? one.host : ''), at: one.at, cards: cards }, (prompts_1.length ? { prompts: prompts_1 } : {})), (link ? { link: link } : {}));
     }
     catch (_a) {
         return undefined;
@@ -152,8 +130,7 @@ var firstStart = function (s) {
     var running = s.cards.filter(function (one) { return one.status === 'working' || one.ask; });
     return running.length ? Math.min.apply(Math, running.map(function (one) { return one.startedAt; })) : Number.MAX_SAFE_INTEGER;
 };
-// An ask whose work is at work on the person's reply to it does not wait on them
-var waits = function (s) { var _a; return (((_a = s.prompts) === null || _a === void 0 ? void 0 : _a.length) ? 2 : s.cards.some(function (one) { return one.ask && !(one.ask.replied && (one.status === 'working' || one.ask.replied.isWaking)); }) ? 1 : 0); };
+var waits = function (s) { var _a; return (((_a = s.prompts) === null || _a === void 0 ? void 0 : _a.length) ? 2 : s.cards.some(function (one) { return one.ask; }) ? 1 : 0); };
 var ordered = function (list) {
     return __spreadArray([], list, true).sort(function (a, b) { return waits(b) - waits(a) || firstStart(a) - firstStart(b) || (0, exports.chatName)(a).localeCompare((0, exports.chatName)(b)); });
 };

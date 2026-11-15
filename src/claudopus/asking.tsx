@@ -116,6 +116,8 @@ const pending = new Map<string, string>()
 const actingOn = new Map<string, string>()
 // The asks of this chat's work already answered, by work and when it asked
 const answeredAsks = new Set<string>()
+// When the ask each work last had answered and cleared was asked, so a reply in words left after a press reaches only that ask
+const answeredAt = new Map<string, number>()
 // Answers on their way, so a press hook can wait for the one its press started (a button's handler does not await it)
 const answersOnWay = new Set<Promise<unknown>>()
 const answerAsk = ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
@@ -131,7 +133,8 @@ const plainWords = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/
 const settles = (ask: NonNullable<Todo['ask']>, said: string, isReply: boolean) =>
   !isReply || !ask.choices?.length || ask.choices.some(choice => plainWords(choice) && `${plainWords(said)} `.startsWith(`${plainWords(choice)} `))
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
-  if (one.chat) return answerElsewhere($, one, choice, isReply)
+  // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
+  if (one.chat) return
   const ask = one.ask
   const said = choice.trim()
   if (!ask || !said) return
@@ -148,6 +151,7 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
     list.map(card => (card.id === one.id && card.ask?.at === ask.at && card.ask.text === ask.text ? ((isCleared = true), { ...card, ask: undefined, entries: [...card.entries, { at, kind: 'steer' as const, text: isReply ? said : `${said} — to: ${ask.text}` }].slice(-ENTRIES_KEPT) }) : card)),
   )
   if (!isCleared) return
+  answeredAt.set(one.id, ask.at)
   drafts.delete(one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
   if (isReply) freeTimes()

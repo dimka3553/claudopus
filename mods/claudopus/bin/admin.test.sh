@@ -2,7 +2,7 @@
 # Tests the gate in bin/admin on a Mac: no admin command gets past it without a grant the hook sealed, however the runner is reached.
 # Everything runs under a home folder of its own, with a keychain of its own made there, so the person's keychain, settings and
 # kept passwords are never touched; no command is run as admin (each case stops at the gate, or at the password it does not have).
-#   sh mods/claudopus/bin/admin.test.sh
+#   bash mods/claudopus/bin/admin.test.sh
 set -u
 # On a Mac it runs under a keychain of its own; on Linux bin/keyring keeps its files under this test's own home
 [ "$(uname)" = Darwin ] && mac=1 || mac=
@@ -15,6 +15,18 @@ export HOME=$tmp/home
 memory=$HOME/.claude/claudopus
 mkdir -p "$memory/admin-grants"
 unset XDG_DATA_HOME
+# The runners take their home folder from the user database, never $HOME: the cases below run copies of them that take this test's
+# home instead, so the person's own is never touched. The shipped runners, which take the person's, are run only where they must
+# refuse (a forged key and grant under another home)
+shipped=$here
+src=$here/../../../src
+mkdir -p "$tmp/bin" && cp -p "$here"/* "$tmp/bin/" || exit 1
+for f in admin release secret keyring; do
+  sed 's|^own_home=$(/usr/bin/perl .*$|own_home=$HOME|' "$here/$f" >"$tmp/bin/$f" && chmod +x "$tmp/bin/$f"
+  ! cmp -s "$here/$f" "$tmp/bin/$f" || { echo "admin.test.sh: $f takes its home folder some other way now"; exit 1; }
+done
+here=$tmp/bin
+admin=$here/admin
 if [ -n "$mac" ]; then
   mkdir -p "$HOME/Library/Keychains" "$HOME/Library/Preferences"
   keychain=$HOME/Library/Keychains/login.keychain-db
@@ -27,7 +39,7 @@ hook_seal=$(node -e '
   const text = require("fs").readFileSync(process.argv[1], "utf8")
   const GATE_SERVICE = /const GATE_SERVICE = \x27([^\x27]+)\x27/.exec(text)[1]
   process.stdout.write(eval(/const SEAL = (`[\s\S]*?`)\n/.exec(text)[1]))
-' "$here/../../../src/claudopus/gate.tsx") && [ -n "$hook_seal" ] || { echo "admin.test.sh: the hook's seal script was not read from src/claudopus/gate.tsx"; exit 1; }
+' "$src/claudopus/gate.tsx") && [ -n "$hook_seal" ] || { echo "admin.test.sh: the hook's seal script was not read from src/claudopus/gate.tsx"; exit 1; }
 seal() {
   if [ -n "${2:-}" ]; then printf '%s\n%s' "$2" "$1" | perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m, $k)'; else /bin/sh -c "$hook_seal" sh make "$1"; fi
 }
@@ -93,6 +105,13 @@ grant good here 'id -u'
 expect 'a sealed grant for this Mac and this command: past the gate' 3 "$PAST" -- "$admin" here 'id -u'
 [ ! -e "$memory/admin-grants/good.json" ] && echo "ok - the grant was taken" || { echo "NOT OK - the grant was left"; failed=1; }
 expect 'the same command again, its grant taken: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+# What root runs has the system's own PATH, never the caller's: a program planted earlier on the caller's PATH is not the one run
+mkdir -p "$tmp/planted" && printf '#!/bin/sh\necho planted\n' >"$tmp/planted/id" && chmod +x "$tmp/planted/id"
+[ -n "$mac" ] && system_path=/usr/bin:/bin:/usr/sbin:/sbin || system_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+grant path here 'id -u'
+shown=$(PATH="$tmp/planted:$PATH" CLAUDOPUS_ADMIN_SHOW=1 "$admin" here 'id -u' 2>&1)
+n=$((n + 1))
+if [ "$shown" = "PATH=$system_path; export PATH; id -u" ]; then echo "ok $n - a caller's PATH does not reach what root runs"; else echo "NOT OK $n - root was handed: $shown"; failed=1; fi
 
 config '{"admin":"never"}'
 expect '"never" with no seal: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
@@ -106,17 +125,11 @@ config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nnever')")
 expect '"never" as Config sealed it: past the gate with no grant' 3 "$PAST" -- "$admin" here 'id -u'
 expect '"never" as Config sealed it, through a wrapper as before: past the gate' 3 "$PAST" -- "$tmp/wrapper.sh"
 
-config '{"adminPassword":"macos"}'
-expect 'macOS asks, no grant: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
-if [ -n "$mac" ]; then
-  grant mac1 here 'id -u'
-  expect 'macOS asks, in a chat reached over SSH: nothing runs' 7 'which nobody sees from a chat reached over SSH' -- "$admin" here 'id -u'
-  grant mac2 m4 'id -u'
-  expect 'macOS asks, on another Mac: nothing runs' 7 'works only on this Mac' -- "$admin" m4 'id -u'
-else
-  grant linux1 here 'id -u'
-  expect 'macOS asks, on Linux: nothing runs, and it says only a Mac can' 7 'only a Mac can do' -- "$admin" here 'id -u'
-fi
+# adminPassword, which earlier versions read, chooses nothing: with no grant refused, with one the password is asked for
+config '{"adminPassword":"keep"}'
+expect 'adminPassword set, no grant: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
+grant pw1 here 'id -u'
+expect 'adminPassword set, a grant: the password is asked for, as always' 3 "$PAST" -- "$admin" here 'id -u'
 
 config '{}'
 # What takes something back makes a new key: a grant and a "never" sealed before it count for nothing
@@ -130,6 +143,119 @@ rm -f "$memory"/admin-grants/*
 config "{\"admin\":\"never\",\"adminSealed\":\"$old_never\"}"
 expect '"never" sealed before the key changed: refused' 6 "$REFUSED" -- "$admin" here 'id -u'
 config '{}'
+# The secret runner reads only its own keys: a setting in its environment never points it at the kept admin passwords
+printf '%s\n' 'admin-pass-1' | "$here/keyring" set claudopus-admin m9 'Claudopus admin: m9'
+listed=$(env CLAUDOPUS_SECRET_SERVICE=claudopus-admin "$here/secret" --list 2>&1)
+n=$((n + 1))
+if [ -z "$listed" ]; then echo "ok $n - the secret runner cannot be pointed at the admin passwords"; else echo "NOT OK $n - the secret runner listed: $listed"; failed=1; fi
+"$here/keyring" delete claudopus-admin m9 >/dev/null 2>&1
+# F-007 F-009: no admin password is kept or used. A "never" sealed with the gate's own key, as anything that reads the key could seal
+# it, with a password an earlier version kept: the runner neither uses that password nor runs anything; it asks for the password,
+# and the kept one is gone. Before this fix the kept password ran the command with no one asked
+printf '%s\n' 'kept-admin-pw' | "$here/keyring" set claudopus-admin here 'Claudopus admin: here'
+config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nnever')")\"}"
+expect 'a "never" sealed with the real key and a password kept: nothing runs, the password is asked for' 3 "$PAST" -- "$admin" here 'id -u'
+n=$((n + 1))
+if "$here/keyring" has claudopus-admin here; then echo "NOT OK $n - the kept admin password was left"; failed=1; else echo "ok $n - the kept admin password was forgotten, never used"; fi
+config '{}'
+# What the panel types is sealed by the hook's own openssl line (read out of src/claudopus/boxes.tsx) to a key made as the runner
+# makes it, and opened as the runner opens it: this machine's openssl takes every option both use
+seal_for=$(node -e 'const t = require("fs").readFileSync(process.argv[1], "utf8"); process.stdout.write(eval(/const SEAL_FOR = (\x27[^\n]*\x27)\n/.exec(t)[1]))' "$src/claudopus/boxes.tsx")
+private=$(openssl genrsa 2048 2>/dev/null)
+public=$(printf '%s\n' "$private" | openssl rsa -pubout -outform DER 2>/dev/null | openssl base64 -A)
+sealed_value=$(printf '%s' 'pw "with" \quotes' | /bin/bash -c "$seal_for" sh "$public")
+opened=$(printf '%s' "$sealed_value" | openssl base64 -d -A 2>/dev/null | openssl pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 3< <(printf '%s\n' "$private") 2>/dev/null)
+n=$((n + 1))
+if [ "$opened" = 'pw "with" \quotes' ] && ! printf '%s' "$sealed_value" | grep -qF '"with"' ; then echo "ok $n - a box's value goes sealed and is opened only with the runner's key"; else echo "NOT OK $n - sealed '$sealed_value' opened as '$opened'"; failed=1; fi
+grep -q 'pkeyutl -decrypt -inkey /dev/fd/3 -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256' "$admin" || { echo "NOT OK - the runner opens a box's value another way than tested here"; failed=1; }
+unset private
+# Nothing in the runner keeps an admin password
+n=$((n + 1))
+if grep -q 'keyring" set "$service"' "$admin"; then echo "NOT OK $n - the runner still keeps a password"; failed=1; else echo "ok $n - the runner keeps no admin password"; fi
+rm -f "$memory"/admin-grants/*
+# A kept admin password is hidden in what the secret runner hides, as a kept key is
+printf '%s\n' 'adminpw-5678' | "$here/keyring" set claudopus-admin here 'Claudopus admin: here'
+hidden=$(printf 'the password is adminpw-5678\n' | "$here/secret" --hide)
+n=$((n + 1))
+if [ "$hidden" = 'the password is [hidden admin password of here]' ]; then echo "ok $n - a kept admin password is hidden in what is printed"; else echo "NOT OK $n - it printed: $hidden"; failed=1; fi
+"$here/keyring" delete claudopus-admin here >/dev/null 2>&1
+
+# The release runner: a release only with the person's press, and nothing of a branch's .release run
+r=$tmp/release
+mkdir -p "$r" && git init -q --bare "$r/origin.git" && git clone -q "$r/origin.git" "$r/work" 2>/dev/null
+(cd "$r/work" && git config user.email t@t && git config user.name t && git checkout -q -b main && printf 'CHECK=true\n' >.release && echo one >file && git add -A && git commit -q -m one && git push -q origin main)
+# A branch whose .release would run code of its own as it is read, push somewhere else, run a step after and replace bash
+(cd "$r/work" && git checkout -q -b fix-it && printf 'touch %q\nREMOTE=elsewhere\nAFTER="touch %q"\nbash() { touch %q; }\nCHECK=true\n' "$r/read" "$r/after" "$r/bash" >.release && echo two >file && git commit -q -am two)
+export RELEASE_LOCKS=$tmp/locks
+# Inside Claude Code, as work runs it, a release needs the press; a person's own release from their terminal does not
+export CLAUDECODE=1
+top=$(git -C "$r/work" rev-parse --show-toplevel)
+# release_grant <id> <seal word> <branch>
+release_grant() {
+  local at s
+  at=$(now)
+  s=$(seal "$(printf '%s\n%s\n%s\nrelease\n%s\n%s' "$2" "$1" "$at" "$top" "$3")")
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({id => $ARGV[0], host => "release", command => $ARGV[1], at => $ARGV[2] + 0, seal => $ARGV[3]})' "$1" "$top
+$3" "$at" "$s" >"$memory/admin-grants/$1.json"
+}
+release() { (cd "$r/work" && "$here/release"); }
+RELEASE_REFUSED='nothing was released, because this release was not allowed on its card'
+expect 'a release with no grant: refused' 6 "$RELEASE_REFUSED" -- release
+release_grant rel1 release-grant other-branch
+expect 'a release granted for another branch: refused' 6 "$RELEASE_REFUSED" -- release
+rm -f "$memory"/admin-grants/*
+release_grant rel2 grant fix-it
+expect "a release with an admin command's seal: refused" 6 "$RELEASE_REFUSED" -- release
+rm -f "$memory"/admin-grants/*
+n=$((n + 1))
+[ "$(git -C "$r/origin.git" rev-parse main)" = "$(git -C "$r/work" rev-parse main)" ] && echo "ok $n - main was not moved with no grant" || { echo "NOT OK $n - main moved with no grant"; failed=1; }
+release_grant rel3 release-grant fix-it
+expect 'a release granted for this worktree and branch: released' 0 'released' -- release
+n=$((n + 1))
+[ "$(git -C "$r/origin.git" show main:file)" = two ] && echo "ok $n - main has the branch" || { echo "NOT OK $n - main does not have the branch"; failed=1; }
+n=$((n + 1))
+[ ! -e "$memory/admin-grants/rel3.json" ] && echo "ok $n - the release's grant was taken" || { echo "NOT OK $n - the release's grant was left"; failed=1; }
+for mark in read after bash; do
+  n=$((n + 1))
+  [ ! -e "$r/$mark" ] && echo "ok $n - the branch's .release did not run its $mark" || { echo "NOT OK $n - the branch's .release ran its $mark"; failed=1; }
+done
+(cd "$r/work" && echo three >file && git commit -q -am three)
+# Outside Claude Code with no terminal, as a run detached or over ssh: still refused
+expect 'outside Claude Code with no terminal and no grant: refused' 6 "$RELEASE_REFUSED" -- env -u CLAUDECODE bash -c 'cd "$1" && "$2" </dev/null' sh "$r/work" "$here/release"
+# F-017: a key and a grant made under a home folder of the caller's own count for nothing: the shipped runner reads the person's
+# own home, whatever HOME says, and XDG_DATA_HOME is never read
+release_grant rel4 release-grant three
+(cd "$r/work" && git checkout -q -b three 2>/dev/null; git commit -q --allow-empty -m forged)
+expect 'the shipped release, with a valid grant and key under another HOME: refused' 6 "$RELEASE_REFUSED" -- env HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" bash -c 'cd "$1" && "$2" </dev/null' sh "$r/work" "$shipped/release"
+config "{\"admin\":\"never\",\"adminSealed\":\"$(seal "$(printf 'mode\nnever')")\"}"
+expect 'the shipped admin, with a valid never-ask seal under another HOME: refused' 6 "$REFUSED" -- env HOME="$HOME" XDG_DATA_HOME="$HOME/.local/share" "$shipped/admin" here 'id -u'
+config '{}'
+rm -f "$memory"/admin-grants/*
+(cd "$r/work" && git checkout -q fix-it)
+# A person at their own terminal outside Claude Code: asked there, and a no releases nothing, a yes releases
+at_terminal() {
+  env -u CLAUDECODE python3 -c '
+import os, pty, select, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.chdir(sys.argv[1]); os.execv(sys.argv[2], [sys.argv[2]])
+out, sent = b"", False
+while True:
+    if not select.select([fd], [], [], 60)[0]: break
+    try: d = os.read(fd, 4096)
+    except OSError: break
+    if not d: break
+    out += d
+    if not sent and b"[y/N]" in out: os.write(fd, sys.argv[3].encode() + b"\n"); sent = True
+_, st = os.waitpid(pid, 0)
+sys.stdout.write(out.decode(errors="replace")); sys.exit(os.WEXITSTATUS(st) if os.WIFEXITED(st) else 1)
+' "$r/work" "$here/release" "$1"
+}
+expect "a person's own release at a terminal, answered no: refused" 6 "$RELEASE_REFUSED" -- at_terminal n
+expect "a person's own release at a terminal, answered yes: released" 0 'released' -- at_terminal y
+n=$((n + 1))
+[ "$(git -C "$r/origin.git" show main:file)" = three ] && echo "ok $n - main has the person's release" || { echo "NOT OK $n - main does not have the person's release"; failed=1; }
+unset CLAUDECODE
 expect 'forgetting a password needs no grant' 0 'No password was kept' -- "$admin" here --forget
 expect 'with no command it says how it is used' 2 'usage' -- "$admin" here
 

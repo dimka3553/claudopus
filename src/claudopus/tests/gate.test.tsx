@@ -18,7 +18,7 @@ const gated = async ($: Parameters<TestBody>[0], on: On, config: Record<string, 
   const grants = () => [...w.files.keys()].filter(path => path.startsWith(GRANTS))
   // A press on a card's gate, and the second after which the held call reads it
   const press = async (key: string) => (await pressed(list, key), w.wake())
-  return { ...w, list, bash, labels, held, grants, press }
+  return { ...w, holding: w.held, list, bash, labels, held, grants, press }
 }
 
 test('an admin command is held however the runner is reached, and nothing else is taken for one', async ($, on) => {
@@ -178,7 +178,8 @@ test('Always allow this command keeps the exact command for its Mac, sealed; Con
   }
   // An entry with no seal, or another entry's seal, as work could write into the file, allows nothing
   const forged = { here: [...(kept.here ?? []), { command: 'rm -rf /', seal: kept.here?.[0]?.seal ?? '', at: 1 }, { command: 'reboot', seal: '', at: 1 }] }
-  files.set(ALLOWED, JSON.stringify(forged))
+  // As if it got past the guards with the kept copy (a key F-007's way): the seals still allow nothing
+  ownSet(files, 'admin-allowed.json', JSON.stringify(forged))
   for (const [id, command] of [['f1', `${ADMIN} here 'rm -rf /'`], ['f2', `${ADMIN} here 'reboot'`]] as const) {
     const call = bash(id, command)
     expect(await held(id)).toBeDefined()
@@ -303,19 +304,15 @@ test('with no panel to ask on, an admin command is refused, never run unasked', 
   expect(admins).toEqual([])
 })
 
-test('Let macOS ask, keep nothing: chosen in Config it forgets every kept password, and it runs admin commands on this Mac only', async ($, on) => {
-  const { press, list, bash, held, admins, files } = await gated($, on)
-  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  expect(await config.find({ type: 'Text', text: 'Admin password' })).toBeDefined()
-  expect(await config.find({ type: 'Text', text: /a password can be read by any process running as you/ })).toBeDefined()
-  expect(((await config.find({ type: 'Select', key: 'config-admin-password-pick' } as never))?.props.options as { label: string }[]).map(one => one.label)).toEqual(["Keep it in this Mac's keychain", 'Let macOS ask, keep nothing'])
-  await config.select({ key: 'config-admin-password-pick', value: 'macos' })
+test('F-008 F-009 · no admin password is kept: Config has no setting to keep one, every one an earlier version kept is forgotten as the mod loads, and admin commands on another Mac still ask on their card', async ($, on) => {
+  const { press, bash, held, admins, files } = await gated($, on, { adminPassword: 'keep' })
   expect(await until(async () => files.get('keychain:admin-forgotten'))).toBe('yes')
-  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', adminPassword: 'macos' })
-  // Another Mac has no screen here for macOS to ask on
-  expect((await bash('b1', `${ADMIN} m4 'id -u'`)).deny).toContain('works only on this Mac')
-  // On this Mac the card still asks first
-  const call = bash('b2', `${ADMIN} here 'id -u'`)
+  expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').adminPassword === undefined ? true : undefined))).toBe(true)
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  expect(await config.find({ type: 'Text', text: 'Admin password' })).toBeUndefined()
+  expect(await config.find({ type: 'Text', text: /each one also asks for the admin password, which is never kept/ })).toBeDefined()
+  // Another Mac's admin command is held on its card as this Mac's is: its password is asked when it runs
+  const call = bash('b2', `${ADMIN} m4 'id -u'`)
   expect(await held('b2')).toBeDefined()
   await press('gate-b2-0-once')
   expect((await call).result).toBe('ran')

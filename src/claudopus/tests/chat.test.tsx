@@ -194,7 +194,7 @@ test('work never writes into the boxes folder or reads the boxes\' keychain serv
   await runs(`${bin}/secret API_KEY here 'curl -H "Authorization: Bearer $API_KEY" https://api.example.com'`)
   // The admin runner past its own gate, here set never to ask as Config seals it (gate.test.tsx holds the asking)
   files.set('keychain:gate', 'kept-key')
-  files.set(`${MEMORY}/config.json`, JSON.stringify({ admin: 'never', adminSealed: fakeSeal('kept-key', 'mode\nnever') }))
+  ownSet(files, 'config.json', JSON.stringify({ admin: 'never', adminSealed: fakeSeal('kept-key', 'mode\nnever') }))
   await runs(`${bin}/admin here 'whoami'`)
   await runs(`bash ${bin}/secret API_KEY here 'true'`)
   await runs('cat src/claudopus/boxes.tsx && rg -n boxes src/claudopus')

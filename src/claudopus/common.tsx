@@ -164,8 +164,12 @@ let person = ''
 let models: Models = modelsOf({})
 // The settings read again: at a session's start, and after a change in the Config tab
 const loadSettings = async ($: EngineInterface) => {
+  // A change to the person's settings or texts made while no chat watched is put back before anything reads them
+  if (dir) await personCheck($).catch(err => log($, `files not compared as the mod loads: ${String(err)}`))
   const config = await readConfig($, dir)
   isOff = config.agents === false
+  // Admin passwords an earlier version kept leave the keychain as the mod loads: none is kept any more
+  void forgetKeptPasswords($).catch(() => undefined)
   person = typeof config.name === 'string' ? config.name.trim() : ''
   models = modelsOf(config)
   macs = (Array.isArray((config as { macs?: unknown }).macs) ? ((config as { macs: unknown[] }).macs) : []).filter(isMac).slice(0, 4)
@@ -228,6 +232,8 @@ const rightModel = (id: string): string | undefined => {
   const isOlder = major > 99 || major < topMajor || (major === topMajor && minor < topMinor)
   return isOlder ? INSTEAD[family] : undefined
 }
+// The model each agent started on, as the engine resolved it: a step on Haiku of one that started there is its own kind's, not the app's move
+const startedOn = new Map<string, string>()
 // The work and helpers whose steps the app sent to such a model, each said in the log once
 const sentElsewhere = new Set<string>()
 // What an Agent call is answered when it names such a model
@@ -314,14 +320,17 @@ const band = (ui: Ui, key: string, name: string, side: string, body: JSX.Element
 // Linux desktop session the person sees (DISPLAY or WAYLAND_DISPLAY): without one, as in a terminal over SSH, nothing opens a window
 let isLinux = false
 let hasDesktop = true
-// Where bin/keyring keeps its files on Linux, as it finds it: $XDG_DATA_HOME, when it is a full path, else ~/.local/share
+// Where bin/keyring keeps its files on Linux, ~/.local/share/claudopus/keyring (never under $XDG_DATA_HOME, which a caller sets),
+// and where earlier versions kept them when XDG_DATA_HOME was set, guarded the same (the mod moves them home as it loads)
 let keyringRoot = ''
+let keyringOldRoot = ''
 const knowSystem = async ($: EngineInterface) => {
   const r = await $.process.run(['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined)
   isLinux = r?.exitCode === 0 && r.stdout.trim() === 'Linux'
   hasDesktop = !isLinux || Boolean((await $.env.get('DISPLAY')) || (await $.env.get('WAYLAND_DISPLAY')))
   const data = (await $.env.get('XDG_DATA_HOME')) ?? ''
-  keyringRoot = `${data.startsWith('/') ? data : `${(await $.env.get('HOME')) ?? ''}/.local/share`}/claudopus/keyring`
+  keyringRoot = `${(await $.env.get('HOME')) ?? ''}/.local/share/claudopus/keyring`
+  keyringOldRoot = data.startsWith('/') ? `${data}/claudopus/keyring` : ''
 }
 // How this computer is named in what the person reads
 const thisMac = () => (isLinux ? 'this machine' : 'this Mac')

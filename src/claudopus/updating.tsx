@@ -1,15 +1,15 @@
-// Claudopus keeps itself up to date: every hour one chat reads the version page on claudopus.ai, and when it names a version other than the one installed runs Claude Code's own update steps for it, or, for a copy run from a folder of its code, brings that folder up to date (the pure parts are in hooks/update.ts)
+// Updates as the person asks for them: every hour one chat only reads the version page on claudopus.ai, and the panel says when it names a newer version, with Install. Install, like Config's Check for updates, runs Claude Code's own update steps for it, or, for a copy run from a folder of its code, brings that folder up to date (the pure parts are in hooks/update.ts)
 
 // ---- Keeping itself up to date (the pure parts are in ./update) ----
 
-// Every hour one chat on this Mac reads the version page and, when it differs from the installed version, runs Claude Code's own two
-// update steps for the mod, under a lock the other chats see, and
-// keeps what it learnt in update.json; a copy run from a folder of its code brings that folder up to date with git instead
+// A look and an install run one at a time, under a lock the other chats see; what an install learnt is kept in update.json, what
+// the hourly look saw on the page in update-seen.json
 let isUpdating = false
 // The lock is one file made only where none is (the shell's noclobber), holding when it was taken and by whom; a lock left by a
 // chat that closed mid-look is moved aside by exactly one chat once it is old (by what it says, else by when it was written).
 // Taken, the act runs and only this chat's own lock is removed after it; held by another chat, nothing runs and 'busy' comes back
 const UPDATE_BUSY = 'busy' as const
+const LOCK_SKEW = 60_000
 const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): Promise<T | typeof UPDATE_BUSY> => {
   const lock = `${dir}/update.lock`
   const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
@@ -18,7 +18,8 @@ const underUpdateLock = async <T,>($: EngineInterface, act: () => Promise<T>): P
   if (!(await take())) {
     const now = await $.clock.now()
     const at = Number((await readOr($, lock)).split(' ')[0]) || (await $.fs.stat(lock).catch(() => undefined))?.mtimeMs || now
-    if (now - at < UPDATE_LOOK) return UPDATE_BUSY
+    // A lock dated ahead of this Mac's clock, past what two chats' clocks can differ by, was never taken by a chat here: it is stale
+    if (now - at < UPDATE_LOOK && at - now <= LOCK_SKEW) return UPDATE_BUSY
     const aside = `${lock}.${token.split(' ')[1]}`
     if ((await $.process.run(['mv', lock, aside]).catch(() => ({ exitCode: 1 }))).exitCode !== 0) return UPDATE_BUSY
     await $.process.run(['rm', '-f', aside]).catch(() => undefined)
@@ -65,37 +66,49 @@ const lookAt = async ($: EngineInterface, from: ReturnType<typeof installedFrom>
   return lookOnce(lookIo($), { from, root: $.plugin.root, cwd, engine, stampPath })
 }
 
-// Every hour one chat on this Mac reads the version page and, when it differs from the installed version, runs Claude Code's own two
-// update steps for the mod, under a lock the other chats see, and
-// keeps what it learnt in update.json; a copy run from a folder of its code brings that folder up to date with git instead
-const selfUpdate = async ($: EngineInterface) => {
-  const from = installedFrom($.plugin.root)
+// Claudopus never installs an update by itself: Claude Code leaves automatic updates off for a marketplace other than Anthropic's
+// own, and what an update installs carries no signature the mod could check. Every hour one chat only reads the version page (one
+// small fetch: nothing is downloaded or run), and when it names a newer version the panel says so, with Install. A new version
+// comes only from a press: Install, or Config's Check for updates (Claude Code's own update steps, as /plugin update runs them)
+const lookedPath = () => `${dir}/update-seen.json`
+const lookForNew = async ($: EngineInterface) => {
   if (isUpdating || !dir) return
-  // Automatic updates turned off in Config leave the installed version alone
+  // The hourly look turned off in Config reads nothing
   if ((await readConfig($, dir)).updates === false) return
-  const stampPath = stampFor(from)
-  if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now())) return
+  if (!isUpdateDue(stampOf(await readOr($, lookedPath())), await $.clock.now())) return
   isUpdating = true
   try {
     await underUpdateLock($, async () => {
-      // Another chat may have looked between this chat's reading and its lock, and the person may have turned automatic updates
-      // off while this chat waited for it
-      if (!isUpdateDue(stampOf(await readOr($, stampPath)), await $.clock.now()) || (await readConfig($, dir)).updates === false) return
-      await lookAt($, from)
+      // Another chat may have looked between this chat's reading and its lock, or the person turned the look off meanwhile
+      const before = stampOf(await readOr($, lookedPath()))
+      const now = await $.clock.now()
+      if (!isUpdateDue(before, now) || (await readConfig($, dir)).updates === false) return
+      const page = await lookIo($).page()
+      const version = page.ok ? versionOnPage(page.text) : undefined
+      await $.fs.write(lookedPath(), JSON.stringify({ at: now, version: version ?? before?.version ?? '', result: version ? 'seen' : `version page not read: ${page.status || page.text.slice(0, 120)}` }))
+      if (version) redraw($)
     })
   } finally {
     isUpdating = false
   }
 }
+// The newer version the hourly look saw, while neither this chat nor the Mac has it yet, and the look is on
+const newOut = async ($: EngineInterface, loaded: string, installed: string) => {
+  if (!dir || !loaded) return ''
+  const said = stampOf(await readOr($, lookedPath()))?.version ?? ''
+  // Only a version number is ever shown: anything else in the file is no version
+  const seen = /^\d{1,4}(?:\.\d{1,6}){1,3}$/.test(said) ? said : ''
+  if (!seen || !isNewer(seen, loaded) || (installed && !isNewer(seen, installed)) || installPress.done === seen) return ''
+  return (await readConfig($, dir)).updates === false ? '' : seen
+}
 
-// Config's Check for updates: the same look, now, whatever the switch and the hour say. A look already under way here, or another
-// chat's, is waited for (CHECK_STEP at a time, up to UPDATE_LOOK, after which a stale lock is taken over), then this one runs, so
-// two looks never run at once; it is cheap when the other one already downloaded the newest version
+// One look now, under the lock: a look already under way here, or another chat's, is waited for (CHECK_STEP at a time, up to
+// UPDATE_LOOK, after which a stale lock is taken over), then this one runs, so two never run at once; it is cheap when the other one
+// already downloaded the newest version. A Look, or why there was none
 const CHECK_STEP = 3000
-const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
-  const loaded = (await versionsOf($)).version
+const lookNow = async ($: EngineInterface, by: string): Promise<Look | string> => {
   const from = installedFrom($.plugin.root)
-  if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
+  if (!dir) return "Couldn't check: Claudopus has no memory folder in this chat."
   const until = (await $.clock.now()) + UPDATE_LOOK + CHECK_STEP
   for (;;) {
     if (!isUpdating) {
@@ -103,16 +116,77 @@ const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isEr
       try {
         const look = await underUpdateLock($, () => lookAt($, from))
         if (look !== UPDATE_BUSY) {
-          await log($, `Claudopus checked for updates from Config: ${look.kind}${'version' in look && look.version ? ` ${look.version}` : ''}`)
-          return checkSaid(look, loaded, isRunFromAfar || isReloadRefused, !from)
+          await log($, `Claudopus checked for updates from ${by}: ${look.kind}${'version' in look && look.version ? ` ${look.version}` : ''}`)
+          return look
         }
       } finally {
         isUpdating = false
       }
     }
-    if ((await $.clock.now()) > until) return { text: "Couldn't check: another chat's check did not finish. Try again later.", isError: true }
+    if ((await $.clock.now()) > until) return "Couldn't check: another chat's check did not finish. Try again later."
     await new Promise<void>(done => void $.clock.after(CHECK_STEP, done))
   }
+}
+// Config's Check for updates: the look, now, whatever the hour says; a chat switches to what it got when /reload-plugins is typed
+const checkForUpdates = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
+  const loaded = (await versionsOf($)).version
+  const look = await lookNow($, 'Config')
+  return typeof look === 'string' ? { text: look, isError: true } : checkSaid(look, loaded, true, !installedFrom($.plugin.root))
+}
+// The panel's Install, pressed for the version it showed: the same look as Check for updates, then this chat alone reloads to what it
+// got, with Claude Code's own /reload-plugins. Other open chats keep theirs, and their header says to type /reload-plugins. A chat run
+// from another Mac is never sent one (the engine refuses it there), nor one whose reload the engine refused: it says to type it
+const installPress = { version: '', isBusy: false, said: '', isError: false, done: '' }
+let isReloadRefused = false
+const installNew = async ($: EngineInterface, version: string) => {
+  if (installPress.isBusy) return
+  Object.assign(installPress, { version, isBusy: true, said: '', isError: false })
+  redraw($)
+  const loaded = (await versionsOf($)).version
+  const from = installedFrom($.plugin.root)
+  try {
+    const look = await lookNow($, 'the panel\'s Install')
+    if (typeof look === 'string' || look.kind === 'failed' || !loaded || !isNewer(look.version, loaded)) {
+      const said = typeof look === 'string' ? { text: look, isError: true } : checkSaid(look, loaded, true, !from)
+      return void Object.assign(installPress, { said: said.text, isError: said.isError })
+    }
+    installPress.done = version
+    if (isRunFromAfar || isReloadRefused) return void Object.assign(installPress, { said: checkSaid(look, loaded, true, !from).text })
+    // The mark lets the next load know what it moved from, so the header shows the moment
+    await $.fs.write(`${dir}/reloads/${await $.session.id()}.json`, JSON.stringify({ version: look.version, from: loaded, at: await $.clock.now() }))
+    await log($, `Claudopus ${look.version} installed from the panel's Install, and this chat runs ${loaded}: reloading it`)
+    const said = await $.command.run({ command: 'reload-plugins' })
+    if (/isn't available/i.test(String((said as { text?: unknown } | undefined)?.text ?? ''))) {
+      isReloadRefused = true
+      Object.assign(installPress, { said: checkSaid(look, loaded, true, !from).text })
+      await log($, `Claudopus not reloaded to ${look.version}: the engine refused it; the panel says to type /reload-plugins`)
+    }
+  } catch (err) {
+    Object.assign(installPress, { said: `Couldn't install: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true })
+  } finally {
+    installPress.isBusy = false
+    redraw($)
+  }
+}
+// The panel's card for a newer version out: what it is and Install; while it installs, that; after, what came of it
+const newOutCard = ($: EngineInterface, ui: Ui, version: string) => {
+  // After a press, what came of it stays once the card's version is installed
+  const shown = !version || installPress.version === version ? installPress : undefined
+  if (!version && !shown?.said) return null
+  return (
+    <ui.Box key="update-out" flexDirection="column" flexShrink={0}>
+      {version ? <ui.Text key="update-out-title" bold wrap="wrap">{`Claudopus ${version} is out`}</ui.Text> : null}
+      {version ? <ui.Text key="update-out-what" dimColor wrap="wrap">Nothing is downloaded until you press Install, which gets it through Claude Code's own update steps and reloads this chat.</ui.Text> : null}
+      {shown?.isBusy ? (
+        <ui.Text key="update-out-busy" dimColor>Installing…</ui.Text>
+      ) : version ? (
+        <ui.Box key="update-out-buttons" flexDirection="row">
+          <ui.Button key={`update-install-${presses}`} label="Install" onPress={() => void ((presses += 1), installNew($, version))} />
+        </ui.Box>
+      ) : null}
+      {shown?.said ? <ui.Text key="update-out-said" color={shown.isError ? 'error' : undefined} wrap="wrap">{shown.said}</ui.Text> : null}
+    </ui.Box>
+  )
 }
 
 // ---- Moving an open chat to the version installed ----
@@ -135,15 +209,6 @@ const installedCopy = async ($: EngineInterface) => {
   return copyOf(installed, id, $.plugin.root, cwd)
 }
 
-// A chat whose copy is older than the one installed loads the new one itself, with Claude Code's own /reload-plugins: the run waits
-// until the chat is idle (no turn of its own running), and background work carries on through it. The reload starts this code
-// afresh; each ask is kept in reloads/<chat>.json, so a reload that brought back the old copy, or was refused, is not asked again
-// for the same version for RELOAD_AGAIN, and a chat never reloads over and over
-let reloadAsked = ''
-// In a chat the app runs on another Mac over ssh, the engine refuses a /reload-plugins it was not typed in ("isn't available over a
-// remote connection in this session"): every one the mod ran there was refused, every one typed was not. There it is not sent, since
-// each refusal is a line in the chat, and the header says to type it
-let isReloadRefused = false
 // A /reload-plugins run from afar loads the new copy but leaves the old one's timers running in the same chat, and copies before
 // 0.2.56 send it whatever the connection, each a refused line. They all wait while reloads/<chat>.json names the installed version from under RELOAD_AGAIN ago, so
 // in a chat run from afar this copy keeps that mark naming it, looked at every HOLD_EVERY, which is far below their RELOAD_EVERY.
@@ -169,40 +234,6 @@ const holdOldCopies = async ($: EngineInterface) => {
   if (before?.version === copy.version && now >= at && now - at < RELOAD_AGAIN / 2) return
   await $.fs.write(mark, JSON.stringify({ version: copy.version, from: loaded, at: now }))
 }
-const reloadToInstalled = async ($: EngineInterface) => {
-  if (!dir || reloadAsked || isRunFromAfar) return
-  const loaded = (await versionsOf($)).version
-  const copy = await installedCopy($)
-  if (!loaded || !copy?.version || !isNewer(copy.version, loaded)) return
-  const manifest = copy.installPath ? await readOr($, `${copy.installPath}/.claude-plugin/plugin.json`) : ''
-  const mark = `${dir}/reloads/${await $.session.id()}.json`
-  const before = await readOr($, mark).then(text => {
-    try {
-      return JSON.parse(text) as { version?: string; at?: number }
-    } catch {
-      return undefined
-    }
-  })
-  const now = await $.clock.now()
-  if (!isReloadDue(loaded, copy, manifest, before, now)) return
-  reloadAsked = copy.version
-  try {
-    await $.fs.write(mark, JSON.stringify({ version: copy.version, from: loaded, at: now }))
-    await log($, `Claudopus ${copy.version} is installed and this chat runs ${loaded}: reloading it`)
-    const said = await $.command.run({ command: 'reload-plugins' })
-    if (/isn't available/i.test(String((said as { text?: unknown } | undefined)?.text ?? ''))) {
-      isReloadRefused = true
-      $.ui.invalidate('ui.render')
-      await log($, `Claudopus not reloaded to ${copy.version}: the engine refused it over the remote connection; the header says to type /reload-plugins`)
-    }
-  } catch (err) {
-    await log($, `Claudopus not reloaded to ${copy.version}: ${String(err)}`)
-  } finally {
-    // Settled without this code being replaced (refused, or the old copy came back): the mark decides when to ask again
-    reloadAsked = ''
-  }
-}
-
 // ---- The moment a chat moves to a newer version ----
 
 // The version this chat loaded last, kept through a reload of this code, so the load after it knows what it moved from
