@@ -1,5 +1,0 @@
-- While you type into an ask's reply box or a key box, the panel and Details hold still: other cards' lines, times and output wait until you stop, so the box no longer flickers, drops letters or throws the panel to its bottom; a card that starts, finishes or asks, and an admin command waiting, still show at once.
-- With nobody typing, the panel is drawn again at once for anything new, but for running times and command output only every ten seconds, so a button under the pointer keeps its hover and takes the first click.
-- A reply box is empty after you send from it, and stays empty when it comes back.
-- What you typed into an ask's reply box stays in it through a reload of Claudopus, and does not turn up in the work's next ask.
-- A key box is drawn without the letters typed in it, so a redraw can never put older letters over newer ones.

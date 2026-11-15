@@ -2,6 +2,52 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.126 · 15 November 2026
+- A newer Claudopus is now a small grey box in the panel's header, not a big notice: the version, how many versions it covers since yours, and in a line what is new.
+- Updating is three steps, each your press, the box showing where it stands: Download (with its size and progress as it comes), Install (saying what it replaces), and Reload (saying whether this chat or every chat needs it). Not now keeps it quiet for a day, Skip this version until a newer one.
+- A download is checked against the fingerprint the release published before it can be installed, and checked again at Install; one that does not match is thrown away, and an installed copy that does not match has Claude Code's record put back. A failed step says what failed and that what your chat runs is unchanged.
+- A chat run from a folder of the code says so, and its steps fetch into that folder and move it forward, a fast-forward only; a worktree or another branch is told a release never reaches it and is offered no download.
+- Config's Updates: look every hour, every 6 hours, once a day, once a week or only when you ask; Check now only looks; it says which version this chat runs and where it loads from.
+- After a chat moves to a newer version, one quiet line says so with What's new, in place of the screen that covered the whole panel.
+
+## 0.2.125 · 15 November 2026
+- The battery card now shows what the whole Mac draws, what the processors and the graphics processor each draw, and Claude's part of each; Claude's graphics power is marked as estimated, and the card says what "Claude" covers and that the screen, memory and storage count only in the whole.
+- Claude's watts, disk and network now count work a chat left running after its command ended, and processes that started between two readings, which were missed before.
+- The graphics card says busy is time at work at any speed, shows what the graphics processor draws, and lists who uses it most, with macOS drawing the screen named as such.
+
+## 0.2.124 · 15 November 2026
+- After you answer an ask on its card (a button such as Release it or Done, or a reply from its box), the card stays where it was at the top for a minute, saying what you answered, instead of jumping away under your pointer.
+- A piece of work started again by your answer, such as Release it on work that had ended, keeps its place among the cards instead of moving to the very bottom of the panel.
+
+## 0.2.123 · 15 November 2026
+- A Stop you press on a card, or on a helper under it, now holds: the chat is told you stopped it, and it cannot start that work again, message it or start the same work afresh until you send a new message asking for it.
+- Nothing of Claudopus's own wakes stopped work: answers that were on their way to it are dropped, and it is not carried on after a cut-off.
+- The helpers and background commands of stopped work stop with it; anything it started detached is named to the chat as left running.
+- A card you stopped says "Stopped by you", keeps what it had done, and has Start again in its details.
+
+## 0.2.122 · 15 November 2026
+- In the desktop app, resting the pointer on a figure above the prompt now really shows its card, one at a time, gone as the pointer leaves: who uses the most memory and processor, the battery in words, network download and upload
+- The cards show Claude's own part of the graphics processor, the disk and the network, and the strain on the battery: what the Mac draws and what Claude's processors draw, in watts
+- The bar above the prompt redraws only when new figures come, not every second
+
+## 0.2.121 · 15 November 2026
+- Claudopus now remembers which keys, tokens and logins you have given, by name and where each is kept, never a value: Claudopus's keychain, keys you saved by hand in this Mac's keychain, SBOS, and the .env files in your subjects' folders. A Keys button beside Memory shows the list, and work reads it before asking.
+- The list is made again from each store's own list of names whenever you open it, a key is given or forgotten, or work asks for one, so a key taken out of a store stops being listed.
+- Work that asks for a key the list already has is stopped and told where it is and how to use it.
+
+## 0.2.120 · 15 November 2026
+- Under a card, only runs that are really running are listed: a watch the engine killed or timed out, and a wait or command that ended, leave the list at once, so no clock counts on for something that stopped.
+- The closing row counts the runs that ended beside the helpers, such as "3 runs ended · 3 timed out", and Details lists each with how it ended in plain words: finished, failed with its exit code, killed, timed out or stopped by the work.
+- A run past the time the work said it would take no longer shows that old figure as if it held: it shows a fresh expectation from the time left the run prints (or its percent), or else says plainly that it is past its expected time.
+- Work is told to give a new expected time when its own estimate turns out wrong, and to stop its waits and watches once it no longer needs them.
+
+## 0.2.119 · 15 November 2026
+- While you type into an ask's reply box or a key box, the panel and Details hold still: other cards' lines, times and output wait until you stop, so the box no longer flickers, drops letters or throws the panel to its bottom; a card that starts, finishes or asks, and an admin command waiting, still show at once.
+- With nobody typing, the panel is drawn again at once for anything new, but for running times and command output only every ten seconds, so a button under the pointer keeps its hover and takes the first click.
+- A reply box is empty after you send from it, and stays empty when it comes back.
+- What you typed into an ask's reply box stays in it through a reload of Claudopus, and does not turn up in the work's next ask.
+- A key box is drawn without the letters typed in it, so a redraw can never put older letters over newer ones.
+
 ## 0.2.118 · 15 November 2026
 - The battery above the prompt no longer shows a time to full beside 100%: while macOS calls it 100% and still tops it up, it says "finishing", and a battery macOS calls empty shows no time left beside 0%.
 

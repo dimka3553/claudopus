@@ -79,6 +79,8 @@ export type Todo = {
   // `isUndone`: a file of theirs a command changed, put back as it was (`isOutside`: found changed between commands, by an editor or a program left running); Allow makes the change again
   admins?: { id: string; host: string; command: string; at: number; from?: string; isWork?: boolean; kind?: 'release' | 'file'; isUndone?: boolean; isOutside?: boolean; call?: string; folder?: string; branch?: string }[]
   startedAt: number
+  // When it first began, kept when it is started again (whose startedAt moves on so its time runs on): the cards keep their places by it
+  begunAt?: number
   // 0 while it works
   endedAt: number
   // When its turn last ended with its answer, finished, while its own background work still held it; absent once it steps again.
@@ -95,7 +97,11 @@ export type Todo = {
   leftSince?: number
   // What it started in the background itself that wakes it when it ends (a command, a watch): the engine's task id, what it is
   // in its own words, and since when, with the command itself. Dropped as it ends or is stopped
-  bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string }[]
+  bg?: { id: string; what: string; at: number; isWatch?: boolean; cmd?: string; expiresAt?: number }[]
+  // What it ran in the background or detached that has ended, newest last: its words, when it began and ended, and how it ended
+  // (finished, failed with its exit code, killed, timed out at the engine's limit, stopped by the work, or ended as far as the mod
+  // can tell). Its card sums these up in a row, and Details lists them
+  endedRuns?: { id: string; what: string; at: number; endedAt: number; how: 'finished' | 'failed' | 'killed' | 'timed out' | 'stopped' | 'ended'; code?: string }[]
   // In another chat's file only: how each of its jobs stands as that chat last read it (its latest line, how far, its last lines),
   // by the job's id, so its Details shows them as that chat's own does
   seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[] }>
@@ -115,6 +121,9 @@ export type Todo = {
   quietTold?: number
   // A helper whose work was told it works through in order what could be split
   serialTold?: boolean
+  // Stopped by the person's own press on Stop, on its card or a helper's: when. Until `isLifted`, set by their next message, the chat
+  // or the work above it may not start it again, message it or start the same work afresh, and nothing of the mod's wakes it
+  byYou?: { at: number; isLifted?: boolean }
   // Only work that is working has a card; one that has ended is kept, so a message to it brings its card back as it was
   status: 'working' | 'done' | 'stopped' | 'failed'
   // Set on a card another chat shares: that chat, the Mac it runs on when another (empty for this one), and the card's own id there.
@@ -264,6 +273,6 @@ export type Flow = {
 
 declare module 'claude-code' {
   interface PluginState {
-    claudopus: { me: Shaped<Me>; todos: Shaped<Todo[]>; view: Shaped<View>; servers: Shaped<Server[]>; tick: Shaped<number>; drawn: Shaped<number>; shown: Shaped<boolean>; reports: Shaped<Report[]>; flows: Shaped<Flow[]>; others: Shaped<Shared[]>; ran: Shaped<string>; drafts: Shaped<Record<string, string>>; load: string }
+    claudopus: { me: Shaped<Me>; todos: Shaped<Todo[]>; view: Shaped<View>; servers: Shaped<Server[]>; tick: Shaped<number>; figures: Shaped<number>; drawn: Shaped<number>; shown: Shaped<boolean>; reports: Shaped<Report[]>; flows: Shaped<Flow[]>; others: Shaped<Shared[]>; ran: Shaped<string>; drafts: Shaped<Record<string, string>>; load: string }
   }
 }

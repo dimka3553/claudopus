@@ -99,6 +99,9 @@ const view = atom({ plugin: 'claudopus', key: 'view' } as const, { openId: '' },
 const servers = atom({ plugin: 'claudopus', key: 'servers' } as const, [], { shape: 'servers-2' })
 // Counts the passes that bring the screen up to date: each one redraws what reads it
 const tick = atom({ plugin: 'claudopus', key: 'tick' } as const, 0, { shape: 'tick-1' })
+// When the figures above the prompt last changed: the band redraws on that alone, never each second, since each redraw of it closes
+// and opens again a hover card the pointer rests on, and can leave one open after the pointer has gone on to the next figure
+const figuresAt = atom({ plugin: 'claudopus', key: 'figures' } as const, 0, { shape: 'figures-1' })
 // Whether the panel was open when last looked: a reload of the mod closes it, and it comes back by itself if it was
 // When the panel was last drawn, kept through a reload (drawnNow, written by the timer each second, never read while drawing)
 const lastDrawn = atom({ plugin: 'claudopus', key: 'drawn' } as const, 0, { shape: 'drawn-1' })

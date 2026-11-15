@@ -31,8 +31,12 @@ const SHIPPED_PRINCIPLES: string = '<shipped: rules/CLAUDE.md>'
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
+// A release on GitHub as the test world gives it: its version, commit and the tree it published; `got` a different tree that came
+// down instead, `manifest` a different version in it, `online` a newer commit online, and a fetch that fails, a folder with commits of its
+// own, or uncommitted changes the move would overwrite
+type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string; startedOn?: Record<string, string> } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -107,6 +111,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
     if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: options.shipped ? SHIPPED_PRINCIPLES : PRINCIPLES }
     if (isShipped && options.changelog !== undefined && e.path.endsWith('/CHANGELOG.md')) return { value: options.changelog }
+    // A release on GitHub, where the test gives one: the mod's folder is a main checkout, whose version a reload loads
+    if (options.release && e.path.endsWith('/.git/HEAD')) return { value: 'ref: refs/heads/main\n' }
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: files.get('manifest') ?? '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
@@ -242,6 +248,46 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return { value: { exitCode: 0, stdout: rest.includes('--targets') ? options.tailscale : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (tool === 'kill') killed.push(String(rest[0]))
+    // A release on GitHub, where the test gives one: the mod's folder is Claudopus's main checkout on main, a fetch of the release's
+    // tag lays its commit under the download ref (and git's progress where the step reads it), and the folder's tree in that commit
+    // is the one the release published unless the test says what came down instead
+    const release = options.release
+    if (release && tool === 'sh' && rest[1] === '"$@" 2>"$0"') {
+      const argv = rest.slice(3).map(String)
+      gitRan.push(argv.slice(argv.indexOf('-C') + 2).join(' '))
+      if (release.fetchFails) return (files.set(String(rest[2]), 'fatal: unable to access GitHub: Could not resolve host'), ok('', 128))
+      files.set(String(rest[2]), 'Receiving objects:  50% (10/20), 1.00 MiB | 2.00 MiB/s\rReceiving objects: 100% (20/20), 2.00 MiB | 2.00 MiB/s, done.\nResolving deltas: 100% (5/5), done.\n')
+      files.set('git:ref', release.commit)
+      return ok()
+    }
+    if (release && tool === 'git' && rest.includes('--show-toplevel')) return ok('/plugins-src\n')
+    if (release && tool === 'sh' && String(rest[1]).includes('write-tree')) return ok(`${files.get('tree:installed') ?? release.tree}\n`)
+    if (release && tool === 'env' && rest.includes('git')) {
+      const args = rest.slice(rest.indexOf('-C') + 2).map(String)
+      gitRan.push(args.join(' '))
+      const at = (arg?: string) => (arg ?? '').replace(/\^\{commit\}$/, '')
+      if (args[0] === 'rev-parse' && args.includes('--show-toplevel')) return ok('/plugins-src\n')
+      if (args[0] === 'ls-files') return ok('mods/claudopus/.claude-plugin/plugin.json\n')
+      if (args[0] === 'rev-parse' && args.includes('--git-dir')) return ok(release.worktree ? '/plugins-src/.git/worktrees/fix\n/plugins-src/.git\n' : '/plugins-src/.git\n/plugins-src/.git\n')
+      if (args[0] === 'symbolic-ref') return ok(release.worktree ? 'fix-bar\n' : 'main\n')
+      if (args.includes('--symbolic-full-name')) return ok('origin/main\n')
+      if (args[0] === 'rev-parse' && args.includes('--verify')) {
+        const what = args.at(-1) ?? ''
+        if (what.startsWith('refs/claudopus/update')) return files.has('git:ref') ? ok(`${files.get('git:ref')}\n`) : ok('', 1)
+        if (what.includes(':')) return what.startsWith(`${release.commit}:`) && files.has('git:ref') ? ok(`${release.got ?? release.tree}\n`) : ok('', 1)
+        return ok(`${at(what)}\n`)
+      }
+      if (args[0] === 'show') return ok(JSON.stringify({ name: 'claudopus', version: release.manifest ?? release.version }))
+      if (args[0] === 'update-ref' && args[1] === '-d') return (files.delete('git:ref'), ok())
+      if (args[0] === 'merge-base') return ok('', release.ownCommits ? 1 : 0)
+      if (args[0] === 'merge') {
+        if (release.overwrite) return { value: { exitCode: 1, stdout: '', stderr: 'error: Your local changes to the following files would be overwritten by merge', isStdoutTruncated: false, isStderrTruncated: false } }
+        files.set('manifest', JSON.stringify({ name: 'claudopus', version: release.version }))
+        return ok()
+      }
+      if (args[0] === 'ls-remote') return ok(`${release.online ?? release.commit}\tHEAD\n`)
+      return ok()
+    }
     // git in the mod's folder: no checkout unless the test lays git:online, the version its branch online has; then the folder is on
     // main following origin/main, behind it, and a fast-forward (refused with what git:merge says, where laid) moves the manifest there
     if (tool === 'env' && rest.includes('git')) {
@@ -326,6 +372,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (rest[0] === 'set') return (files.set(key, String(e.init?.stdin ?? '').replace(/\n$/, '')), ok())
       if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
       if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))
+      // Every service and account a value is kept under, never a value: the keys laid as secret:<name> and keychain-entry:<service>\t<account>
+      // (a keychain that does not answer, where the test lays keyring:refused, fails it)
+      if (rest[0] === 'entries' && files.has('keyring:refused')) return ok('', 1)
+      if (rest[0] === 'entries') return ok([...files.keys()].flatMap(one => (one.startsWith('secret:') && one !== 'secret:refused' ? [`claudopus-secret\t${one.slice(7)}\n`] : one.startsWith('keychain-entry:') ? [`${one.slice(15)}\n`] : [])).join(''))
       return ok('', 2)
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
@@ -336,9 +386,15 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
     if (tool?.endsWith('bin/secret')) {
-      const said = rest[0] === '--list' ? (kept ? 'API_KEY\n' : '') : kept ? String(e.init?.stdin ?? '').replaceAll(kept, '[hidden API_KEY]') : String(e.init?.stdin ?? '')
+      // and the keys a test lays as secret:<name>, each listed by its name and hidden in what passes through
+      const more = [...files].filter(([key]) => key.startsWith('secret:')).map(([key, value]) => [key.slice(7), value] as const)
+      if (rest[0] === '--hide' && files.has('secret:refused')) return ok('', 1)
+      const hidden = more.reduce((text, [name, value]) => text.replaceAll(value, `[hidden ${name}]`), kept ? String(e.init?.stdin ?? '').replaceAll(kept, '[hidden API_KEY]') : String(e.init?.stdin ?? ''))
+      const said = rest[0] === '--list' ? `${kept ? 'API_KEY\n' : ''}${more.map(([name]) => `${name}\n`).join('')}` : hidden
       return { value: { exitCode: 0, stdout: said, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
+    if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
     const stdout = tool?.endsWith('jq')
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
@@ -419,7 +475,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
     if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
-    if (e.tool === 'Monitor') return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: 0, persistent: true } } as never
+    // SBOS's list of names, as the test lays it
+    if (e.tool === 'mcp__sbos__secrets') return { result: { content: [{ type: 'text', text: files.get('sbos:secrets') ?? '[]' }] } } as never
+    if (e.tool === 'Monitor') {
+      // as the engine answers: a watch not kept for good ends at its time limit, at most 30 minutes
+      const w = e as { timeout_ms?: number; persistent?: boolean | string }
+      const forGood = w.persistent === undefined || w.persistent === true || w.persistent === 'true'
+      return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: forGood ? 0 : Math.min(w.timeout_ms ?? 300_000, 1_800_000), persistent: forGood } } as never
+    }
     if (e.tool === 'Workflow') return { result: { status: 'async_launched', taskId: 'wt1', runId: 'wf_1', taskType: 'local_workflow', workflowName: 'rounds', transcriptDir: '/t/wf_1', scriptPath: '/t/wf_1.js' } } as never
     return { result: 'ran' } as never
   })

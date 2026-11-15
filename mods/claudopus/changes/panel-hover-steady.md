@@ -2,3 +2,4 @@
 - Now the panel is drawn again only when something it shows has changed. Running times and command output move every ten seconds, and not at all while you're using the panel (for fifteen seconds after you scroll it, click in it or type in it). A new ask, an admin command, work starting or finishing, and anything you press still show at once.
 - With nothing running, the panel isn't drawn again at all, so buttons like "Back to the panel" on the update screen keep working on the first click.
 - Other chats' work no longer redraws your panel each time those chats report in. Only what you'd see changing does.
+- While an update downloads, its figures move every two seconds at most, and not while you're using the panel, so its other buttons stay pressable.

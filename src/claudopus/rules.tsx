@@ -164,7 +164,7 @@ const pathOf = (path: string, home: string, folder: string) => {
 // with Edit or Write, so its card shows the change and waits for their press. A command is read as the boxes' guard reads it: a
 // command that only reads counts only for what it sends into a file with >; this stops slips and common tricks, as that guard does
 const MEMORY_READERS = [...BOX_READERS, 'cat', 'jq', 'diff', 'cmp', 'shasum', 'sha256sum', 'md5', 'md5sum']
-const MEMORY_OWN = ['live', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads']
+const MEMORY_OWN = ['live', 'keys.md', 'keys.json', 'update.lock', 'update.json', 'update-folder.json', 'update-seen.json', 'reloads']
 const MEMORY_PERSON = ['config.json', 'rules', 'roles']
 const namesMemory = (text: string, names: readonly string[]) => {
   const words = BOX_WORDS(text)
@@ -289,6 +289,15 @@ const drifted = (steps: number) =>
 // The chat is told once when nothing new has come back under a piece of work for a while
 const STUCK_IN_CHAT = (title: string, mins: number) =>
   `"${title}" has had nothing new come back to it or its helpers for ${mins} minutes: it may be stuck waiting on something that will not come. Its card shows where it stands.`
+// Work the person stopped with their own press on Stop: what the chat, or the work above a helper, is told, as the engine's notice
+// of the stop says only that it was stopped "by Claude"; what a call that would start it again is refused with; what their next
+// message carries while some is stopped so. `left` lists what it started detached that goes on running
+const STOPPED_BY_YOU = (title: string, id: string, left: string[] = []) =>
+  `{Name} stopped "${title}" (${id}) with Stop on its card: {name} stopped this; do not restart it, message it or start the same work again unless {name} asks.${left.length ? ` Left running, as it was started detached: ${left.join('; ')}.` : ''} Say nothing about the stop unless {name} asks.`
+const STOPPED_REFUSED = (title: string) =>
+  `Refused by Claudopus: {name} stopped "${title}" with Stop on its card. {Name} stopped this; do not restart it, message it or start the same work again unless {name} asks in a new message. Do not try another way.`
+const STOPPED_EARLIER = (titles: string[]) =>
+  `{Name} stopped earlier, with Stop on its card: ${titles.join('; ')}. Start it again, message it or start the same work afresh only if this message asks for that.`
 // The work is reminded after this many steps past a steer with no decision, and after this many without touching its to-dos
 const OWED_AFTER = 2
 const QUIET_STEPS = 12

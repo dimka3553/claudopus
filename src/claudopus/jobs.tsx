@@ -14,6 +14,8 @@ let jobsLookedAt = 0
 let jobProcs: Proc[] = []
 let jobProcsAt = 0
 const JOB_PS = 15_000
+// How long past its time limit a watch is still waited for to say it ended, before it counts as ended anyway
+const WATCH_GRACE = 2 * 60_000
 const shellMissed = new Map<string, number>()
 // Where the engine writes this chat's background output, once found; and when it was last looked for in vain
 let tasksDir = ''
@@ -162,10 +164,11 @@ const lookJobs = async ($: EngineInterface) => {
   if (psText !== undefined) ((jobProcs = procsOf(psText, now)), (jobProcsAt = now))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
-  // A detached job whose process ended leaves its card
+  // A detached job whose process ended leaves its card, kept as ended (how its process ended is not known)
   const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
   if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
-    await changeTodos($, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined } : one)))
+    const runsOf = (one: Todo) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' as const }))
+    await changeTodos($, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined, ...keepEnded(one, runsOf(one)) } : one)))
     void drawFresh($)
   }
   // Each background command's shell, found by its words among the engine's shells: paused when any of its processes is, and gone
@@ -180,6 +183,10 @@ const lookJobs = async ($: EngineInterface) => {
   }
   for (const o of owned) if (o.pid) states.set(o.id, treeOf(jobProcs, o.pid).some(isPausedProc))
   const ended = bgs.filter(b => (shellMissed.get(b.id) ?? 0) >= 2 && now - b.at >= 60_000).map(b => b.id)
+  // How each ended, where its output says: finished, failed with its code, or killed
+  const endedAs: Record<string, EndAs> = {}
+  // A watch well past the time limit the engine set it has ended, whether or not its last line was read
+  for (const one of list) for (const b of one.bg ?? []) if (b.isWatch && b.expiresAt && now - b.expiresAt >= WATCH_GRACE && !ended.includes(b.id)) (ended.push(b.id), (endedAs[b.id] = 'timed out'))
   // How what each wait waits for stands: a run it waits on paused or gone, a file it polls still for long
   const targetOf = (wait: NonNullable<ReturnType<typeof waitOf>>) => {
     const runs = wait.pattern
@@ -202,8 +209,10 @@ const lookJobs = async ($: EngineInterface) => {
     const job = asked[(n - 1) / 2]
     const id = job?.id ?? ''
     const text = (parts[n + 1] ?? '').split('\n@@AT@@ ')[0] ?? ''
-    if (!job?.pid && isOutputEnded(text)) ended.push(id)
     const m = Number(parts[n]?.split(' ')[0] ?? 0) * 1000
+    // One that ended, by the engine's last line on its output, and when: as that output last changed
+    const end = job?.pid ? undefined : runEndOf(text)
+    if (end) (ended.includes(id) || ended.push(id), (endedAs[id] = { ...end, ...(m ? { at: m } : {}) }))
     // An output that is there but holds nothing has printed nothing yet: its time is when it was made, not when it last wrote (on
     // 15 Nov such rows read "updated 9m ago" for runs that sent all they printed elsewhere)
     const seen = { ...latestOf(text), ...(m && !text.trim() ? { isEmpty: true } : {}) }
@@ -221,7 +230,7 @@ const lookJobs = async ($: EngineInterface) => {
   }
   // A background command that has ended, by the engine's last line on its output or as no shell runs it, leaves its card
   if (ended.length) {
-    await dropBackground($, ended)
+    await dropBackground($, ended, endedAs)
     for (const id of ended) (jobLog.delete(id), shellMissed.delete(id))
     isChanged = true
   }

@@ -38,8 +38,12 @@ const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my pri
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
+// A release on GitHub as the test world gives it: its version, commit and the tree it published; `got` a different tree that came
+// down instead, `manifest` a different version in it, `online` a newer commit online, and a fetch that fails, a folder with commits of its
+// own, or uncommitted changes the move would overwrite
+type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string; startedOn?: Record<string, string> } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -114,6 +118,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
     if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: options.shipped ? SHIPPED_PRINCIPLES : PRINCIPLES }
     if (isShipped && options.changelog !== undefined && e.path.endsWith('/CHANGELOG.md')) return { value: options.changelog }
+    // A release on GitHub, where the test gives one: the mod's folder is a main checkout, whose version a reload loads
+    if (options.release && e.path.endsWith('/.git/HEAD')) return { value: 'ref: refs/heads/main\n' }
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: files.get('manifest') ?? '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
@@ -249,6 +255,46 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return { value: { exitCode: 0, stdout: rest.includes('--targets') ? options.tailscale : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (tool === 'kill') killed.push(String(rest[0]))
+    // A release on GitHub, where the test gives one: the mod's folder is Claudopus's main checkout on main, a fetch of the release's
+    // tag lays its commit under the download ref (and git's progress where the step reads it), and the folder's tree in that commit
+    // is the one the release published unless the test says what came down instead
+    const release = options.release
+    if (release && tool === 'sh' && rest[1] === '"$@" 2>"$0"') {
+      const argv = rest.slice(3).map(String)
+      gitRan.push(argv.slice(argv.indexOf('-C') + 2).join(' '))
+      if (release.fetchFails) return (files.set(String(rest[2]), 'fatal: unable to access GitHub: Could not resolve host'), ok('', 128))
+      files.set(String(rest[2]), 'Receiving objects:  50% (10/20), 1.00 MiB | 2.00 MiB/s\rReceiving objects: 100% (20/20), 2.00 MiB | 2.00 MiB/s, done.\nResolving deltas: 100% (5/5), done.\n')
+      files.set('git:ref', release.commit)
+      return ok()
+    }
+    if (release && tool === 'git' && rest.includes('--show-toplevel')) return ok('/plugins-src\n')
+    if (release && tool === 'sh' && String(rest[1]).includes('write-tree')) return ok(`${files.get('tree:installed') ?? release.tree}\n`)
+    if (release && tool === 'env' && rest.includes('git')) {
+      const args = rest.slice(rest.indexOf('-C') + 2).map(String)
+      gitRan.push(args.join(' '))
+      const at = (arg?: string) => (arg ?? '').replace(/\^\{commit\}$/, '')
+      if (args[0] === 'rev-parse' && args.includes('--show-toplevel')) return ok('/plugins-src\n')
+      if (args[0] === 'ls-files') return ok('mods/claudopus/.claude-plugin/plugin.json\n')
+      if (args[0] === 'rev-parse' && args.includes('--git-dir')) return ok(release.worktree ? '/plugins-src/.git/worktrees/fix\n/plugins-src/.git\n' : '/plugins-src/.git\n/plugins-src/.git\n')
+      if (args[0] === 'symbolic-ref') return ok(release.worktree ? 'fix-bar\n' : 'main\n')
+      if (args.includes('--symbolic-full-name')) return ok('origin/main\n')
+      if (args[0] === 'rev-parse' && args.includes('--verify')) {
+        const what = args.at(-1) ?? ''
+        if (what.startsWith('refs/claudopus/update')) return files.has('git:ref') ? ok(`${files.get('git:ref')}\n`) : ok('', 1)
+        if (what.includes(':')) return what.startsWith(`${release.commit}:`) && files.has('git:ref') ? ok(`${release.got ?? release.tree}\n`) : ok('', 1)
+        return ok(`${at(what)}\n`)
+      }
+      if (args[0] === 'show') return ok(JSON.stringify({ name: 'claudopus', version: release.manifest ?? release.version }))
+      if (args[0] === 'update-ref' && args[1] === '-d') return (files.delete('git:ref'), ok())
+      if (args[0] === 'merge-base') return ok('', release.ownCommits ? 1 : 0)
+      if (args[0] === 'merge') {
+        if (release.overwrite) return { value: { exitCode: 1, stdout: '', stderr: 'error: Your local changes to the following files would be overwritten by merge', isStdoutTruncated: false, isStderrTruncated: false } }
+        files.set('manifest', JSON.stringify({ name: 'claudopus', version: release.version }))
+        return ok()
+      }
+      if (args[0] === 'ls-remote') return ok(`${release.online ?? release.commit}\tHEAD\n`)
+      return ok()
+    }
     // git in the mod's folder: no checkout unless the test lays git:online, the version its branch online has; then the folder is on
     // main following origin/main, behind it, and a fast-forward (refused with what git:merge says, where laid) moves the manifest there
     if (tool === 'env' && rest.includes('git')) {
@@ -333,6 +379,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (rest[0] === 'set') return (files.set(key, String(e.init?.stdin ?? '').replace(/\n$/, '')), ok())
       if (rest[0] === 'delete') return files.has(key) ? (files.delete(key), ok()) : ok('', 1)
       if (rest[0] === 'list') return ok([...files.keys()].filter(one => one.startsWith(`keyring:${rest[1]}/`)).map(one => `${one.split('/').pop()}\n`).join(''))
+      // Every service and account a value is kept under, never a value: the keys laid as secret:<name> and keychain-entry:<service>\t<account>
+      // (a keychain that does not answer, where the test lays keyring:refused, fails it)
+      if (rest[0] === 'entries' && files.has('keyring:refused')) return ok('', 1)
+      if (rest[0] === 'entries') return ok([...files.keys()].flatMap(one => (one.startsWith('secret:') && one !== 'secret:refused' ? [`claudopus-secret\t${one.slice(7)}\n`] : one.startsWith('keychain-entry:') ? [`${one.slice(15)}\n`] : [])).join(''))
       return ok('', 2)
     }
     // git, asked where a worktree is and which branch it is on, as the test lays git:top and git:branch
@@ -343,9 +393,15 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The secret runner: one key kept when the test lays its value, swapped for its name in what it is handed
     const kept = files.get('keychain:API_KEY')
     if (tool?.endsWith('bin/secret')) {
-      const said = rest[0] === '--list' ? (kept ? 'API_KEY\n' : '') : kept ? String(e.init?.stdin ?? '').replaceAll(kept, '[hidden API_KEY]') : String(e.init?.stdin ?? '')
+      // and the keys a test lays as secret:<name>, each listed by its name and hidden in what passes through
+      const more = [...files].filter(([key]) => key.startsWith('secret:')).map(([key, value]) => [key.slice(7), value] as const)
+      if (rest[0] === '--hide' && files.has('secret:refused')) return ok('', 1)
+      const hidden = more.reduce((text, [name, value]) => text.replaceAll(value, `[hidden ${name}]`), kept ? String(e.init?.stdin ?? '').replaceAll(kept, '[hidden API_KEY]') : String(e.init?.stdin ?? ''))
+      const said = rest[0] === '--list' ? `${kept ? 'API_KEY\n' : ''}${more.map(([name]) => `${name}\n`).join('')}` : hidden
       return { value: { exitCode: 0, stdout: said, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
+    // grep handed a .env file for the names before each =, as the list of keys reads one: only what -o matches comes back
+    if (tool === '/usr/bin/grep' && rest[0] === '-ohE') return ok((files.get(String(rest[2])) ?? '').split('\n').flatMap(line => line.match(/^\s*(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=/)?.[0] ?? []).map(one => `${one}\n`).join(''))
     const stdout = tool?.endsWith('jq')
       ? // What jq makes of a transcript: the test lays it beside it
         (files.get(`${String(e.argv.at(-1))}.sum`) ?? '{"s":[],"u":[],"d":[]}')
@@ -426,7 +482,14 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // A workflow runs in the background: the tool answers with its run, its task and where its transcripts go
     // A command sent to the background answers at once with its task, as a real one did on 13 Nov; a watch the same
     if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
-    if (e.tool === 'Monitor') return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: 0, persistent: true } } as never
+    // SBOS's list of names, as the test lays it
+    if (e.tool === 'mcp__sbos__secrets') return { result: { content: [{ type: 'text', text: files.get('sbos:secrets') ?? '[]' }] } } as never
+    if (e.tool === 'Monitor') {
+      // as the engine answers: a watch not kept for good ends at its time limit, at most 30 minutes
+      const w = e as { timeout_ms?: number; persistent?: boolean | string }
+      const forGood = w.persistent === undefined || w.persistent === true || w.persistent === 'true'
+      return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: forGood ? 0 : Math.min(w.timeout_ms ?? 300_000, 1_800_000), persistent: forGood } } as never
+    }
     if (e.tool === 'Workflow') return { result: { status: 'async_launched', taskId: 'wt1', runId: 'wf_1', taskType: 'local_workflow', workflowName: 'rounds', transcriptDir: '/t/wf_1', scriptPath: '/t/wf_1.js' } } as never
     return { result: 'ran' } as never
   })
@@ -1315,7 +1378,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === 'success').length).toBe(1)
   expect((await pane.find({ type: 'Text', text: /^Just finished$/ }))?.text).toBe('Just finished')
   // Its helper, ended in the same moment, stays in its card for the same pause
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', 'Fix the nose', 'Search the docs'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Keys', 'Config', 'About', 'Fix the nose', 'Search the docs'])
   await clock.advance(1_000)
   expect(await pane.find({ type: 'Text', text: '✓ Finished' })).toBeDefined()
   await clock.advance(1_100)
@@ -1324,8 +1387,8 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /^Nothing/ }))?.text).toBe('Nothing is running')
   // It is one folded row, "Finished", under the running cards; unfolded, a card as running work has, with Details and no Stop
   const buttons = await pane.findAll({ type: 'Button' })
-  expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About', '▸ Finished 1'])
-  await pane.press({ key: String(buttons[4]?.key) })
+  expect(buttons.map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Keys', 'Config', 'About', '▸ Finished 1'])
+  await pane.press({ key: String(buttons[5]?.key) })
   expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.props.wrap).toBe('truncate-end')
   expect((await pane.find({ type: 'Text', text: /^Finished ·/ }))?.text).toBe('Finished · 1 of 7 done · 2m 00s')
   expect(await pane.find({ type: 'Button', key: 'stop-a1' })).toBeUndefined()
@@ -2275,7 +2338,9 @@ test('every run under a card says how it stands: a command held open shows its p
   // The download held open: how much of how much, its percent, speed and time left, as curl printed them, and nothing of when
   // Named in the work's own form: its kind already said, how long it should take beside its time, in amber well past it
   expect(shown).toContain('Download the CT scans')
-  expect(shown).toContain('9m 00s of ~3m')
+  // past it, the run's own time left makes a fresh expectation, never the old figure as if it held
+  expect(shown).toContain('9m 00s of ~9m 53s')
+  expect(shown.some(text => /of ~3m/.test(text))).toBe(false)
   expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
@@ -2297,6 +2362,77 @@ test('every run under a card says how it stands: a command held open shows its p
   await list.unmount()
   held.get('dl')?.('')
   await call
+})
+
+test('only runs really running are listed: a watch the engine killed at its time limit, a command that failed and one that finished leave at once, counted on the closing row and told apart in Details; 15 Nov three "[killed]" watches stayed with their clocks running', SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const born = now
+  const TASKS = '/tmp/claude-501/x/s1/tasks'
+  const MIN = 60_000
+  // The 15 Nov card: two alike watches set 30 minutes, one more, and the wait that was really still going
+  const outputs: Record<string, () => string> = {
+    [`${TASKS}/mon-m1.output`]: () => (now - born >= 30 * MIN ? '\n[killed]\n' : ''),
+    [`${TASKS}/mon-m2.output`]: () => (now - born >= 30 * MIN ? '\n[killed]\n' : ''),
+    [`${TASKS}/bg-w1.output`]: () => '',
+    [`${TASKS}/bg-f1.output`]: () => (now - born >= 3 * MIN ? 'Traceback: boom\n\n[exited with code 1]\n' : ''),
+    [`${TASKS}/bg-k1.output`]: () => (now - born >= 2 * MIN ? 'all good\n\n[exited with code 0]\n' : ''),
+    // one past its time that prints how long it has left, and one past its time that does not
+    [`${TASKS}/bg-p1.output`]: () => 'progress: 3/6 steps fitting eta 4m\n',
+    [`${TASKS}/bg-p2.output`]: () => 'drawing frames\n',
+  }
+  const { clock } = world(on, { jobs: { output: file => outputs[file]?.() ?? '', wroteAt: () => now - 2_000 } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'save the videos', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Save the videos', prompt: 'go' } as never)
+  const watch = (id: string) => $.tool.call({ tool: 'Monitor', tool_use_id: id, agentId: 'a1', command: 'until grep -q "pass 1 done" /s/screen.log; do sleep 20; done', description: 'Wait for first screening pass (about 35 min)', timeout_ms: 3_000_000, persistent: false } as never)
+  await watch('m1')
+  await watch('m2')
+  const bg = (id: string, command: string, description: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command, description, run_in_background: true } as never)
+  await bg('w1', 'until grep -q "pass 1 done" /s/screen.log; do sleep 20; done; tail -2 /s/screen.log', 'Wait for the details screening to finish (about 55 min)')
+  await bg('f1', 'python3 fetch.py', 'Run the fetch of the list')
+  await bg('k1', 'python3 tidy.py', 'Run the tidy up')
+  await bg('p1', 'python3 fit.py', 'Run the fit (about 20 min)')
+  await bg('p2', 'python3 frames.py', 'Run the drawing of frames (about 20 min)')
+  const texts = async (surface = 'terminal') => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface } as never)
+    const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
+    await list.unmount()
+    return all
+  }
+  for (let n = 0; n < 10; n++) await advance(MIN)
+  // Before the limit both watches run, as one row of two
+  expect((await texts()).some(text => /^Wait for first screening pass ×2$/.test(text))).toBe(true)
+  for (let n = 0; n < 39; n++) await advance(MIN)
+  const shown = (await until(async () => {
+    const all = await texts()
+    return all.some(text => /^4 runs ended/.test(text)) ? all : undefined
+  })) ?? []
+  // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
+  expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
+  expect(shown.some(text => /screening pass ×2|Run the fetch|Run the tidy/.test(text))).toBe(false)
+  // The closing row counts them and says, in words, how many did not finish well
+  expect(shown).toContain('4 runs ended · 1 failed, 2 timed out')
+  // The wait still running stays, within its time
+  expect(shown).toContain('Wait for the details screening to finish')
+  expect(shown).toContain('49m 00s of ~55m')
+  // Past its time: a fresh expectation from the time left it prints; or else plainly past it, never the old figure as if it held
+  expect(shown).toContain('49m 00s of ~53m')
+  expect(shown).toContain('49m 00s · past ~20m')
+  expect(shown.some(text => /of ~20m/.test(text))).toBe(false)
+  // Details names each ended run with how it ended
+  const pane = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
+  const details = (await pane.findAll({ type: 'Text' })).map(one => one.text)
+  await pane.unmount()
+  expect(details).toContain('Runs ended')
+  expect(details.filter(text => text === 'Wait for first screening pass').length).toBe(2)
+  expect(details.filter(text => /^timed out after (29|30)m \d\ds · /.test(text)).length).toBe(2)
+  expect(details.some(text => /^failed \(exit code 1\) after \dm \d\ds · /.test(text))).toBe(true)
+  expect(details.some(text => /^finished after \dm \d\ds · /.test(text))).toBe(true)
+  // Later the wait passes its time too, with nothing printed: it says so
+  for (let n = 0; n < 8; n++) await advance(MIN)
+  expect((await texts()).some(text => /^57m 00s · past ~55m$/.test(text))).toBe(true)
 })
 
 test("a run's second line starts under its name, with the tree's lines carried down beside it: not the last, the last, a run under a helper, a narrow panel, on a desktop and in a terminal; 15 Nov the app dropped the lines and the line started left of the tree", SLOW, async ($, on) => {
@@ -4045,7 +4181,7 @@ test('the bar keeps its buttons whole on a row of their own under the header, wr
   // A terminal's gap would be a whole blank line between the rows, so it has none
   const term = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 30 }, surface: 'terminal' } as never)
   expect((await term.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')?.props.rowGap).toBe(0)
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About'])
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Keys', 'Config', 'About'])
   // The chat's size is no longer squeezed beside the buttons
   expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined()
 })
@@ -4128,30 +4264,24 @@ test('About opens the changelog in a tab of its own, every version newest first,
   expect(texts).toContain('Pictures open large.')
 })
 
-test('a newer version than the one whose changes were seen covers the panel with what changed since, until Back to the panel', async ($, on) => {
+test('a chat that moved to a newer version than the one whose changes were seen says so in one quiet note in the header, with What\'s new, until closed', async ($, on) => {
   const { files } = world(on, { changelog: CHANGELOG })
   files.set(`${MEMORY}/seen.json`, JSON.stringify({ version: '0.0.8' }))
   await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
-  expect(await until(async () => pane.find({ type: 'Text', text: 'Claudopus updated' }))).toBeDefined()
-  const texts = (await pane.findAll({ type: 'Text' })).map(one => one.text)
-  expect(texts).toContain('v0.0.8 → v0.1.0 · 2 versions')
-  expect(texts.filter(one => /^v0\.\d\.\d+$/.test(one))).toEqual(['v0.1.0', 'v0.0.9'])
-  expect(texts).not.toContain('An old change.')
-  // The whole panel: no header buttons under it
-  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).not.toContain('Stats')
-  await pressed(pane, 'update-top-close')
+  expect(await until(async () => pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' }))).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '· from v0.0.8, 2 versions' })).toBeDefined()
+  // The panel stays whole beneath it: its header buttons are there
+  expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toContain('Stats')
+  await pressed(pane, 'update-close')
   expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0')
-  await pane.unmount()
-  const after = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
-  expect(await until(async () => (await after.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
-  expect(await after.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+  expect(await until(async () => ((await pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })) ? undefined : true))).toBe(true)
   // A load of the same version again shows nothing
-  await after.unmount()
+  await pane.unmount()
   await $.session.start(start)
   const again = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
   expect(await until(async () => (await again.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
-  expect(await again.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+  expect(await again.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })).toBeUndefined()
 })
 
 test('a first install starts the record of changes seen at its own version, and shows no update screen', async ($, on) => {
@@ -4160,7 +4290,7 @@ test('a first install starts the record of changes seen at its own version, and 
   expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0')
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' } as never)
   expect(await until(async () => (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: 'Claudopus updated' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })).toBeUndefined()
 })
 
 
@@ -4314,10 +4444,9 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })
 
-test('Check for updates in Config shows it is checking, then what it found; a second press meanwhile starts no second look', async ($, on) => {
-  const { files, gitRan } = world(on)
-  // The tests run the mod from a folder of its code, as its maker does: a newer version brings that folder up to date with git
-  let page = '{"version":"0.1.0"}'
+test('Check now in Config only looks: it shows it is checking, then what it found, and a second press meanwhile starts no second look; nothing is fetched or moved', async ($, on) => {
+  const { files, gitRan } = world(on, { release: { version: '0.1.2', commit: 'c'.repeat(40), tree: 'a'.repeat(40) } })
+  let page = JSON.stringify({ version: '0.1.0', tree: 'a'.repeat(40) })
   let answer: (() => void) | undefined
   let fetches = 0
   on('http.fetch', async () => {
@@ -4332,42 +4461,37 @@ test('Check for updates in Config shows it is checking, then what it found; a se
   }
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  expect(await config.find({ type: 'Text', text: 'This chat runs v0.1.0' })).toBeDefined()
+  expect(await until(() => config.find({ type: 'Text', text: 'This chat runs v0.1.0' }))).toBeDefined()
+  // Where it loads from, said as it is
+  expect(await until(() => config.find({ type: 'Text', text: /^It loads from the folder .*, Claudopus's own checkout on main\. Not looked yet\.$/ }))).toBeDefined()
   await pressed(config, 'config-check')
   expect(await until(() => config.find({ type: 'Text', text: 'Checking…' }))).toBeDefined()
-  // While it checks there is no button to press again
-  expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check for updates')).toBe(false)
+  expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check now')).toBe(false)
   release()
   expect(await until(() => config.find({ type: 'Text', text: /^You're on the newest version \(v0\.1\.0\)/ }))).toBeDefined()
   expect(fetches).toBe(1)
-  // The folder is newest already: git is never run
-  expect(gitRan).toEqual([])
-  // A newer release, with changes in the folder that the update would overwrite: git refuses and nothing is changed
-  page = '{"version":"0.1.2"}'
-  files.set('git:online', '0.1.2')
-  files.set('git:merge', 'error: Your local changes to the following files would be overwritten by merge:\n\ta.tsx')
+  // A newer release: Check now says so and the panel offers it; nothing was fetched, moved or installed
+  page = JSON.stringify({ version: '0.1.2', tree: 'a'.repeat(40) })
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  const kept = await until(() => config.find({ type: 'Text', text: /^Couldn't update to v0\.1\.2: changes in its folder that aren't committed/ }))
-  expect(kept?.props.color).toBe('error')
+  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is out: the panel offers it.' }))).toBeDefined()
+  expect(gitRan.filter(one => /^(fetch|merge)/.test(one) || one.includes('fetch --progress'))).toEqual([])
   expect(files.get('manifest')).toBeUndefined()
-  // Pressed again once that is sorted: the folder moves forward to it, and the box says so
-  files.delete('git:merge')
+  // An older page with no fingerprint is no release: said as a failure, in the error colour
+  page = '{"version":"0.1.3"}'
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  // With automatic updates off, as shipped, a chat switches only when /reload-plugins is typed in it
-  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it.' }))).toBeDefined()
-  expect(gitRan).toContain('merge --ff-only --quiet @{u}')
-  files.delete('git:online')
-  // No answer that reads as a version: said as a failure, in the error colour
-  page = 'oops'
-  await pressed(config, 'config-check')
-  await until(async () => answer)
-  release()
-  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check/ }))
+  const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page has no fingerprint/ }))
   expect(failed?.props.color).toBe('error')
+  // How often: one choice, written as the two keys; Only when I ask is updates false
+  await config.select({ key: 'config-look-pick', value: '24' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toMatchObject({ updateEvery: 24 })
+  await config.select({ key: 'config-look-pick', value: '0' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toMatchObject({ updates: false })
+  await config.select({ key: 'config-look-pick', value: '1' })
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })
 
 // The asking card: an ask, its Copy, buttons and reply box
@@ -7568,6 +7692,65 @@ test('in the terminal, an ask that comes while a password is being typed leaves 
   expect((await inputs()).filter(one => one.focus).map(one => one.key)).toEqual([box?.key])
 })
 
+// Five pieces of work, the fourth asking: the 15 Nov "Release it" on an ended ask took the card from the top to the very end of a long
+// panel, which read as the panel jumping to the bottom
+const askingFourth = async ($: Parameters<TestBody>[0], on: On, choices?: string[], ended = false) => {
+  const w = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'five things', wait: false, origin: composer })
+  for (const n of [1, 2, 3, 4, 5]) await $.agent.spawn({ ...spawn, description: `Piece ${n}`, prompt: `piece ${n}` } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k4', agentId: 'a4', text: 'Release piece four?', ...(choices ? { choices } : {}) } as never)
+  if (ended) await $.turn.complete({ answer: 'Waits for your Release it.', durationMs: 1, isAborted: false, turnId: 'turn-a4', reason: 'answer', agentId: 'a4' } as never)
+  await w.clock.advance(5000)
+  const order = async () => (await textOrder(list)).filter(one => /^Piece \d$/.test(one)).filter((one, n, all) => all.indexOf(one) === n)
+  expect(await until(async () => ((await order())[0] === 'Piece 4' ? true : undefined))).toBe(true)
+  return { ...w, list, order }
+}
+
+test('Release it on an ended ask leaves its card where it was, saying the answer, and the work started again keeps its place, never the end', async ($, on) => {
+  const { list, order, clock, resumed } = await askingFourth($, on, ['Release it', 'Not now'], true)
+  const release = ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Release it')
+  await list.press({ key: release?.key ?? '' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('pressed "Release it"')))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: /You answered “Release it”/ } as never))).toBeDefined()
+  expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5'])
+  // A minute on, it takes its own place among the others: where it began, not after them
+  await clock.advance(65_000)
+  expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
+})
+
+const answeredStays = async ($: Parameters<TestBody>[0], on: On, how: 'press' | 'reply') => {
+  const { list, order, clock } = await askingFourth($, on)
+  if (how === 'press') await pressed(list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
+  else await list.input({ key: ((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).find(one => /-reply-/.test(one.key ?? ''))?.key ?? '', text: 'It is pasted' })
+  expect(await until(async () => list.find({ type: 'Text', text: /You answered/ } as never))).toBeDefined()
+  expect(await order()).toEqual(['Piece 4', 'Piece 1', 'Piece 2', 'Piece 3', 'Piece 5'])
+  await clock.advance(30_000)
+  expect((await order())[0]).toBe('Piece 4')
+  // A minute on, it takes its own place among the others
+  await clock.advance(35_000)
+  expect(await until(async () => ((await order())[0] === 'Piece 1' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 1', 'Piece 2', 'Piece 3', 'Piece 4', 'Piece 5'])
+}
+test('Done on an ask leaves the card at the top saying the answer for a minute, then in its own place', async ($, on) => answeredStays($, on, 'press'))
+test('an answer sent from an ask\'s box leaves the card at the top saying the answer for a minute, then in its own place', async ($, on) => answeredStays($, on, 'reply'))
+test('answering one of two asks at the top leaves both cards where they were, so nothing still waiting slides into the spot just pressed', async ($, on) => {
+  const { list, order, clock } = await askingFourth($, on)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a2', text: 'Release piece two?', choices: ['Release it', 'Not now'] } as never)
+  await clock.advance(5000)
+  expect(await until(async () => ((await order())[0] === 'Piece 2' ? true : undefined))).toBe(true)
+  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
+  // The older ask, second at the top, is answered: it stays second, the newer ask above it, and it still says the answer under the line its work then writes
+  await pressed(list, ((await list.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown> }[]).find(one => one.props.label === 'Done')?.key ?? '')
+  expect(await until(async () => list.find({ type: 'Text', text: /You answered “Done”/ } as never))).toBeDefined()
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n4', agentId: 'a4', text: 'Now doing the next part' } as never)
+  await clock.advance(5000)
+  expect(await order()).toEqual(['Piece 2', 'Piece 4', 'Piece 1', 'Piece 3', 'Piece 5'])
+  expect(await list.find({ type: 'Text', text: /You answered “Done”/ } as never)).toBeDefined()
+})
+
 // Each finding of the security review of 0.2.100 (F-001 to F-022), held by a test that fails on the code before its fix. The findings
 // the runners hold (F-006, F-008, F-009, F-017, F-018) are tested in mods/claudopus/bin/admin.test.sh too, on a real keychain or keyring
 
@@ -8076,10 +8259,10 @@ test('F-017 · a release waits for the person\'s press on its card, and its gran
 
 // F-019 is held in updating.test.tsx, with the hourly look and the panel's Install
 
-test('F-020 · a lock on the update dated ahead of this clock holds nothing: Check for updates looks at once', async ($, on) => {
+test('F-020 · a lock on the update dated ahead of this clock holds nothing: Check now looks at once', async ($, on) => {
   const { files } = world(on)
   let fetches = 0
-  on('http.fetch', () => ((fetches += 1), { value: { status: 200, ok: true, headers: {}, text: '{"version":"0.1.0"}' } }) as never)
+  on('http.fetch', () => ((fetches += 1), { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ version: '0.1.0', tree: 'a'.repeat(40) }) } }) as never)
   files.set(`${MEMORY}/update.lock`, `${SEC_NOW + 365 * 24 * 3_600_000} planted`)
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
@@ -8372,6 +8555,156 @@ test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper
   expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ ids: ['a1'] })
 })
 
+// The keys remembered: names and stores only, made again from the stores, shown by the Keys button, and an ask for a kept key refused
+
+// Made-up keys, as a person would have given them, in each store
+const keysLaid = (files: Map<string, string>) => {
+  files.set('secret:ELEVENLABS_API_KEY', 'el-made-up-value-0001')
+  files.set('secret:KAGGLE_KEY', 'kg-made-up-value-0002')
+  files.set('keychain-entry:elevenlabs-api\tsam', '')
+  // An app's own storage is not a key someone gave
+  files.set('keychain-entry:Chrome Safe Storage\tChrome', '')
+  // An account named by what is in fact a kept value, as a slip could leave it: hidden in the list like any other
+  files.set('keychain-entry:other-api\tkg-made-up-value-0002', '')
+  files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n- Render | /repo/render |  | going | Renders\n')
+  files.set('/repo/render/.env.local', 'export OPENAI_API_KEY=env-made-up-value-0003\nVOICE_ID=abc\nDB_PASSWORD = env-made-up-value-0004\nNEXT_PUBLIC_STRIPE_KEY=pk_made_up\n')
+  files.set('/repo/render/.env.example', 'EXAMPLE_TOKEN=x\n')
+  files.set('sbos:secrets', JSON.stringify([
+    { name: 'elevenlabs-key', label: 'ElevenLabs API key', put_in: false, value: 'sbos-made-up-value-0005' },
+    { name: 'github-token', label: 'GitHub read-only token', put_in: true, secret: 'sbos-made-up-value-0006' },
+    { name: 'labs', label: "Labs' production database", database: true, put_in: true },
+    // labels that carry a kept value, as a slip could leave them: one with a | in it, one long enough to be cut
+    { name: 'odd-one', label: `pipe ${'pp|made-up-value-0009'} and ${'x'.repeat(70)} long-made-up-value-0010`, put_in: false },
+  ]))
+  files.set('secret:PIPE_KEY', 'pp|made-up-value-0009')
+  files.set('secret:LONG_KEY', 'long-made-up-value-0010')
+}
+const VALUES = ['el-made-up-value-0001', 'kg-made-up-value-0002', 'env-made-up-value-0003', 'env-made-up-value-0004', 'sbos-made-up-value-0005', 'sbos-made-up-value-0006', 'made-up-value-0009', 'long-made-up', 'pk_made_up']
+
+test('the list of keys holds every store\'s names and never a value, and the Keys button shows it in a tab', SLOW, async ($, on) => {
+  const { files, tabs, logged } = world(on)
+  keysLaid(files)
+  await $.session.start(start)
+  // SBOS's list, as a piece of work reads it, is taken in
+  await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's1', agentId: 'w1' } as never)
+  const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  expect((await keyed(pane, 'keys-open'))?.props.label).toBe('Keys')
+  await pressed(pane, 'keys-open')
+  const opened = await until(async () => tabs.find(tab => /^memory-keys-md-\d+: Keys$/.test(tab)))
+  expect(opened).toBeDefined()
+  const tab = await $.ui.mount({ ...LIST, requestId: (opened ?? '').split(':')[0], surface: 'desktop' } as never)
+  const shown = String((await tab.find({ type: 'Markdown' }))?.props.text)
+  for (const name of ['ELEVENLABS_API_KEY', 'KAGGLE_KEY', "Claudopus's keychain", '| elevenlabs-api |', 'OPENAI_API_KEY', 'DB_PASSWORD', '/repo/render/.env.local', 'elevenlabs-key', 'asked, not given', 'github-token', 'SBOS secrets'])
+    expect(shown).toContain(name)
+  // Not a key: an app's own storage, a variable that holds none, and an example file
+  for (const name of ['Chrome', 'VOICE_ID', 'EXAMPLE_TOKEN', 'NEXT_PUBLIC_STRIPE_KEY']) expect(shown).not.toContain(name)
+  // Another app's account that is not a name stays out of the list
+  expect(shown).not.toContain('/ sam')
+  // A database in SBOS is used through its query
+  expect(shown).toMatch(/\| labs \|[^\n]*`query`/)
+  // No value anywhere: the list, its state, the log, what the work was told
+  const everything = [...files].filter(([key]) => key.startsWith(MEMORY)).map(([key, text]) => `${key}\n${text}`).join('\n') + logged.join('\n')
+  for (const value of VALUES) expect(everything).not.toContain(value)
+  // A kept value in a label is hidden before the label is cut
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('pipe [hidden PIPE_KEY] and')
+})
+
+test('a key taken out of a store goes from the list, and nothing is written when the list cannot be checked for kept values', async ($, on) => {
+  const { files } = world(on)
+  keysLaid(files)
+  await $.session.start(start)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'w1', command: '/plug/bin/secret KAGGLE_KEY here true' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('KAGGLE_KEY')
+  files.delete('secret:KAGGLE_KEY')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', agentId: 'w1', command: '/plug/bin/secret KAGGLE_KEY --forget' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).not.toContain('| KAGGLE_KEY |')
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('ELEVENLABS_API_KEY')
+  // SBOS's next list drops what it no longer holds
+  await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's1', agentId: 'w1' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('github-token')
+  files.set('sbos:secrets', '[]')
+  await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's2', agentId: 'w1' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).not.toContain('github-token')
+  // A kept value that is also a word of the list's own shape changes nothing else in it
+  files.set('secret:SHORT_PIN', 'true')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b5', agentId: 'w1', command: '/plug/bin/secret SHORT_PIN here true' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('| SHORT_PIN |')
+  expect(JSON.parse(files.get(`${MEMORY}/keys.json`) ?? '{}').entries.every((one: { isPresent: unknown }) => typeof one.isPresent === 'boolean')).toBe(true)
+  files.delete('secret:SHORT_PIN')
+  // A keychain that does not answer is not read as an empty one: what was known of it stays
+  files.set('keyring:refused', 'yes')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b4', agentId: 'w1', command: '/plug/bin/secret ELEVENLABS_API_KEY here true' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toContain('| ELEVENLABS_API_KEY |')
+  files.delete('keyring:refused')
+  // A hiding that fails leaves the list as it was
+  const before = files.get(`${MEMORY}/keys.md`)
+  files.set('secret:refused', 'yes')
+  files.set('secret:NEW_TOKEN', 'new-made-up-value-0007')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b3', agentId: 'w1', command: '/plug/bin/secret NEW_TOKEN here true' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toBe(before)
+})
+
+test('an ask for a key the list has is refused with where it is; a key not kept is asked for', async ($, on) => {
+  const { files } = world(on)
+  keysLaid(files)
+  await $.session.start(start)
+  await $.tool.call({ tool: 'mcp__sbos__secrets', tool_use_id: 's1', agentId: 'w1' } as never)
+  // SBOS asked for a key Claudopus's keychain keeps under another name: the ElevenLabs ask of 15 Nov
+  const sbos = await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'a1', agentId: 'w1', name: 'elevenlabs-key', label: 'ElevenLabs API key' } as never)
+  expect(sbos.deny).toContain('ELEVENLABS_API_KEY')
+  expect(sbos.deny).toContain("Claudopus's keychain")
+  expect(sbos.deny).toMatch(/bin\/secret ELEVENLABS_API_KEY here/)
+  // one SBOS has put in already
+  expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'a2', agentId: 'w1', name: 'github-token', label: 'GitHub' } as never)).deny).toContain('SBOS secrets')
+  // The panel's ask for one
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'a3', agentId: 'w1', text: 'Paste your ElevenLabs API key', details: 'For the transcripts.' } as never)).deny).toContain('ELEVENLABS_API_KEY')
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'a4', agentId: 'w1', text: 'Paste KAGGLE_KEY in the box' } as never)).deny).toContain('KAGGLE_KEY')
+  // The secret runner under a name it does not keep, or asked to take a kept one in again
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'a5', agentId: 'w1', command: "/plug/bin/secret ELEVENLABS_KEY here 'curl x'" } as never)).deny).toContain('ELEVENLABS_API_KEY')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'a6', agentId: 'w1', command: '/plug/bin/secret ELEVENLABS_API_KEY --add' } as never)).deny).toMatch(/--forget/)
+  // What is fine: the kept name used, a key not kept, an ask that is not for a key, and SBOS's own agents' keys
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f1', agentId: 'w1', command: "/plug/bin/secret ELEVENLABS_API_KEY here 'curl x'" } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'f2', agentId: 'w1', name: 'stripe-customers-key', label: 'Stripe' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f3', agentId: 'w1', text: 'Paste your Stripe key', details: 'x' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'f4', agentId: 'w1', text: 'Release the list of keys?', details: 'It lists ElevenLabs and Kaggle.', choices: ['Release it', 'Not now'] } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'f5', agentId: 'w1', name: 'elevenlabs-key', label: 'x', agent: 'bot' } as never)).deny).toBeUndefined()
+  // An ask made leaves its name in the list as asked, not given
+  expect(files.get(`${MEMORY}/keys.md`)).toMatch(/\| stripe-customers-key \|[^\n]*asked, not given/)
+  // No false refusals: a name inside another word, a database of SBOS's, a key with other words in its name
+  for (const text of ['Paste the Replicate API token for the FaceIQ Labs app', 'Paste the Clipify webhook secret', 'Paste your Labs login key'])
+    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `n-${text.length}`, agentId: 'w1', text } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'w1', command: "/plug/bin/secret GITHUB_PAT here 'gh x'" } as never)).deny).toBeUndefined()
+  // The most specific kept key is the one named
+  files.set('secret:KAGGLE_USERNAME', 'kgu-made-up')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n2', agentId: 'w1', command: '/plug/bin/secret KAGGLE_USERNAME here true' } as never)
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'n3', agentId: 'w1', text: 'Type your Kaggle username for the login' } as never)).deny).toContain('KAGGLE_USERNAME')
+  // What it is about counts when the ask is to paste something; asked again on purpose, naming the kept key as it is, it is shown
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd1', agentId: 'w1', text: 'Paste the key in the box', details: 'It is your ElevenLabs API key.' } as never)).deny).toContain('ELEVENLABS_API_KEY')
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'd2', agentId: 'w1', text: 'Paste your ElevenLabs API key', details: 'The kept ELEVENLABS_API_KEY is refused by ElevenLabs: 401.' } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'd3', agentId: 'w1', name: 'elevenlabs-key', label: 'x', for: 'ELEVENLABS_API_KEY in the keychain answers 401' } as never)).deny).toBeUndefined()
+  // A word for a key after other words is another key; the word secret in a command that runs no runner is no ask
+  files.set('secret:STRIPE_SECRET_KEY', 'st-made-up-value-0011')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n4', agentId: 'w1', command: '/plug/bin/secret STRIPE_SECRET_KEY here true' } as never)
+  for (const text of ['Paste the Stripe webhook signing secret', 'Paste the Stripe publishable key', 'Type your GitHub login email'])
+    expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `s-${text.length}`, agentId: 'w1', text } as never)).deny).toBeUndefined()
+  for (const command of ['git commit -m "keep the secret STRIPE_KEY here for now"', 'kubectl get secret STRIPE_KEY default'])
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `k-${command.length}`, agentId: 'w1', command } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 's1', agentId: 'w1', text: 'Paste your Stripe secret key' } as never)).deny).toContain('STRIPE_SECRET_KEY')
+  // The runner by other paths to it
+  for (const command of ["cd /plug/bin && ./secret ELEVENLABS_KEY here 'x'", "/plug/bin//secret ELEVENLABS_KEY here 'x'"])
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `p-${command.length}`, agentId: 'w1', command } as never)).deny).toContain('ELEVENLABS_API_KEY')
+  // An ask in SBOS for one it holds leaves it held
+  await $.tool.call({ tool: 'mcp__sbos__ask_secret', tool_use_id: 'h1', agentId: 'w1', name: 'github-token', label: 'GitHub', for: 'github-token answers 401' } as never)
+  expect(files.get(`${MEMORY}/keys.md`)).toMatch(/\| github-token \|[^\n]*present/)
+})
+
+test('work never writes the list of keys itself, by any tool', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  expect((await $.tool.call({ tool: 'Write', tool_use_id: 'w1', agentId: 'w1', file_path: `${MEMORY}/keys.md`, content: 'X' } as never)).deny).toBeDefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'w2', agentId: 'w1', command: 'echo x > ~/.claude/claudopus/keys.json' } as never)).deny).toBeDefined()
+})
+
 // The line above the prompt while work runs: how Claude uses the computer, drawn on the desktop and written in the terminal
 
 // A Mac's look as its commands print it, with Claude's app and chat, another app, and how much has moved by the nth look
@@ -8528,7 +8861,7 @@ test('a computer with no battery shows none, and a desktop plugged into a UPS do
   await term.unmount()
 })
 
-test('a pointer resting on a figure shows more of it in a line above: who uses the most, the parts of a speed, the battery in full', async ($, on) => {
+test('a pointer resting on a figure shows its card: who uses the most, the parts of a speed, the battery in full', async ($, on) => {
   let n = 0
   const extra = `${gpuAt(37)}\n"In use system memory"=1288490188\n${batt('85%; discharging; 4:12 remaining')}`
   const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, extra) })
@@ -8539,24 +8872,50 @@ test('a pointer resting on a figure shows more of it in a line above: who uses t
   await clock.advance(1000)
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
-  const more: Record<string, string> = {
-    memory: 'Memory 29 of 64 GB in use · most: Claude 3.3 GB, Safari 0.4 GB · Claude with what it started 3.3 GB',
-    cpu: 'Processor 50% busy across 10 cores · most: Safari 30%, Claude 20% · Claude with what it started 20%',
-    gpu: 'Graphics processor 37% busy · 1.2 GB of memory in use',
-    battery: 'Battery 85% · on battery, 4:12 left as the system estimates it',
-    disk: 'Disk 63 MB/s read and written · disk0',
-    net: 'Network 1 MB/s · in 1 MB/s, out 0 MB/s · en0',
+  const cards: Record<string, string[]> = {
+    memory: ['Memory', '29 of 64 GB', 'Claude and what it started', '3.3 GB', 'Using the most', 'Safari', '0.4 GB'],
+    cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
+    gpu: ['Graphics processor', '37% busy', 'Graphics memory in use', '1.2 GB'],
+    battery: ['Battery', '85%', 'On battery, 4:12 left as the system estimates it'],
+    disk: ['Disk', '63 MB/s', 'Reading and writing together'],
+    net: ['Network', '1 MB/s', 'Download', 'Upload'],
   }
-  const boxes = await desk.findAll({ type: 'Box' })
-  for (const [key, text] of Object.entries(more)) {
-    // Hidden until the pointer rests on its own figure (the test kit does not show the hover itself)
-    const line = boxes.find(b => b.props.key === `usage-more-${key}`)
-    expect(line?.props.display).toBe('none')
-    expect(line?.text).toBe(text)
+  // The drawn tree as the surface gets it: each element's props, its hover, its children
+  type El = { type?: string; props?: Record<string, unknown> & { key?: string; children?: unknown }; hover?: Record<string, unknown>; children?: unknown }
+  const drawn: unknown = await desk.drawn()
+  const kids = (el: El): El[] => [el.children, el.props?.children].flatMap(c => (Array.isArray(c) ? c : c && typeof c === 'object' ? [c] : [])) as El[]
+  const find = (node: unknown, key: string): El | undefined => {
+    if (!node || typeof node !== 'object') return undefined
+    if (Array.isArray(node)) return node.map(n => find(n, key)).find(Boolean)
+    const el = node as El
+    return el.props?.key === key ? el : kids(el).map(k => find(k, key)).find(Boolean)
   }
-  // Above the figures, so they stay where they are when it shows
-  const band = boxes.find(b => b.props.flexDirection === 'column' && b.text.endsWith('1 MB/s'))
-  expect(band?.text.startsWith('Memory 29')).toBe(true)
+  const textOf = (node: unknown): string[] => (typeof node === 'string' ? [node] : !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(textOf) : kids(node as El).flatMap(textOf))
+  for (const [key, parts] of Object.entries(cards)) {
+    const figure = find(drawn, `usage-${key}`)
+    // The figure lights its group and a faint fill under a resting pointer: a group member whose hover changes nothing is never wired
+    // to the pointer by the desktop app
+    expect(figure?.hover?.scope).toBe(`usage-${key}`)
+    expect(Object.keys(figure?.hover ?? {}).sort()).toEqual(['backgroundColor', 'scope'])
+    // Its card waits hidden in the bar's column above the figures and shows while the group is lit, so one shows at a time and goes
+    // as the pointer leaves; not an absolute Box, which the app lifts as a card of its own that stayed open
+    const card = find(drawn, `usage-${key}-card`)
+    expect(card?.props?.display).toBe('none')
+    expect(card?.props?.position).toBeUndefined()
+    expect(card?.hover).toEqual({ scope: `usage-${key}`, display: 'flex' })
+    for (const part of parts) expect(textOf(card)).toContain(part)
+  }
+  // Above the figures, so they stay where they are when one shows
+  const parentOf = (node: unknown, key: string): El | undefined => {
+    if (!node || typeof node !== 'object') return undefined
+    if (Array.isArray(node)) return node.map(n => parentOf(n, key)).find(Boolean)
+    const el = node as El
+    return kids(el).some(k => k.props?.key === key) ? el : kids(el).map(k => parentOf(k, key)).find(Boolean)
+  }
+  const column = parentOf(drawn, 'band-row')
+  expect(column?.props?.flexDirection).toBe('column')
+  expect(kids(column ?? {}).at(-1)?.props?.key).toBe('band-row')
+  expect(kids(column ?? {}).filter(k => k.props?.key?.endsWith('-card')).length).toBe(6)
   await desk.unmount()
 })
 
@@ -8595,89 +8954,375 @@ test('in a phone-narrow terminal the word for a charge the system calls full whi
   // and the line of more says what the system said, with no estimate it did not give
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
-  expect((await desk.find({ type: 'Text', text: /^Battery 100% · / }))?.text).toBe('Battery 100% · finishing the charge: the system calls it full and still tops it up')
+  // Its card says it in full
+  expect(await desk.find({ type: 'Text', text: 'Finishing the charge: the system calls it full and still tops it up' })).toBeDefined()
   await desk.unmount()
 })
 
-// F-019 and F-020 of the security review, for the hourly look: it only reads the version page and shows a newer version with Install;
-// nothing is downloaded, installed or reloaded until that press, and a lock dated ahead of the clock holds none of it
+test('the battery card says what the Mac draws, the processors and graphics each, Claude\'s part of each, and what Claude covers', async ($, on) => {
+  let n = 0
+  // Each look: Claude's renderer a quarter of the graphics time, Safari the rest; Claude's chat 20 J a look, the
+  // processors 40 J, the graphics processor 5 J
+  const power = (k: number) =>
+    [
+      gpuAt(60),
+      ac('94%; charging; (no estimate)'),
+      '@@POWER@@',
+      '"SystemLoad"=80000',
+      '@@GPUP@@',
+      `      "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=${k * 1e9}})`,
+      '      "IOUserClientCreator" = "pid 852, Claude"',
+      `      "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=${k * 3e9}})`,
+      '      "IOUserClientCreator" = "pid 700, Safari"',
+      '@@RU@@',
+      `1423 0 0 ${k * 20e9}`,
+      `E ${k * 40e9} ${k * 5e9}`,
+    ].join('\n')
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, power(n)) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: 'The whole Mac draws' })) ? true : undefined))
+  for (const text of ['The whole Mac draws', '80 W', 'Processors, every program', "Claude's own processes", 'Graphics, every program', 'Claude of that, estimated'])
+    expect(await desk.find({ type: 'Text', text })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: "Claude's processors draw" })).toBeUndefined()
+  expect(await desk.find({ type: 'Text', text: /^Claude: the app, its chats and all their work\. Part of what the processors draw is no program's, and work that ends within seconds is missed\. The screen, memory and storage count only in the whole, which the Mac updates about once a minute\.$/ })).toBeDefined()
+  // The graphics card: busy is time at work, what it draws, and who uses it most
+  for (const text of ['Time at work, at any speed', 'Drawing', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
+  await desk.unmount()
+})
+
+// F-019 and F-020 of the security review, and the update's three steps: a look only reads the version page and the panel says a
+// newer version is out; nothing is fetched, installed or reloaded until a press, each step its own; a download that is not what the
+// release published is thrown away and can never be installed; each step stands through a reload; a lock dated ahead holds nothing
 
 const UPD_NOW = 1_700_000_000_000
+const TREE = 'a'.repeat(40)
+const COMMIT = 'c'.repeat(40)
+const RELEASE = { version: '0.1.2', commit: COMMIT, tree: TREE }
+const pageText = (version = '0.1.2', tree = TREE) =>
+  JSON.stringify({ version, tree, size: 4_200_000, versions: [{ version, line: 'The bar shows the battery', more: 2 }, { version: '0.1.1', line: 'Runs show time left', more: 0 }, { version: '0.1.0', line: 'First', more: 0 }] })
 const reloadsOf = (on: On) => {
   const reloads: string[] = []
   on('command.run', { command: 'reload-plugins' } as never, () => (reloads.push('reload-plugins'), { value: { text: 'Reloaded' } }) as never)
   return reloads
 }
-
-test('F-019 · the hourly look only reads the version page: a newer version is shown with Install, and nothing is downloaded, installed or reloaded', SLOW, async ($, on) => {
-  const { files, clock, gitRan } = world(on)
-  const reloads = reloadsOf(on)
+const pageOn = (on: On, text: () => string) => {
   let fetches = 0
-  on('http.fetch', () => ((fetches += 1), { value: { status: 200, ok: true, headers: {}, text: '{"version":"9.9.9"}' } }) as never)
-  // Even with a branch online that a look would bring the folder up to
-  files.set('git:online', '9.9.9')
+  on('http.fetch', () => ((fetches += 1), { value: { status: 200, ok: true, headers: {}, text: text() } }) as never)
+  return () => fetches
+}
+const listAt = (surface = 'desktop') => ({ ...LIST, props: { ...LIST.props, bodyColumns: 70 }, surface }) as never
+// The text shown, or a failure that lists what is shown instead
+const shownIn = async (pane: { find: (q: { type: string; text: string | RegExp }) => Promise<unknown>; findAll: (q: { type: string }) => Promise<readonly { text?: unknown }[]> }, text: string | RegExp) => {
+  const found = await until(() => pane.find({ type: 'Text', text }) as Promise<{} | undefined>)
+  if (!found) throw new Error(`not shown: ${String(text)}; shown: ${(await pane.findAll({ type: 'Text' })).map(one => String(one.text)).join(' | ').slice(0, 1200)}`)
+  return found
+}
+// Time on, in steps the kit's clock can take with the panel's one-second beat running
+const later = async (clock: { advance: (ms: number) => Promise<unknown> }, ms: number) => {
+  for (let left = ms; left > 0; left -= 20 * 60_000) await clock.advance(Math.min(left, 20 * 60_000))
+}
+const changing = (ran: string[]) => ran.filter(one => /^(fetch|merge|reset|checkout|pull|update-ref)\b/.test(one) || one.includes('fetch --progress'))
+
+test('F-019 · the look only reads the version page: the panel says a newer version is out, with Download, and nothing is fetched, installed or reloaded, whatever config.json says', SLOW, async ($, on) => {
+  const { files, clock, gitRan } = world(on, { release: RELEASE })
+  const reloads = reloadsOf(on)
+  const fetches = pageOn(on, () => pageText())
+  // Keys an earlier version or a planted file might use to ask for installing by itself: none of them is read
+  ownSet(files, 'config.json', JSON.stringify({ updates: true, updateEvery: 1, autoInstall: true, autoUpdate: true, install: 'always' }))
   await $.session.start(start)
   await clock.advance(3 * 60_000)
-  expect(await until(async () => fetches || undefined)).toBe(1)
-  const panel = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 70 }, surface: 'desktop' } as never)
-  expect(await until(() => panel.find({ type: 'Text', text: 'Claudopus 9.9.9 is out' }))).toBeDefined()
-  expect(await keyed(panel, 'update-install')).toBeDefined()
-  // Within the hour no second look, and through all of it nothing ran: no git, no update step, no reload
-  await clock.advance(20 * 60_000)
-  expect(fetches).toBe(1)
-  expect(gitRan).toEqual([])
+  expect(await until(async () => fetches() || undefined)).toBe(1)
+  const panel = await $.ui.mount(listAt())
+  await shownIn(panel, 'Claudopus 0.1.2 is out')
+  expect(await panel.find({ type: 'Text', text: '· 2 versions since v0.1.0' })).toBeDefined()
+  await shownIn(panel, 'The bar shows the battery · and 3 more changes')
+  expect(await keyed(panel, 'update-download')).toBeDefined()
+  expect(await keyed(panel, 'update-install')).toBeUndefined()
+  // Another look once the last is over an hour old, and through all of them nothing was fetched or moved, nothing installed or reloaded
+  const aged = async () => files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
+  await aged()
+  await later(clock, 16 * 60_000)
+  expect(await until(async () => (fetches() > 1 ? true : undefined))).toBe(true)
+  expect(changing(gitRan)).toEqual([])
   expect(files.get('manifest')).toBeUndefined()
   expect(reloads).toEqual([])
-  expect(files.get(`${MEMORY}/log.md`) ?? '').not.toContain('reloading it')
-  // Turned off in Config, the look reads nothing more, and the card is gone
+  expect(files.get(`${MEMORY}/update-steps.json`)).toBeUndefined()
+  // Only when I ask: the look reads nothing more
   ownSet(files, 'config.json', JSON.stringify({ updates: false }))
-  await clock.advance(61 * 60_000)
-  expect(fetches).toBe(1)
-  expect(await until(async () => ((await panel.find({ type: 'Text', text: 'Claudopus 9.9.9 is out' })) ? undefined : true))).toBe(true)
+  const before = fetches()
+  await aged()
+  await later(clock, 16 * 60_000)
+  expect(fetches()).toBe(before)
 })
 
-test('F-019 · Install installs through the same steps as Check for updates, then reloads this chat alone', SLOW, async ($, on) => {
-  const { files, clock, gitRan } = world(on)
+test('Download fetches the release and checks it against what the release published: one that does not match is thrown away and cannot be installed', SLOW, async ($, on) => {
+  const { files, clock, gitRan } = world(on, { release: { ...RELEASE, got: 'b'.repeat(40) } })
   const reloads = reloadsOf(on)
-  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{"version":"0.1.2"}' } }) as never)
-  files.set('git:online', '0.1.2')
+  pageOn(on, () => pageText())
   await $.session.start(start)
   await clock.advance(3 * 60_000)
-  const panel = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 70 }, surface: 'desktop' } as never)
+  const panel = await $.ui.mount(listAt())
   await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
-  expect(gitRan).toEqual([])
+  await pressed(panel, 'update-download')
+  await shownIn(panel, "Couldn't fetch Claudopus 0.1.2")
+  await shownIn(panel, "What came down isn't what the release published, so it was thrown away. Nothing was changed: this chat still runs v0.1.0.")
+  expect(await keyed(panel, 'update-install')).toBeUndefined()
+  expect(gitRan).toContain('update-ref -d refs/claudopus/update')
+  // A steps file that says it was downloaded, planted or left from before: the panel checks the download it names, finds it is not
+  // the release's tree, and offers no Install (Install itself checks again, in update.test.tsx)
+  files.set(`${MEMORY}/update-steps.json`, JSON.stringify({ version: '0.1.2', stage: 'downloaded', commit: COMMIT, tree: TREE, at: await clock.now() }))
+  files.set('git:ref', COMMIT)
+  await panel.unmount()
+  const again = await $.ui.mount(listAt())
+  await shownIn(again, 'Claudopus 0.1.2 is out')
+  expect(await keyed(again, 'update-install')).toBeUndefined()
+  expect(gitRan.some(one => one.startsWith('merge '))).toBe(false)
+  expect(files.get('manifest')).toBeUndefined()
+  expect(reloads).toEqual([])
+})
+
+test('Download, Install and Reload are each their own press: the folder moves only at Install, the chat reloads only at Reload', SLOW, async ($, on) => {
+  const { files, clock, gitRan } = world(on, { release: RELEASE })
+  const reloads = reloadsOf(on)
+  pageOn(on, () => pageText())
+  await $.session.start(start)
+  await clock.advance(3 * 60_000)
+  const panel = await $.ui.mount(listAt())
+  await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
+  await pressed(panel, 'update-download')
+  await shownIn(panel, 'Claudopus 0.1.2 fetched')
+  await shownIn(panel, /^Checked against the release\. Move forward takes .* from v0\.1\.0 to v0\.1\.2, fast-forward only\.$/)
+  expect(JSON.parse(files.get(`${MEMORY}/update-steps.json`) ?? '{}')).toMatchObject({ version: '0.1.2', stage: 'downloaded', commit: COMMIT, tree: TREE })
+  // Downloaded, nothing the chat runs has moved
+  expect(gitRan.some(one => one.startsWith('merge '))).toBe(false)
+  expect(files.get('manifest')).toBeUndefined()
+  files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
+  await later(clock, 16 * 60_000)
+  expect(gitRan.some(one => one.startsWith('merge '))).toBe(false)
   await pressed(panel, 'update-install')
-  expect(await until(async () => reloads.length || undefined)).toBe(1)
-  // The folder moved forward to it (Claude Code's own steps for an installed copy), and the next load knows what it moved from
-  expect(gitRan).toContain('merge --ff-only --quiet @{u}')
+  await shownIn(panel, 'Claudopus 0.1.2 is in the folder')
+  expect(gitRan).toContain(`merge --ff-only --quiet ${COMMIT}`)
   expect(JSON.parse(files.get('manifest') ?? '{}').version).toBe('0.1.2')
+  await shownIn(panel, /^This chat still runs v0\.1\.0\. Every chat run from/)
+  expect(reloads).toEqual([])
+  await pressed(panel, 'update-reload')
+  expect(await until(async () => reloads.length || undefined)).toBe(1)
   const mark = [...files.entries()].find(([path]) => path.startsWith(`${MEMORY}/reloads/`))?.[1]
   expect(JSON.parse(mark ?? '{}')).toMatchObject({ version: '0.1.2', from: '0.1.0' })
 })
 
-test('F-019 · a chat run from another Mac installs at the press but is not sent a reload: it says to type /reload-plugins', SLOW, async ($, on) => {
-  const { files, clock } = world(on, { env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
-  const reloads = reloadsOf(on)
-  on('http.fetch', () => ({ value: { status: 200, ok: true, headers: {}, text: '{"version":"0.1.2"}' } }) as never)
-  files.set('git:online', '0.1.2')
+test('each step stands through a reload: a chat that loads finds the download waiting for Install, a step cut short said as stopped, and a copy newer than it runs offered its Reload', SLOW, async ($, on) => {
+  const { files, clock } = world(on, { release: RELEASE })
+  pageOn(on, () => pageText())
+  files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: UPD_NOW, version: '0.1.2', result: 'seen' }))
+  files.set(`${MEMORY}/update-steps.json`, JSON.stringify({ version: '0.1.2', stage: 'downloaded', commit: COMMIT, tree: TREE, at: UPD_NOW - 5 * 3_600_000 }))
+  files.set('git:ref', COMMIT)
+  await $.session.start(start)
+  const panel = await $.ui.mount(listAt())
+  await shownIn(panel, 'Claudopus 0.1.2 fetched')
+  expect(await keyed(panel, 'update-install')).toBeDefined()
+  // A download whose chat closed mid-way
+  files.set(`${MEMORY}/update-steps.json`, JSON.stringify({ version: '0.1.2', stage: 'downloading', at: UPD_NOW - 10 * 60_000, pct: 40 }))
+  await panel.unmount()
+  const stopped = await $.ui.mount(listAt())
+  await shownIn(stopped, 'It stopped before it finished, when its chat closed or reloaded.')
+  expect(await keyed(stopped, 'update-again')).toBeDefined()
+  // The folder already has the newer version: what is left is this chat's reload
+  files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.2' }))
+  await stopped.unmount()
+  const behind = await $.ui.mount(listAt())
+  expect(await until(() => keyed(behind, 'update-reload'))).toBeDefined()
+})
+
+test('a steps file that says a download was checked, with no such download in the repo, is not believed: the panel offers the download again', SLOW, async ($, on) => {
+  const { files } = world(on, { release: RELEASE })
+  pageOn(on, () => pageText())
+  files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: UPD_NOW, version: '0.1.2', result: 'seen' }))
+  files.set(`${MEMORY}/update-steps.json`, JSON.stringify({ version: '0.1.2', stage: 'downloaded', commit: 'f'.repeat(40), tree: TREE, at: UPD_NOW }))
+  await $.session.start(start)
+  const panel = await $.ui.mount(listAt())
+  await shownIn(panel, 'Claudopus 0.1.2 is out')
+  expect(await panel.find({ type: 'Text', text: 'Claudopus 0.1.2 fetched' })).toBeUndefined()
+  expect(await keyed(panel, 'update-install')).toBeUndefined()
+})
+
+test('Not now keeps a version quiet for a day, Skip this version until a newer one; the terminal shows the same notice', SLOW, async ($, on) => {
+  const { files, clock } = world(on, { release: RELEASE })
+  let version = '0.1.2'
+  pageOn(on, () => pageText(version))
   await $.session.start(start)
   await clock.advance(3 * 60_000)
-  const panel = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 70 }, surface: 'desktop' } as never)
+  const panel = await $.ui.mount(listAt())
   await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
-  await pressed(panel, 'update-install')
-  expect(await until(() => panel.find({ type: 'Text', text: 'v0.1.2 is in its folder now. Type /reload-plugins to switch this chat to it.' }))).toBeDefined()
+  await pressed(panel, 'update-later-available')
+  expect(await until(async () => ((await panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' })) ? undefined : true))).toBe(true)
+  const put = JSON.parse(files.get(`${MEMORY}/update-later.json`) ?? '{}') as { version?: string; until?: number }
+  expect(put.version).toBe('0.1.2')
+  expect((put.until ?? 0) - (await clock.now())).toBe(24 * 3_600_000)
+  // A day on, it shows again
+  files.set(`${MEMORY}/update-later.json`, JSON.stringify({ version: '0.1.2', until: (await clock.now()) - 1 }))
+  await panel.unmount()
+  const day = await $.ui.mount(listAt())
+  await shownIn(day, 'Claudopus 0.1.2 is out')
+  await pressed(day, 'update-skip-available')
+  expect(await until(async () => ((await day.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' })) ? undefined : true))).toBe(true)
+  expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').skipVersion).toBe('0.1.2')
+  version = '0.1.3'
+  files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
+  await later(clock, 16 * 60_000)
+  expect(JSON.parse(files.get(`${MEMORY}/update-seen.json`) ?? '{}').version).toBe('0.1.3')
+  const term = await $.ui.mount(listAt('terminal'))
+  await shownIn(term, 'Claudopus 0.1.3 is out')
+})
+
+test('a chat run from a worktree of the code is told a release never reaches it, and offered no download', SLOW, async ($, on) => {
+  const { clock, gitRan } = world(on, { release: { ...RELEASE, worktree: true } })
+  pageOn(on, () => pageText())
+  await $.session.start(start)
+  await clock.advance(3 * 60_000)
+  const panel = await $.ui.mount(listAt())
+  await shownIn(panel, 'Claudopus 0.1.2 is out')
+  await shownIn(panel, 'This chat runs from a worktree of the code, on branch fix-bar: it gets a release only when main is merged into it.')
+  expect(await keyed(panel, 'update-download')).toBeUndefined()
+  expect(changing(gitRan)).toEqual([])
+})
+
+test('F-019 · a chat run from another Mac moves at Install but is not sent a reload: it says to type /reload-plugins', SLOW, async ($, on) => {
+  const { files, clock } = world(on, { release: RELEASE, env: { CLAUDE_SSH_DAEMON_CHILD: '1' } })
+  const reloads = reloadsOf(on)
+  pageOn(on, () => pageText())
+  files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.0' }))
+  await $.session.start(start)
+  await clock.advance(3 * 60_000)
+  files.set('manifest', JSON.stringify({ name: 'claudopus', version: '0.1.2' }))
+  const panel = await $.ui.mount(listAt())
+  await shownIn(panel, 'This chat still runs v0.1.0. Type /reload-plugins in this chat to switch it.')
+  expect(await keyed(panel, 'update-reload')).toBeUndefined()
   expect(reloads).toEqual([])
 })
 
-test('F-020 · a lock on the update dated ahead of this clock holds nothing: the hourly look reads the page all the same', SLOW, async ($, on) => {
+test('F-020 · a lock on the update dated ahead of this clock holds nothing: the look reads the page all the same', SLOW, async ($, on) => {
   const { files, clock } = world(on)
-  let fetches = 0
-  on('http.fetch', () => ((fetches += 1), { value: { status: 200, ok: true, headers: {}, text: '{"version":"0.1.0"}' } }) as never)
+  const fetches = pageOn(on, () => pageText('0.1.0'))
   files.set(`${MEMORY}/update.lock`, `${UPD_NOW + 365 * 24 * 3_600_000} planted`)
   await $.session.start(start)
   await clock.advance(3 * 60_000)
-  expect(await until(async () => fetches || undefined)).toBe(1)
-  // The version page names the one this chat runs: no card
-  const panel = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 70 }, surface: 'desktop' } as never)
+  expect(await until(async () => fetches() || undefined)).toBe(1)
+  // The version page names the one this chat runs: no notice
+  const panel = await $.ui.mount(listAt())
   expect(await panel.find({ type: 'Text', text: /is out$/ })).toBeUndefined()
+})
+
+// A Stop the person presses holds: the chat is told it was theirs, and nothing starts the work again until they ask
+
+// The case of 15 Nov: a message sent by mistake started work, the person pressed Stop on its card, the engine's notice said it was
+// "stopped by Claude", and the chat sent it a message that started it again, twice
+test('work the person stopped on its card is not started again by the chat, a message, an answer or the mod until they ask', async ($, on) => {
+  const { stopped, resumed, sent } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'The bar above the input box just disappeared completely now.', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Bar above the input box disappeared', prompt: 'Their words: "The bar above the input box just disappeared completely now."' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pane.press({ key: 'stop-a1' })
+  expect(stopped).toContain('a1')
+
+  // The engine's notice of the stop: the chat is told it was the person's
+  const notice = '<task-notification>\n<task-id>a1</task-id>\n<status>killed</status>\n<summary>Agent "Bar above the input box disappeared" was stopped by Claude</summary>\n</task-notification>'
+  const told = (await $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }
+  expect((told.context ?? []).join('\n')).toContain('the person stopped this; do not restart it, message it or start the same work again unless the person asks')
+
+  // The chat sends it a message: refused
+  const message = await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'Carry on from where you stood.' } as never)
+  expect(String(message.deny)).toContain('the person stopped')
+  expect(sent).toHaveLength(0)
+  // It starts the same work afresh under another title, with the same words: refused
+  const again = await $.tool.call({ tool: 'Agent', tool_use_id: 'm2', subagent_type: 'general-purpose', model: 'opus', description: 'Find why the prompt bar vanished', prompt: 'Their words: "The bar above the input box just disappeared completely now."' } as never)
+  expect(String(again.deny)).toContain('the person stopped')
+  // or the engine is asked to resume it, by any way round: refused
+  const resume = (await $.agent.spawn({ ...spawn, resume: { agentId: 'a1' }, prompt: 'go on' } as never)) as { deny?: string }
+  expect(String(resume.deny)).toContain('the person stopped')
+  const fresh = (await $.agent.spawn({ ...spawn, description: 'Bar above the input box disappeared', prompt: 'again' } as never)) as { deny?: string }
+  expect(String(fresh.deny)).toContain('the person stopped')
+  expect(resumed.filter(line => line.startsWith('a1: '))).toHaveLength(0)
+
+  // Its card says so and keeps where it stood, with a way to start it again
+  expect(await pane.find({ type: 'Text', text: /Stopped by you/ })).toBeDefined()
+
+  // Other work is not held
+  const other = await $.tool.call({ tool: 'Agent', tool_use_id: 'm3', subagent_type: 'general-purpose', model: 'opus', description: 'Check the ears', prompt: 'check the ears' } as never)
+  expect(other.deny).toBeUndefined()
+
+  // A new message of theirs lifts the hold, and reminds the chat it was stopped
+  const next = (await $.prompt.submit({ text: 'Carry on with the bar work.', wait: false, origin: composer })) as { context?: string[] }
+  expect((next.context ?? []).join('\n')).toContain('only if this message asks for that')
+  const asked = await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm4', to: 'a1', message: 'Carry on with the bar work.' } as never)
+  expect(asked.deny).toBeUndefined()
+})
+
+test('a stop that was not the person\'s, by the chat or the engine, is not held', async ($, on) => {
+  const { agents } = { agents: {} as Record<string, string> }
+  world(on, { agents })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
+  const notice = '<task-notification><task-id>a1</task-id><status>killed</status></task-notification>'
+  const told = (await $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }
+  expect((told.context ?? []).join('\n')).not.toContain('stopped this')
+  const message = await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'go on' } as never)
+  expect(message.deny).toBeUndefined()
+})
+
+test('a helper the person stopped stays stopped: the work above it is told, and may not start it again', async ($, on) => {
+  const { appended } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Measure the nostrils', prompt: 'measure', parentAgentId: 'a1' } as never)
+  // Its Stop is in its own Details, as the person presses it there
+  const pane = await $.ui.mount({ ...LIST, requestId: 'work-a2', surface: 'desktop' } as never)
+  await pane.press({ key: 'stop-a2' })
+  expect(appended.some(line => line.includes('stopped "Measure the nostrils"') && line.includes('do not restart it'))).toBe(true)
+  const held = (await $.agent.spawn({ ...spawn, description: 'Measure the nostrils', prompt: 'measure again', parentAgentId: 'a1' } as never)) as { deny?: string }
+  expect(String(held.deny)).toContain('the person stopped')
+  const message = await $.tool.call({ tool: 'SendMessage', tool_use_id: 'h1', agentId: 'a1', to: 'a2', message: 'go on' } as never)
+  expect(String(message.deny)).toContain('the person stopped')
+  // The work above it goes on: it is not held
+  const own = await $.tool.call({ tool: 'SendMessage', tool_use_id: 'h2', to: 'a1', message: 'how is it going?' } as never)
+  expect(own.deny).toBeUndefined()
+})
+
+test('a stop holds while the chat\'s turn for that message is still open, by name, for its helpers, and lets other work by alike titles go', async ($, on) => {
+  const { sent } = world(on)
+  await $.session.start(start)
+  const BAR = 'The bar above the input box just disappeared completely now.'
+  await $.prompt.submit({ text: BAR, wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Bar above the input box disappeared', prompt: `Their words: "${BAR}"` } as never)
+  await $.agent.spawn({ ...spawn, description: 'Read the bar code', prompt: 'read', parentAgentId: 'a1' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pane.press({ key: 'stop-a1' })
+  // Their own words passed on in the same turn are no way round it
+  expect(String((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: BAR } as never)).deny)).toContain('the person stopped')
+  // nor its name instead of its id
+  expect(String((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm2', to: 'Bar above the input box disappeared', message: 'carry on' } as never)).deny)).toContain('the person stopped')
+  // nor its helper, by a message or a resume
+  expect(String((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm3', to: 'a2', message: 'go on' } as never)).deny)).toContain('the person stopped')
+  expect(String(((await $.agent.spawn({ ...spawn, description: '', resume: { agentId: 'a2' }, prompt: 'go on' } as never)) as { deny?: string }).deny)).toContain('the person stopped')
+  expect(sent).toHaveLength(0)
+  // Other work whose title shares most of its words is not held
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'm4', subagent_type: 'general-purpose', model: 'opus', description: 'Move the input box above the bar', prompt: 'move it' } as never)).deny).toBeUndefined()
+  // Once their message lifts it and the work goes on, a later stop by the chat is not theirs
+  await $.prompt.submit({ text: 'Go on with the bar.', wait: false, origin: composer })
+  await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm5', to: 'a1', message: 'Go on with the bar.' } as never)
+  await $.agent.spawn({ ...spawn, resume: { agentId: 'a1' }, prompt: 'Go on with the bar.' } as never)
+  await $.tool.call({ tool: 'TaskStop', tool_use_id: 's1', task_id: 'a1' } as never)
+  const notice = '<task-notification><task-id>a1</task-id><status>killed</status></task-notification>'
+  const told = (await $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }
+  expect((told.context ?? []).join('\n')).not.toContain('stopped this')
+  expect(await pane.find({ type: 'Text', text: /Stopped by you/ })).toBeUndefined()
 })

@@ -123,8 +123,8 @@ const runningLine = (one: Todo, at: number) => (one.status === 'working' && one.
 const BG_KEPT = 20
 // A command it sent to the background, or a watch it set, is kept by its card with its task id and its own words for it; one it
 // stops goes. A command the engine ends with its final response wakes nothing and is not kept
-const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown }, result: unknown) => {
-  if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')])
+const keepBackground = async ($: EngineInterface, agent: string, call: { tool: string; description?: unknown; command?: unknown; task_id?: unknown; shell_id?: unknown; timeout_ms?: unknown; persistent?: unknown }, result: unknown) => {
+  if (call.tool === 'TaskStop' || call.tool === 'KillShell') return dropBackground($, [String(call.task_id ?? call.shell_id ?? '')], 'stopped')
   const r = (result && typeof result === 'object' ? result : {}) as { backgroundTaskId?: unknown; taskId?: unknown; backgroundEndsWithFinalResponse?: unknown }
   // A command the engine ends with the work's final response wakes nothing and is not kept (the engine does not always say that
   // one it keeps wakes its owner, so its silence is no sign)
@@ -133,20 +133,61 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
   const what = oneLine(String(call.description ?? '') || String(call.command ?? '').split('\n')[0] || '').slice(0, 160)
   const cmd = oneLine(String(call.command ?? '')).slice(0, 400)
   const now = await $.clock.now()
+  // A watch ends at the time limit the engine said as it started it ("expires in 30m"), or else the one it was given where that is
+  // within the engine's own 30 minutes; one kept for good has none
+  const said = typeof result === 'string' ? result : JSON.stringify(result ?? '')
+  const told = (result && typeof result === 'object' ? result : {}) as { timeoutMs?: unknown; persistent?: unknown }
+  const isForGood = [call.persistent, told.persistent].some(p => p === true || p === 'true')
+  const limit = call.tool !== 'Monitor' || isForGood ? undefined : Number(told.timeoutMs) > 0 ? Math.min(Number(told.timeoutMs), WATCH_MOST) : (expiresIn(said) ?? (Number(call.timeout_ms) > 0 ? Math.min(Number(call.timeout_ms), WATCH_MOST) : undefined))
   await changeTodos($, list =>
-    list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(cmd ? { cmd } : {}), ...(call.tool === 'Monitor' ? { isWatch: true } : {}) }].slice(-BG_KEPT) } : one)),
+    list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(cmd ? { cmd } : {}), ...(call.tool === 'Monitor' ? { isWatch: true } : {}), ...(limit ? { expiresAt: now + limit } : {}) }].slice(-BG_KEPT) } : one)),
   )
 }
-// Background work that has ended or was stopped leaves every card that kept it
-const dropBackground = async ($: EngineInterface, ids: string[]) =>
-  changeTodos($, list => {
+// The longest the engine lets a watch run before it ends it
+const WATCH_MOST = 30 * 60_000
+type EndedRun = NonNullable<Todo['endedRuns']>[number]
+// How a run ended, said plainly: on its card's summary and in Details
+const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => (run.how === 'failed' ? `failed${run.code ? ` (exit code ${run.code})` : ''}` : run.how === 'stopped' ? 'stopped by the work' : run.how)
+// The closing row under a card: how many helpers and runs have ended, then how many of the runs did not finish well, in words
+const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
+  const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
+  const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'run')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'run')} ended`
+  const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
+    const count = runs.filter(r => r.how === how).length
+    return count ? [`${count} ${how}`] : []
+  })
+  return bad.length ? `${head} · ${bad.join(', ')}` : head
+}
+// The runs a card has had end, kept so its summary row and Details can say how each ended
+const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
+// Background work that has ended or was stopped leaves every card that kept it at once, and is kept as ended with how it ended
+// (by its id, or one word for them all), so the card's summary counts it
+type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number }
+const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Record<string, EndAs> = 'ended') => {
+  const now = await $.clock.now()
+  const endOfId = (id: string) => {
+    const one = typeof how === 'string' || 'how' in how ? (how as EndAs) : ((how as Record<string, EndAs>)[id] ?? 'ended')
+    return typeof one === 'string' ? { how: one } : one
+  }
+  return changeTodos($, list => {
     const isGone = (id: string) => ids.includes(id)
     if (!list.some(one => one.bg?.some(b => isGone(b.id)))) return list
     return list.map(one => {
       const bg = one.bg?.filter(b => !isGone(b.id))
-      return bg?.length === one.bg?.length ? one : { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined }
+      if (bg?.length === one.bg?.length) return one
+      const runs = (one.bg ?? []).filter(b => isGone(b.id)).map(b => {
+        const end = endOfId(b.id)
+        // It ended when its output last changed, where that is known, else as it was seen gone. A watch the engine killed at the
+        // time limit it set ran out of time (within a tenth of its limit, at most a minute, as its limit is counted from when the mod saw it start); one killed
+        // before it was killed
+        const endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now
+        const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how
+        return { id: b.id, what: b.what, at: b.at, endedAt, how, ...(end.code ? { code: end.code } : {}) } as EndedRun
+      })
+      return { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined, ...keepEnded(one, runs) }
     })
   })
+}
 
 // What work still at work says on its card while it waits for a command of its own: which, and how long it has run; only that it
 // waits when the command has its own row on the card's tree
