@@ -6394,7 +6394,10 @@ const personLook = async ($: EngineInterface, by?: ToolCallInput): Promise<strin
   let sealedKnown = await knownRead($)
   // Not checked, as the keychain did not answer: a chat that knows what they hold leaves them for the next look, and reads what it
   // knows meanwhile; one that knows nothing yet says so below
-  if (!sealedKnown && isKnownUnsure && knownSeen) return []
+  if (!sealedKnown && isKnownUnsure && knownSeen) {
+    knownWarn($, 'the keychain did not answer')
+    return []
+  }
   // No sealed copy, and this Mac never made one (no key of its own): the first load of a version that keeps one, and what is there
   // is the person's
   const key = !sealedKnown && !knownSeen ? await knownKey($) : 'yes'
