@@ -82,18 +82,11 @@ const isNoteShown = (one: DoneNote, at: number) =>
 const callsEnded = new Set<string>()
 const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
   const at = await $.clock.now()
-<<<<<<< HEAD
-  doneNotes = [...doneNotes.filter(one => one.id !== note.id && at - one.at < DONE_SHOWN), { ...note, at }].slice(-6)
-  drawAgain($)
-  // Drawn again as its minute ends, so it goes with nothing else to redraw the panel
-  $.clock.after(DONE_SHOWN + 100, () => drawAgain($))
-=======
   const made = { ...note, at, ...(note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}) }
   doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), made].slice(-6)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   // Drawn again as its time ends, so it goes with nothing else to redraw the panel
-  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => $.ui.invalidate('ui.render'))
->>>>>>> origin/main
+  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => drawAgain($))
 }
 // The call a note tells of has ended: what it said is over, so the note goes (after DONE_LEAST from its press)
 const noteCallEnded = async ($: EngineInterface, call: string) => {
@@ -102,9 +95,9 @@ const noteCallEnded = async ($: EngineInterface, call: string) => {
   if (!doneNotes.some(one => one.call === call && one.endedAt === undefined)) return
   const at = await $.clock.now()
   doneNotes = doneNotes.map(one => (one.call === call && one.endedAt === undefined ? { ...one, endedAt: at } : one))
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   const last = Math.max(...doneNotes.filter(one => one.call === call).map(one => one.at + DONE_LEAST))
-  $.clock.after(Math.max(0, last - at) + 100, () => $.ui.invalidate('ui.render'))
+  $.clock.after(Math.max(0, last - at) + 100, () => drawAgain($))
 }
 // What was done is a line, as Claude Code reports a call's result under it: a mark and the words, with no box, fill or edge, so it is
 // never taken for a card of work. Green once allowed or given, grey once refused or cancelled
@@ -270,14 +263,9 @@ const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled Â
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
-<<<<<<< HEAD
-  if (one) await noteDone($, { id: `box-${id}`, head: boxHead(one.text), said, what: '' })
-  drawAgain($)
-=======
   // Cancelled, nothing more comes of it: it is over at once
   if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call, endedAt: 0 } : {}), head: boxHead(one.text), said, what: '' })
-  $.ui.invalidate('ui.render')
->>>>>>> origin/main
+  drawAgain($)
 }
 
 const boxesPart = ($: EngineInterface, ui: Ui) => {
