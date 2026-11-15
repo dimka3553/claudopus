@@ -371,11 +371,12 @@ const workHooks = (on: On) => {
     // has its steps go to that family's newest, or to the model the person picked. An agent whose start the mod did not see is left
     // where the app sent it, and its card says so
     const own = id !== undefined ? startedOn.get(id) : undefined
-    const isOwnOlder = own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
+    const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
     if (isMovedByApp && own !== undefined && id !== undefined) {
       const n = (flaggedSteps.get(id) ?? 0) + 1
       flaggedSteps.set(id, n)
+      flaggedOnce.add(id)
       if (n === 1) await log($, `work ${id} was flagged and the app would send it to ${modelName(e.model)}: it is ended with a report instead`)
       if (dir) {
         await update($, todos, list => list.map(one => (one.id === id ? { ...one, flagged: modelName(e.model), moved: undefined } : one)))
@@ -404,7 +405,9 @@ const workHooks = (on: On) => {
     // The card says so only while it holds: not once the app sends its steps to a right model again
     const moved = isMovedByApp ? modelName(e.model) : undefined
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.moved !== moved)) await update($, todos, list => list.map(one => (one.id === id ? { ...one, moved } : one)))
-    const to = chosen && !isMovedByApp && modelName(chosen) !== modelName(e.model) ? chosen : instead
+    // A pick the engine has since passed is its family's newest
+    const pick = chosen ? (rightModel(chosen) ?? chosen) : undefined
+    const to = pick && !isMovedByApp && modelName(pick) !== modelName(e.model) ? pick : instead
     const r = yield* next(to ? { ...e, model: to } : e)
     const tokens = r.usage ? r.usage.input_tokens + r.usage.cache_read_input_tokens + r.usage.cache_creation_input_tokens : 0
     const model = (r.usage as { model?: string } | undefined)?.model
@@ -445,7 +448,7 @@ const workHooks = (on: On) => {
     if (e.workflow) {
       const r = await next(e)
       if (r.model) seeModel(r.model)
-      if (r.agentId && r.model) startedOn.set(r.agentId, r.model)
+      if (r.agentId && r.model && !e.resume) startedOn.set(r.agentId, r.model)
       if (r.agentId && dir) await flowSpawned($, e.workflow.runId, r.agentId, modelName(r.model ?? '') ? r.model : e.model || r.model || '', e.description ?? '').catch(err => log($, `workflow agent not kept: ${String(err)}`))
       return r
     }
@@ -462,7 +465,10 @@ const workHooks = (on: On) => {
     const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
     if (r.model) seeModel(r.model)
-    if (r.agentId && r.model) startedOn.set(r.agentId, r.model)
+    // A resumed agent keeps the model it first started on, or none: the model it resumes on may be one the app moved it to after a flag. A
+    // flagged one goes on to its next report afresh
+    if (r.agentId && r.model && !e.resume) startedOn.set(r.agentId, r.model)
+    if (r.agentId && e.resume) flaggedSteps.delete(r.agentId)
     if (!dir || !r.agentId) return r
     const id = r.agentId
     endedByHandback.delete(id)

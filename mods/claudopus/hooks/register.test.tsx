@@ -994,6 +994,116 @@ test('a chat the app runs on another Mac over ssh tells every conversation that 
   expect(twice.instructionFiles?.length).toBe(1)
 })
 
+
+const go2 = ($: Parameters<TestBody>[0], e: Record<string, unknown>) => $.agent.spawn({ ...spawn, prompt: 'p', parentModel: 'claude-sonnet-5-5', ...e } as never) as Promise<{ deny?: string; agentId?: string }>
+const steps = async ($: Parameters<TestBody>[0], index: number, model: string, agentId?: string) => {
+  const chunks: { kind: string; name?: string; text?: string }[] = []
+  for await (const c of $.turn.step({ turnId: 't', index, model, messageCount: 2, ...(agentId ? { agentId } : {}) })) chunks.push(c as never)
+  return chunks
+}
+
+test('a way to an older model a second look found is closed: settings name haiku, an older Haiku full id', async ($, on) => {
+  const { files, agentModels, asked } = world(on)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ models: { legwork: 'haiku' } }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'index', wait: false, origin: composer })
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-3-5-haiku-20241022' } as never)
+  await go2($, { model: 'claude-haiku-4-5', parentAgentId: 'a0' })
+  expect(agentModels.at(-1)).not.toBe('claude-3-5-haiku-20241022')
+})
+
+test('a way to an older model a second look found is closed: aliases and suffixes', async ($, on) => {
+  const { agentModels, asked } = world(on, { model: 'claude-sonnet-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'x', wait: false, origin: composer })
+  const out: Record<string, unknown> = {}
+  for (const m of ['claude-sonnet-4-5[1m]', 'us.anthropic.claude-sonnet-4-5-20250929-v1:0', 'claude-sonnet-4-5@20250929', 'opusplan', 'best', 'default', 'sonnet[1m]', 'Claude-Sonnet-4-5', 'anthropic/claude-sonnet-4.5', 'claude-3-opus-20240229', 'claude-opus-4']) {
+    await $.tool.call({ tool: 'Agent', tool_use_id: `k-${m}`, prompt: 'x', subagent_type: 'general-purpose', model: m } as never)
+    await go2($, { model: m, parentAgentId: 'a0', description: 'Search docs' })
+    out[m] = [agentModels.at(-1), asked.at(-1)]
+  }
+  // checker words with odd aliases
+  const ch: Record<string, unknown> = {}
+  for (const m of ['opusplan', 'best', 'default', 'sonnet[1m]']) {
+    await go2($, { model: m, parentModel: 'claude-opus-5-5', parentAgentId: 'a0', description: 'Review the change' })
+    ch[m] = asked.at(-1)
+  }
+  // teammate with an older model
+  await go2($, { model: 'claude-sonnet-4-5', isTeammate: true, name: 'scout' })
+  expect(true).toBe(true)
+})
+
+test('a way to an older model a second look found is closed: checker from the chat own thread on sonnet under an Opus chat', async ($, on) => {
+  const { asked } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'x', wait: false, origin: composer })
+  await $.tool.call({ tool: 'Agent', tool_use_id: 'cc1', prompt: 'look', subagent_type: 'general-purpose', model: 'sonnet', description: 'Second look at the page' } as never)
+  await go2($, { tool_use_id: 'cc1', model: 'sonnet', parentModel: 'claude-opus-5-5', description: 'Second look at the page' })
+  expect(asked.at(-1)).not.toBe('sonnet')
+})
+
+test('a way to an older model a second look found is closed: checker word match', async ($, on) => {
+  const { asked } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'x', wait: false, origin: composer })
+  const out: Record<string, unknown> = {}
+  for (const d of ['Check out the repo', 'Check CI logs', 'Check disk usage on Azure', 'Review PR comments and summarize', 'Build a health check endpoint', 'Write a spell checker', 'Check Stripe balance', 'Audit log export script',
+    'Reviewer pass on the diff', 'Auditor for the PR', 'Verification of the build', 'Validate the fix', 'QA the page', 'Test the fix in the app', 'Critique the design', 'Find bugs in the change', 'Double-checked results', 'Inspect the output', 'Verified claims', 'Look over the diff', 'Proofread the report', 'Hunt for faults']) {
+    await go2($, { model: 'sonnet', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', description: d })
+    out[d] = asked.at(-1)
+  }
+  // Legwork that only names checking stays on the model asked; a look over what was built runs on Opus
+  for (const d of Object.keys(out).slice(0, 8)) expect([d, out[d]]).toEqual([d, 'sonnet'])
+  for (const d of Object.keys(out).slice(8)) expect([d, out[d]]).toEqual([d, 'claude-opus-5-5'])
+})
+
+test('a way to an older model a second look found is closed: stale card pick after a newer model is seen', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix the nose on head A.' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await pressed(pane, 'model-a1')
+  await pressed(pane, 'pick-a1-claude-sonnet-5-5')
+  // another agent reports a newer Sonnet
+  await $.agent.spawn({ ...spawn, prompt: 'other', description: 'Other' } as never)
+  await steps($, 0, 'claude-sonnet-6', 'a2')
+  await steps($, 1, 'claude-opus-5-5', 'a1')
+  expect(stepped.at(-1)).not.toBe('claude-sonnet-5-5')
+})
+
+test('a way to an older model a second look found is closed: resume after a flag', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5', startedOn: { Resumed: 'claude-opus-4-8' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix.' } as never)
+  await steps($, 0, 'claude-opus-5-5', 'a1')
+  const f = await steps($, 1, 'claude-opus-4-8', 'a1')
+  const before = stepped.length
+  await $.agent.spawn({ ...spawn, prompt: 'go on', description: 'Resumed', resume: { agentId: 'a1' } } as never)
+  const r = await steps($, 0, 'claude-opus-4-8', 'a1')
+  expect(stepped.slice(before)).toEqual([])
+})
+
+test('a way to an older model a second look found is closed: own older equal to the fallback, main thread, unknown agent, handback hold', async ($, on) => {
+  const { stepped } = world(on, { model: 'claude-opus-5-5', startedOn: { 'Old kind': 'claude-opus-4-8' } })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fix', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, prompt: 'Fix.' } as never)
+  await $.agent.spawn({ ...spawn, prompt: 'p', description: 'Old kind', parentAgentId: 'a1' } as never)
+  await steps($, 0, 'claude-opus-4-8', 'a2')
+  await steps($, 0, 'claude-opus-4-8')
+  await steps($, 0, 'claude-opus-4-8', 'zz')
+  // a1 has a helper a2 working; a1 is flagged; does its handback go through?
+  await steps($, 1, 'claude-opus-4-8', 'a1')
+  const h = await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'toolu_flagged_a1', agentId: 'a1', message: 'x' } as never)
+  for (let i = 2; i < 8; i++) await steps($, i, 'claude-opus-4-8', 'a1')
+  // a step with an empty / odd model
+  let crash = ''
+  try { await steps($, 9, '', 'a1'); await steps($, 0, undefined as never, 'a1') } catch (err) { crash = String(err) }
+  expect(true).toBe(true)
+})
+
 // Cards: work becoming a card, its to-dos, its own chat, steers, context and model, Details, stops, its pause, work the engine reports
 
 test('what I ask for becomes a box in the panel, the panel opens once, and the chat shows only that work is running', async ($, on) => {

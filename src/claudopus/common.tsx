@@ -216,6 +216,8 @@ const modelName = (id: string) => {
 // The models the person can move running work to from its card, by the id each step is sent with, the newest of each family. Never
 // Haiku. These are the least the mod knows: a newer id the engine starts work on or answers from takes its family's place (seeModel)
 const MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2']
+// The newest Haiku, for the settings that name Haiku for a kind of work, raised the same way
+const HAIKU = ['claude-haiku-5-5']
 // A version as numbers; an id that leads with a date or an old numbering ("claude-3-5-sonnet-20241022") reads as none
 const versionOf = (id: string): [number, number] | undefined => {
   const [major = 0, minor = 0] = (modelName(id).split(' ')[1] ?? '').split('.').map(Number)
@@ -229,10 +231,11 @@ const newestModel = (family: string) => MODELS.find(one => modelName(one).starts
 const seeModel = (id: string) => {
   const family = modelName(id).split(' ')[0] ?? ''
   const version = versionOf(id)
-  const at = MODELS.findIndex(one => modelName(one).startsWith(`${family} `))
-  const top = at >= 0 ? versionOf(MODELS[at]!) : undefined
-  if (family === 'Haiku' || !version || !top || !isBelow(top, version)) return
-  MODELS[at] = `claude-${family.toLowerCase()}-${version[0]}${version[1] ? `-${version[1]}` : ''}`
+  const list = family === 'Haiku' ? HAIKU : MODELS
+  const at = list.findIndex(one => modelName(one).startsWith(`${family} `))
+  const top = at >= 0 ? versionOf(list[at]!) : undefined
+  if (!version || !top || !isBelow(top, version)) return
+  list[at] = `claude-${family.toLowerCase()}-${version[0]}${version[1] ? `-${version[1]}` : ''}`
 }
 // The model a step or start is sent to in place of one no work runs on: an older version than its family's newest goes to that
 // newest, and Haiku to the newest Sonnet. Nothing for a model work may run on: the newest or a newer version, a name with no
@@ -240,23 +243,30 @@ const seeModel = (id: string) => {
 const rightModel = (id: string): string | undefined => {
   const [family = '', version = ''] = modelName(id).split(' ')
   if (!family) return undefined
-  if (family === 'Haiku') return Object.values(models).includes('haiku') ? undefined : newestModel('Sonnet')
+  const isHaikuNamed = family === 'Haiku' && Object.values(models).includes('haiku')
+  if (family === 'Haiku' && !isHaikuNamed) return newestModel('Sonnet')
   if (!version) return undefined
-  const top = versionOf(newestModel(family) ?? '')
+  const newest = isHaikuNamed ? HAIKU[0] : newestModel(family)
+  const top = versionOf(newest ?? '')
   const mine = versionOf(id)
   const isOlder = !mine || (top !== undefined && isBelow(mine, top))
-  return isOlder ? newestModel(family) : undefined
+  return isOlder ? newest : undefined
 }
 // How strong a model is, for a check never weaker than what it checks
 const RANK: Record<string, number> = { Haiku: 0, Sonnet: 1, Opus: 2, Fable: 3 }
-const rankOf = (id: string) => RANK[modelName(id).split(' ')[0] ?? ''] ?? -1
-// A helper that looks over what was built, by its few words
-const isChecker = (description: string) => /\b(second look|check(s|ing|er)?|review(s|ing)?|verif(y|ies|ying)|audit|look(s|ing)? for what is wrong|what is wrong)\b/i.test(description)
+// `opusplan` runs on Sonnet outside plan mode, so it counts as Sonnet
+const rankOf = (id: string) => (/opusplan/i.test(id) ? RANK.Sonnet! : (RANK[modelName(id).split(' ')[0] ?? ''] ?? -1))
+// A helper that looks over what was built, by its few words: a look, check, review or test of what is there, not legwork that only
+// names checking ("Check out the repo", "Check disk usage")
+const isChecker = (description: string) =>
+  /\b(second look|another look|look(s|ing)? (over|for what is wrong|for faults|for bugs)|(double[- ]?)?check(s|ing|ed)? (what|the|that|this|it|its|whether|if|for faults|for bugs|for what)\b(?! (out|in|disk|ci|logs?|balance|status|usage|version|price)\b)|review(s|ing|ed)? (what|the|that|this|it|its)\b(?! (pr|comments?)\b)|double[- ]?check(s|ing|ed)?|reviewer|auditor|verif(y|ies|ying|ication|ied)|validat(e|es|ing|ion)|critique|proofread|inspect(s|ing)?|find (bugs|faults|what is wrong)|hunt(s|ing)? for (faults|bugs)|test(s|ing)? the (fix|build|page|change)|qa)\b/i.test(description)
 // Work a safety check flagged whose next steps the app would send to an older model: it is ended with this report instead, so its
 // parent starts what is left again on a current model. The steps of it answered so
 const FLAGGED = (on: string) =>
   `Stopped by Claudopus: a safety check flagged this agent's last message, and the app would have carried it on on ${modelName(on) || on}, an older model no work runs on, so nothing after the flag was done. Start what is left again on the current model, leaving out what was flagged.`
 const flaggedSteps = new Map<string, number>()
+// Work a safety check flagged once: its steps on an older model are never sent to a newer one, whatever it was started on
+const flaggedOnce = new Set<string>()
 // The model an agent is started on in place of the one asked, or why it is not started; nothing when it may start as asked
 const startModel = (e: { model?: string; parentModel?: string; parentAgentId?: string; description?: string; fork: boolean; workflow?: unknown }): { model?: string; deny?: string } => {
   const parentModel = String(e.parentModel ?? '')
@@ -266,8 +276,8 @@ const startModel = (e: { model?: string; parentModel?: string; parentAgentId?: s
   const parent = rightModel(parentModel) ?? parentModel
   // An alias or `inherit` the engine resolves to the newest, or the parent's; an older id or Haiku goes to its family's newest
   let model = asked && asked !== 'inherit' ? (rightModel(asked) ?? '') : rightModel(parentModel) && (!asked || asked === 'inherit') ? parent : ''
-  // A check of what was built, started by a piece of work or a workflow, never runs weaker than its parent, nor below Opus
-  if ((e.parentAgentId || e.workflow) && isChecker(e.description ?? '')) {
+  // A check of what was built never runs weaker than what started it, nor below Opus
+  if (isChecker(e.description ?? '')) {
     const runs = model || (asked && asked !== 'inherit' ? asked : parent)
     const least = rankOf(parent) >= RANK.Opus! ? parent : (newestModel('Opus') ?? 'opus')
     if (rankOf(runs) < rankOf(least)) model = least
