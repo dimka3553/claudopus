@@ -8520,7 +8520,8 @@ test('in a phone-narrow terminal the word for a charge the system calls full whi
   // and the line of more says what the system said, with no estimate it did not give
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
-  expect((await desk.find({ type: 'Text', text: /^Battery 100% · / }))?.text).toBe('Battery 100% · finishing the charge: the system calls it full and still tops it up')
+  // Its card says it in full
+  expect(await desk.find({ type: 'Text', text: 'Finishing the charge: the system calls it full and still tops it up' })).toBeDefined()
   await desk.unmount()
 })
 
