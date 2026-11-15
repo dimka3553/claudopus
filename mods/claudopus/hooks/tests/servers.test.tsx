@@ -10,10 +10,10 @@ import { timelineRows } from '../stats'
 const HOME = '/home/sam'
 // The mod's own folder on this machine: each area's tests are built into mods/claudopus/hooks/tests/
 const PLUGIN = new URL('../..', (import.meta as unknown as { url: string }).url).pathname.replace(/\/$/, '')
-// Every test may take 20 seconds, not the kit's 5: the areas' files run side by side, and on a busy machine or GitHub's runner (about
-// twice as slow as a Mac) a long scenario passed or failed by the machine's load, not by the mod. SLOW is that limit, kept for the
-// tests that name it
-const SLOW = { timeoutMs: 20_000 }
+// Every test may take a minute, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's runner
+// (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
+// SLOW is that limit, kept for the tests that name it
+const SLOW = { timeoutMs: 60_000 }
 const test = (name: string, options: unknown, body?: unknown) =>
   body === undefined ? kitTest(name, SLOW, options as TestBody) : kitTest(name, { ...SLOW, ...(options as object) }, body as TestBody)
 const MEMORY = `${HOME}/.claude/claudopus`

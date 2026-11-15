@@ -21,7 +21,7 @@ claude plugin validate --strict .
 
 Use a recent Claude Code engine: the desktop app's, the `claude` on your PATH or the public one from npm all run every test, since the tests need Claude Code's own test kit, not the desktop app.
 
-The GitHub check (`.github/workflows/check.yml`) runs the build check, the notification apps' checksums and every test, but not the two strict validations, on each push to `main` and each pull request, with the npm engine pinned to a version that passes them; a failing test fails the check. The release runs them again, and the validations, with the desktop app's engine. A test near the kit's 5-second limit takes `SLOW` (from `src/claudopus/tests/world.tsx`) as its options, since GitHub's runner is about twice as slow as a Mac.
+The GitHub check (`.github/workflows/check.yml`) runs the build check, the notification apps' checksums and every test, but not the two strict validations, on each push to `main` and each pull request, with the npm engine pinned to a version that passes them; a failing test fails the check. The release runs them again, and the validations, with the desktop app's engine. Every test may take a minute (the `test` of `src/claudopus/tests/world.tsx`), since the areas' files run side by side and GitHub's runner is about twice as slow as a Mac.
 
 ## Tests
 
