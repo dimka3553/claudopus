@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 # release [-m "title"] [branch]: the one way work reaches a repo's main branch, so two pieces of work never release at once.
 # Run it from the work's own worktree, its work committed on its own branch. On this Mac one release per repo runs at a time
 # (a lock others wait on); across Macs, git's refusal of a push that is not a fast-forward makes it take main again. It takes
@@ -26,6 +26,12 @@
 # holds the call leaves a grant naming this worktree and this branch, sealed as bin/admin's are, which this runner takes once. Run by
 # hand outside Claude Code at a terminal, it asks there instead. Exit 6 when neither said yes: nothing is done.
 set -uo pipefail
+# Nothing of the caller's shell decides what runs here: -p above reads no BASH_ENV and takes no function from the environment, the
+# system's own tools come before anything the caller's PATH adds, and no git setting comes from the environment
+PATH=/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}
+export PATH
+for v in $(compgen -e | grep -E '^(GIT_|BASH_FUNC_)'); do unset "$v"; done
+unset CDPATH
 say() { echo "release: $*" >&2; }
 die() { say "$1"; exit "${2:-1}"; }
 # The home folder is the one the user database names for this user, never $HOME, which whoever runs this can set to a folder of
@@ -171,7 +177,7 @@ gained() { [ -n "$(git -C "$top" merge-base "$branch" "$REMOTE/$MAIN" 2>/dev/nul
 gh_bin=$(for g in /opt/homebrew/bin/gh /usr/local/bin/gh /usr/bin/gh; do [ -x "$g" ] && { echo "$g"; break; }; done)
 ghq() { env -u GH_HOST -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_CONFIG_DIR -u XDG_CONFIG_HOME -u GH_REPO -u GH_DEBUG \
   -u HTTPS_PROXY -u HTTP_PROXY -u ALL_PROXY -u https_proxy -u http_proxy -u all_proxy -u SSL_CERT_FILE -u SSL_CERT_DIR \
-  /usr/bin/perl -e 'my $p = fork // exit 127; if (!$p) { exec @ARGV; exit 127 } $SIG{ALRM} = sub { kill "KILL", $p }; alarm 60; waitpid $p, 0; exit($? & 127 ? 124 : $? >> 8)' "$gh_bin" "$@"; }
+  /usr/bin/perl -e 'my $p = fork // exit 127; if (!$p) { setpgrp(0, 0); exec @ARGV; exit 127 } $SIG{ALRM} = sub { kill "KILL", -$p }; alarm 60; waitpid $p, 0; exit($? & 127 ? 124 : $? >> 8)' "$gh_bin" "$@"; }
 # The wait for GitHub's checks, across every try, ends 40 minutes from the first; RELEASE_CHECK_WAIT (seconds) can make it shorter,
 # never longer
 wait_s=${RELEASE_CHECK_WAIT:-2400}; case $wait_s in '' | *[!0-9]* | 0) wait_s=2400 ;; esac; [ "$wait_s" -gt 2400 ] && wait_s=2400
@@ -203,7 +209,7 @@ for try in 1 2 3 4 5; do
   main_checks=$GITHUB_CHECKS
   settings_of "$common/release.local" "NAME VERSION_FILE DERIVED BUILD CHECK GITHUB_RELEASE GITHUB_CHECKS GITHUB_WORKFLOW"
   [ -n "$main_checks" ] && [ "$GITHUB_CHECKS" != "$main_checks" ] && GITHUB_CHECKS="$main_checks${GITHUB_CHECKS:+,$GITHUB_CHECKS}"
-  [ -z "$GITHUB_CHECKS" ] || [ -n "$(printf %s "$GITHUB_CHECKS" | tr -d ', \t')" ] || die "GITHUB_CHECKS names no check; nothing pushed" 3
+  [ -z "$GITHUB_CHECKS" ] || [ -n "$(printf %s "$GITHUB_CHECKS" | tr -d ', \t\n\r')" ] || die "GITHUB_CHECKS names no check; nothing pushed" 3
   MAIN=$keep_main REMOTE=$keep_remote AFTER=$keep_after
   if ! out=$(git merge -q --no-ff --no-commit "$branch" 2>&1); then
     git rev-parse -q --verify MERGE_HEAD >/dev/null || die "git would not merge $branch onto $MAIN: $out" 1

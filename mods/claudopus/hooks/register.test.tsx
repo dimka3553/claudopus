@@ -7743,6 +7743,14 @@ test('F-007 F-017 · a runner run with another home or data folder, or with Clau
     `XDG_DATA_HOME=/tmp/d ${ADMIN} here 'id -u'`,
     `env -i PATH=/usr/bin ${ADMIN} here 'id -u'`,
     'bash /repo/rel.sh',
+    // What the release's own shell runs, the GitHub checks' verdict among it, set by the caller: a startup file, the PATH, git's
+    // settings, functions, a script sourced first, or a shell of the caller's choosing
+    'BASH_ENV=/tmp/e.sh /plug/claudopus/bin/release',
+    'cd /repo/wt && PATH=/tmp/x:$PATH /plug/claudopus/bin/release',
+    'export GIT_CONFIG_COUNT=1; /plug/claudopus/bin/release',
+    'export -f perl; /plug/claudopus/bin/release',
+    'source /tmp/e.sh && /plug/claudopus/bin/release',
+    'bash /plug/claudopus/bin/release',
   ])
     expect(((await bash(`h${command.length}`, command)) as { deny?: string }).deny).toContain("Claudopus's runners")
   expect(grants()).toEqual([])
