@@ -85,9 +85,9 @@ const noteDone = async ($: EngineInterface, note: Omit<DoneNote, 'at'>) => {
   const at = await $.clock.now()
   const made = { ...note, at, ...(note.call && note.endedAt === undefined && callsEnded.has(note.call) ? { endedAt: at } : {}) }
   doneNotes = [...doneNotes.filter(one => one.id !== note.id && isNoteShown(one, at)), made].slice(-6)
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   // Drawn again as its time ends, so it goes with nothing else to redraw the panel
-  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => $.ui.invalidate('ui.render'))
+  $.clock.after((!made.call ? DONE_SHOWN : made.endedAt !== undefined ? DONE_LEAST : DONE_LONGEST) + 100, () => drawAgain($))
 }
 // The call a note tells of has ended: what it said is over, so the note goes (after DONE_LEAST from its press)
 const noteCallEnded = async ($: EngineInterface, call: string) => {
@@ -96,9 +96,9 @@ const noteCallEnded = async ($: EngineInterface, call: string) => {
   if (!doneNotes.some(one => one.call === call && one.endedAt === undefined)) return
   const at = await $.clock.now()
   doneNotes = doneNotes.map(one => (one.call === call && one.endedAt === undefined ? { ...one, endedAt: at } : one))
-  $.ui.invalidate('ui.render')
+  drawAgain($)
   const last = Math.max(...doneNotes.filter(one => one.call === call).map(one => one.at + DONE_LEAST))
-  $.clock.after(Math.max(0, last - at) + 100, () => $.ui.invalidate('ui.render'))
+  $.clock.after(Math.max(0, last - at) + 100, () => drawAgain($))
 }
 // What was done is a line, as Claude Code reports a call's result under it: a mark and the words, with no box, fill or edge, so it is
 // never taken for a card of work. Green once allowed or given, grey once refused or cancelled
@@ -135,8 +135,11 @@ const boxHead = (text: string) => {
   const mac = text.match(/admin password of (.+?) to run/)?.[1]
   return mac ? `The admin password of ${mac}` : name ? `The key ${name}` : 'A key to save'
 }
-// What is being typed in each box, only in this code's memory, so a redraw keeps it; gone once it is sent
-const boxDrafts = new Map<string, string>()
+// What is typed in a box is kept by the surface alone, never here or drawn back: a drawing that carried it put older letters over
+// newer ones. Each try that left the box to be typed again gives its field a new key, so the field starts empty
+const boxTries = new Map<string, number>()
+// The boxes something is typed in, unsent, so an ask's reply box does not take the keys from them
+const boxTyped = new Set<string>()
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map<string, string>()
 // Sent from here: the box goes at once, before the runner removes its request
@@ -212,10 +215,10 @@ const lookBoxes = async ($: EngineInterface) => {
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
-  for (const id of [...boxDrafts.keys(), ...boxSaid.keys()]) if (!found.some(one => one.id === id)) (boxDrafts.delete(id), boxSaid.delete(id))
+  for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 
 // A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
@@ -228,13 +231,13 @@ const boxKeyring = ($: EngineInterface, what: 'set' | 'has' | 'delete', id: stri
       : Promise.resolve({ exitCode: -1 })
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($: EngineInterface, id: string, value: string) => {
-  boxDrafts.delete(id)
   if (!value) return
   const refused = value.replace(/[\\"]/g, '\\$&').length > BOX_LONGEST ? `That was longer than ${BOX_LONGEST} characters, so it was not sent.` : /[^\x20-\x7E]/.test(value) ? 'That held a line break, a curly quote or another character outside plain letters, digits and signs, so it was not sent. Type it again.' : ''
   if (refused) {
     boxSaid.set(id, refused)
     boxPresses += 1
-    return void $.ui.invalidate('ui.render')
+    boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
+    return void drawAgain($)
   }
   const request = `${boxesDir()}/${id}.json`
   // A runner that has stopped, or a box answered in another chat, takes nothing: its value would stay in the keychain
@@ -245,7 +248,8 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   if (!sent) {
     boxSaid.set(id, 'It could not be sealed for the command that asked, so it was not sent.')
     boxPresses += 1
-    return void $.ui.invalidate('ui.render')
+    boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
+    return void drawAgain($)
   }
   const escaped = sent.replace(/[\\"]/g, '\\$&')
   const r = isLinux
@@ -258,6 +262,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
   // and one whose runner stopped meanwhile is taken out again
   if (isKept && !(await $.fs.exists(request).catch(() => false))) await boxKeyring($, 'delete', id)
   boxPresses += 1
+  boxTries.set(id, (boxTries.get(id) ?? 0) + 1)
   if (!isKept) {
     boxSaid.set(id, `It could not be put in ${keptWhere()}. Try again.`)
     await log($, `box ${id} not kept: security ended ${r.exitCode}`)
@@ -269,18 +274,17 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call } : {}), head: boxHead(one.text), said: one.key ? 'You gave it · it went only to the command that asked, which goes on now' : `You gave it · it is in ${keptWhere()}, and what asked for it goes on now`, what: '', isOn: true })
     await log($, `box ${id} sent to the keychain`)
   }
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
-  boxDrafts.delete(id)
   boxSent.add(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`]).catch(() => undefined)
   // Cancelled, nothing more comes of it: it is over at once
   if (one) await noteDone($, { id: `box-${id}`, ...(one.call ? { call: one.call, endedAt: 0 } : {}), head: boxHead(one.text), said, what: '' })
-  $.ui.invalidate('ui.render')
+  drawAgain($)
 }
 
 // Each box with when it was asked, so the panel puts it among what waits on the person, the newest first
@@ -296,13 +300,12 @@ const boxRows = ($: EngineInterface, ui: Ui, isKeysHeld = false) => {
       <ui.Text dimColor wrap="wrap">{one.key ? 'What you type here shows as you type it. It goes only to the command that asked, sealed for it, never into a chat, and is not kept.' : `What you type here shows as you type it. It goes only into ${keptWhere()}, never into a chat.`}</ui.Text>
       <ui.Box width="100%" flexDirection="column">
         <ui.Input
-          key={`box-${one.id}-field-${boxPresses}`}
+          key={`box-${one.id}-field-${boxTries.get(one.id) ?? 0}`}
           placeholder="Type or paste it here"
-          value={boxDrafts.get(one.id) ?? ''}
           submitLabel="send"
           autoFocus={n === 0 && !isKeysHeld ? true : undefined}
-          onInput={value => void boxDrafts.set(one.id, value)}
-          onSubmit={value => void sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`))}
+          onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($))}
+          onSubmit={value => void (boxTyped.delete(one.id), freeTimes($), sendBox($, one.id, value).catch(() => log($, `box ${one.id} not sent`)))}
         />
       </ui.Box>
       {boxSaid.get(one.id) ? <ui.Text key={`box-${one.id}-said`} color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}

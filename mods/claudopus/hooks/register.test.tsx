@@ -438,7 +438,12 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.tool === 'Bash' && (e as { run_in_background?: boolean }).run_in_background) return { result: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundTaskId: `bg-${e.tool_use_id}` } } as never
     // SBOS's list of names, as the test lays it
     if (e.tool === 'mcp__sbos__secrets') return { result: { content: [{ type: 'text', text: files.get('sbos:secrets') ?? '[]' }] } } as never
-    if (e.tool === 'Monitor') return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: 0, persistent: true } } as never
+    if (e.tool === 'Monitor') {
+      // as the engine answers: a watch not kept for good ends at its time limit, at most 30 minutes
+      const w = e as { timeout_ms?: number; persistent?: boolean | string }
+      const forGood = w.persistent === undefined || w.persistent === true || w.persistent === 'true'
+      return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: forGood ? 0 : Math.min(w.timeout_ms ?? 300_000, 1_800_000), persistent: forGood } } as never
+    }
     if (e.tool === 'Workflow') return { result: { status: 'async_launched', taskId: 'wt1', runId: 'wf_1', taskType: 'local_workflow', workflowName: 'rounds', transcriptDir: '/t/wf_1', scriptPath: '/t/wf_1.js' } } as never
     return { result: 'ran' } as never
   })
@@ -2287,7 +2292,9 @@ test('every run under a card says how it stands: a command held open shows its p
   // The download held open: how much of how much, its percent, speed and time left, as curl printed them, and nothing of when
   // Named in the work's own form: its kind already said, how long it should take beside its time, in amber well past it
   expect(shown).toContain('Download the CT scans')
-  expect(shown).toContain('9m 00s of ~3m')
+  // past it, the run's own time left makes a fresh expectation, never the old figure as if it held
+  expect(shown).toContain('9m 00s of ~9m 53s')
+  expect(shown.some(text => /of ~3m/.test(text))).toBe(false)
   expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
@@ -2309,6 +2316,77 @@ test('every run under a card says how it stands: a command held open shows its p
   await list.unmount()
   held.get('dl')?.('')
   await call
+})
+
+test('only runs really running are listed: a watch the engine killed at its time limit, a command that failed and one that finished leave at once, counted on the closing row and told apart in Details; 15 Nov three "[killed]" watches stayed with their clocks running', SLOW, async ($, on) => {
+  let now = 1_700_000_000_000
+  const born = now
+  const TASKS = '/tmp/claude-501/x/s1/tasks'
+  const MIN = 60_000
+  // The 15 Nov card: two alike watches set 30 minutes, one more, and the wait that was really still going
+  const outputs: Record<string, () => string> = {
+    [`${TASKS}/mon-m1.output`]: () => (now - born >= 30 * MIN ? '\n[killed]\n' : ''),
+    [`${TASKS}/mon-m2.output`]: () => (now - born >= 30 * MIN ? '\n[killed]\n' : ''),
+    [`${TASKS}/bg-w1.output`]: () => '',
+    [`${TASKS}/bg-f1.output`]: () => (now - born >= 3 * MIN ? 'Traceback: boom\n\n[exited with code 1]\n' : ''),
+    [`${TASKS}/bg-k1.output`]: () => (now - born >= 2 * MIN ? 'all good\n\n[exited with code 0]\n' : ''),
+    // one past its time that prints how long it has left, and one past its time that does not
+    [`${TASKS}/bg-p1.output`]: () => 'progress: 3/6 steps fitting eta 4m\n',
+    [`${TASKS}/bg-p2.output`]: () => 'drawing frames\n',
+  }
+  const { clock } = world(on, { jobs: { output: file => outputs[file]?.() ?? '', wroteAt: () => now - 2_000 } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  const advance = async (ms: number) => ((now += ms), await clock.advance(ms))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'save the videos', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Save the videos', prompt: 'go' } as never)
+  const watch = (id: string) => $.tool.call({ tool: 'Monitor', tool_use_id: id, agentId: 'a1', command: 'until grep -q "pass 1 done" /s/screen.log; do sleep 20; done', description: 'Wait for first screening pass (about 35 min)', timeout_ms: 3_000_000, persistent: false } as never)
+  await watch('m1')
+  await watch('m2')
+  const bg = (id: string, command: string, description: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command, description, run_in_background: true } as never)
+  await bg('w1', 'until grep -q "pass 1 done" /s/screen.log; do sleep 20; done; tail -2 /s/screen.log', 'Wait for the details screening to finish (about 55 min)')
+  await bg('f1', 'python3 fetch.py', 'Run the fetch of the list')
+  await bg('k1', 'python3 tidy.py', 'Run the tidy up')
+  await bg('p1', 'python3 fit.py', 'Run the fit (about 20 min)')
+  await bg('p2', 'python3 frames.py', 'Run the drawing of frames (about 20 min)')
+  const texts = async (surface = 'terminal') => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface } as never)
+    const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
+    await list.unmount()
+    return all
+  }
+  for (let n = 0; n < 10; n++) await advance(MIN)
+  // Before the limit both watches run, as one row of two
+  expect((await texts()).some(text => /^Wait for first screening pass ×2$/.test(text))).toBe(true)
+  for (let n = 0; n < 39; n++) await advance(MIN)
+  const shown = (await until(async () => {
+    const all = await texts()
+    return all.some(text => /^4 runs ended/.test(text)) ? all : undefined
+  })) ?? []
+  // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
+  expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
+  expect(shown.some(text => /screening pass ×2|Run the fetch|Run the tidy/.test(text))).toBe(false)
+  // The closing row counts them and says, in words, how many did not finish well
+  expect(shown).toContain('4 runs ended · 1 failed, 2 timed out')
+  // The wait still running stays, within its time
+  expect(shown).toContain('Wait for the details screening to finish')
+  expect(shown).toContain('49m 00s of ~55m')
+  // Past its time: a fresh expectation from the time left it prints; or else plainly past it, never the old figure as if it held
+  expect(shown).toContain('49m 00s of ~53m')
+  expect(shown).toContain('49m 00s · past ~20m')
+  expect(shown.some(text => /of ~20m/.test(text))).toBe(false)
+  // Details names each ended run with how it ended
+  const pane = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
+  const details = (await pane.findAll({ type: 'Text' })).map(one => one.text)
+  await pane.unmount()
+  expect(details).toContain('Runs ended')
+  expect(details.filter(text => text === 'Wait for first screening pass').length).toBe(2)
+  expect(details.filter(text => /^timed out after (29|30)m \d\ds · /.test(text)).length).toBe(2)
+  expect(details.some(text => /^failed \(exit code 1\) after \dm \d\ds · /.test(text))).toBe(true)
+  expect(details.some(text => /^finished after \dm \d\ds · /.test(text))).toBe(true)
+  // Later the wait passes its time too, with nothing printed: it says so
+  for (let n = 0; n < 8; n++) await advance(MIN)
+  expect((await texts()).some(text => /^57m 00s · past ~55m$/.test(text))).toBe(true)
 })
 
 test("a run's second line starts under its name, with the tree's lines carried down beside it: not the last, the last, a run under a helper, a narrow panel, on a desktop and in a terminal; 15 Nov the app dropped the lines and the line started left of the tree", SLOW, async ($, on) => {
@@ -4558,6 +4636,104 @@ test("while the person types into a card's reply box the list's running times st
   await list.unmount()
 })
 
+test('while the person types into an ask the panel holds its drawing whole, as other cards move, start and finish around it: the 15 Nov panel that jumped to its bottom and flickered with every letter typed', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'two pieces of work', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Keep digging for head CTs', prompt: 'dig' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Which source next?', details: 'A long explanation.\n\n- one\n- two\n- three', choices: ['Kaggle', 'TCIA', 'Not now'] } as never)
+  for (const surface of ['desktop', 'terminal'] as const) {
+    const list = await $.ui.mount({ ...LIST, surface } as never)
+    const ears = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface } as never)
+    await clock.advance(2000)
+    const drawing = async (pane: typeof list) => JSON.stringify([...(await pane.findAll({ type: 'Text' })).map(one => one.text), ...(await pane.findAll({ type: 'Input' } as never)).map(one => [one.key, one.props.value])])
+    const box = (await list.findAll({ type: 'Input' } as never)).find(one => /^ask-a1-reply-/.test(one.key ?? ''))
+    expect(box).toBeDefined()
+    const [before, beforeDetails] = [await drawing(list), await drawing(ears)]
+    // Each letter is one change: none of them draws the panel again, nor Details
+    for (const text of ['N', 'No', 'Non', 'Non-A']) await list.input({ key: box?.key ?? '', text, kind: 'change' } as never)
+    expect(await drawing(list)).toBe(before)
+    // The other card writes a new line and its time moves: the panel still holds its drawing, and so does Details
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `n-${surface}`, agentId: 'a2', text: `I am measuring the left ear on the ${surface}.` } as never)
+    await clock.advance(3000)
+    await list.input({ key: box?.key ?? '', text: 'Non-Asian', kind: 'change' } as never)
+    expect(await drawing(list)).toBe(before)
+    expect(await drawing(ears)).toBe(beforeDetails)
+    // A third piece of work starts: it is drawn, and the box is drawn with the text it had, never the letters as they come
+    await $.agent.spawn({ ...spawn, description: `Find more scans ${surface}`, prompt: 'more' } as never)
+    expect(await until(async () => list.find({ type: 'Text', text: `Find more scans ${surface}` }))).toBeDefined()
+    expect((await list.findAll({ type: 'Input' } as never)).find(one => /^ask-a1-reply-/.test(one.key ?? ''))?.props.value).toBe('')
+    // Typing stopped: the panel moves on, with the other card's new line, and the box holds what was typed
+    await clock.advance(31_000)
+    expect(await until(async () => list.find({ type: 'Text', text: `I am measuring the left ear on the ${surface}.` }))).toBeDefined()
+    expect((await list.findAll({ type: 'Input' } as never)).find(one => /^ask-a1-reply-/.test(one.key ?? ''))?.props.value).toBe('Non-Asian')
+    // A press is the person's own move: it lets the panel go at once
+    await list.input({ key: box?.key ?? '', text: 'Non-Asian heads', kind: 'change' } as never)
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `m-${surface}`, agentId: 'a2', text: `Both ears done on the ${surface}.` } as never)
+    await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'TCIA')?.key ?? '' })
+    expect(await until(async () => list.find({ type: 'Text', text: `Both ears done on the ${surface}.` }))).toBeDefined()
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${surface}`, agentId: 'a1', text: 'Which source next?', choices: ['Kaggle', 'TCIA', 'Not now'] } as never)
+    await Promise.all([list.unmount(), ears.unmount()])
+  }
+})
+
+test('with work running and nobody typing, the panel is drawn again at once for anything new, but for its running times alone only every ten seconds, so a button under the pointer keeps its hover and takes its click', async ($, on) => {
+  const { clock } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I go on?', choices: ['Approve', 'Not now'] } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const texts = async () => JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  await clock.advance(1000)
+  const before = await texts()
+  await clock.advance(3000)
+  expect(await texts()).toBe(before)
+  // The work writes a line: drawn at once
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'I am looking at the left ear.' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'I am looking at the left ear.' }))).toBeDefined()
+  // and its time moves again within ten seconds
+  const after = await texts()
+  await clock.advance(11_000)
+  expect(await until(async () => ((await texts()) !== after ? true : undefined))).toBe(true)
+  // A press shows what it did at once
+  await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key ?? '' })
+  expect(await until(async () => ((await list.find({ type: 'Text', text: 'May I go on?' })) ? undefined : true))).toBe(true)
+  // and so does one that only opens a part of the panel, Finished, with work ended and other work running
+  await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' } as never)
+  await $.turn.complete({ answer: 'Nose checked.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a2' } as never)
+  await clock.advance(12_000)
+  const shut = await texts()
+  await pressed(list, 'finished-fold')
+  expect(await until(async () => ((await texts()) !== shut ? true : undefined))).toBe(true)
+  await list.unmount()
+})
+
+test('a key box keeps what is typed in it without drawing it back, and holds the panel while it is typed into', async ($, on) => {
+  const { clock, files } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'get the data', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Get the data', prompt: 'data' } as never)
+  void $.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret SAMPLE_USER here fetch' } as never).catch(() => undefined)
+  const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'SAMPLE_USER', chat: 'engine-id', at: 1_700_000_000_000 }))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(1000)
+  const field = await until(async () => (await list.findAll({ type: 'Input' } as never)).find(one => (one.key ?? '').startsWith(`box-${id}-field`)))
+  expect(field).toBeDefined()
+  if (!field) return
+  // The surface keeps the letters itself: the box is drawn with no value, so a drawing never puts older letters over newer ones
+  expect(field.props.value).toBeUndefined()
+  const before = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  await list.input({ key: field.key ?? '', text: 'made-up-na', kind: 'change' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'I am waiting for the made-up name.' } as never)
+  await clock.advance(3000)
+  expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).toBe(before)
+  expect((await list.findAll({ type: 'Input' } as never)).find(one => one.key === field.key)).toBeDefined()
+  await list.unmount()
+})
+
 test('an ask outlives the work that made it: amber after the work ends, with or without buttons of its own, until the person answers', async ($, on) => {
   const { submitted, resumed, clock } = world(on)
   await $.session.start(start)
@@ -4648,6 +4824,10 @@ test('a reply in words that does not settle an ask keeps it, and the card active
   expect(await list.find({ type: 'Text', text: ASK })).toBeDefined()
   expect(await labels()).toContain('Release it')
   expect((await list.findAll({ type: 'Input' } as never)).some(one => /-reply-/.test(one.key ?? ''))).toBe(true)
+  // and its box is a new one, empty: the surface would put the sent words back into a box it found again by its old key
+  const back = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
+  expect(back?.key).not.toBe(box?.key)
+  expect(back?.props.value).toBe('')
   expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true)
   expect(resumed.filter(line => line.startsWith('a1: '))).toHaveLength(1)
   // More words from the person keep it open still; Release it settles it, and the card finishes once the work has acted on it
@@ -5524,8 +5704,9 @@ test("while the person types a reply into an ask, work finishing here and in ano
   expect(await drawn(list)).toContain('happy')
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: '✓ Finished' })) ? undefined : true))).toBe(true)
-  // The half reply is still in its box
-  expect((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('Not ye')
+  // The half reply is still in its box: while typing the box holds the letters itself, and once typing stops it is drawn with them
+  await clock.advance(31_000)
+  expect(await until(async () => ((await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))?.props.value === 'Not ye' ? true : undefined))).toBe(true)
   await list.unmount()
 })
 
@@ -8427,12 +8608,21 @@ test('a look that gives nothing waits as long as one that works, so a broken loo
 // What the Mac's own commands print for the graphics processor and the battery, in each case the bar must tell apart
 const gpuAt = (pct: number) => `@@GPU@@\n"Device Utilization %"=${pct}`
 const batt = (line: string) => `@@BATT@@\nNow drawing from 'Battery Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`
+const ac = (line: string) => `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`
 const BATTERIES: { name: string; extra: string; desk: string[]; term: RegExp; alt: string }[] = [
   { name: 'on battery with a time left', extra: `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`, desk: ['37%', '85% 4:12 left'], term: / gpu[▰▱]{3} 37% bat 85% 4:12 disk/, alt: 'Battery: 85%, 4:12 left' },
   { name: 'on battery while the system still estimates', extra: batt('64%; discharging; (no estimate)'), desk: ['64%'], term: / bat 64% disk/, alt: 'Battery: 64%, on battery' },
   { name: 'charging', extra: batt('62%; charging; 1:05 remaining'), desk: ['62% 1:05 to full'], term: / bat 62% ↑1:05 disk/, alt: 'Battery: 62%, charging, 1:05 to full' },
   { name: 'fully charged on power', extra: `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t100%; charged; 0:00 remaining present: true`, desk: ['100%'], term: / bat 100% ac disk/, alt: 'Battery: 100%, on power' },
   { name: 'low on battery', extra: batt('12%; discharging; 0:41 remaining'), desk: ['12% 0:41 left'], term: / bat 12% 0:41 disk/, alt: 'Battery: 12%, 0:41 left' },
+  // macOS calls the charge 100% while it still tops the cells up, and still gives a time to full: the time beside 100% is dropped
+  { name: 'called full while it finishes the charge', extra: ac('100%; finishing charge; 0:36 remaining'), desk: ['100% finishing'], term: / bat 100% finishing disk/, alt: 'Battery: 100%, finishing charge' },
+  { name: 'called full while it still says charging', extra: ac('100%; charging; 0:12 remaining'), desk: ['100%'], term: / bat 100% ↑ disk/, alt: 'Battery: 100%, charging' },
+  { name: 'nearly full, finishing the charge', extra: ac('99%; finishing charge; 0:05 remaining'), desk: ['99% 0:05 to full'], term: / bat 99% ↑0:05 disk/, alt: 'Battery: 99%, charging, 0:05 to full' },
+  { name: 'held at 80% by optimised charging, or on a charger too weak to charge', extra: ac('80%; AC attached; not charging'), desk: ['80%'], term: / bat 80% ac disk/, alt: 'Battery: 80%, on power' },
+  { name: 'charging while the system still estimates', extra: ac('45%; charging; (no estimate)'), desk: ['45%'], term: / bat 45% ↑ disk/, alt: 'Battery: 45%, charging' },
+  // The low end the same way: a charge the system calls 0% has no time left beside it
+  { name: 'called empty with a time left', extra: batt('0%; discharging; 0:09 remaining'), desk: ['0%'], term: / bat 0% disk/, alt: 'Battery: 0%, on battery' },
 ]
 for (const one of BATTERIES)
   test(`the bar shows the battery as the system reports it: ${one.name}`, async ($, on) => {
@@ -8449,7 +8639,7 @@ for (const one of BATTERIES)
     const drawings = await desk.findAll({ type: 'Svg' })
     expect(drawings.find(d => String(d.props.alt).startsWith('Battery'))?.props.alt).toBe(one.alt)
     // Never a figure the system did not give
-    if (/no estimate|charged/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
+    if (/no estimate|charged|\t(100|0)%|not charging/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
     if (one.name === 'low on battery') expect((await desk.find({ type: 'Text', text: /^12% 0:41 left$/ }))?.props.color).toBe('#E5A50A')
     await desk.unmount()
     const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
@@ -8528,6 +8718,24 @@ test('in a narrow terminal a figure that does not fit is left out whole, the net
   expect(await line(44)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 85% 4:12$/)
   expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4:12$/)
   expect(await line(80)).toMatch(/bat 85% 4:12 disk 63M\/s net 1M\/s$/)
+})
+test('in a phone-narrow terminal the word for a charge the system calls full while it finishes is shown whole', async ($, on) => {
+  let n = 0
+  const { clock } = world(on, { usage: () => lookAt((n += 1), 1583261, `${gpuAt(37)}\n${ac('100%; finishing charge; 0:00 remaining')}`) })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await clock.advance(1000)
+  await clock.advance(6000)
+  await clock.advance(1000)
+  const term = await $.ui.mount({ ...BAND, props: { ...BAND.props, bodyColumns: 44 }, surface: 'terminal' } as never)
+  await until(async () => ((await term.find({ type: 'Text', text: /^mem/ })) ? true : undefined))
+  expect((await term.find({ type: 'Text', text: /^mem/ }))?.text).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 100% finishing$/)
+  await term.unmount()
+  // and the line of more says what the system said, with no estimate it did not give
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
+  expect((await desk.find({ type: 'Text', text: /^Battery 100% · / }))?.text).toBe('Battery 100% · finishing the charge: the system calls it full and still tops it up')
+  await desk.unmount()
 })
 
 // F-019 and F-020 of the security review, for the hourly look: it only reads the version page and shows a newer version with Install;

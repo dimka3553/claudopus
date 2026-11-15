@@ -2,6 +2,22 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.120 · 15 November 2026
+- Under a card, only runs that are really running are listed: a watch the engine killed or timed out, and a wait or command that ended, leave the list at once, so no clock counts on for something that stopped.
+- The closing row counts the runs that ended beside the helpers, such as "3 runs ended · 3 timed out", and Details lists each with how it ended in plain words: finished, failed with its exit code, killed, timed out or stopped by the work.
+- A run past the time the work said it would take no longer shows that old figure as if it held: it shows a fresh expectation from the time left the run prints (or its percent), or else says plainly that it is past its expected time.
+- Work is told to give a new expected time when its own estimate turns out wrong, and to stop its waits and watches once it no longer needs them.
+
+## 0.2.119 · 15 November 2026
+- While you type into an ask's reply box or a key box, the panel and Details hold still: other cards' lines, times and output wait until you stop, so the box no longer flickers, drops letters or throws the panel to its bottom; a card that starts, finishes or asks, and an admin command waiting, still show at once.
+- With nobody typing, the panel is drawn again at once for anything new, but for running times and command output only every ten seconds, so a button under the pointer keeps its hover and takes the first click.
+- A reply box is empty after you send from it, and stays empty when it comes back.
+- What you typed into an ask's reply box stays in it through a reload of Claudopus, and does not turn up in the work's next ask.
+- A key box is drawn without the letters typed in it, so a redraw can never put older letters over newer ones.
+
+## 0.2.118 · 15 November 2026
+- The battery above the prompt no longer shows a time to full beside 100%: while macOS calls it 100% and still tops it up, it says "finishing", and a battery macOS calls empty shows no time left beside 0%.
+
 ## 0.2.117 · 15 November 2026
 - Everything that waits for your press is at the top of the panel, right under its header, the newest first: a work that waits on an admin command, a release, a change to your files or a put-back change comes up whole, with its amber box in its own card, beside the cards of work that asked you something; password and key boxes, the chat's own gates and Claude Code's own permission prompts, every chat's, are there too. All other work stays below in the order it began.
 - Once you press Allow or Deny, the same card says what was allowed where the amber box was, outlined green (grey when refused), and the card goes back to its place when that note goes.

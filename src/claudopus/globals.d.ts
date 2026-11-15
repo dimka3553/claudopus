@@ -188,10 +188,12 @@ declare global {
   export import detachedOf = M10.detachedOf
   export import DOWNLOAD_CMD = M10.DOWNLOAD_CMD
   export import describedOf = M10.describedOf
+  export import runEndOf = M10.endOf
+  export import expiresIn = M10.expiresIn
+  export import leftSeconds = M10.leftSeconds
   export import foldJobs = M10.foldJobs
   export import heldShellOf = M10.heldShellOf
   export import isKindSaid = M10.isKindSaid
-  export import isOutputEnded = M10.isOutputEnded
   export import isPausedProc = M10.isPausedProc
   export import isPid = M10.isPid
   export import isWaitOnly = M10.isWaitOnly
@@ -223,6 +225,7 @@ declare global {
   export import Job = M10.Job
   export import JobKind = M10.JobKind
   export import TabMove = M9.TabMove
+  export import batteryShown = M11.batteryShown
   export import batterySvg = M11.batterySvg
   export import FOOTPRINT_EVERY = M11.FOOTPRINT_EVERY
   export import gbText = M11.gbText
