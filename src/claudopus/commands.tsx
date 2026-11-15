@@ -3,6 +3,8 @@
 // Panes whose focus is in a box the person types in, and each pane's last move of the person's
 const boxFocused = new Set<string>()
 const lastMoves = new Map<string, { at: number; by: number }>()
+// Where the app's last refused pull would have put each pane: the focused box's place
+const pulledTo = new Map<string, number>()
 
 const commandHooks = (on: On) => {
 
@@ -36,8 +38,9 @@ const commandHooks = (on: On) => {
     // The app pulling the pane back to the box the person types in, reported as their move, is refused: the window stays where
     // they scrolled it (scrolls.ts)
     if (e.origin.kind === 'person') {
-      const move = { at: await $.clock.now(), by: e.by }
-      if (!isPullGuardOff && isPulledBack(lastMoves.get(e.requestId), move, boxFocused.has(e.requestId))) return (recordEvent($, 'pull-refused', { by: e.by, to: e.offset }), {})
+      const move = { at: await $.clock.now(), by: e.by, to: e.offset }
+      if (!isPullGuardOff && isPulledBack(lastMoves.get(e.requestId), move, boxFocused.has(e.requestId), pulledTo.get(e.requestId)))
+        return (Math.abs(e.by) >= PULL_MARKS && pulledTo.set(e.requestId, e.offset), recordEvent($, 'pull-refused', { by: e.by, to: e.offset }), {})
       lastMoves.set(e.requestId, move)
     }
     return next(e)

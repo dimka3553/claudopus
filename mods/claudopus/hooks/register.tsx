@@ -16,7 +16,7 @@ import { copyOf, download, FAILS, folderMarketplace, folderReady, install, insta
 import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUDGET } from './changelog'
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
-import { isPulledBack } from './scrolls'
+import { isPulledBack, PULL_MARKS } from './scrolls'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import { leftoversOf, memOf, leftName, PS_COLUMNS } from './jobs'
 import type { OpenCall, Proc, Span } from './jobs'
@@ -10389,6 +10389,8 @@ const workHooks = (on: On) => {
 // Panes whose focus is in a box the person types in, and each pane's last move of the person's
 const boxFocused = new Set<string>()
 const lastMoves = new Map<string, { at: number; by: number }>()
+// Where the app's last refused pull would have put each pane: the focused box's place
+const pulledTo = new Map<string, number>()
 
 const commandHooks = (on: On) => {
 
@@ -10422,8 +10424,9 @@ const commandHooks = (on: On) => {
     // The app pulling the pane back to the box the person types in, reported as their move, is refused: the window stays where
     // they scrolled it (scrolls.ts)
     if (e.origin.kind === 'person') {
-      const move = { at: await $.clock.now(), by: e.by }
-      if (!isPullGuardOff && isPulledBack(lastMoves.get(e.requestId), move, boxFocused.has(e.requestId))) return (recordEvent($, 'pull-refused', { by: e.by, to: e.offset }), {})
+      const move = { at: await $.clock.now(), by: e.by, to: e.offset }
+      if (!isPullGuardOff && isPulledBack(lastMoves.get(e.requestId), move, boxFocused.has(e.requestId), pulledTo.get(e.requestId)))
+        return (Math.abs(e.by) >= PULL_MARKS && pulledTo.set(e.requestId, e.offset), recordEvent($, 'pull-refused', { by: e.by, to: e.offset }), {})
       lastMoves.set(e.requestId, move)
     }
     return next(e)
@@ -12772,6 +12775,8 @@ const tabHooks = (on: On) => {
   on('ui.input', async ($, e, next) => {
     const r = await next(e)
     if (e.plugin !== 'claudopus' || e.kind !== 'submit') return r
+    // A box sent is gone: the pull back to it no longer applies (commands.tsx)
+    boxFocused.delete(e.requestId)
     // Two replies to ended work went from the timer with no sign of why: each submit says here what it found on its way
     void log($, `reply submitted: ${answersOnWay.size} answer(s) and ${wakes.length} wake(s) on the way`)
     if (answersOnWay.size || wakes.length) await sendWakes($, true).catch(err => log($, `reply not sent: ${String(err)}`))

@@ -202,6 +202,7 @@ declare global {
   export import Version = M8.Version
   export import tabMoveQueue = M9.tabMoveQueue
   export import isPulledBack = M10.isPulledBack
+  export import PULL_MARKS = M10.PULL_MARKS
   export import detachedOf = M11.detachedOf
   export import DOWNLOAD_CMD = M11.DOWNLOAD_CMD
   export import describedOf = M11.describedOf
