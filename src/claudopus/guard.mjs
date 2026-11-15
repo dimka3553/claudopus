@@ -28,7 +28,8 @@ const copy = () => {
 }
 // The tests of a run by name, passed or failed
 const run = dir => {
-  execFileSync('node', ['src/claudopus/build.mjs'], { cwd: dir, stdio: 'ignore' })
+  const built = spawnSync('node', ['src/claudopus/build.mjs'], { cwd: dir, encoding: 'utf8' })
+  if (built.status !== 0) throw new Error(`the build failed:\n${built.stdout}${built.stderr}`.trimEnd())
   const out = spawnSync(engine, ['plugin', 'test', 'mods/claudopus'], { cwd: dir, encoding: 'utf8', maxBuffer: 1 << 28 })
   const text = `${out.stdout}\n${out.stderr}`
   const of = mark => [...text.matchAll(new RegExp(`^\\(${mark}\\) (.*?)(?: \\[[\\d.]+m?s\\])?$`, 'gm'))].map(m => m[1])
@@ -80,6 +81,16 @@ if (verb === 'break') {
         if (shown.status === 0) writeFileSync(join(dir, path), shown.stdout)
         else if (existsSync(join(dir, path))) rmSync(join(dir, path))
       }
+      // The base's build joins the tests as it did then: given the branch's test parts it did not list, and none of what this
+      // checkout's build joined before
+      const build = join(dir, 'src/claudopus/build.mjs')
+      const listed = /const TEST_PARTS = \[([^\]]*)\]/.exec(readFileSync(build, 'utf8'))
+      if (listed) {
+        const parts = readdirSync(join(dir, 'src/claudopus/tests')).filter(name => name.endsWith('.test.tsx') && !listed[1].includes(`'${name}'`))
+        writeFileSync(build, readFileSync(build, 'utf8').replace(listed[0], `const TEST_PARTS = [${listed[1].trimEnd().replace(/,?$/, ',')} ${parts.map(name => `'${name}'`).join(', ')}]`))
+      }
+      rmSync(join(dir, 'mods/claudopus/hooks/tests'), { recursive: true, force: true })
+      rmSync(join(dir, 'mods/claudopus/hooks/register.test.tsx'), { force: true })
       const { passed } = run(dir)
       const useless = added.filter(name => passed.includes(name))
       console.log(`${added.length} new tests; ${useless.length} pass without this branch's code${useless.length ? ', so guard nothing it changed:' : '.'}`)
