@@ -113,9 +113,12 @@ const recorderHooks = (on: On) => {
     if (await isRecording($)) await recordLine($, { ev: 'scroll', id: e.requestId, origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows })
     return next(e)
   })
-  on('ui.focus', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element) })
-    return next(e)
+  // Every site's focus moves, the panel's and the rest (a press that takes the focus out of the panel), and what came of each
+  on('ui.focus', async ($, e, next) => {
+    if (!(await isRecording($))) return next(e)
+    const r = await next(e)
+    await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element), deny: (r as { deny?: unknown })?.deny !== undefined })
+    return r
   })
   // Typing as a count by box: the value is never read
   on('ui.input', { requestId: LIST }, async ($, e, next) => {
@@ -127,8 +130,12 @@ const recorderHooks = (on: On) => {
     }
     return next(e)
   })
+  // A press, and whether it reached its button: an element the drawing no longer holds runs nothing
   on('ui.press', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'press', id: e.requestId, element: keyShown(e.element) })
-    return next(e)
+    if (!(await isRecording($))) return next(e)
+    await recordLine($, { ev: 'press', id: e.requestId, element: keyShown(e.element) })
+    const r = await next(e)
+    await recordLine($, { ev: 'pressed', element: keyShown(r.element) })
+    return r
   })
 }
