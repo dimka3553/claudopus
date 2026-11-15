@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.124 · 15 November 2026
+- After you answer an ask on its card (a button such as Release it or Done, or a reply from its box), the card stays where it was at the top for a minute, saying what you answered, instead of jumping away under your pointer.
+- A piece of work started again by your answer, such as Release it on work that had ended, keeps its place among the cards instead of moving to the very bottom of the panel.
+
 ## 0.2.123 · 15 November 2026
 - A Stop you press on a card, or on a helper under it, now holds: the chat is told you stopped it, and it cannot start that work again, message it or start the same work afresh until you send a new message asking for it.
 - Nothing of Claudopus's own wakes stopped work: answers that were on their way to it are dropped, and it is not carried on after a cut-off.
