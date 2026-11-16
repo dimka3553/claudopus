@@ -85,7 +85,7 @@ Claudopus never updates by itself. Every hour (or as often as Config says) it lo
 
 ### When work is done
 
-- The card comes to the top for two seconds, outlined in green, then goes under **Finished**. A chime plays, and a notification names the work and the start of its result; clicking it opens that chat.
+- The card comes to the top, under what waits, for two seconds, outlined in green, then goes under **Finished**. A chime plays, and a notification names the work and the start of its result; clicking it opens that chat.
 - Work stopped by an error stays in its place and turns red.
 - Finished work that left something running stays at the top with **Stop it**.
 - When the panel is scrolled down, the bar just above the prompt says what waits or what just finished at the top; pressing it takes the panel back up.
