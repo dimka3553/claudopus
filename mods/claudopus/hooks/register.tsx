@@ -9358,6 +9358,9 @@ const chatHooks = (on: On) => {
       })
       if (how === 'stopped') await keepStoppedReports($, now)
       await lookEnds($)
+      // Work that ended its step to wait for its helpers, or to be started again, which the engine does not list as waiting: the chat
+      // is told it is still at work, as the engine tells it otherwise
+      if (how === 'done' && !isHandedBack && listed !== 'waiting') await tellWaitsOn($, id).catch(err => log($, `chat not told work ${id} waits: ${String(err)}`))
       // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
       if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
@@ -10358,7 +10361,7 @@ const LOOK_IN_EVERY = 60_000
 const HELPER_QUIET = 5 * 60_000
 // What Claude is told of a helper that has shown nothing new
 const QUIET_HELPER = (title: string, id: string, mins: number, running: string) =>
-  `Your helper "${title}" (${id}) has shown nothing new for ${mins} minutes${running ? `; ${running}` : ''}. Look at what it is doing now: send it a short question with SendMessage, which it sees after its current step; if it is stuck, stop it with TaskStop and start a narrower one in its place. If it does one at a time what could be split up, start helpers for the other parts beside it.`
+  `Your helper "${title}" (${id}) has shown nothing new for ${mins} minutes${running ? `; ${running}` : ''}. Look at what it is doing now: send it a short question with SendMessage, which it sees after its current step; if it is stuck, tell it the same way to hand back what it has now (Claude Code does not let you stop it yourself) and start a narrower one in its place. If it does one at a time what could be split up, start helpers for the other parts beside it.`
 // What it is told of a helper that keeps taking single steps in order
 const SERIAL_HELPER = (title: string, id: string, steps: number) =>
   `Your helper "${title}" (${id}) has taken ${steps} steps, nearly all of one call each: it does one at a time what could be split up. If its parts don't depend on each other, start helpers for the rest beside it, or tell it with SendMessage to send its calls together.`
@@ -10512,7 +10515,7 @@ const stepHooks = (on: On) => {
 // The helpers an agent started that are still at work
 const runningHelpers = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working' && !one.answeredAt)
 const HELD_AT_END = (n: number) =>
-  `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Don't hand back your report yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Carry on with what needs nothing from ${n === 1 ? 'it' : 'them'}, or end your step without a report: each result starts you again. Stop one you no longer need with TaskStop.`
+  `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Don't hand back your report yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Carry on with what needs nothing from ${n === 1 ? 'it' : 'them'}, or end your step without a report: each result starts you again, and Claudopus tells the chat you wait for ${n === 1 ? 'it' : 'them'}. One you no longer need: tell it with SendMessage to hand back what it has now, as Claude Code does not let you stop it yourself.`
 const HELPERS_STARTED = 'Your helpers run in the background: each call came back at once, and each result comes to you as a message when it ends, even after you end your step. Continue now with your own part, and when nothing else is left, end your step: never wait for them with a command.'
 // What the work that started a helper is told as Claudopus passes on its result
 const HELPER_ENDED = (title: string, how: Todo['status'], report: string) =>
@@ -10520,6 +10523,28 @@ const HELPER_ENDED = (title: string, how: Todo['status'], report: string) =>
 // What the chat is told, so a helper's result that reached it, or a notice that the task ended without its report, needs nothing
 const HELPER_PASSED = (helper: string, work: string) =>
   `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step to let it work. Claudopus has passed it on to that task and started it again: there is nothing for you to do with it, and nothing to tell {name}.`
+
+// What the chat is told of work that ended its step to wait for its helpers, or to be started again: the engine sees neither, so it
+// tells the chat that work ended without its report and to ask it for one, which the work cannot give while its helpers run (16 Nov:
+// five tasks asked again and again, each refused at its report). Told once, until the work takes a step again. Work that waits only
+// on a command it started detached is not: its card ends as the engine ends it, and the command starts it again
+const toldWaitsOn = new Set<string>()
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`)
+const WAITS_ON = (work: string, helpers: number, wake: string) =>
+  `From Claudopus: the task "${work}" ended its step without its report because it waits ${helpers ? `for ${plural(helpers, 'a helper', 'helpers')} it started` : `to be started again once this is there: ${wake}`}. Claude Code may say it ended without delivering a report, but it is still at work: ${
+    helpers ? `${helpers === 1 ? "the helper's result starts" : "each helper's result starts"} it again` : 'Claudopus starts it again then'
+  }, and its report comes after that. Do not send it a message asking for its report, which it cannot give while it waits, and do not tell {name} it stopped.`
+const tellWaitsOn = async ($: EngineInterface, id: string) => {
+  if (!dir || isOff || toldWaitsOn.has(id)) return
+  const list = await read($, todos)
+  const card = list.find(one => one.id === id)
+  if (!card || card.parentId || card.status !== 'working' || card.handedBackAt !== undefined) return
+  const helpers = runningHelpers(list, id).length
+  if (!helpers && !card.wakeWhen) return
+  toldWaitsOn.add(id)
+  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(WAITS_ON(titleOf(card), helpers, card.wakeWhen?.what ?? '')) }] } })
+  await log($, `chat told work ${id} waits on ${helpers ? plural(helpers, 'a helper', 'helpers') : 'being woken'}`)
+}
 
 // A helper that ends while the work that started it has ended its step: the engine hands its result to the chat (seen live on 16
 // Nov), so Claudopus passes it on to that work and starts it again with it. The work never holds itself open to wait for helpers
@@ -11652,14 +11677,19 @@ const workHooks = (on: On) => {
     // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
     // The engine presses work that ends its step without its report, while it sees nothing of the work's own at work: a command
-    // the work started detached, or what it asked Claudopus to wake it for, it does not see (16 Nov: 30 presses in 25 minutes ended a
-    // task early). That press is answered here with no model, so the work ends its step and is started again when that is done
-    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen) && (await isPressedForReport($, id))) {
-      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : 'it waits to be woken'}: let it end its step`)
+    // the work started detached, what it asked Claudopus to wake it for, or its helpers, which run in the background and whose
+    // results start it again, it does not see (16 Nov: 30 presses in 25 minutes ended a task early; five tasks waiting on a second
+    // look were each pressed and refused at their report). That press is answered here with no model, so the work ends its step and
+    // is started again when that is done
+    const helpers = id !== undefined && card && !isOff && card.handedBackAt === undefined ? runningHelpers(await read($, todos), id).length : 0
+    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen || helpers) && (await isPressedForReport($, id))) {
+      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : 'it waits to be woken'}: let it end its step`)
       yield { kind: 'text', index: 0, text: LEFT_AT_WORK }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
       return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
     }
+    // A step of its own: the chat is told again the next time it ends its step to wait
+    if (id !== undefined) toldWaitsOn.delete(id)
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder

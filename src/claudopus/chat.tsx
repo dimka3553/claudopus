@@ -488,6 +488,9 @@ const chatHooks = (on: On) => {
       })
       if (how === 'stopped') await keepStoppedReports($, now)
       await lookEnds($)
+      // Work that ended its step to wait for its helpers, or to be started again, which the engine does not list as waiting: the chat
+      // is told it is still at work, as the engine tells it otherwise
+      if (how === 'done' && !isHandedBack && listed !== 'waiting') await tellWaitsOn($, id).catch(err => log($, `chat not told work ${id} waits: ${String(err)}`))
       // A reply it never read goes to the chat; work that waits for its helpers reads it at its next step
       if ((await read($, todos)).find(one => one.id === id)?.status !== 'working') await replyUnread($, id).catch(err => log($, `reply not passed on: ${String(err)}`))
       if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))

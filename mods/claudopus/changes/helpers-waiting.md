@@ -1,0 +1,2 @@
+- A task that ends its step to wait for its helpers, or for something it asked Claudopus to start it again for, is no longer reported to the chat as ended without a report: Claudopus tells the chat it is still at work and is not to be asked for its report, and answers Claude Code's reminders to report without using Claude
+- Tasks are no longer told to stop a helper of their own with TaskStop, which Claude Code refuses them: they tell it to hand back what it has instead
