@@ -182,10 +182,6 @@ const personSign = async ($: EngineInterface) => {
     [...(await read($, todos)), ...(await read($, flows))].filter(one => (one as { byYou?: unknown }).byYou).map(one => one.id), [...stoppingJobs], doneNotes.length, updatedMoment ?? null, copiedKey, dir ? await readOr($, stepsPath()) : "",
   ])
 }
-// How tall the list was while in use, from the app's own word on each scroll: the list is drawn at least that tall until the person
-// leaves it, so a card that shrinks (their own answer) never shortens it under them. At its end the view snapped up by the shrink
-let usedRows = 0
-const noteRows = (at: number, rows: number | undefined) => void (usedRows = isEngaged(at) ? Math.max(usedRows, rows ?? 0) : (rows ?? 0))
 // A click is the focus moving onto a button, then the press: a drawing between them is a new button under the pointer, and the
 // click did nothing (16 Nov, recorded: the update note's What's new took several clicks while other chats' writes drew the panel
 // twice a second). From the person's focus on one of the panel's buttons until its press, or PRESS_HOLD, the panel is drawn as it

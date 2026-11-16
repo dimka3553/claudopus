@@ -1,0 +1,1 @@
+- The panel no longer runs on past its cards: while you scrolled it, it kept the length of the longest list it had shown in the chat, so blank space hung under the cards. Now it never reaches past the bottom of what you see

@@ -1776,8 +1776,13 @@ const panelHooks = (on: On) => {
     // Where updating stands for this chat: a small box under the header's lines, its steps each a press
     const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 
+    // While the person uses the list scrolled down, it is drawn at least as tall as the bottom of what they see, so a card that
+    // shrinks under them (their own answer) never snaps the view up; never taller, so no blank space is ever held below the cards.
+    // The height the app reports is no guide: it is this drawing's own, held height included, and kept as the most it had ever been
+    // it left the list with the length of its longest moment of the chat, blank under three cards (16 Nov, Dima's screenshot)
+    const heldRows = paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) ? e.props.scroll.offset + e.props.scroll.bodyRows : 0
     return (
-      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) ? usedRows : 0)}>
+      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, heldRows)}>
         {!alone ? (
           // The mark and its lines across the whole width, so the chat's size is read whole; the buttons on a row of their own under
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off
