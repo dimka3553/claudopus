@@ -272,15 +272,34 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
     finished.set(one.id, { at, answer: answer.slice(0, ANSWER_CHARS) })
   }
   if (!finished.size) return
+  // The deepest first: a card with a helper still at work, or one that ends now, or with something it asked to be started again for,
+  // waits; one whose helper ends now is passed that helper's result below, which starts it again, as passOnHelper does when heard.
+  // Work the chat started ends now, so the chat is told and its report kept; a helper keeps the time it really ended
+  let endedNow: string[] = []
   await changeTodos($, all => {
-    const end = (one: Todo) => {
-      const f = finished.get(one.id)
-      return f ? { ...ended(one, 'done', Math.min(f.at, now)), answer: one.answer || f.answer, wakeWhen: undefined } : one
+    const gone = new Set<string>()
+    let list = all
+    for (let isMoved = true; isMoved; ) {
+      isMoved = false
+      list = list.map(one => {
+        const f = finished.get(one.id)
+        if (!f || one.status !== 'working' || one.wakeWhen || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
+        gone.add(one.id)
+        isMoved = true
+        const isTop = !one.parentId || one.parentId === HELPER
+        const answer = f.answer || one.answer
+        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && answer.trim() ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
+      })
     }
-    const helpersDone = all.map(one => (one.parentId ? end(one) : one))
-    return helpersDone.map(one => (one.parentId || one.wakeWhen || helpersDone.some(kid => kid.parentId === one.id && kid.status === 'working') ? one : end(one)))
+    endedNow = [...gone]
+    return gone.size ? list : all
   })
-  await log($, `work that ended while the mod was out ended on its card: ${[...finished.keys()].join(', ')}`)
+  if (!endedNow.length) return
+  await log($, `work that ended while the mod was out ended on its card: ${endedNow.join(', ')}`)
+  for (const one of endedNow) {
+    const card = (await read($, todos)).find(todo => todo.id === one)
+    if (card?.parentId && card.parentId !== HELPER) await passOnHelper($, one, card.answer, 'done').catch(err => log($, `helper ${one}'s result not passed on: ${String(err)}`))
+  }
   redraw($)
 }
 
