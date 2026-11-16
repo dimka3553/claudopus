@@ -183,7 +183,8 @@ const lookJobs = async ($: EngineInterface) => {
       cards.map(one => {
         const ended = (one.detached ?? []).filter(d => gone.includes(d.id))
         if (!ended.length) return one
-        taken.set(one.id, ended)
+        // (one being stopped now is told by its stop, read here as the run leaves its card)
+        taken.set(one.id, ended.filter(d => !stoppingJobs.has(d.id)))
         const left = (one.detached ?? []).filter(d => !gone.includes(d.id))
         return { ...one, detached: left.length ? left : undefined, ...keepEnded(one, runsOf(one)) }
       }),

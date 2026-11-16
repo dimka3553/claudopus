@@ -631,9 +631,7 @@ export const ownWaitOf = (cmd: string, runs: OwnRun[]): OwnRun | undefined => {
 // A command made only of what reads and sifts another's output (tail, grep and their kind): left going, it only watches a run and
 // ends with nothing. `isFollow` when it follows a file as it grows, so it never ends of itself (16 Nov: pairs of "tail pic_eyes.log"
 // and "ugrep wrote" stood silent for an hour and a half under a card and two finished helpers, long after what they watched)
-const FILTER = /^(?:\S*\/)?(tail|grep|egrep|fgrep|ugrep|rg|awk|sed|cut|tr|head|cat|uniq)\b/
-// The words a filter takes before what it reads: one given more reads files, a search or a copy, and is no watcher
-const OWN_WORDS: Record<string, number> = { grep: 1, egrep: 1, fgrep: 1, ugrep: 1, rg: 1, awk: 1, sed: 1, tr: 2, cut: 0, head: 0, uniq: 0, cat: 0, tail: 0 }
+const FILTER = /^(?:\S*\/)?(?:tail|grep|egrep|fgrep|ugrep|rg|awk|sed|cut|tr|head|cat|uniq)\b/
 export const watcherOf = (cmd: string): { isFollow: boolean } | undefined => {
   if (/\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(cmd)) return undefined
   const text = unquoted(cmd.replace(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&]+)\s*(?:&&|;)\s*/, ''))
@@ -645,14 +643,13 @@ export const watcherOf = (cmd: string): { isFollow: boolean } | undefined => {
     .filter(Boolean)
   if (!steps.length || !steps.every(step => FILTER.test(step) && !/\bsed\b.*\s-i\b/.test(step))) return undefined
   const isFollow = (step: string) => /^(?:\S*\/)?tail\b.*\s(?:-\w*[fF]\w*|--follow\S*)(?:\s|$)/.test(step)
-  // It watches when it follows a file as it grows, or its first step reads only what is piped to it (a value an option takes, as
-  // -n 20 or -e PAT, is no word of its own)
+  // It watches only when it follows a file as it grows, or is a lone grep that sifts what is piped to it: its pattern and nothing
+  // more, with only options that change how it matches or prints (a search of a folder, of files or by a file of patterns is work)
   const first = steps[0] ?? ''
-  const name = FILTER.exec(first)?.[1] ?? ''
-  const words = first.split(/\s+/).slice(1).filter((word, n, all) => !word.startsWith('-') && !/^-(?:[nmABCcef]|-max-count|-regexp)$/.test(all[n - 1] ?? '') && word !== '""')
-  const given = /\s(?:-e|--regexp)\s/.test(first) ? 1 : 0
-  if (!isFollow(first) && words.length > Math.max(0, (OWN_WORDS[name] ?? 0) - given)) return undefined
-  return { isFollow: steps.some(isFollow) }
+  if (isFollow(first)) return { isFollow: true }
+  const words = first.split(/\s+/).slice(1)
+  const isLoneGrep = steps.length === 1 && /^(?:\S*\/)?u?grep$|^(?:\S*\/)?[ef]grep$/.test(first.split(/\s+/)[0] ?? '') && words.every(word => !word.startsWith('-') || /^-(?:-line-buffered|-color(?:=\w+)?|[EFiovwxH]+)$/.test(word)) && words.filter(word => !word.startsWith('-')).length === 1
+  return isLoneGrep ? { isFollow: false } : undefined
 }
 
 // Jobs alike (the same kind, words and command, or the same wait) are one row that says how many they are, from the first one's
