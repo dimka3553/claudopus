@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.142 · 16 November 2026
+- The README, the guide, the privacy page and claudopus.ai now describe Claudopus as it is today: updating with Download and Install (or one Update) then /reload-plugins, the reply box in the bar above the prompt, Stop that holds, finished work coming to the top, the bar of figures, the pages in the panel's header, and admin passwords that are never kept.
+
 ## 0.2.141 · 16 November 2026
 - Stats no longer fails with "Svg source longer than 131072 characters" once there is a lot of history: the timeline is drawn in fewer characters, a piece of work's bars light up together when every bar can't carry its own words, and past that the bars are drawn without the words; the bars themselves stay the same.
 - If a timeline is ever still too big for one drawing, it becomes a short line and the rest of the Stats tab still draws.

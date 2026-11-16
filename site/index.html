@@ -460,8 +460,8 @@ figure .note{margin-top:var(--s4)}
       <ol class="steps">
         <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="1"><rect x="1" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>Claudopus is on in every chat you open from then on, in every folder.</span></li>
         <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="2"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>You send a message. The chat answers in one line, starts the job in the background, and is free for your next message.</span></li>
-        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="3"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>The panel opens beside the chat by itself the first time work starts in that chat. If you close it, it stays closed for that chat, and <code>/claudopus</code> opens it again.</span></li>
-        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="4"><rect x="0" y="0" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><span>A short band above the prompt says what is being done right now.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="3"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>The panel opens beside the chat by itself the first time work starts in that chat. If you close it, it closes in every chat, and <code>/claudopus</code> opens it again.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="4"><rect x="0" y="0" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><span>While work runs, a bar above the prompt shows memory, processor, graphics, battery, disk and network, with Claude's own part in purple.</span></li>
         <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="5"><rect x="0" y="0" width="3" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>When a job finishes, the chat passes on its result, and the panel lists it under Finished.</span></li>
       </ol>
     </div>
@@ -479,13 +479,12 @@ figure .note{margin-top:var(--s4)}
       </div>
       <div class="notch big">
         <h3>It can ask for your Mac's password</h3>
-        <p>When a job needs an admin command, a box asks you once for that Mac's password and hides what you type. The password stays in this Mac's keychain and is never put in a chat, a file or a log. Once it is kept, later admin commands on that Mac run without asking you again.</p>
+        <p>When a job needs an admin command, its card shows the exact command and runs it only after you press Allow. The password is never kept: each admin command asks for it, in macOS's own box on this Mac, otherwise in a box at the top of the panel, and it is never put in a chat, a file or a log.</p>
       </div>
       <div class="notch big">
         <h3>It needs</h3>
         <ul class="cells">
-          <li>Claude Code 2.1.287 or newer in the terminal, or the desktop app 2.1.286 or newer.</li>
-          <li>Claude Code 2.1.299 or newer for the panel to draw in VS Code.</li>
+          <li>Claude Code in the terminal or the desktop app; it is tested with 2.1.325, and older versions may not draw everything.</li>
           <li>Access to the model the chat picks for each job: Opus for most, Sonnet for long legwork, Fable only for heavy work.</li>
           <li>The panel's Stats tab reads Claude's records with <code>jq</code>, which macOS 15 and later include.</li>
         </ul>

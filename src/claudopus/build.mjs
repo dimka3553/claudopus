@@ -157,7 +157,7 @@ if (process.argv.includes('--notes')) {
       '/plugin install claudopus@claudopus',
       '```',
       '',
-      'Installed copies update themselves. See the [README](https://github.com/dimka3553/claudopus#readme) and the [full guide](https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/docs/guide.md).',
+      'A newer version shows in the panel: press Download, then Install, then type /reload-plugins. See the [README](https://github.com/dimka3553/claudopus#readme) and the [full guide](https://github.com/dimka3553/claudopus/blob/main/mods/claudopus/docs/guide.md).',
     ].join('\n'),
   )
   process.exit(0)
