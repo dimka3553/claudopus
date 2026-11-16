@@ -347,8 +347,10 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
   const row = step * 0.73
   const tall = BARS + 18
   const base = BARS + 2
-  // Each cut-out gap is a short dashed tick on the axis
-  const breaks = parts.slice(1).map(p => `<line x1="${px(p.x - gapOf(parts) / 2)}" x2="${px(p.x - gapOf(parts) / 2)}" y1="${base - 7}" y2="${base - 1}" stroke="#8C8C8C" stroke-dasharray="2 2"/>`)
+  // Each cut-out gap is a short dashed tick on the axis, all in one path; with so many that they are under 3 px apart they would
+  // run together into a smear, and are left out
+  const ticks = gapOf(parts) >= 3 ? parts.slice(1).map(p => `M${px(p.x - gapOf(parts) / 2)} ${base - 7}v6`) : []
+  const breaks = ticks.length ? [`<path d="${ticks.join('')}" stroke="#8C8C8C" stroke-dasharray="2 2"/>`] : []
   const first = parts[0]?.from ?? 0
   const last = parts.at(-1)?.to ?? 0
   const isOneDay = dayText(first) === dayText(last)
@@ -365,41 +367,67 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
   }
   // The whole row's height takes the pointer, so a thin bar is easy to land on
   const hit = (p: Piece, bars: Bar[]) => `<path class="h" d="${bars.map(b => spot(p, b)).map(s => box(s.x, s.y, Math.max(4, s.w), step)).join('')}"/>`
+  // Each way stops as soon as what it made is past the limit, so a long history costs no more than one drawing's worth
+  const capped = <T,>(items: T[], one: (item: T) => string[]) => {
+    const out: string[] = []
+    let n = 0
+    for (const item of items)
+      for (const part of one(item)) {
+        if ((n += part.length) > SVG_MOST) return undefined
+        out.push(part)
+      }
+    return out
+  }
   const byBar = () =>
-    pieces.flatMap(p =>
+    capped(pieces, p =>
       p.bars.map(b => {
         const s = spot(p, b)
         return `<g class="b">${hit(p, [b])}<path d="${box(s.x, s.y, s.w, row)}" fill="${colorOf(b.model)}"/>${tip(`${p.title} · ${nameOf(b.model)} · ${label(b.from)}–${clockText(b.to)} · ${hours(b.to - b.from)}`)}</g>`
       }),
     )
   const byPiece = () =>
-    pieces.map(p => {
+    capped(pieces, p => {
       const models = [...new Set(p.bars.map(b => b.model))]
       const shapes = models.map(model => `<path d="${p.bars.filter(b => b.model === model).map(b => spot(p, b)).map(s => box(s.x, s.y, s.w, row)).join('')}" fill="${colorOf(model)}"/>`)
       const [a, z] = [p.spans[0]?.[0] ?? 0, p.spans.at(-1)?.[1] ?? 0]
-      return `<g class="b">${hit(p, p.bars)}${shapes.join('')}${tip(`${p.title} · ${models.map(nameOf).join(', ')} · ${label(a)}–${clockText(z)} · ${hours(lengthOf(p.spans))}`)}</g>`
+      return [`<g class="b">${hit(p, p.bars)}${shapes.join('')}${tip(`${p.title} · ${models.map(nameOf).join(', ')} · ${label(a)}–${clockText(z)} · ${hours(lengthOf(p.spans))}`)}</g>`]
     })
-  // One shape a model, each bar on its own pixel row, bars that touch at this width joined
-  const byModel = () => {
-    const runs = new Map<string, Map<number, [number, number][]>>()
+  // One shape a model, on a grid of `q` pixels: each bar's ends and its row moved to the grid, bars that touch on it joined. A row
+  // then holds at most a run every two steps of the grid, and there are at most BARS / q rows, so a coarse enough grid always fits
+  const byModel = (q: number) => () => {
+    const tall1 = Math.max(row, q * 0.73)
+    const runs = new Map<string, Map<number, Span[]>>()
     for (const p of pieces)
       for (const b of p.bars) {
         const s = spot(p, b)
-        const rows = runs.get(b.model) ?? new Map<number, [number, number][]>()
-        const y = Math.round(s.y * 2) / 2
-        rows.set(y, [...(rows.get(y) ?? []), [s.x, s.x + s.w]])
+        const rows = runs.get(b.model) ?? new Map<number, Span[]>()
+        const y = Math.floor(s.y / q) * q
+        const spans = rows.get(y) ?? []
+        spans.push([Math.floor(s.x / q) * q, Math.max(Math.floor(s.x / q) * q + q, Math.ceil((s.x + s.w) / q) * q)])
+        rows.set(y, spans)
         runs.set(b.model, rows)
       }
-    return [...runs.entries()].map(([model, rows]) => {
-      const d = [...rows.entries()].flatMap(([y, spans]) => union(spans.map(([a, z]): Span => [Math.floor(a * 2) / 2, Math.ceil(z * 2) / 2 + 0.5])).map(([a, z]) => box(a, y, z - a - 0.5, row)))
-      return `<path d="${d.join('')}" fill="${colorOf(model)}"/>`
+    return capped([...runs.entries()], ([model, rows]) => {
+      // A row starts at its first bar; each next bar is a step along from where the last one began
+      const d = [...rows.entries()].map(([y, spans]) => {
+        let x = 0
+        return union(spans.map(([a, z]): Span => [a, z + 0.01]))
+          .map(([a, z], i) => {
+            const part = `${i ? `m${px(a - x)} 0` : `M${px(a)} ${px(y)}`}h${px(Math.max(1.5, z - 0.01 - a))}v${px(tall1)}h-${px(Math.max(1.5, z - 0.01 - a))}z`
+            x = a
+            return part
+          })
+          .join('')
+      })
+      return [`<path d="${d.join('')}" fill="${colorOf(model)}"/>`]
     })
   }
   const axis = parts.length ? `<text x="0" y="${base + 13}">${esc(label(first))}</text><text x="${width}" y="${base + 13}" text-anchor="end">${esc(label(last))}</text>` : ''
   const style = '<style>text{font:11px -apple-system,system-ui,sans-serif;fill:#8C8C8C}.h{fill:#000;fill-opacity:0}.t{visibility:hidden;font-weight:600}.b:hover .t{visibility:visible}.b:hover path:not(.h){opacity:.6}svg:has(.b:hover) .a{visibility:hidden}</style>'
   const whole = (bars: string[]) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${tall}" viewBox="0 0 ${width} ${tall}">${style}${breaks.join('')}<g class="a">${axis}</g>${bars.join('')}</svg>`
-  for (const way of [byBar, byPiece, byModel]) {
-    const svg = whole(way())
+  for (const way of [byBar, byPiece, ...[0.5, 1, 2, 4, 8, 16, 32].map(byModel)]) {
+    const bars = way()
+    const svg = bars ? whole(bars) : ''
     if (svgFits(svg)) return svg
   }
   return ''

@@ -1,0 +1,4 @@
+- Stats no longer fails with "Svg source longer than 131072 characters" once there is a lot of history: the timeline is drawn in fewer characters, a piece of work's bars light up together when every bar can't carry its own words, and past that the bars are drawn without the words; the bars themselves stay the same.
+- If a timeline is ever still too big for one drawing, it becomes a short line and the rest of the Stats tab still draws.
+- With weeks of history the timeline's idle-gap breaks no longer eat nearly all of its width.
+- A very long workflow draws its last rounds as squares and says how many came before, so its card never gets too big to draw.
