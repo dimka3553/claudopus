@@ -451,12 +451,58 @@ const termBox = (Box: Ui['Box']) => (props: BoxArgs) => {
   const framed = isFrame ? {} : { paddingY, paddingTop, paddingBottom }
   return Box({ ...rest, ...framed, ...(isFrame ? {} : { backgroundColor: TERM_SOLID }) } as BoxArgs)
 }
-// The element table a drawing uses: the surface's own, with the terminal's Box taking the app's tints as above and a mark
-// (isTerminal) the views in other files read, which are handed the table alone
+// A button kept from one drawing to the next. The engine gives every button it is handed a number, and a click names that number.
+// A button made anew gets a new number, and the number before is thrown away the moment the newer drawing is made, before the app
+// shows it: a click on the button still on screen then names a number the engine no longer knows, and is dropped with nothing
+// run and nothing tried again (16 Nov, recorded in the panel: drawn anew 287 times in three minutes, a click on Stats dropped
+// between three drawings a tenth of a second apart). The engine keeps the number of a button that is the very same element as
+// last time (run on the app's engine 2.1.325: kept through fresh drawings, and a press on the oldest landed). So a button drawn
+// in the same place with the same key and the same look is given back as the element it was, and its press runs the handler of
+// the newest drawing, never the one it was first made with. A button whose key or look changed is a new one, as before
+type ButtonArgs = Parameters<Ui['Button']>[0]
+type KeptButton = { element: ReturnType<Ui['Button']>; look: string; latest: unknown; at: number }
+const keptButtons = new Map<string, KeptButton>()
+// How many times each key has been drawn so far in one drawing, by the drawing's own event: the same key drawn twice in a pane
+// (a card shown both among the asks and under Finished) is two buttons, each kept apart
+const keptSeen = new WeakMap<object, Map<string, number>>()
+// A kept button not drawn for this long goes; drawn again later, it is a new one
+const KEPT_FOR = 10 * 60_000
+let keptSwept = 0
+// What a button shows, without its handler. Anything in it that cannot be compared (a function inside, as a button within a
+// button would hold) says so, and that button is made anew each time
+const lookOf = (shown: Record<string, unknown>) => {
+  let isPlain = true
+  const look = JSON.stringify(shown, (_name, value) => (typeof value === 'function' ? ((isPlain = false), undefined) : value))
+  return isPlain ? look : undefined
+}
+const keptButton = (Button: Ui['Button'], e: { component?: unknown; requestId?: unknown; surface?: unknown }) => (props: ButtonArgs) => {
+  const { onPress, ...shown } = props as ButtonArgs & { onPress?: unknown; key?: unknown }
+  const look = typeof shown.key === 'string' && typeof onPress === 'function' ? lookOf(shown) : undefined
+  if (look === undefined) return Button(props)
+  const seen = keptSeen.get(e) ?? new Map<string, number>()
+  keptSeen.set(e, seen)
+  const nth = seen.get(shown.key as string) ?? 0
+  seen.set(shown.key as string, nth + 1)
+  const place = `${String(e.component)}\u0000${String(e.requestId ?? '')}\u0000${String(e.surface)}\u0000${shown.key as string}\u0000${nth}`
+  const now = Date.now()
+  if (now - keptSwept > 60_000) {
+    keptSwept = now
+    for (const [where, one] of keptButtons) if (now - one.at > KEPT_FOR) keptButtons.delete(where)
+  }
+  const was = keptButtons.get(place)
+  if (was && was.look === look) return ((was.latest = onPress), (was.at = now), was.element)
+  const kept: KeptButton = { element: undefined as unknown as KeptButton['element'], look, latest: onPress, at: now }
+  kept.element = Button({ ...shown, onPress: (...args: unknown[]) => (kept.latest as (...args: unknown[]) => unknown)(...args) } as unknown as ButtonArgs)
+  keptButtons.set(place, kept)
+  return kept.element
+}
+// The element table a drawing uses: the surface's own, with its buttons kept as above, and on the terminal its Box taking the
+// app's tints as above and a mark (isTerminal) the views in other files read, which are handed the table alone
 const uiOf = <E extends Parameters<EngineInterface['ui']['resolve']>[0]>($: EngineInterface, e: E): Ui => {
   const ui = $.ui.resolve(e) as Ui
-  if (e.surface !== 'terminal') return ui
-  const marked = { ...ui, Box: termBox(ui.Box), isTerminal: true }
+  const Button = keptButton(ui.Button, e) as Ui['Button']
+  if (e.surface !== 'terminal') return { ...ui, Button }
+  const marked = { ...ui, Button, Box: termBox(ui.Box), isTerminal: true }
   return marked
 }
 // One part of a report's view or of the list: a filled block with a bold heading and, at its right, a dim count

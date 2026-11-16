@@ -2,6 +2,14 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.167 · 16 November 2026
+- A click on a button no longer goes missing because the panel was drawn again around it: a button that looks the same from one drawing to the next is kept as the same button, so a click on the drawing still on your screen reaches it. A button whose words have just changed can still miss a click in that instant
+- Every click that reaches its button is one line in Claudopus's log, so the clicks that land can be counted against the ones the app's log shows as dropped
+- An answer pressed on a card by mistake can be taken back while the card still says it: "Take back" puts the question back with its buttons, and the task is told not to act on that answer
+- The bar above the prompt holds still for clicks too: on the desktop it is drawn afresh at most about once a second, and not at all from the start of a click on one of its buttons until the click lands
+- Scrolled down in the panel, the cards above where you point no longer grow or shrink under you while you use it: what work writes waits until you have left the panel alone for 15 seconds, and your own presses and new questions still show at once. At the list's end the view no longer snaps up and swings back
+- Buttons in Settings, About and the other tabs hold still for clicks under load as the panel's do, so Reset and the rest take their click
+
 ## 0.2.166 · 16 November 2026
 - A release now runs its checks on this Mac while GitHub runs its own, instead of one after the other, so each release, and each release queued behind it, takes a few minutes less. Main still moves only once both passed and you allowed it.
 
