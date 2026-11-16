@@ -124,7 +124,7 @@ took() { perl -e 'printf "%.1f", $ARGV[1] - $ARGV[0]' "$(head -1 "$tmp/out/$1" |
 
 # A process beside the releases, in the test's own process group as GitHub's runner leaves every step's processes: no release
 # may stop it (16 Nov: on Linux the stop of this Mac's checks, in a group job control never made, stopped every process beside)
-sleep 600 </dev/null >/dev/null 2>&1 &
+/usr/bin/perl -e 'select(undef, undef, undef, 900)' </dev/null >/dev/null 2>&1 &
 beside=$!
 
 # 1. One release alone: the measure the others are set beside
