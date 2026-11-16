@@ -278,7 +278,7 @@ test("Claude's own part, where the Mac tells each process's: of the graphics pro
   // 18446744073709544 W, or 2 W of a 69 W draw), so the draw is the battery's voltage times its current; on the charger it is the
   // system load; and a draw no Mac makes shows none
   const u = (n: number) => (2n ** 64n + BigInt(n)).toString()
-  const battery = (load: string, mv: number, ma: string) => `"SystemLoad"=${load}\n"SystemPowerIn"=0\n"Voltage" = ${mv}\n"InstantAmperage" = ${ma}`
+  const battery = (load: string, mv: number, ma: string) => `"Voltage"=20000\n"SystemLoad"=${load}\n"SystemPowerIn"=0\n"Voltage" = ${mv}\n"InstantAmperage" = ${ma}`
   const charger = (load: string) => `"SystemLoad"=${load}\n"SystemPowerIn"=95000\n"Voltage" = 12500\n"InstantAmperage" = 1200`
   for (const [load, watts] of [
     [battery(u(-7552), 12203, u(-5552)), 67.751],

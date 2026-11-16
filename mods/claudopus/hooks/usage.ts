@@ -258,11 +258,13 @@ export const rawOfMac = (text: string, at: number, footprint?: Record<string, nu
 // off (a Mac drawing 69 W told 2 W, or below zero), so the draw is what leaves the battery, its voltage times its current. A draw
 // no Mac makes is no draw at all
 const loadOf = (text: string): number | undefined => {
-  const of = (key: string) => {
-    const digits = new RegExp(`"${key}" ?= ?(\\d+)`).exec(text)?.[1]
+  // The load and power in are the gauge's telemetry ("Key"=n); the battery's own voltage and current its top-level lines ("Key" = n),
+  // as another part of the gauge tells a voltage of its own
+  const of = (key: string, sep = '=') => {
+    const digits = new RegExp(`"${key}"${sep}(\\d+)`).exec(text)?.[1]
     return digits ? Number(BigInt.asIntN(64, BigInt(digits))) : undefined
   }
-  const [load, powerIn, mv, ma] = [of('SystemLoad'), of('SystemPowerIn'), of('Voltage'), of('InstantAmperage')]
+  const [load, powerIn, mv, ma] = [of('SystemLoad'), of('SystemPowerIn'), of('Voltage', ' = '), of('InstantAmperage', ' = ')]
   const mw = powerIn ? load : mv !== undefined && ma !== undefined ? (mv * -ma) / 1000 : powerIn === undefined ? load : undefined
   return mw !== undefined && mw > 0 && mw <= 2_000_000 ? mw : undefined
 }
