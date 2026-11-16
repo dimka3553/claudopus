@@ -122,8 +122,9 @@ test('Update pressed while a look reads the version page waits for the look to e
   const { files, clock } = world(on, { release: RELEASE })
   // The page answers at once, but for the timed look below, which takes 20 s to read it
   let slow = false
-  on('http.fetch', async ($$: EngineInterface) => {
-    if (slow) await new Promise<void>(done => void ((slow = false), $$.clock.after(20_000, done)))
+  let isReading = false
+  on('http.fetch', async (engine, _e) => {
+    if (slow) ((slow = false), (isReading = true), await new Promise<void>(done => void engine.clock.after(20_000, () => ((isReading = false), done()))))
     return { value: { status: 200, ok: true, headers: {}, text: pageText() } }
   }) as never
   await $.session.start(start)
@@ -132,9 +133,11 @@ test('Update pressed while a look reads the version page waits for the look to e
   await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
   slow = true
   files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
-  await clock.advance(15 * 60_000 + 1000)
-  expect(slow).toBe(false)
+  // Second by second up to the timed look, and the press comes while it reads the page
+  for (let s = 0; s < 20 * 60 && !isReading; s++) await clock.advance(1000)
+  expect(isReading).toBe(true)
   await pressed(panel, 'update-download')
+  expect(isReading).toBe(true)
   await clock.advance(30_000)
   await shownIn(panel, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
 })
