@@ -402,7 +402,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // Marked on its way once written, so a step that began before it never counts as reading it
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) {
-    writtenIn(target, one.id)
+    writtenIn($, target, one.id)
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at })
     redraw($)
   } else await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
@@ -441,7 +441,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
   const to = `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
-  if (told && !told.deny) return void (writtenIn(target, one.id), redraw($))
+  if (told && !told.deny) return void (writtenIn($, target, one.id), redraw($))
   await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
 }
 // An answer to work that has ended starts that work again with it, as a message to it: the chat then gets the work's report as
@@ -501,8 +501,9 @@ const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
 // The answers, by card and when given, that started their work again: the run each started reads it
 const startedBy = new Set<string>()
 // An answer written into work under way, which reads it at a step of its own: an earlier wake's run no longer covers this card
-const writtenIn = (target: string, card: string) => {
+const writtenIn = ($: EngineInterface, target: string, card: string) => {
   pending.set(target, card)
+  void replyWaiting($, target)
   for (const key of startedBy) if (key.startsWith(`${card}:`)) startedBy.delete(key)
 }
 // Work an answer or the person's message started again is at work from then: its card is back among the running cards, not under
@@ -570,7 +571,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   dropDrafts($, a.card.id)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
-  writtenIn(to, a.card.id)
+  writtenIn($, to, a.card.id)
   const helper = a.ask.from && a.ask.from !== to ? (await read($, todos)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
   if (helper) await tell($, helper.id, `${who(true)} answered your ask ("${a.ask.text}") in the chat, in their own words: ${a.words}`)
   redraw($)
@@ -590,6 +591,24 @@ const replyRead = ($: EngineInterface, agentId: string) => {
   const sent = sentReplies.get(card)
   if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
 }
+// The person's words written into work under way are marked beside the file its wait on helpers reads, so that wait comes back at
+// once and the work reads them; the mark goes at the work's next step, which reads them
+const replyMarked = new Set<string>()
+// (a mark an earlier copy of the mod left, before a reload, is looked for once at each work's first step here)
+const replyLooked = new Set<string>()
+const replyWaiting = async ($: EngineInterface, agentId: string) => {
+  if (!dir) return
+  const at = await $.clock.now()
+  await $.fs.write(`${rollPath(agentId)}.reply`, `${at}\n`).catch(err => log($, `reply mark for ${agentId} not written: ${String(err)}`))
+  replyMarked.add(agentId)
+}
+const replyTaken = async ($: EngineInterface, agentId: string) => {
+  if (!dir) return
+  const isFirst = !replyLooked.has(agentId)
+  replyLooked.add(agentId)
+  if (!replyMarked.delete(agentId) && !(isFirst && (await readOr($, `${rollPath(agentId)}.reply`)).trim())) return
+  await $.fs.write(`${rollPath(agentId)}.reply`, '').catch(() => undefined)
+}
 // Work whose run ended with an answer written in but never read is started again with it
 const replyUnread = async ($: EngineInterface, agentId: string) => {
   const card = pending.get(agentId)
@@ -608,6 +627,16 @@ const heldAnswer = (one: Todo, now: number) => {
   const sent = one.chat ? undefined : sentReplies.get(one.id)
   return sent?.isCard && sent.to !== 'lost' && now - sent.at < ANSWER_SHOWN ? sent : undefined
 }
+// A reply written into work while one of its calls is held open is read only when that call ends: the card names it and how long it
+// has run, so a wait is never taken for a reply lost
+const waitsBehind = (one: Todo, at: number, now: number) => {
+  // the call held open by the very work the reply was written into (the helper that asked, or the work), while it is unread
+  const target = [...pending].find(([, card]) => card === one.id)?.[0]
+  const running = target !== undefined && one.status === 'working' ? runningOf(target) : undefined
+  if (!running || running.at > at) return ''
+  const name = running.label ? `“${cut(describedOf(running.label).text || running.label, 50)}”` : running.what.replace(/ running$/, '')
+  return `waiting: it reads it when ${name} ends (running ${took(now - running.at)})`
+}
 // What the card says of the answer last given to its ask, for ANSWER_SHOWN after, until the work writes a newer line or asks again.
 // An answer that could not be left for another Mac says so under the ask, which is back
 const sentLine = (one: Todo, now: number) => {
@@ -623,7 +652,7 @@ const sentLine = (one: Todo, now: number) => {
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
   const how = {
     sending: 'on its way to the work',
-    work: 'it reads this at its next step',
+    work: waitsBehind(one, sent.at, now) || 'it reads this at its next step',
     read: 'it has read it',
     chat: 'left in the chat, which carries the work on',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose work reads it at its next step`,
