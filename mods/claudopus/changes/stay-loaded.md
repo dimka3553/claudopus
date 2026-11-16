@@ -1,0 +1,1 @@
+- The watcher that brings Claudopus back names the setting your copy really has when Claudopus is loaded from a folder on your Mac, as its own checkout: before, it changed a setting nothing read, and Claudopus stayed off
