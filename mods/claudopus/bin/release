@@ -313,7 +313,7 @@ fails_of_run() {
         elsif (/^ *(\d+) fail\s*$/) { $count = $1 }
         elsif (/^(?:##\[error\]|::error::)(\S+\.test\.sh) failed\s*$/) { print $in{$1} ? "$j: $1 failed\n" : "unnamed $j: $1 failed, naming no test\n"; $n++ }
         elsif (/^(?:##\[error\]|::error::)(.*)$/ && $1 !~ /^Process completed with exit code \d+\.?$/) { print "unnamed $j: $1\n"; $n++ }
-        END { print "unnamed $j: the mod'"'"'s tests failed ", ($count // "uncounted"), " where ", ($named // 0), " are named\n" if ($count // -1) != ($named // 0) && ($count || $named); exit($n ? 0 : 1) }' "$name" "$logf" ||
+        END { print "unnamed $j: the mod'"'"'s tests failed ", ($count // "uncounted"), " where ", ($named // 0), " are named\n" if defined $count ? $count != ($named // 0) : 1; exit($n ? 0 : 1) }' "$name" "$logf" ||
         { if [ -n "$steps" ]; then printf '%s\n' "$steps" | tr '|' '\n' | sed "s#^#unnamed $name: step #"; else echo "unnamed $name: $concl"; fi; }
     done
     # a named check with no job at all

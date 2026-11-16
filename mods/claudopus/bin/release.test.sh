@@ -61,10 +61,19 @@ case $url in
       case $jq in *status*) printf '%s\t%s\t%s\n' $id $1 "$([ $1 = completed ] && echo $2)" ;; *) printf '%s\t%s\n' $id $h ;; esac
     done ;;
   */jobs/*/logs)
+    # (as gh 2.97 does: a log holds the terminal's colour codes, so it is printed only when allowed)
+    case " $* " in *" --allow-escape-sequences "*) ;; *) echo "the response contains terminal escape sequences" >&2; exit 1 ;; esac
     id=${url%/logs}; id=${id##*/}; job=$((id % 10)); id=$((id / 10)); set -- $(state $id $job)
     printf '\357\273\2772026-01-01T00:00:00.0000000Z Set up job\n'
-    [ $job = 0 ] && red $3 | sed -e '/^NOT OK/!s/^/FAIL /' -e 's/^/2026-01-01T00:00:01.1234567Z /'
-    [ $job = 0 ] && [ -n "$(red $3)" ] && echo "2026-01-01T00:00:02.0000000Z ##[error]Process completed with exit code 1." ;;
+    # the mod's tests' own count, then each shell test's lines in a group of its own, as check.yml writes them
+    echo "2026-01-01T00:00:01.0000000Z  12 pass"; echo "2026-01-01T00:00:01.0000000Z  0 fail"
+    if [ $job = 0 ] && [ -n "$(red $3)" ]; then
+      echo "2026-01-01T00:00:01.0000000Z ##[group]revive.test.sh"
+      red $3 | sed -e '/^NOT OK/!s/^/FAIL /' -e 's/^/2026-01-01T00:00:01.1234567Z /'
+      echo "2026-01-01T00:00:01.2000000Z ##[endgroup]"
+      echo "2026-01-01T00:00:01.3000000Z ##[error]revive.test.sh failed"
+      echo "2026-01-01T00:00:02.0000000Z ##[error]Process completed with exit code 1."
+    fi ;;
   */jobs*)
     id=${url#*/runs/}; id=${id%%/*}
     for job in 0 1; do
