@@ -928,6 +928,10 @@ const drifted = (steps: number) =>
 // The chat is told once when nothing new has come back under a piece of work for a while
 const STUCK_IN_CHAT = (title: string, mins: number) =>
   `"${title}" has had nothing new come back to it or its helpers for ${mins} minutes: it may be stuck waiting on something that will not come. Its card shows where it stands.`
+// Work that had stopped mid-step without a report, started again by the mod: what it is told, and what the chat is told
+const RESTARTED_WORK = `From Claudopus, not {name}: you stopped mid-step without a report (the app restarted, the Mac slept or your run was cut off). First check what you already have, then carry on from where you stood; a command or helper you had started may still be running or may need starting again.`
+const RESTARTED_IN_CHAT = (title: string, mins: number) =>
+  `"${title}" had stopped mid-step ${mins} minutes ago with no report; Claudopus started it again. Its card shows where it stands.`
 // Work the person stopped with their own press on Stop: what the chat, or the work above a helper, is told, as the engine's notice
 // of the stop says only that it was stopped "by Claude"; what a call that would start it again is refused with; what their next
 // message carries while some is stopped so. `left` lists what it started detached that goes on running
@@ -8692,6 +8696,8 @@ const SEEN_KEPT = 5000
 const LINES_READ = 2000
 
 // The calls running now, by tool_use_id: whose, what, since when
+// Work the mod started again after it had stopped mid-step: once only; stuck again, it is only told to the chat
+const restartedOnce = new Set<string>()
 const inFlight = new Map<string, { agent: string; what: string; at: number; cmd?: string; label?: string }>()
 const seenLines = new Map<string, Set<string>>()
 
@@ -8777,7 +8783,27 @@ const lookStuck = async ($: EngineInterface) => {
     })
     return isChanged ? next : list
   })
-  for (const one of told) await sayInChat($, named(STUCK_IN_CHAT(titleOf(one), Math.round((now - movedAt(await read($, todos), one)) / 60_000))))
+  // Stuck work the engine no longer runs had stopped mid-step (the app restarted, the Mac slept, its run was cut off): it is
+  // started again at once with a message of the mod's own, rather than waiting for the chat or the person to notice
+  const engine = told.length ? await $.agent.list().catch(() => undefined) : undefined
+  for (const one of told) {
+    const mins = Math.round((now - movedAt(await read($, todos), one)) / 60_000)
+    const status = engine?.find(agent => agent.id === one.id)?.status
+    // Not work that only waits: on a helper the engine still runs, or on background work it holds
+    const helpers = underOf(await read($, todos), one.id).map(kid => kid.id)
+    const isWaiting =
+      WORKING.includes(String(status)) || Boolean(engine?.some(agent => (agent.parentId === one.id || helpers.includes(agent.id)) && WORKING.includes(agent.status)))
+    // Only work the engine lists as no longer running: work it does not list at all is only flagged. Not work cut off by a
+    // restart that the mod brings back itself, nor work just answered on its card, nor work started so once already
+    const isStopped =
+      Boolean(status) && !isWaiting && !isHeld(one) && !stoppedHere.has(one.id) && !cutPending.has(one.id) && !one.ask?.replied && !restartedOnce.has(one.id)
+    if (isStopped) restartedOnce.add(one.id)
+    const r = isStopped && !(await isReplaced($)) ? await sendOwn($, { to: { agentId: one.id }, text: named(RESTARTED_WORK) }).catch(err => ({ isDelivered: false as const, reason: String(err) })) : undefined
+    if (r?.isDelivered) {
+      await log($, `work ${one.id} had stopped mid-step (the engine lists it ${status}): started again`)
+      await sayInChat($, named(RESTARTED_IN_CHAT(titleOf(one), mins)))
+    } else await sayInChat($, named(STUCK_IN_CHAT(titleOf(one), mins)))
+  }
   // What agents that have ended had seen come back is let go
   const list = await read($, todos)
   for (const agent of seenLines.keys()) if (!list.some(one => one.id === agent && one.status === 'working')) seenLines.delete(agent)
