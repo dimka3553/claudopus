@@ -170,6 +170,8 @@ const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
 const HOLD_LOOK = 250
 const LATE = 400
 const BEHIND_FOR = 10_000
+// and a drawing is given as it was for this long at most, however long the mod stays behind
+const BEHIND_HELD = 30_000
 // A hold this long is written in the log with the steps begun meanwhile, so a switch-off can be traced to the step that caused it
 const HOLD_SAID = 1500
 let holdAt = 0

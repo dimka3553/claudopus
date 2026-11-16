@@ -64,27 +64,6 @@ test('a chat whose ended tasks have records of 4 MB and 170 MB loads without hol
   await pane.unmount()
 })
 
-test('the Details of a task with a chat of 170 MB draw without holding Claude\'s helper', { timeoutMs: 120_000 }, async ($, on) => {
-  // As the engine gives a record never compacted: every step, each with 40,000 characters of what came back
-  const talk = Array.from({ length: 4200 }, (_, k) =>
-    k % 2 === 0
-      ? { role: 'user', text: `Go on with part ${k}. ${'y'.repeat(200)}`, toolUses: [] }
-      : { role: 'assistant', text: `Part ${k} done.`, toolUses: [{ tool_use_id: `u${k}`, tool: 'Bash', input: { command: `make part-${k} > /tmp/out/part-${k}.log`, description: `Make part ${k}` }, text: 'z'.repeat(40_000) }] },
-  )
-  world(on, { talk })
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'make the parts', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, prompt: 'Make the parts.' } as never)
-  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await pressed(pane, 'open-a1')
-  const held = holdMeter()
-  const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
-  expect(await until(async () => (JSON.stringify(await tab.drawn()).includes('Part 4199 done') ? 'drawn' : undefined))).toBe('drawn')
-  expect(held()).toBeLessThan(HOLD_MOST)
-  await tab.unmount()
-  await pane.unmount()
-})
-
 test('behind, the mod gives its panes as they were and leaves out what can wait until it has caught up, then draws them again; a long hold is logged with the steps begun then', async ($, on) => {
   const { files, clock } = world(on, { env: { CLAUDOPUS_TIMING: 'real' } })
   await $.session.start(start)

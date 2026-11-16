@@ -197,6 +197,8 @@ const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
 const HOLD_LOOK = 250
 const LATE = 400
 const BEHIND_FOR = 10_000
+// and a drawing is given as it was for this long at most, however long the mod stays behind
+const BEHIND_HELD = 30_000
 // A hold this long is written in the log with the steps begun meanwhile, so a switch-off can be traced to the step that caused it
 const HOLD_SAID = 1500
 let holdAt = 0
@@ -10652,15 +10654,24 @@ const cutLine = (one: Todo) =>
 const BEAT_EVERY = 3000
 const beatFile = (id: string) => `${dir}/keep/${id}.beat`
 const settingsFile = async ($: EngineInterface) => `${(await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`}/settings.json`
+// The key this copy has in the settings: claudopus@<marketplace> for an installed one, claudopus@inline for one loaded from a folder
+const ownKey = ($: EngineInterface) => {
+  const market = /\/plugins\/cache\/([^/]+)\/claudopus\//.exec($.plugin.root)?.[1]
+  return market && /^[\w.-]+$/.test(market) ? `claudopus@${market}` : 'claudopus@inline'
+}
+let beatLine = ''
 const beat = async ($: EngineInterface, id: string) => {
-  if (!dir || !/^\d+$/.test(enginePid)) return
-  await $.fs.write(beatFile(id), `${enginePid}\n`)
-  // The proof that it comes back, for someone who wants to see it: keep/<chat>.hold-test, written by hand, makes this chat's Claudopus
-  // hold Claude's helper long enough to be switched off, once
-  // hold Claude's helper long enough to be switched off, once, in the next drawing of its panel or the next message: the engine
-  // switches off only an add-on that holds the helper while one of its hooks is answering, not in a timer of its own (16 Nov trial)
-  if (!isHoldTestDue && (await $.fs.exists(`${dir}/keep/${id}.hold-test`))) {
-    await $.process.run(['rm', '-f', `${dir}/keep/${id}.hold-test`])
+  if (!dir || !beatLine || isEnded) return
+  await $.fs.write(beatFile(id), beatLine)
+  // The proof that it comes back, for someone who wants to see it: keep/<chat>.hold-test holding this chat's process number, written
+  // by hand, makes this chat's Claudopus hold Claude's helper long enough to be switched off, once, in the next drawing of its panel
+  // or the next message: the engine switches off only an add-on that holds the helper while one of its hooks is answering, not in a
+  // timer of its own (16 Nov trial). It is taken away whatever it holds
+  const proof = `${dir}/keep/${id}.hold-test`
+  if (!isHoldTestDue && (await $.fs.exists(proof))) {
+    const said = (await readOr($, proof)).trim()
+    await $.process.run(['rm', '-f', proof])
+    if (said !== enginePid) return void log($, "a hold-test file that did not name this chat's process was taken away")
     isHoldTestDue = true
     $.ui.invalidate('ui.render')
   }
@@ -10681,15 +10692,19 @@ const startReviver = async ($: EngineInterface, id: string) => {
   const back = (await readOr($, `${dir}/keep/${id}.revived`)).trim().split('\n').at(-1)?.split(' ') ?? []
   const backAt = Number(back[0] ?? 0) * 1000
   if (backAt && (await $.clock.now()) - backAt < 120_000) await log($, `back after Claude switched Claudopus off in this chat (its beat was quiet ${back[1] ?? '?'} s)`)
+  const settings = await settingsFile($)
+  if (/[\t\n]/.test(settings)) return
+  beatLine = `${enginePid}\t${ownKey($)}\t${settings}\n`
   await beat($, id)
   everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined))
-  // In a session of its own, so it outlives the chat's process; it leaves at once when one already runs
-  const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$2" "$3" >/dev/null 2>&1 </dev/null &`
-  const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/revive`, dir, await settingsFile($)]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  // In a session of its own, so it outlives the chat's process; it leaves at once when one of this copy already runs
+  const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$2" >/dev/null 2>&1 </dev/null &`
+  const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
   if (r.exitCode !== 0) await log($, `the watcher that brings Claudopus back was not started: ${r.stderr.slice(0, 200)}`)
 }
 // A chat that ends leaves no beat behind
 const endBeat = async ($: EngineInterface, id: string) => {
+  beatLine = ''
   if (dir && SAFE_CHAT.test(id)) await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined)
 }
 const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/
@@ -12531,7 +12546,7 @@ const panelHooks = (on: On) => {
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
     // While the mod is behind (lookHold), the pane is given as it was, so the drawing adds nothing to what holds Claude's helper
-    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && (isBehind() || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
+    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && ((isBehind() && heldAt - held.at < BEHIND_HELD) || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
     during(paneId === LIST ? 'draw the panel' : 'draw a Details tab')
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
