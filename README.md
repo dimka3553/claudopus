@@ -22,7 +22,7 @@
 
 **Claude Code, with eight arms.** One chat runs many pieces of work at once, on your own Mac or Linux machine.
 
-Each message you send becomes a piece of work that runs in the background, and the chat is free for your next message straight away. A panel beside the chat shows every piece of work as a card. Working rules make Claude check its work before showing it to you, and the chat stays small, so it spends fewer tokens. It adds to Claude Code; it does not replace it. macOS and Linux · free · MIT.
+Each message you send becomes a piece of work that runs in the background, and the chat is free for your next message straight away. A panel beside the chat shows every piece of work as a card. Working rules make Claude check its work before showing it to you, and the chat itself stays small, since the work happens elsewhere. It adds to Claude Code; it does not replace it. macOS and Linux · free · MIT.
 
 Pieces of work running at once each spend their own tokens: five at a time spend about five times as fast as one. On a subscription that uses up your limits sooner; with an API key or other metered billing, it multiplies what you pay in that time.
 
@@ -43,7 +43,7 @@ Answer `y` to add the marketplace, then pick the user scope (the first one, Ente
 
 In the desktop app: **+** next to the prompt box, **Plugins**, **Add marketplace** `dimka3553/claudopus`, then add `claudopus`.
 
-It is on in every chat from then on. The panel opens by itself the first time work starts in a chat; `/claudopus` opens it again after you close it.
+It is on in every chat from then on. The first time, the panel opens with a welcome and an **Index my old chats** button that reads your past chats into its memory. After that it opens by itself when work starts. Closing it closes it in every chat; `/claudopus` opens it again.
 
 <details>
 <summary>If that fails</summary>
@@ -64,22 +64,23 @@ Claudopus never updates by itself. Every hour (or as often as Config says) it lo
 - You send a message. The chat answers in one line and hands it to a background agent, then is free for your next message.
 - A message about work that is already running goes to that work and steers it.
 - A question that a few files answer, the chat answers itself by reading them. The chat itself never changes a file or runs a command; work does that.
-- Work hands its legwork to helpers that run beside it, and keeps going while they run.
+- Work hands its legwork (searching, reading, long runs) to helpers, agents of its own that run beside it, and keeps going while they run.
 
 ### The panel and its cards
 
-- Every piece of work is a card: its title, its model, where it stands in a line, its to-dos as the coloured edge, and a step count. The title opens Details, with every to-do, every helper's steps and the last lines of each command. The model name can be pressed to move running work to another model. The octopus moves while anything runs.
-- Helpers hang under their work's card as a tree, one row each. Commands that work leaves running (a server, a download, a long script, a watch) are rows too: what each is for, how long it has run, and how it stands, read live from its output, with how much is done of how much, the percent, the speed and the time left where it prints them. A run quiet for minutes turns amber; a run past the time it was expected to take says so. On a Mac, pressing a run opens its output in Terminal.
+- Every piece of work is a card: its title, its model, how many of its to-dos are done, where it stands in a line, and its to-dos as the coloured edge. The title opens **Details**, with every to-do, every helper's steps and the last lines of each command. Pressing the model name moves running work to another model. The octopus moves while anything runs.
+- Helpers hang under their work's card as a tree, one row each. Commands that work leaves running (a server, a download, a long script) are rows too: what each is for, how long it has run, and how far it has got, read live from its output. A run quiet for minutes, or past the time it was expected to take, turns amber. On a Mac, pressing a run opens its output in Terminal.
 - Work that gets nothing new back for 12 minutes says so in amber, and the chat is told.
-- **Stop** on a card holds: the card says "Stopped by you" and keeps what was done, its helpers and commands stop with it, and the chat cannot start it again until you ask for it in a new message. Details has **Start again**.
-- The panel lists the work of every open chat on this machine, each under its chat's name, and of your other Macs if you name them in Settings.
-- Workflows, where one agent makes and another checks it round after round, show as blue cards with a row of squares for each round.
+- **Stop** on a card holds: the card says "Stopped by you" and keeps what was done, its helpers and background commands stop with it (anything it started detached is named as left running), and the chat cannot start it again until you ask for it in a new message. Details has **Start again**.
+- The panel also lists other chats on this machine while they have work running or something waiting, each under its chat's name, and those of your other Macs if you list them under `macs`.
+- A workflow, where one agent makes something and another checks it against a bar round after round, shows as a blue card with a row of squares for each round. Ask for one, or use the `rounds` skill.
 
 ### When work needs you
 
 - Everything that waits for you is at the top of the panel, newest first: questions from work, admin commands, releases, password and key boxes, and Claude Code's own permission prompts, from every chat. The card turns amber and shows what it is about right under the question.
-- Answer with the work's own buttons on the card. In the desktop app, **Reply in your own words** opens a reply box in the bar above the chat's prompt, named after the work it goes to; **Close** takes it away and keeps what you typed. In a terminal, the answers are numbered above the prompt.
+- Answer with the work's own buttons on the card. In the desktop app, **Reply in your own words** opens a reply box in the bar just above the chat's prompt, named after the work it goes to; **Close** takes it away and keeps what you typed. In a terminal, the first question's answers are numbered above the prompt: press a number twice in the empty prompt. Another chat's question is answered in its own chat; other panels show it without buttons.
 - You also get a notification with a short sound, and the question arrives in the chat, where you can answer in your own words too.
+- Your reply reaches the work at once, even while it runs something long; when it has to wait behind a short command, the card says which. Work never waits for you on a timer: its question stays until you answer.
 - Once you answer, the card stays where it was for a minute, saying what you answered.
 
 ### When work is done
@@ -87,47 +88,46 @@ Claudopus never updates by itself. Every hour (or as often as Config says) it lo
 - The card comes to the top for two seconds, outlined in green, then goes under **Finished**. A chime plays, and a notification names the work and the start of its result; clicking it opens that chat.
 - Work stopped by an error stays in its place and turns red.
 - Finished work that left something running stays at the top with **Stop it**.
-- When the panel is scrolled down, the bar above the prompt says what waits or what just finished at the top; pressing it takes the panel back up.
+- When the panel is scrolled down, the bar just above the prompt says what waits or what just finished at the top; pressing it takes the panel back up.
 
 ### The bar above the prompt
 
-While work runs: memory in use, how busy the processor and graphics processor are, the battery and its time left, and the disk's and network's speed, with Claude's own part in purple. Memory turns amber past nine tenths, the battery at a fifth when on its own power. In the desktop app, resting the pointer on a figure shows its card: who uses the most, the network in and out, what the battery is drawing. In a terminal the figures are words, and some drop off when the window is narrow.
+While work runs: memory in use, how busy the processor and graphics processor are, the battery and its time left, and the disk's and network's speed, with Claude's own part in purple. Memory turns amber past nine tenths, the battery at a fifth when on its own power. In the desktop app, resting the pointer on a figure shows its card: who uses the most, the network in and out, what the battery is drawing. In a terminal they are short labels with small meters, and some drop off when the window is narrow.
 
 ### The pages
 
-The panel's header has these buttons:
+The panel's header has these buttons (Results once there is a result):
 
 | Page | What it holds |
 | --- | --- |
-| **Results** | What finished work found, newest first, with what waits on you at the top. Each opens with its pictures. |
+| **Results** | What finished work found, newest first, with what waits on you at the top (each with Yes, No and Not now). Each opens with its finding and pictures. |
 | **Stats** | Tokens, cost at API prices, work done and time saved, from Claude Code's own records. |
 | **Memory** | Opens the memory folder `~/.claude/claudopus`: your messages word for word, results, a brief for each subject, and a list of the keys you have given by name and where each is kept (never a value). |
-| **Config** | Every setting, and the rules (below). Each shows what is in force and can be put back to what shipped. |
+| **Config** | Every setting, and the rules (below). Each shows what is in force, and **Reset** puts it back to what shipped. |
 | **About** | What Claudopus is, the version this chat runs, what changed in each version, and links. |
 
 `/claudopus` opens the panel; `/servers` lists the local servers running from your home folder and names the chat that started each, where it can.
 
 ### Rules and models
 
-- Three short texts go into every chat and every piece of work: the **principles** (ask less, show the result, have a second agent check the work), **the chat's rules** and **the work rules**. Edit them in Config; your copy is the one used and updates never overwrite it.
-- Models as shipped: Opus for most work, Sonnet for long legwork, Fable only for heavy work; each can be changed in Config. A check never runs on a weaker model than the one that built what it checks. An agent asked for an older model starts on that family's newest, and one asked for Haiku runs on Sonnet. Work the app moves to an older model after a safety flag is ended, and the work above it carries on with what is left.
-- In a chat your Claude app runs on another Mac over SSH, work goes on when your Mac sleeps or the app ends the chat there: that Mac starts the chat again by itself, and the card says so.
+- Three short texts steer the agents: the **principles** (ask less, show the result, have a second agent check the work) go into every chat and every piece of work, **the chat's rules** into the chat, and **the work rules** into work. Edit them in Config; your copy is the one used and updates never overwrite it.
+- Models as shipped: Opus for most work, Sonnet for long legwork, Fable only for heavy work; each can be changed in Config. A helper started to check work runs on at least the model that built it, and never below Opus. An agent asked for an older model starts on that family's newest, and one asked for Haiku runs on Sonnet, unless you chose Haiku in Config. Work the app moves to an older model after a safety flag is ended, and the work above it carries on with what is left.
 
 ### Keys, passwords and admin commands
 
 - A key or token is asked for once in a box at the top of the panel and kept in the macOS keychain (on Linux, in a file only you can read). It is never put in a chat, and its value is hidden in what commands print. Work that asks for a key you already gave is told where it is.
-- Before work runs a command as administrator, its card shows the exact command and the machine, with **Allow once**, **Always allow this command** and **Deny**. Config sets whether you are asked each time, once per piece of work, or never, and lists what you always allow. An admin password is never kept: each admin command asks for it, in macOS's own box on this Mac, otherwise in a box at the top of the panel.
-- These boxes stop slips and common tricks; they are not a wall.
+- Before work runs a command as administrator, its card shows the exact command and the machine, with **Allow once** (or **Allow for this work**), **Always allow this command** and **Deny**. Config sets whether you are asked each time, once per piece of work, or never, and lists what you always allow. An admin password is never kept: each admin command asks for it, in macOS's own box on this Mac, otherwise in a box at the top of the panel.
+- These boxes stop slips and common tricks; something running as you on your machine could still get past them.
 
 ### One release at a time
 
-Work is told to change a repo only in its own worktree and branch. It reaches main only through one release command that waits its turn, numbers the version, builds, checks and pushes, and only after you press **Allow once** on its card. A push to main by hand is refused.
+Work is told to change a repo only in its own worktree and branch. It reaches main only through one release command that waits its turn, numbers the version, builds, checks and pushes, and only after you press **Allow once** on its card. Work's own push to main is refused.
 
 Every detail is in the [full guide](mods/claudopus/docs/guide.md#what-you-see).
 
 ## Settings
 
-Everything below is set in the panel's **Config** tab, except `macs`. It is kept in `~/.claude/claudopus/config.json`. A change made to that file, or to the rules, by anything other than Config is put back, and offered to you on a card to allow.
+Everything below is set in the panel's **Config** tab, except `macs`. It is kept in `~/.claude/claudopus/config.json`. A change to that file or to the rules made any other way is held: work's own edits ask first on a card, and other changes are put back and offered to you on a card.
 
 | Key | Default | What it does |
 | --- | --- | --- |
@@ -138,7 +138,7 @@ Everything below is set in the panel's **Config** tab, except `macs`. It is kept
 | `admin` | `each` | When you are asked before an admin command runs: `each` time, once per piece of `work`, or `never` |
 | `models` | `work` opus, `legwork` sonnet, `heavy` fable | The models for most work, long legwork and heavy work |
 | `updates`, `updateEvery` | every hour | How often to look for a new version: every 1, 6, 24 or 168 hours, or only when you press **Check now** |
-| `macs` | none | Up to four other Macs over SSH whose chats the panel lists |
+| `macs` | none | Up to four other Macs over SSH whose chats the panel lists ([how](mods/claudopus/docs/guide.md#settings)) |
 
 More on each in the [guide](mods/claudopus/docs/guide.md#settings).
 
@@ -153,7 +153,7 @@ More on each in the [guide](mods/claudopus/docs/guide.md#settings).
 ## Privacy
 
 - Everything it keeps is in `~/.claude/claudopus` on your machine. Delete the folder and it is gone.
-- It sends only to Claude, through Claude Code, and to your own Macs over SSH if you name them. It reads the version page on claudopus.ai to look for updates, and downloads from GitHub only when you press Download. No telemetry.
+- It sends only to Claude, through Claude Code, and to your own Macs over SSH if you name them. It reads the version page on claudopus.ai to look for updates, and contacts GitHub only when you press Download or Install. No telemetry.
 - Keys stay in this Mac's keychain, or on Linux in files under `~/.local/share/claudopus/keyring` that only you can read. An admin password is never kept. An admin command runs only after you allow it on its card, with the system's own `PATH`.
 - The two small notification apps are committed built; `mods/claudopus/notifier/checksums.txt` holds the SHA-256 of each of their files, and every release checks the committed apps still match it.
 
