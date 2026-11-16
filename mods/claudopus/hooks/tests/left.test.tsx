@@ -815,6 +815,29 @@ test('xargs -P sending its output nowhere is a run that says it runs and gives n
   expect(await until(async () => ((await leftTexts($)).some(text => text.includes('8.8 GB')) || undefined))).toBe(true)
 })
 
+test('a command that only waits is stopped as it runs, whatever its words: when over a minute its processes did nothing but sleeps that come and go, and its work is told what wakes it instead; one that ever did work, as a retry or a script that sleeps between steps, runs on', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string> }
+  const { advance, killed, appended } = leftWorld(on, procs)
+  await leftStart($)
+  // Words the check before it runs reads as work: a function of its own, defined in a script it runs
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'w1', agentId: 'a1', command: 'cd /w && nohup bash ./poll.sh > poll.log 2>&1 & echo $!', description: 'Run the poll for the sheets' } as never)
+  const napping = (pid: number) => [psLine(48213, 1, 48213, 'bash ./poll.sh'), psLine(pid, 48213, 48213, 'sleep 8')]
+  // Two looks of sleeping are not enough: a script may be between two steps
+  for (const pid of [48300, 48311]) ((procs.list = napping(pid)), await advance(20_000))
+  expect(killed).toEqual([])
+  // Still only sleeping, a new sleep at each look, for over a minute: stopped, and the work told why
+  for (const pid of [48322, 48333, 48344]) ((procs.list = napping(pid)), await advance(20_000))
+  expect(await until(async () => killed.includes('48213') || undefined)).toBe(true)
+  expect(await until(async () => appended.find(one => /^a1: Claudopus stopped your command "Run the poll for the sheets": all it did was wait/.test(one)))).toBeDefined()
+  // A retry of real work, seen once at its work, is never stopped however long it sleeps between its tries
+  killed.length = 0
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'w2', agentId: 'a1', command: 'cd /w && nohup bash ./copy.sh > copy.log 2>&1 & echo $!', description: 'Run the copy again until it goes through' } as never)
+  procs.list = [psLine(48213, 1, 48213, 'bash ./copy.sh'), psLine(48400, 48213, 48213, 'rclone copy /a remote:')]
+  await advance(20_000)
+  for (let n = 0; n < 6; n++) ((procs.list = [psLine(48213, 1, 48213, 'bash ./copy.sh'), psLine(48410 + n, 48213, 48213, 'sleep 30')]), await advance(20_000))
+  expect(killed).toEqual([])
+})
+
 test('a Python pool left running is one run with its workers\' memory added up', SLOW, async ($, on) => {
   const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs: {} as Record<string, string> }
   const { advance } = leftWorld(on, procs)

@@ -21,7 +21,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // What it kept of its own background work goes with it: started again, it keeps what it starts from then
 // What the person allowed it under "Ask once per piece of work" ends with it
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined })
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined }) })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
 const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
@@ -201,6 +201,10 @@ const sync = async ($: EngineInterface) => {
           ? // Work the mod never saw start: a copy of the chat was started for a message of the person's, anything else is some work's helper
             started(one.id, one.parentId ?? (one.type === 'fork' || ownCalls.has(one.description) ? '' : HELPER), one.description, '', now, one.type === 'fork')
           : undefined
+        : // Work that ended its step to let its helpers work, or for what it asked Claudopus to look for, is still at work: the engine
+          // lists it as completed, but a helper's result or the thing it waits for starts it again (16 Nov its card vanished meanwhile)
+          card.status === 'working' && one.status === 'completed' && !handedBack.has(card.id) && card.handedBackAt === undefined && (card.wakeWhen !== undefined || list.some(kid => kid.parentId === card.id && kid.status === 'working'))
+          ? undefined
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
           ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
           : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
@@ -471,7 +475,7 @@ const follow = async ($: EngineInterface) => {
   await lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
   await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
   await lookInDue($).catch(err => log($, `helpers not looked in on: ${String(err)}`))
-  await writeRolls($).catch(err => log($, `helpers not written: ${String(err)}`))
+  await lookWakes($).catch(err => log($, `wakes not looked at: ${String(err)}`))
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
   const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)

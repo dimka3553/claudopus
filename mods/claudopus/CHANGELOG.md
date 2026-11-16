@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.153 · 16 November 2026
+- No task or helper can start a command whose only job is to wait, whatever shape it takes: a loop that keeps checking for a file, a line, a page or a command, a long sleep, a wait on a process, a tool made to wait, a log followed until one line comes, or a short script that only polls. Claudopus refuses it in one sentence that says what wakes Claude instead. This now covers helpers too, which is where the "36 tries · waiting for sheets" rows came from. A waiting command written in a shape the first check misses is caught while it runs: if all its processes do nothing but sleep or follow a log for two looks in a row, Claudopus stops it and tells Claude what wakes it instead.
+- A task no longer waits for its helpers ("Wait for the three builders"). It ends its step and carries on when each helper's result comes. Seen live: when a task ends its step, the app hands the helper's result to the chat. Claudopus now passes it on to the task, starts the task again, and tells the chat there is nothing to do.
+- For a file, a page or a time that nothing of Claude's own makes, a task asks Claudopus to wake it (`wake_me`). Claudopus looks every 15 seconds and starts Claude again once it is there, or says it never came. Meanwhile the card says what Claude is waiting for, in place of a command row.
+- A real retry (a push or a copy tried again), a batch that pauses between items, and every ordinary long command still run.
+
 ## 0.2.152 · 16 November 2026
 - Tasks, checks and helpers now start with only the tools their work takes, so each starts several times smaller; a task that needs a connector, a skill or the browser is still started with everything.
 - The chat runs a single command such as a push itself, always in the background with a 10-minute limit, and gets back only how it ended and its last 3 lines.

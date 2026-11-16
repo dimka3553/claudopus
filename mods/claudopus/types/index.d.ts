@@ -118,6 +118,9 @@ export type Todo = {
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number
+  // What it asked Claudopus to start it again for (wake_me), in place of a command that only waits: in its own words, a file to
+  // appear, a line in that file, a page that answers, or only a time; when it asked, and the latest it is looked for
+  wakeWhen?: { what: string; file?: string; text?: string; url?: string; at: number; until: number }
   // Work cut off as the chat's process ended, not stopped by anyone: when, and when it went on again; `backAt` is absent while it
   // could not be started again
   cutAt?: number

@@ -18,8 +18,8 @@ import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import { leftoversOf, memOf, leftName, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
-import { ownWaitOf, watcherOf } from './jobs'
-import type { OpenCall, OwnRun, Proc, Span } from './jobs'
+import { isWaiterTree, waiterLeavesOf, waitingOf, watcherOf } from './jobs'
+import type { OpenCall, Proc, Span, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
 import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
@@ -1255,7 +1255,7 @@ const started = (id: string, parentId: string, title: string, words: string, at:
 // What it kept of its own background work goes with it: started again, it keeps what it starts from then
 // What the person allowed it under "Ask once per piece of work" ends with it
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
-const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined })
+const ended = (one: Todo, status: Todo['status'], at: number): Todo => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined }) })
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
 const resumed = (one: Todo, at: number): Todo => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at })
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
@@ -1435,6 +1435,10 @@ const sync = async ($: EngineInterface) => {
           ? // Work the mod never saw start: a copy of the chat was started for a message of the person's, anything else is some work's helper
             started(one.id, one.parentId ?? (one.type === 'fork' || ownCalls.has(one.description) ? '' : HELPER), one.description, '', now, one.type === 'fork')
           : undefined
+        : // Work that ended its step to let its helpers work, or for what it asked Claudopus to look for, is still at work: the engine
+          // lists it as completed, but a helper's result or the thing it waits for starts it again (16 Nov its card vanished meanwhile)
+          card.status === 'working' && one.status === 'completed' && !handedBack.has(card.id) && card.handedBackAt === undefined && (card.wakeWhen !== undefined || list.some(kid => kid.parentId === card.id && kid.status === 'working'))
+          ? undefined
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
           ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
           : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
@@ -1705,7 +1709,7 @@ const follow = async ($: EngineInterface) => {
   await lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
   await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`))
   await lookInDue($).catch(err => log($, `helpers not looked in on: ${String(err)}`))
-  await writeRolls($).catch(err => log($, `helpers not written: ${String(err)}`))
+  await lookWakes($).catch(err => log($, `wakes not looked at: ${String(err)}`))
   await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`))
   const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST)
   if (isShown !== (await read($, paneShown))) await update($, paneShown, () => isShown)
@@ -5818,7 +5822,6 @@ const startedBy = new Set<string>()
 // An answer written into work under way, which reads it at a step of its own: an earlier wake's run no longer covers this card
 const writtenIn = ($: EngineInterface, target: string, card: string) => {
   pending.set(target, card)
-  void replyWaiting($, target)
   for (const key of startedBy) if (key.startsWith(`${card}:`)) startedBy.delete(key)
 }
 // Work an answer or the person's message started again is at work from then: its card is back among the running cards, not under
@@ -5905,24 +5908,6 @@ const replyRead = ($: EngineInterface, agentId: string) => {
   pending.delete(agentId)
   const sent = sentReplies.get(card)
   if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
-}
-// The person's words written into work under way are marked beside the file its wait on helpers reads, so that wait comes back at
-// once and the work reads them; the mark goes at the work's next step, which reads them
-const replyMarked = new Set<string>()
-// (a mark an earlier copy of the mod left, before a reload, is looked for once at each work's first step here)
-const replyLooked = new Set<string>()
-const replyWaiting = async ($: EngineInterface, agentId: string) => {
-  if (!dir) return
-  const at = await $.clock.now()
-  await $.fs.write(`${rollPath(agentId)}.reply`, `${at}\n`).catch(err => log($, `reply mark for ${agentId} not written: ${String(err)}`))
-  replyMarked.add(agentId)
-}
-const replyTaken = async ($: EngineInterface, agentId: string) => {
-  if (!dir) return
-  const isFirst = !replyLooked.has(agentId)
-  replyLooked.add(agentId)
-  if (!replyMarked.delete(agentId) && !(isFirst && (await readOr($, `${rollPath(agentId)}.reply`)).trim())) return
-  await $.fs.write(`${rollPath(agentId)}.reply`, '').catch(() => undefined)
 }
 // Work whose run ended with an answer written in but never read is started again with it
 const replyUnread = async ($: EngineInterface, agentId: string) => {
@@ -8842,6 +8827,24 @@ const chatHooks = (on: On) => {
       isDeferred: false,
     })
     await $.tool.register({
+      name: 'wake_me',
+      description: named(
+        'For a file, a page or a time that nothing of yours makes (a file another program writes, a page that comes up, a moment to look again): Claudopus looks for it and starts you again the moment it is there, so you end your step instead of waiting with a command. Your own commands, in the background or detached, and your helpers wake you by themselves: never use this for them. Name a file, a line in it, a page, or only minutes. A new call replaces the last one.',
+      ),
+      inputSchema: {
+        type: 'object',
+        properties: {
+          what: { type: 'string', description: 'What you wait for, in a few plain words read at a glance on your card' },
+          file: { type: 'string', description: 'The full path of a file to appear (with `text`, a file to hold that text)' },
+          text: { type: 'string', description: 'A line of text to appear in `file`' },
+          url: { type: 'string', description: 'A page to answer without an error' },
+          minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (60 when left out, at most 360)' },
+        },
+        required: ['what'],
+      },
+      isDeferred: false,
+    })
+    await $.tool.register({
       name: 'waits',
       description: named(
         "For background tasks, before you finish: records what in your report waits on {name}, each as one short line {name} can answer yes or no. The panel shows each with Yes / No / Not now. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. It replaces what was recorded before; do not call it when nothing waits.",
@@ -9088,11 +9091,12 @@ const chatHooks = (on: On) => {
       if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
-      if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now } : one)))
+      if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined } : one)))
       // Work nothing holds any more has nothing of its own left running in the background
       if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
       await changeTodos($, list => {
-        const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => one.parentId === id && one.status === 'working'))
+        // (or for what it asked Claudopus to start it again for)
+        const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)))
         // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
         // Work that gave its report waits on nothing it means to finish
         const waitsSince = (one: Todo) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined)
@@ -9121,9 +9125,9 @@ const chatHooks = (on: On) => {
       // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
       // held on its own background work leaves it once it ends (keepStoppedReports)
       const card = (await read($, todos)).find(one => one.id === id)
-      // A helper that has ended lets the work waiting on it go at once, not at the next look round
-      if (card?.parentId && card.status !== 'working') await writeRolls($, true).catch(err => log($, `helpers not written: ${String(err)}`))
       const report = (e.answer ?? '').trim() || answer
+      // A helper that has ended while its work had ended its step: its result is passed on to that work, which starts again with it
+      if (card?.parentId && card.status !== 'working') await passOnHelper($, id, report, card.status).catch(err => log($, `helper's result not passed on: ${String(err)}`))
       if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
       }
@@ -9690,6 +9694,7 @@ const lookJobs = async ($: EngineInterface) => {
   // (not waited for: a work's chat may take its time to take a line, and the look goes on meanwhile)
   void tellSilent($, list, now).catch(err => log($, `silent runs not told: ${String(err)}`))
   void endWatchers($, await read($, todos), now).catch(err => log($, `watchers not stopped: ${String(err)}`))
+  if (psText !== undefined) void endWaiters($, await read($, todos), now).catch(err => log($, `waits not stopped: ${String(err)}`))
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
   if (isChanged) void drawFresh($)
@@ -9843,6 +9848,61 @@ const endWatchers = async ($: EngineInterface, list: Todo[], now: number) => {
     }
   }
 }
+// A command of a work's or a helper's whose processes, at two looks in a row, do nothing but pass time or follow something (only a
+// sleep, a log followed, a tool made to wait at the end of its tree), however its words were written: it only waits, so it is
+// stopped and its work told what wakes it instead. What the words let through is caught here as it runs (a function, a nested
+// shell, a sleep given by a variable). Not a Monitor watch, whose lines the work is told, nor a server
+const WAITER_STOPPED = (what: string) =>
+  `Claudopus stopped your command "${what}": all it did was wait, and nothing you start may only wait. Your own commands wake you the moment they end, and each helper's result comes to you as a message: carry on, or end your step. For a file, a page or a time that nothing of yours makes, a task calls \`wake_me\`; a helper hands back what it waits for.`
+// What each run's processes have shown at the looks: since when they only waited, the sleeps seen, and whether they ever did work.
+// A run that ever did work is never stopped (a script that sleeps between its steps, a retry, a deploy that waits for a service);
+// one is stopped only when, at every look over a minute, it did nothing but pass time, by sleeps that came and went (a loop) or one
+// that has run two minutes
+const waiterSeen = new Map<string, { since: number; looks: number; sleepers: Set<string>; longest: number }>()
+const workSeen = new Set<string>()
+const WAITER_FOR = 60_000
+const WAITER_LONE = 120_000
+const endWaiters = async ($: EngineInterface, list: Todo[], now: number) => {
+  // (every card's commands matched against the shells at once, so two alike never claim the same shell)
+  const allBgs = list.flatMap(one => (one.chat || one.status !== 'working' ? [] : (one.bg ?? []).filter(b => !b.isWatch && !SERVER_CMD.test(b.cmd ?? '') && describedOf(b.what).kind !== 'server')))
+  const shells = allBgs.length ? shellsOf(jobProcs, allBgs.map(b => ({ id: b.id, cmd: b.cmd ?? '', at: b.at }))) : new Map<string, string | true | null>()
+  const runs = list.flatMap(one => {
+    if (one.chat || one.status !== 'working') return []
+    const bgs = allBgs.filter(b => (one.bg ?? []).includes(b))
+    return [
+      ...bgs.flatMap(b => (typeof shells.get(b.id) === 'string' ? [{ owner: one, id: b.id, pid: shells.get(b.id) as string }] : [])),
+      ...(one.detached ?? []).filter(d => d.pid && !SERVER_CMD.test(d.cmd) && describedOf(d.what).kind !== 'server').map(d => ({ owner: one, id: d.id, pid: d.pid ?? '' })),
+      ...(one.running?.cmd && now - one.running.at >= ROW_SHOWN ? ((pid => (pid ? [{ owner: one, id: `call-${one.id}`, pid }] : []))(heldShellOf(jobProcs, one.running.cmd, one.running.at))) : []),
+    ]
+  })
+  for (const id of waiterSeen.keys()) if (!runs.some(run => run.id === id)) waiterSeen.delete(id)
+  for (const id of workSeen) if (!runs.some(run => run.id === id)) workSeen.delete(id)
+  for (const run of runs) {
+    if (workSeen.has(run.id)) continue
+    const leaves = waiterLeavesOf(jobProcs, run.pid)
+    if (!leaves) {
+      // (a shell with nothing under it shows nothing of what it does: neither work nor a wait)
+      if (treeOf(jobProcs, run.pid).length > 1) (workSeen.add(run.id), waiterSeen.delete(run.id))
+      continue
+    }
+    const seen = waiterSeen.get(run.id) ?? { since: now, looks: 0, sleepers: new Set<string>(), longest: 0 }
+    seen.looks += 1
+    for (const leaf of leaves) (seen.sleepers.add(leaf.pid), (seen.longest = Math.max(seen.longest, now - leaf.startAt)))
+    waiterSeen.set(run.id, seen)
+    const isLoop = seen.sleepers.size >= 3 && seen.looks >= 3 && now - seen.since >= WAITER_FOR
+    if ((!isLoop && seen.longest < WAITER_LONE) || stoppingJobs.has(run.id)) continue
+    const job = jobsOf(run.owner, now).find(j => j.id === run.id) ?? jobsOf({ ...run.owner, bg: run.owner.bg?.filter(b => b.id === run.id), detached: run.owner.detached?.filter(d => d.id === run.id) }, now).find(j => j.id === run.id)
+    if (!job) continue
+    waiterSeen.delete(run.id)
+    stoppingJobs.add(job.id)
+    try {
+      await stopping($, run.owner.id, job, WAITER_STOPPED(job.label))
+    } finally {
+      stoppingJobs.delete(job.id)
+    }
+    await log($, `run ${job.id} of ${run.owner.parentId ? 'helper' : 'work'} ${run.owner.id} stopped: all it did was wait`)
+  }
+}
 // (`said`: what the work is told instead of the person's stop, nothing when empty)
 const stopping = async ($: EngineInterface, owner: string, job: Job, said?: string) => {
   const now = await $.clock.now()
@@ -9913,12 +9973,6 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   for (const id of silentTold) if (jobLog.get(id)?.wroteAt && now - (jobLog.get(id)?.wroteAt ?? 0) < RUN_SILENT_TOLD) silentTold.delete(id)
 }
 
-// The runs a card has going that end of themselves, as a wait for one names it: a background command, or one left detached by its
-// process (not a server, which is not waited on to end)
-const ownRunsOf = (one: Todo | undefined): OwnRun[] =>
-  [...(one?.bg ?? []).filter(b => !b.isWatch).map(b => ({ id: b.id, what: b.what, cmd: b.cmd ?? '' })), ...(one?.detached ?? []).map(d => ({ id: d.id, what: d.what, cmd: d.cmd, ...(d.pid ? { pid: d.pid } : {}) }))].filter(
-    run => !SERVER_CMD.test(run.cmd) && describedOf(run.what).kind !== 'server',
-  )
 // The detached runs a piece of work stopped itself with a kill naming its process: their end wakes no one
 const killedByWork = new Set<string>()
 const noteKills = (one: Todo | undefined, command: string) => {
@@ -10016,7 +10070,7 @@ const callStarted = (id: string, at: number) => {
 const kindOf = (command: string) => oneLine(command.replace(/^\s*cd \S+ && /, '')).split(' ').slice(0, 2).join(' ')
 
 // What one step of an agent tells it, in the order the patterns are looked at; at most LINES_EACH of each kind per agent
-const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs: number }[], wait = '', isTop = true) => {
+const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs: number }[], isTop = true) => {
   const seen = stepsSeen.get(agent) ?? { lookups: 0, told: {}, steps: 0, singles: 0 }
   if (!stepsSeen.has(agent) && stepsSeen.size >= STEPS_KEPT) stepsSeen.delete(stepsSeen.keys().next().value ?? '')
   stepsSeen.set(agent, seen)
@@ -10036,7 +10090,7 @@ const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs:
   const helpers = work.filter(one => one.tool === 'Agent')
   if (helpers.some(one => CHECKER.test(String((one.input as { description?: unknown })?.description ?? '')))) seen.checkerAt = seen.steps
   if (work.length === 1 && helpers.length === 1) say('alone', HELPER_ALONE)
-  if (helpers.length && wait && !seen.told.started) say('started', HELPERS_STARTED(wait))
+  if (helpers.length && !seen.told.started) say('started', HELPERS_STARTED)
   // Single lookups in a row
   seen.lookups = work.length === 1 && isLookup(work[0]!.tool, work[0]!.input) ? seen.lookups + 1 : 0
   if (seen.lookups >= LOOKUPS_IN_A_ROW) {
@@ -10120,6 +10174,70 @@ const lookInDue = async ($: EngineInterface) => {
   await lookInOnHelpers($)
 }
 
+// ---- What a piece of work or a helper waits for that nothing of its own makes: Claudopus looks, and starts it again ----
+
+// How long Claudopus looks for what was asked when no time is given, and at most; and how often it looks
+const WAKE_LONGEST = 60
+const WAKE_MOST = 360
+const WAKE_LOOK = 15_000
+let wakesLookedAt = 0
+const wakeTries = new Map<string, number>()
+// Whether a page answers without an error, following where it sends: looked at side by side, each in at most 5 s
+const pageAnswers = async ($: EngineInterface, url: string) =>
+  /^2\d\d$/.test(((await $.process.run(['curl', '-s', '-L', '-o', '/dev/null', '-m', '5', '-w', '%{http_code}', url], { timeoutMs: 8000 }).catch(() => undefined))?.stdout ?? '').trim())
+const WAKE_FOUND = (what: string) => `From Claudopus: what you asked to be started again for is there: ${what}. Carry on from it.`
+const WAKE_TIME = (what: string) => `From Claudopus: the time you asked for has come: ${what}. Carry on.`
+const WAKE_MISSED = (what: string, minutes: number) => `From Claudopus: ${what} was still not there after ${minutes} min of looking. Find out why before you look again.`
+// Looked at as the list is followed: each file, line or page asked for, at most every WAKE_LOOK; the work is started again (or told,
+// while at a step of its own) the moment it is there, when its time comes, or when the longest look has run out
+const lookWakes = async ($: EngineInterface) => {
+  if (!dir || isOff) return
+  const now = await $.clock.now()
+  if (now - wakesLookedAt < WAKE_LOOK) return
+  wakesLookedAt = now
+  // (work the engine lists as ended once its step ends is still due: what it asked for starts it again, unless it gave its report)
+  const due = (await read($, todos)).filter(one => one.wakeWhen && (one.status === 'working' || one.status === 'done') && one.handedBackAt === undefined && !endedByHandback.has(one.id) && !isHeld(one))
+  // (nothing asked for, nothing drawn: the panel stays still under the pointer)
+  if (!due.length) return
+  let isChanged = false
+  for (const one of due) {
+    const w = one.wakeWhen
+    if (!w) continue
+    const isTimeOnly = !w.file && !w.url
+    const path = w.file?.startsWith('~/') ? `${dir.replace(/\/\.claude\/claudopus$/, '')}/${w.file.slice(2)}` : w.file
+    const found =
+      isTimeOnly
+        ? now >= w.until
+        : path
+          ? w.text
+            ? (await $.process.run(['grep', '-qF', '--', w.text, path], { timeoutMs: 5000 }).catch(() => undefined))?.exitCode === 0
+            : await $.fs.exists(path).catch(() => false)
+          : await pageAnswers($, w.url ?? '')
+    const isMissed = !found && now >= w.until
+    if (!found && !isMissed) continue
+    const text = isMissed ? WAKE_MISSED(w.what, Math.round((w.until - w.at) / 60_000)) : isTimeOnly ? WAKE_TIME(w.what) : WAKE_FOUND(w.what)
+    // At a step of its own it reads the line at its next step; with its step ended it is started again by the message
+    const isAtStep = (await $.agent.list().catch(() => [])).find(agent => agent.id === one.id)?.status === 'running'
+    const r = isAtStep
+      ? await tell($, one.id, text).then(() => ({ isDelivered: true as const, reason: '' })).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+      : (await isReplaced($))
+        ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
+        : await sendOwn($, { to: { agentId: one.id }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    // Not reached: looked at again at the next look, three times at most, before it is let go
+    const tries = (wakeTries.get(one.id) ?? 0) + 1
+    if (!r.isDelivered && tries < 3) (wakeTries.set(one.id, tries), await log($, `work ${one.id} not started again for ${w.what}, tried again next look: ${r.reason}`))
+    if (!r.isDelivered && tries < 3) continue
+    wakeTries.delete(one.id)
+    await changeTodos($, list => list.map(card => (card.id === one.id && card.wakeWhen?.at === w.at ? { ...card, wakeWhen: undefined } : card)))
+    isChanged = true
+    if (r.isDelivered && !isAtStep) await wakeCard($, one.id)
+    await log($, `work ${one.id} ${r.isDelivered ? 'started again' : 'not started again'}: ${isMissed ? 'not there' : 'there'}: ${w.what}`)
+  }
+  if (isChanged) redraw($)
+}
+// What a card that asked to be started again says under its line, in place of a command that would wait
+const wakeLine = (one: Todo) => (one.wakeWhen ? `Claudopus starts Claude again when this is there: ${one.wakeWhen.what}` : '')
+
 // What a card with helpers running says under its line: only how many have gone quiet, as those at work are rows on its tree
 const lookedInLine = (one: Todo, at: number) => {
   const l = one.lookedIn
@@ -10139,61 +10257,48 @@ const stepHooks = (on: On) => {
     for (const call of e.tool_calls) callStarts.delete(call.tool_use_id)
     const card = (await read($, todos)).find(one => one.id === agent)
     const again = await rulesAgain($, agent).catch(err => (void log($, `rules not handed again: ${String(err)}`), ''))
-    const lines = [...stepLines(agent, calls, waitCommand($, agent), !card?.parentId), ...(again ? [again] : [])]
+    const lines = [...stepLines(agent, calls, !card?.parentId), ...(again ? [again] : [])]
     if (!lines.length) return r
     await log($, `work ${agent} told of its step: ${lines.map(line => line.slice(0, 40)).join(' / ')}`)
     return { ...r, additionalContext: [...(r.additionalContext ?? []), ...lines] }
   })
 }
 
-// ---- Helpers run in the background, and their work waits for them only when it has nothing else ----
-
-// How long one wait for helpers lasts before it comes back with how each is doing: the steady look-in
-const HELPERS_WAIT = 110_000
-// How many times a piece of work that tries to end while its helpers run is held back in one stretch, before it is let go
-const HELD_AT_STOP = 6
-const heldAtStop = new Map<string, number>()
+// ---- Helpers run in the background, and their work never waits for them ----
 
 // The helpers an agent started that are still at work
 const runningHelpers = (list: Todo[], id: string) => list.filter(one => one.parentId === id && one.status === 'working' && !one.answeredAt)
-// One line per helper, for the work that started it: what, how long, its steps, when it last showed something new, what it runs now
-const helperRoll = (list: Todo[], id: string, at: number) =>
-  list
-    .filter(one => one.parentId === id)
-    .filter(one => one.status === 'working' || at - one.endedAt < HELPERS_WAIT * 2)
-    .map(one => {
-      const last = Math.max(one.startedAt, one.newAt ?? 0)
-      const state = one.status === 'working' ? `running ${took(at - one.startedAt)}, ${one.steps ?? 0} steps${one.running ? `, now ${one.running.what} for ${took(at - one.running.at)}` : ''}${at - last >= HELPER_QUIET ? ' (nothing new for 5+ minutes: check it, message it with SendMessage, or stop it with TaskStop and start a narrower one)' : ''}` : `ended (${one.status})`
-      return `- "${titleOf(one)}" (${one.id}): ${state}`
-    })
-    .join('\n')
-// The command the work waits for its helpers with: a Bash call of its own, so no hook waits
-const waitCommand = ($: EngineInterface, agent: string) => `'${$.plugin.root}/bin/helpers' '${rollPath(agent)}'`
-const WAIT_HOW = (command: string) => `When you have nothing else to do, wait for them with this Bash command (timeout 600000): ${command} . It comes back as soon as one ends, or after about two minutes with how each is doing.`
-const HELD_AT_END = (n: number, command: string) =>
-  `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Do not finish yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Continue with what needs nothing from ${n === 1 ? 'it' : 'them'}, or wait with this Bash command (timeout 600000): ${command} ; stop one you no longer need with TaskStop.`
-const HELPERS_STARTED = (command: string) => `Your helpers run in the background: each call came back at once and each result comes to you as a message when it ends. Continue now with your own part. ${WAIT_HOW(command)}`
+const HELD_AT_END = (n: number) =>
+  `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Don't hand back your report yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Carry on with what needs nothing from ${n === 1 ? 'it' : 'them'}, or end your step without a report: each result starts you again. Stop one you no longer need with TaskStop.`
+const HELPERS_STARTED = 'Your helpers run in the background: each call came back at once, and each result comes to you as a message when it ends, even after you end your step. Continue now with your own part, and when nothing else is left, end your step: never wait for them with a command.'
+// What the work that started a helper is told as Claudopus passes on its result
+const HELPER_ENDED = (title: string, how: Todo['status'], report: string) =>
+  `From Claudopus: your helper "${title}" ${how === 'failed' ? 'failed' : how === 'stopped' ? 'was stopped' : 'has finished'} while your step had ended, so Claudopus passes its result on to you here (if you already have it, carry on).${report ? ` Its result:\n\n${report}` : ' It gave no result.'}`
+// What the chat is told, so a helper's result that reached it, or a notice that the task ended without its report, needs nothing
+const HELPER_PASSED = (helper: string, work: string) =>
+  `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step to let it work. Claudopus has passed it on to that task and started it again: there is nothing for you to do with it, and nothing to tell {name}.`
 
-// The file each piece of work with helpers waits on: its first line the helpers it has running and those of them gone quiet, then
-// how each is doing
-const rollPath = (agent: string) => `${dir}/helpers/${agent}.txt`
-const rollsWritten = new Map<string, { head: string; at: number }>()
-const writeRolls = async ($: EngineInterface, isNow = false) => {
+// A helper that ends while the work that started it has ended its step: the engine hands its result to the chat (seen live on 16
+// Nov), so Claudopus passes it on to that work and starts it again with it. The work never holds itself open to wait for helpers
+const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status']) => {
+  if (!dir || isOff) return
   const list = await read($, todos)
-  const now = await $.clock.now()
-  const parents = new Set(list.filter(one => one.parentId && (one.status === 'working' || now - one.endedAt < HELPERS_WAIT * 2)).map(one => one.parentId))
-  for (const id of parents) {
-    const parent = list.find(one => one.id === id)
-    if (!parent || parent.status !== 'working') continue
-    // A helper that goes quiet changes the line too, so a work waiting on its helpers hears of it at once, not after its wait
-    const running = runningHelpers(list, id)
-    const quiet = running.filter(one => now - Math.max(one.startedAt, one.newAt ?? 0) >= HELPER_QUIET)
-    const head = `running: ${running.map(one => one.id).join(',')}${quiet.length ? ` quiet: ${quiet.map(one => one.id).join(',')}` : ''}`
-    const last = rollsWritten.get(id)
-    if (!isNow && last && last.head === head && now - last.at < 60_000) continue
-    rollsWritten.set(id, { head, at: now })
-    await $.fs.write(rollPath(id), `${head}\n${helperRoll(list, id, now)}\n`).catch(err => log($, `helpers of ${id} not written: ${String(err)}`))
-  }
+  const helper = list.find(one => one.id === helperId)
+  const parent = helper?.parentId ? list.find(one => one.id === helper.parentId) : undefined
+  // (nor work being stopped: a helper stopped with it says nothing worth starting it again for)
+  if (!helper || !parent || isHeld(parent) || pressed.has(parent.id) || stoppedHere.has(parent.id) || parent.status === 'stopped' || parent.status === 'failed' || parent.handedBackAt !== undefined || endedByHandback.has(parent.id)) return
+  // A work at a step of its own has the result from the engine itself. One the engine still holds for a command of its own may have
+  // it too: it is passed on all the same, as a result lost costs more than one read twice, but the chat had none of it to be told of
+  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === parent.id)?.status
+  if (listed === 'running') return
+  const r = (await isReplaced($))
+    ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
+    : await sendOwn($, { to: { agentId: parent.id }, text: HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  if (!r.isDelivered) return void (await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`))
+  await wakeCard($, parent.id)
+  await log($, `helper ${helperId}'s result passed on to ${parent.id}, which had ended its step`)
+  // Told once the result is on its way, so the chat never lets go of a result that did not arrive
+  if (listed !== 'waiting') await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_PASSED(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a helper's result passed on: ${String(err)}`))
 }
 
 // What a piece of work, or a helper, starts with the Agent tool runs in the background: the call comes back at once and the
@@ -10201,20 +10306,14 @@ const writeRolls = async ($: EngineInterface, isNow = false) => {
 const isHelperSpawn = (e: { parentAgentId?: string; workflow?: unknown; resume?: unknown; fork: boolean; isTeammate?: true; background: boolean }) =>
   Boolean(e.parentAgentId) && !flowAgents.has(e.parentAgentId ?? '') && !e.workflow && !e.resume && !e.fork && !e.isTeammate && !e.background && !isOff && Boolean(dir)
 
-// Work that ends its turn while its helpers run is held back, so their results come to it and not to the chat
-const holdAtStop = async ($: EngineInterface, agent: string, at: 'stop' | 'handback'): Promise<string> => {
+// Work that hands back its report while its helpers run is held back, so their results come to it and not to the chat; work that
+// only ends its step is let go, as Claudopus passes each result on and starts it again (passOnHelper)
+const holdAtHandback = async ($: EngineInterface, agent: string): Promise<string> => {
   if (!dir || isOff || flowAgents.has(agent)) return ''
-  // Its report went through: what ends after it is no longer held
-  if (at === 'stop' && handedBack.has(agent)) return ''
   const running = runningHelpers(await read($, todos), agent).length
-  const key = `${agent} ${at}`
-  if (!running) return (heldAtStop.delete(key), '')
-  const held = heldAtStop.get(key) ?? 0
-  if (held >= HELD_AT_STOP) return ''
-  heldAtStop.set(key, held + 1)
-  await log($, `work ${agent} held at its ${at === 'stop' ? 'end' : 'report'}: ${running} helpers run`)
-  await writeRolls($, true)
-  return HELD_AT_END(running, waitCommand($, agent))
+  if (!running) return ''
+  await log($, `work ${agent} held at its report: ${running} helpers run`)
+  return HELD_AT_END(running)
 }
 
 // Work that is stopped takes the helpers it has running with it: they run in the background, and would go on spending, their
@@ -10736,8 +10835,13 @@ const NO_PROGRESS_WAIT =
   'Not run: this wait would print nothing to show how it is going. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
 const NO_PROGRESS_SCRIPT =
   'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
-const NO_OWN_WAIT = (what: string) =>
-  `Not run: this only waits for your own command "${what}" to end, and you are woken the moment it ends, so carry on with what needs nothing from it or end your step now.`
+// What a command that only waits is told instead, by what it waits for
+const NO_WAIT = (kind: WaitKind) =>
+  `Not run: this command only waits${kind === 'helpers' ? ' for your helpers' : kind === 'time' ? ' for time to pass' : ''}, and nothing you start may only wait. ${
+    kind === 'helpers'
+      ? 'Each helper\'s result comes to you as a message, even after you end your step: carry on with what needs nothing from them, or end your step now.'
+      : 'Your own commands, in the background or detached, wake you the moment they end, and each helper\'s result comes to you as a message: carry on with what needs nothing from them, or end your step now. For a file, a page or a time that nothing of yours makes, call the `wake_me` tool and end your step: Claudopus wakes you when it is there. To try something again that failed, run it again yourself.'
+  }`
 const NO_FOLLOW =
   'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20); you are woken the moment your command ends.'
 const MOVED_BACK = (name: string) =>
@@ -10895,19 +10999,19 @@ const workHooks = (on: On) => {
       await log($, `refused work ${e.agentId}'s wait for the person: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       return { deny: NO_PERSON_WAIT(who()) }
     }
-    // A run of its own ending wakes the work (the engine tells it of a background command, the mod of one left detached), so a
-    // command that only waits for one to end is not started: it would hold the next step back until its loop came round
+    // Nothing a piece of work or a helper starts may only wait, whatever shape its loop takes: its own commands and helpers wake it
+    // as they end, and Claudopus wakes it for a file, a page or a time nothing of its own makes (wake_me)
     if (dir && !isOff && e.agentId !== undefined && (e.tool === 'Bash' || e.tool === 'Monitor')) {
       const command = String((e as { command?: unknown }).command ?? '')
       const card = (await read($, todos)).find(one => one.id === e.agentId)
-      const waited = ownWaitOf(command, ownRunsOf(card))
-      if (waited) {
-        await log($, `refused work ${e.agentId}'s wait on its own run ${waited.id}`)
-        return { deny: NO_OWN_WAIT(runWords(waited.what, waited.cmd)) }
+      const waits = waitingOf(command, await scriptsRun($, command), { isWatch: e.tool === 'Monitor' })
+      if (waits) {
+        await log($, `refused ${card?.parentId ? 'helper' : 'work'} ${e.agentId}'s command that only waits (${waits})`)
+        return { deny: NO_WAIT(waits) }
       }
       // A tail that follows a log never ends of itself and tells the work nothing as it runs: it only outlives what it watches
       // (a Monitor watch is told each line as it comes, so it says something; a Bash call's output is read only as it ends)
-      if (e.tool === 'Bash' && watcherOf(command)?.isFollow && !/\|\s*(?:\S*\/)?(?:grep|egrep|ugrep|rg)\b[^|]*\s-(?:\w*[mq]\w*)\b|\|\s*sed\b[^|]*\/q\b/.test(command)) {
+      if (e.tool === 'Bash' && watcherOf(command)?.isFollow) {
         await log($, `refused work ${e.agentId}'s command that only follows a log`)
         return { deny: NO_FOLLOW }
       }
@@ -11119,7 +11223,6 @@ const workHooks = (on: On) => {
     if (steered) {
       const sent = await next(e)
       if (answer) await answeredInChat($, answer, steered, !sent.deny && !sent.isError)
-      if (words && !sent.deny && !sent.isError) await replyWaiting($, steered)
       // Work that had ended is started again by the message, and may not be running yet to take a row: it gets the line as a
       // message of its own instead, read once it reaches it
       // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
@@ -11130,7 +11233,7 @@ const workHooks = (on: On) => {
     }
     // A report handed back is kept as the turn's answer only once the handback went through: refused, the work carries on
     if (e.agentId !== undefined && String(e.tool) === 'SubagentHandback') {
-      const hold = await holdAtStop($, e.agentId, 'handback').catch(() => '')
+      const hold = await holdAtHandback($, e.agentId).catch(() => '')
       if (hold) return { deny: hold }
       const r = await next(e)
       if (!r.deny && !r.isError) handedBack.set(e.agentId, String((e as { message?: unknown }).message ?? '').trim())
@@ -11203,7 +11306,7 @@ const workHooks = (on: On) => {
   // Work the person moved to another model sends each step from then on to that model; only the model the request names changes
   on('turn.step', async function* ($, e, next) {
     const id = e.agentId
-    if (id !== undefined) (replyRead($, id), await replyTaken($, id).catch(() => undefined))
+    if (id !== undefined) replyRead($, id)
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
@@ -11265,8 +11368,6 @@ const workHooks = (on: On) => {
   // As a piece of work stops, the engine says what background work is still in flight: what its card kept that is not, has ended
   on('classic.SubagentStop', async ($, e, next) => {
     const r = await next(e)
-    const hold = r.block ? '' : await holdAtStop($, e.agent_id, 'stop').catch(() => '')
-    if (hold) return { ...r, block: hold }
     const live = e.background_tasks
     if (dir && Array.isArray(live)) {
       const ids = new Set(live.map(one => one.id))
@@ -11339,7 +11440,6 @@ const workHooks = (on: On) => {
       return capped([...list.filter(one => one.id !== id), { ...(old ? resumed(old, now) : fresh), model: old?.chosen ?? r.model, startedOn: old?.startedOn ?? (e.resume ? undefined : r.model), ...(rules ? { rulesSent: hashOf(rules) } : {}) }])
     })
     if (isOwn) await openList($)
-    if (!isOwn) await writeRolls($, true).catch(err => log($, `helpers not written: ${String(err)}`))
     await sync($).catch(() => undefined)
 
     return r
@@ -11460,6 +11560,34 @@ const toolHooks = (on: On) => {
     })
 
     return { result: items.map(item => `${item.state === 'done' ? '[x]' : item.state === 'dropped' ? '[dropped]' : item.state === 'doing' ? '[doing]' : '[ ]'} ${item.text}`).join('\n') }
+  })
+
+  // A file, a page or a time nothing of the work's own makes is looked for by Claudopus, which starts the work again when it is
+  // there: no command of the work's ever only waits (lookWakes)
+  on('tool.call', { tool: 'mcp__claudopus__wake_me' }, async ($, e) => {
+    const input = e as unknown as { what?: unknown; file?: unknown; text?: unknown; url?: unknown; minutes?: unknown }
+    if (e.agentId === undefined) return { result: 'Only a background task is started again this way; the chat is started by the next message.' }
+    // A helper that ends its step has ended: it hands back what it found and what it waits for, and its task asks to be woken
+    if (!(await read($, todos)).some(one => one.id === e.agentId)) await sync($)
+    if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper is not started again this way: hand back your result now, saying what you were waiting for, and the task that started you asks Claudopus to wake it.' }
+    const what = cut(oneLine(String(input.what ?? '')), 80)
+    if (!what) return { result: 'Say in a few words what you wait for.' }
+    const file = typeof input.file === 'string' && input.file.trim() ? input.file.trim() : undefined
+    const url = typeof input.url === 'string' && /^https?:\/\/\S+$/.test(input.url.trim()) ? input.url.trim() : undefined
+    const text = file && typeof input.text === 'string' && input.text.trim() ? input.text.trim().slice(0, 200) : undefined
+    if (typeof input.url === 'string' && input.url.trim() && !url) return { result: 'A page is named by its whole web address, starting http:// or https://.' }
+    if (file && !file.startsWith('/') && !file.startsWith('~/')) return { result: 'Name the file by its full path.' }
+    const minutes = Math.min(WAKE_MOST, Math.max(0.25, Number(input.minutes) > 0 ? Number(input.minutes) : file || url ? WAKE_LONGEST : 0))
+    if (!file && !url && !(Number(input.minutes) > 0)) return { result: 'Name a file, a page, or the minutes after which to start you again.' }
+    const at = await $.clock.now()
+    // (its own card: a helper's is its own, not its work's)
+    const agent = e.agentId
+    if (!(await read($, todos)).some(one => one.id === agent)) await sync($)
+    let isCard = false
+    await changeTodos($, list => list.map(one => (one.id === agent ? ((isCard = true), { ...one, wakeWhen: { what, ...(file ? { file } : {}), ...(text ? { text } : {}), ...(url ? { url } : {}), at, until: at + minutes * 60_000 } }) : one)))
+    if (!isCard) return { result: 'Claudopus has no card for you here, so it cannot start you again: carry on with what you can do now.' }
+    redraw($)
+    return { result: `Claudopus looks ${file ? `for ${text ? `"${text}" in ` : ''}${file}` : url ? `at ${url}` : `at the clock`} and starts you again ${file || url ? `the moment it is there, or after ${Math.round(minutes)} min with word that it never came` : `in ${Math.round(minutes)} min`}. End your step now, or carry on with what needs nothing from it.` }
   })
 
   // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each
@@ -12560,6 +12688,12 @@ const panelHooks = (on: On) => {
             {lookedInLine(one, at) && !one.chat ? (
               <Box key={`looked-${one.id}`} paddingLeft={lead}>
                 <Text dimColor={!one.lookedIn?.quiet} color={one.lookedIn?.quiet ? NEEDS : undefined} wrap="wrap">{lookedInLine(one, at)}</Text>
+              </Box>
+            ) : null}
+            {/* What it asked Claudopus to start it again for, in place of a command that would only wait */}
+            {wakeLine(one) && !one.chat ? (
+              <Box key={`wake-${one.id}`} paddingLeft={lead}>
+                <Text dimColor wrap="wrap">{wakeLine(one)}</Text>
               </Box>
             ) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>

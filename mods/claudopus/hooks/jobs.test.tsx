@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, ownWaitOf, watcherOf, PLAIN_MOST } from './jobs'
+import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
+import type { WaitKind } from './jobs'
 import type { Job } from './jobs'
 
 test("a run's raw line becomes a few plain words or nothing: no paths, file names, times, codes, states, settings, sizes, programs or secrets; 16 Nov a row read \"35 MB · [run 11:27:50] waiting for the machine to start (Running)\"", async () => {
@@ -124,43 +125,118 @@ test('a command that only polls is a wait that says what for; one that does real
   expect(waitOf('python run_all.py')).toBeUndefined()
 })
 
-test('a command that only waits for a run of the same work to end is known, by its process or a pgrep for it; one that does more, waits for a line or a port, or could hang the mod, is not', async () => {
-  const upload = { id: 'u', what: 'Upload both evidence zips', cmd: 'nohup /opt/homebrew/bin/rclone copy /d "evidence:x" -P > /s/drive/upload.log 2>&1 &', pid: '6909' }
-  const server = { id: 's', what: 'Serve the tiles', cmd: 'nohup python serve.py > /w/server.log 2>&1 &', pid: '7001' }
-  const runs = [upload, server]
-  const cases: [string, string | undefined][] = [
-    // The waits of 16 Nov, as they ran
-    ['for i in $(seq 1 55); do kill -0 6909 2>/dev/null || break; echo "progress: $i/55 tries waiting for the upload"; sleep 10; done; kill -0 6909 2>/dev/null && echo STILL_RUNNING || echo ENDED; grep -E "ERROR|Copied|INFO" /s/drive/upload.log | tail -5', 'u'],
-    ['n=0; while kill -0 6909; do n=$((n+1)); echo "progress: $n tries"; sleep 5; done', 'u'],
-    ["until ! pgrep -f 'rclone copy' >/dev/null; do sleep 10; done; date", 'u'],
-    ['while pgrep -u root -f "bin/rclone copy"; do sleep 10; done', 'u'],
-    ['wait 6909', 'u'],
-    // Not only a wait: it starts or writes what comes next, or is sent off beside other work
-    ['while kill -0 6909; do sleep 5; done; rclone lsl evidence:x', undefined],
-    ['for f in a b; do sleep 1; done; if python finalize.py; then echo ok; fi; kill -0 6909', undefined],
-    ['until rclone copy /a remote:; do echo retry; sleep 10; kill -0 6909; done', undefined],
-    ['while kill -0 6909; do sleep 5; done & python post.py', undefined],
-    ['while kill -0 6909; do sleep 5; done; tail -100 /s/drive/upload.log > /w/summary.txt', undefined],
-    ['while kill -0 6909; do sleep 5; done; sed -i s/a/b/ /w/notes.txt', undefined],
-    // A wait for what comes while a run goes: a line in its log, a file, a port, with its process only a guard
-    ['until grep -q "epoch 3" /s/train.log || ! kill -0 6909; do echo progress; sleep 10; done', undefined],
-    ['while [ ! -f out/done.flag ] && kill -0 6909; do echo progress; sleep 5; done', undefined],
-    ['until grep -q Serving /w/server.log; do echo "progress: 1 tries"; sleep 1; done', undefined],
-    ['until grep -q Copied /s/drive/upload.log; do sleep 10; done', undefined],
-    ['until curl -s localhost:3000 >/dev/null; do sleep 2; done', undefined],
-    // Something no run of its own is, or a pattern too short to name one
-    ['while kill -0 4242; do sleep 5; done', undefined],
-    ['while pgrep -f python >/dev/null; do sleep 5; done', undefined],
-    // A look once, with no wait in it
-    ['kill -0 6909 && echo RUNNING', undefined],
+test('a command whose only job is to wait is known whatever shape it takes, by what it waits for; one that does work is not, and none can hold the mod up', async () => {
+  const O = '/private/tmp/x/tasks'
+  const cases: [string, string[], WaitKind | undefined][] = [
+    // The waits of 16 Nov, as they ran: an upload's process, a helper's own output and script, the wait for helpers
+    ['for i in $(seq 1 55); do kill -0 6909 2>/dev/null || break; echo "progress: $i/55 tries waiting for the upload"; sleep 10; done; kill -0 6909 2>/dev/null && echo STILL_RUNNING || echo ENDED; grep -E "ERROR|Copied|INFO" /s/drive/upload.log | tail -5', [], 'loop'],
+    [`until [ -s ${O}/b1.output ] && grep -q "Counter" ${O}/b1.output; do sleep 5; done; cat ${O}/b1.output`, [], 'loop'],
+    [`n=0; while pgrep -f "sets.py" >/dev/null; do n=$((n+1)); echo "progress: $n tries waiting for sheets"; sleep 8; [ $n -gt 60 ] && break; done; ls -la ~/x | head; cat ${O}/bg.output`, [], 'loop'],
+    ["'/Users/x/claudopus/mods/claudopus/bin/helpers' '/Users/x/.claude/claudopus/helpers/a6.txt'", [], 'helpers'],
+    // A process, a page, a run elsewhere, a time, a tool made to wait, a line in a log
+    ['wait 6909', [], 'process'],
+    ['until curl -s localhost:3000 >/dev/null; do sleep 2; done', [], 'loop'],
+    ['until gh run view 123 --json status | grep -q completed; do echo progress; sleep 20; done', [], 'loop'],
+    ['gh run watch 123', [], 'tool'],
+    ['tail -f /w/upload.log | grep -m1 Copied', [], 'tool'],
+    ['sleep 300; cat out.log', [], 'time'],
+    ["python3 -c 'import time; time.sleep(480)'", [], 'time'],
+    // Any shape: a script inline, a here-document, a shell in a shell, ssh, a loop that spins, a break in an if
+    ["python3 -c \"import time,os\nwhile not os.path.exists('/x/done'): time.sleep(5)\nprint('ok')\"", [], 'loop'],
+    ["python3 - <<'EOF'\nimport time\nwhile True:\n    if open('/x/log').read().count('done'): break\n    time.sleep(3)\nEOF", [], 'loop'],
+    ["ssh azure 'while ! test -f /w/done; do sleep 10; done; echo ok'", [], 'loop'],
+    ["bash -c 'until [ -f x ]; do sleep 3; done'", [], 'loop'],
+    ['until [ -f x ]; do :; done', [], 'loop'],
+    ['while true; do if [ -f /x/a ]; then break; fi; sleep 4; done', [], 'loop'],
+    // and the shapes a second look found getting through: flags joined to -c, a function, a brace range, a for that exits, sleeps
+    // written other ways, a zsh repeat, Perl and Ruby, a follow by another program, waiting tools, a script written and run at once
+    ["bash -lc 'until [ -f /x ]; do sleep 5; done'", [], 'loop'],
+    ['waitfor() { while [ ! -f "$1" ]; do sleep 5; done; }; waitfor /tmp/x', [], 'loop'],
+    ['for i in {1..600}; do curl -sf localhost:3000 && break; sleep 0.5; done', [], 'loop'],
+    ['for i in $(seq 60); do curl -sf localhost:3000 && exit 0; sleep 2; done', [], 'loop'],
+    ['for i in $(seq 1 3000); do sleep 0.1; done', [], 'loop'],
+    ['sleep 4; sleep 4; sleep 4; sleep 4', [], 'time'],
+    ['sleep $((60*5))', [], 'time'],
+    ['T=600; sleep $T', [], 'time'],
+    ['/bin/sleep 600', [], 'time'],
+    ['env sleep 600', [], 'time'],
+    ['(sleep 600)', [], 'time'],
+    ['ssh -t host sleep 600', [], 'time'],
+    ['node -e "setTimeout(()=>{}, 600000)"', [], 'time'],
+    ["python3 <<'PY'\nimport time\ntime.sleep(600)\nPY", [], 'time'],
+    ['repeat 60 { [[ -f /x ]] && break; sleep 5 }', [], 'loop'],
+    ["perl -e 'sleep 5 until -e \"/x\"'", [], 'loop'],
+    ["ruby -e 'sleep 5 until File.exist?(\"/x\")'", [], 'time'],
+    ['docker logs -f web 2>&1 | grep -m1 "ready"', [], 'tool'],
+    ["tail -f /x/run.log | awk '/done/{exit}'", [], 'tool'],
+    ['kubectl rollout status deploy/web --timeout=10m', [], 'tool'],
+    ['npx wait-on http://localhost:3000', [], 'tool'],
+    ['curl --retry 60 --retry-delay 10 --retry-all-errors http://localhost:3000', [], 'tool'],
+    ['wait %1', [], 'process'],
+    ["cat > /tmp/w.py <<'EOF'\nimport os, time\nwhile not os.path.exists('/x/done'):\n    time.sleep(5)\nEOF\npython3 /tmp/w.py", [], 'loop'],
+    // A short script of its own that only polls
+    ['python wait_for.py', ['import os, time\nwhile not os.path.exists("/x/done"):\n    time.sleep(5)\nprint("there")\n'], 'loop'],
+    // Work: a script, a throttled batch, a retry of real work, reading a list, words quoted for show, jobs of its own run side by side
+    ['python train.py', [], undefined],
+    ['python train.py', ['for epoch in range(9):\n    train()\n    if done(): break\n    time.sleep(1)\n    torch.save(model, "m.pt")\n'], undefined],
+    ['for f in *.png; do convert $f -resize 50% small/$f; sleep 1; done', [], undefined],
+    ['until git push; do sleep 5; done', [], undefined],
+    ['until rclone copy /a remote:; do echo retry; sleep 10; done', [], undefined],
+    ['while read -r f; do echo $f; done < list.txt', [], undefined],
+    ['git commit -m "Stop tasks from waiting: while loops that sleep are refused"', [], undefined],
+    ['echo "sleep 600"', [], undefined],
+    ['a & b & wait', [], undefined],
+    ['python make.py & pid=$!; python other.py; wait $pid', [], undefined],
+    ['sleep 2 && curl -s localhost:3000', [], undefined],
+    ["python3 -c \"import time\nfor i in range(12):\n    print(f'progress: {i+1}/12', flush=True); time.sleep(1)\n\"", [], undefined],
+    ['for i in 1 2 3; do curl -X POST https://x/api -d @a.json; sleep 1; done', [], undefined],
+    ['tail -20 /w/run.log', [], undefined],
+    // Work the first version refused: retries of real work, scripts that page, retry or simulate with a short sleep, a sleep inside
+    // real work, the word watch or wait or a helpers file named as an argument
+    ['for i in 1 2 3; do curl -fsSL -o /tmp/f.zip https://x/f.zip && break; sleep 5; done', [], undefined],
+    ['until curl -sf -X POST https://api/deploy -d @b.json; do sleep 5; done', [], undefined],
+    ['for i in 1 2 3; do python3 -c "import train; train.run()" && break; sleep 10; done', [], undefined],
+    ["for i in 1 2 3; do node -e \"require('./build').run()\" && break; sleep 10; done", [], undefined],
+    ["python3 -c \"import requests,time\nurl='https://api/x'\nwhile url:\n    r=requests.get(url).json(); print(r); url=r.get('next'); time.sleep(1)\"", [], undefined],
+    ["python3 -c \"import time\nfor i in range(5):\n    try:\n        run(); break\n    except Exception:\n        time.sleep(2**i)\"", [], undefined],
+    ['npm run dev > /tmp/dev.log 2>&1 & sleep 8 && curl -s localhost:3000', [], undefined],
+    ['docker compose up -d && sleep 10 && docker compose ps', [], undefined],
+    ['rec a.wav & P=$!; sleep 30; kill $P', [], undefined],
+    ['grep -rn watch src/', [], undefined],
+    ['npm run watch --', [], undefined],
+    ['cat src/bin/helpers.ts', [], undefined],
+    ['./run.sh wait 5', [], undefined],
+    // and the second look's: eval, osascript, xargs, a log followed under a time limit
+    ['eval "sleep 120"', [], 'time'],
+    ["osascript -e 'delay 120'", [], 'time'],
+    ['echo 120 | xargs sleep', [], 'time'],
+    ['timeout 300 tail -f /dev/null', [], 'tool'],
   ]
-  for (const [cmd, id] of cases) expect([cmd, ownWaitOf(cmd, runs)?.id]).toEqual([cmd, id])
-  expect(ownWaitOf('while kill -0 6909; do sleep 5; done', [])).toBeUndefined()
-  // A pattern is never run as one: a pattern that would take minutes to try takes no time
+  for (const [cmd, scripts, kind] of cases) expect([cmd, waitingOf(cmd, scripts)]).toEqual([cmd, kind])
+  // A loop that never ends is a watch: let through as a Monitor watch, whose every line its work is told, and nowhere else
+  const gpu = 'while true; do nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader; sleep 10; done'
+  expect([waitingOf(gpu, [], { isWatch: true }), waitingOf(gpu)]).toEqual([undefined, 'loop'])
+  // Read only so far and never by a pattern that tries every split: a long or unclosed command takes no time
   const at = Date.now()
-  expect(ownWaitOf('while pgrep -f "(a+)+b.*.*.*.*zz"; do sleep 5; done', [{ id: 'x', what: 'x', cmd: 'a'.repeat(400) }])).toBeUndefined()
-  expect(ownWaitOf('for do sleep 1 '.repeat(3000), runs)).toBeUndefined()
+  for (const cmd of ['for do sleep 1 '.repeat(3000), '"'.repeat(30000), '<<E\n'.repeat(5000), '$( '.repeat(7000)]) waitingOf(cmd)
   expect(Date.now() - at).toBeLessThan(200)
+})
+
+test("a command's processes only wait when every one at the end of its tree passes time or follows something, whatever its words", async () => {
+  const at = 1_700_000_000_000
+  const ps = (lines: string[]) => procsOf(lines.join('\n'), at)
+  const shell = '100 1 S 00:30 /bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval \'waitfor /x\''
+  // A function, a nested shell or a sleep by a variable: its shell waits on a sleep, or a log followed
+  expect(isWaiterTree(ps([shell, '101 100 S 00:02 sleep 5']), '100')).toBe(true)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 bash -lc until', '102 101 S 00:01 /bin/sleep 3']), '100')).toBe(true)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 tail -f /x/run.log', '102 100 S 00:20 grep -m1 done']), '100')).toBe(true)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 docker logs -f web']), '100')).toBe(true)
+  // Work at the end of the tree, or beside a sleep, is work; so is a lone grep a pipe goes through, and a shell with nothing under it
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 grep --line-buffered -v DEBUG']), '100')).toBe(false)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 python train.py']), '100')).toBe(false)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 rclone copy /a remote:', '102 100 S 00:01 sleep 1']), '100')).toBe(false)
+  expect(isWaiterTree(ps([shell]), '100')).toBe(false)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:02 sleep 5']), '999')).toBe(false)
 })
 
 test('a command made only of tail, grep and their kind only watches; one that follows a file never ends of itself; one that does anything more is no watcher', async () => {
