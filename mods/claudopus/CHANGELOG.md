@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.143 · 16 November 2026
+- A button in the panel, such as What's new or Close in the update note, works on the first click: the panel holds still from the moment you press until the press lands, where before a redraw in between lost the click.
+
 ## 0.2.142 · 16 November 2026
 - The README, the guide, the privacy page and claudopus.ai now describe Claudopus as it is today: updating with Download and Install (or one Update) then /reload-plugins, the reply box in the bar above the prompt, Stop that holds, finished work coming to the top, the bar of figures, the pages in the panel's header, and admin passwords that are never kept.
 

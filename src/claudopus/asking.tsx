@@ -162,6 +162,22 @@ const sideSign = () =>
 // move again ENGAGED after the person's last move
 const ENGAGED = 15_000
 let engagedAt = 0
+// A click is the focus moving onto a button, then the press: a drawing between them is a new button under the pointer, and the
+// click did nothing (16 Nov, recorded: the update note's What's new took several clicks while other chats' writes drew the panel
+// twice a second). From the person's focus on one of the panel's buttons until its press, or PRESS_HOLD, the panel is drawn as it
+// last was, but for the mod's own calls for a drawing (a box, an ask, a press: freshness), which come at once. Only on the desktop
+// surface: in the terminal a press is one key, and the arrows moving the focus would hold the panel still. A drawing asked for
+// meanwhile is made once the hold ends
+const PRESS_HOLD = 2000
+let pressFrom = 0
+let pressFresh = 0
+let isPressMissed = false
+const holdForPress = async ($: EngineInterface) => {
+  const at = (pressFrom = await $.clock.now())
+  pressFresh = freshness
+  $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), isPressMissed && ((isPressMissed = false), drawAgain($)))))
+}
+const isPressHeld = (at: number) => pressFrom > 0 && at - pressFrom < PRESS_HOLD && pressFresh === freshness
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 // Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone

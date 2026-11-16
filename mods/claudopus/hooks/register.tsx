@@ -4707,7 +4707,14 @@ let downloadProgress: { version: string; pct: number; got: number; phase: string
 const progressDrawn = { shown: '', phase: '', at: 0 }
 // Update's press, from its fetch to the end of its move: the panel says Updating throughout, and offers no press in between
 let isUpdatePress = false
+// A press while only a look runs (the timed one, or Config's Check now) waits for the look to end, then acts: before, it did nothing
+const afterLook = ($: EngineInterface, act: () => void) =>
+  void (async () => {
+    for (const end = (await $.clock.now()) + 30_000; isUpdating && !isStepping && (await $.clock.now()) < end; ) await new Promise<void>(done => void $.clock.after(250, done))
+    if (!isUpdating && !isStepping) act()
+  })()
 const downloadPress = ($: EngineInterface, version: string) => {
+  if (isUpdating && !isStepping) return afterLook($, () => downloadPress($, version))
   presses += 1
   // A press while a step runs does nothing, as atStep would, and leaves the flag to the press that set it
   if (isStepping || isUpdating) return
@@ -4758,6 +4765,7 @@ const downloadPress = ($: EngineInterface, version: string) => {
 }
 // Install, pressed for the download the notice showed: checked against the page read now, then put in place
 const installPress = ($: EngineInterface, version: string, commit: string) => {
+  if (isUpdating && !isStepping) return afterLook($, () => installPress($, version, commit))
   presses += 1
   void atStep($, () => installStep($, version, commit))
 }
@@ -5417,6 +5425,22 @@ const sideSign = () =>
 // move again ENGAGED after the person's last move
 const ENGAGED = 15_000
 let engagedAt = 0
+// A click is the focus moving onto a button, then the press: a drawing between them is a new button under the pointer, and the
+// click did nothing (16 Nov, recorded: the update note's What's new took several clicks while other chats' writes drew the panel
+// twice a second). From the person's focus on one of the panel's buttons until its press, or PRESS_HOLD, the panel is drawn as it
+// last was, but for the mod's own calls for a drawing (a box, an ask, a press: freshness), which come at once. Only on the desktop
+// surface: in the terminal a press is one key, and the arrows moving the focus would hold the panel still. A drawing asked for
+// meanwhile is made once the hold ends
+const PRESS_HOLD = 2000
+let pressFrom = 0
+let pressFresh = 0
+let isPressMissed = false
+const holdForPress = async ($: EngineInterface) => {
+  const at = (pressFrom = await $.clock.now())
+  pressFresh = freshness
+  $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), isPressMissed && ((isPressMissed = false), drawAgain($)))))
+}
+const isPressHeld = (at: number) => pressFrom > 0 && at - pressFrom < PRESS_HOLD && pressFresh === freshness
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 // Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
@@ -10573,8 +10597,12 @@ const commandHooks = (on: On) => {
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
+      // A button the person put the focus on holds the panel's drawing until it is pressed (PRESS_HOLD)
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
+      // after the let-go above, whose own drawing would end the hold
+      if (e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) await holdForPress($)
+      else pressFrom = 0
       if (!isInBarBox) barBoxAt = 0
     }
     return next(e)
@@ -11285,6 +11313,10 @@ let keysAsk = ''
 const listOffsets = new Map<string, number>()
 // How many things wait on the person at the top of the list, as last drawn
 let waitsAtTop = 0
+// The last drawing made of each pane on each surface, what a press under way keeps on screen (isPressHeld)
+const lastShown = new Map<string, unknown>()
+// The surface the list was last drawn on: the focus says none, and only the desktop's clicks are held for (isPressHeld)
+let listSurface = ''
 const panelHooks = (on: On) => {
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
@@ -11314,7 +11346,7 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
-    if (paneId === LIST) listDrawing += 1
+    if (paneId === LIST) ((listDrawing += 1), (listSurface = e.surface))
     try {
     // While the person types into a box the pane is drawn as it last was, whole, but for a change in its shape; not typing, as it last
     // was while only its running times moved, for CALM at most (heldDrawings)
@@ -11324,6 +11356,11 @@ const panelHooks = (on: On) => {
     const shape = await paneShape($, paneId)
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
+    // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
+    // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh)
+    const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
+    const shown = paneId === LIST && isPressHeld(heldAt) ? lastShown.get(shownKey) : undefined
+    if (shown) return ((listHeldAt = heldAt), (isPressMissed = true), shown as Awaited<ReturnType<typeof next>>)
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
@@ -12996,6 +13033,7 @@ const panelHooks = (on: On) => {
     )
     })()
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    lastShown.set(heldKey.replace(/\|[01]\|([01])$/, '|$1'), drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     return drawing
     } finally {
@@ -13015,7 +13053,7 @@ const tabHooks = (on: On) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
-    if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1), await engage($))
+    if (e.plugin === 'claudopus') ((pressFrom = 0), freeTimes($), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>

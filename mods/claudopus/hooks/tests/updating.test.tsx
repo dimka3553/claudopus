@@ -782,6 +782,30 @@ test('Update is one press for a chat run from its checkout: the fetch, its check
   expect(reloads).toEqual([])
 })
 
+test('Update pressed while a look reads the version page waits for the look to end, then updates: before, the press did nothing', SLOW, async ($, on) => {
+  const { files, clock } = world(on, { release: RELEASE })
+  // The page answers at once, but for the timed look below, which takes 20 s to read it
+  let slow = false
+  let isReading = false
+  on('http.fetch', async (engine, _e) => {
+    if (slow) ((slow = false), (isReading = true), await new Promise<void>(done => void engine.clock.after(20_000, () => ((isReading = false), done()))))
+    return { value: { status: 200, ok: true, headers: {}, text: pageText() } }
+  }) as never
+  await $.session.start(start)
+  await clock.advance(3 * 60_000)
+  const panel = await $.ui.mount(listAt())
+  await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
+  slow = true
+  files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
+  // Second by second up to the timed look, and the press comes while it reads the page
+  for (let s = 0; s < 20 * 60 && !isReading; s++) await clock.advance(1000)
+  expect(isReading).toBe(true)
+  await pressed(panel, 'update-download')
+  expect(isReading).toBe(true)
+  await clock.advance(30_000)
+  await shownIn(panel, 'v0.1.0 · v0.1.2 ready, type /reload-plugins')
+})
+
 // What updating says speaks only of versions, Update and /reload-plugins: never of where the code sits or how git moves it
 const UPDATE_JARGON = /folder|checkout|fetch|forward|detached|brought|commit|\bmain\b|branch|worktree|\bgit\b|fingerprint|marketplace|~\/|\/Users\//i
 // Update never overwrites uncommitted work nor moves a main with commits of its own: it says why it could not move forward, and nothing moves
