@@ -1,0 +1,136 @@
+#!/bin/bash
+# Brings Claudopus back in a chat where Claude's engine switched it off.
+#
+# revive <memory folder>
+#
+# Claude's engine runs every add-on's hooks on one shared helper. When the helper gives no answer for five seconds while one of an
+# add-on's hooks is answering, the engine switches that add-on off, and it stays off in that chat until the person types
+# /reload-plugins. The engine loads an add-on again by itself when one of its own settings changes. So each chat's Claudopus writes
+# <memory>/keep/<chat>.beat every few seconds: the chat's process, the key its copy of Claudopus has in the settings, and the
+# settings file it reads, a tab apart. One of these runs on the Mac at a time, the newest copy's. When a beat goes quiet while its
+# chat's process still runs, it changes that copy's own "revived" setting in that file, and the engine loads Claudopus again: in
+# every chat that copy runs in, as an update does. A chat that does not come back after a few tries is left as it is until its
+# beat moves again. What it did is in <memory>/keep/revive.log.
+set -u
+mem=${1:?memory folder}
+dir="$mem/keep"
+mkdir -p "$dir" || exit 1
+# How often to look, how quiet a beat may be (longer just after the Mac woke), how long between two changes, how many tries a chat
+# gets before it is left
+STEP=${CLAUDOPUS_REVIVE_STEP:-3}
+QUIET=${CLAUDOPUS_REVIVE_QUIET:-10}
+WOKE_QUIET=${CLAUDOPUS_REVIVE_WOKE_QUIET:-60}
+GAP=${CLAUDOPUS_REVIVE_GAP:-60}
+TRIES=${CLAUDOPUS_REVIVE_TRIES:-3}
+# With no chat beating for this long, it ends
+IDLE=${CLAUDOPUS_REVIVE_IDLE:-600}
+log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$dir/revive.log"; }
+now() { date +%s; }
+# (GNU stat first: its -f reads the file system and succeeds, so the BSD form would give nonsense on Linux)
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
+me="$0"
+
+# One at a time, the newest copy's: one already running from this same file is left to run; one from another copy (an older
+# version) is ended, and this one takes over
+was=$(cat "$dir/revive.pid" 2>/dev/null)
+if [ -n "$was" ] && [ "$was" != "$$" ] && kill -0 "$was" 2>/dev/null; then
+  args=$(ps -o args= -p "$was" 2>/dev/null)
+  case "$args" in
+    *"$me $mem"*) exit 0 ;;
+    *bin/revive*) kill "$was" 2>/dev/null ;;
+  esac
+fi
+printf '%s\n' "$$" > "$dir/revive.pid"
+mine() { [ "$(cat "$dir/revive.pid" 2>/dev/null)" = "$$" ]; }
+
+# One key's "revived" option set in one settings file with the system's own JSON (JavaScript on macOS, Python on Linux), every other
+# key as it was. A key of an installed copy is changed only while enabledPlugins turns it on; one loaded from a folder
+# (claudopus@inline) has no entry there. Prints "set", or "off"; fails when the file cannot be read as JSON or holds a number
+# JavaScript cannot carry whole, which it leaves as it is
+change() { # <settings file> <key> <time>
+  if [ -x /usr/bin/osascript ]; then
+    /usr/bin/osascript -l JavaScript - "$1" "$2" "$3" <<'JS' 2>/dev/null
+ObjC.import('Foundation')
+function run(argv) {
+  const path = $(argv[0]).stringByResolvingSymlinksInPath.js
+  const text = $.NSString.stringWithContentsOfFileEncodingError(path, $.NSUTF8StringEncoding, null)
+  if (text.isNil()) throw new Error('unread')
+  // A number of more than 15 digits would come back changed
+  if (/[-:\[,\s]\d{16,}|\d\.\d{16,}/.test(text.js)) throw new Error('numbers')
+  const d = JSON.parse(text.js)
+  const key = argv[1]
+  if (key !== 'claudopus@inline' && (d.enabledPlugins || {})[key] !== true) return 'off'
+  if (!d.pluginConfigs || typeof d.pluginConfigs !== 'object') d.pluginConfigs = {}
+  if (!d.pluginConfigs[key] || typeof d.pluginConfigs[key] !== 'object') d.pluginConfigs[key] = {}
+  const one = d.pluginConfigs[key]
+  if (!one.options || typeof one.options !== 'object') one.options = {}
+  one.options.revived = argv[2]
+  if (!$(JSON.stringify(d, null, 2) + '\n').writeToFileAtomicallyEncodingError(path, true, $.NSUTF8StringEncoding, null)) throw new Error('unwritten')
+  return 'set'
+}
+JS
+  else
+    python3 - "$1" "$2" "$3" <<'PY' 2>/dev/null
+import json, os, re, sys, tempfile
+path, key, at = os.path.realpath(sys.argv[1]), sys.argv[2], sys.argv[3]
+with open(path) as f: text = f.read()
+# As on a Mac: a number of more than 15 digits is left as it is
+if re.search(r'[-:\[,\s]\d{16,}|\d\.\d{16,}', text): sys.exit(1)
+d = json.loads(text)
+if key != 'claudopus@inline' and (d.get('enabledPlugins') or {}).get(key) is not True: print('off'); sys.exit(0)
+if not isinstance(d.get('pluginConfigs'), dict): d['pluginConfigs'] = {}
+if not isinstance(d['pluginConfigs'].get(key), dict): d['pluginConfigs'][key] = {}
+one = d['pluginConfigs'][key]
+if not isinstance(one.get('options'), dict): one['options'] = {}
+one['options']['revived'] = at
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+with os.fdopen(fd, 'w') as f: f.write(json.dumps(d, indent=2) + '\n')
+os.chmod(tmp, os.stat(path).st_mode & 0o777); os.replace(tmp, path)
+print('set')
+PY
+  fi
+}
+
+log "watching the chats' beats (pid $$)"
+last=$(now) idle=$(now) changed=0 woke=0
+while mine; do
+  sleep "$STEP"
+  t=$(now)
+  # A Mac that slept leaves every beat quiet when it wakes: the chats get longer to write theirs again
+  [ $((t - last)) -gt $((STEP * 3 + 5)) ] && woke=$t
+  last=$t
+  any=0
+  for beat in "$dir"/*.beat; do
+    [ -f "$beat" ] || continue
+    sid=$(basename "$beat" .beat)
+    IFS=$'\t' read -r pid key settings < "$beat" 2>/dev/null
+    # A chat whose process has ended has no Claudopus to bring back
+    if ! kill -0 "${pid:-0}" 2>/dev/null; then rm -f "$beat" "$dir/$sid.revived" "$dir/$sid.gaveup"; continue; fi
+    any=1
+    m=$(mtime "$beat") || continue
+    quiet=$((t - m))
+    # Beating: a chat that came back starts its tries afresh
+    if [ "$quiet" -lt "$QUIET" ]; then rm -f "$dir/$sid.revived" "$dir/$sid.gaveup"; continue; fi
+    [ $((t - woke)) -lt "$WOKE_QUIET" ] && continue
+    [ $((t - changed)) -lt "$GAP" ] && continue
+    # Left after its tries, until its beat moves again
+    [ -f "$dir/$sid.gaveup" ] && continue
+    case "${key:-}" in claudopus@*) ;; *) continue ;; esac
+    [ -f "${settings:-}" ] || continue
+    tries=0; [ -f "$dir/$sid.revived" ] && tries=$(wc -l < "$dir/$sid.revived" | tr -d ' ')
+    if [ "${tries:-0}" -ge "$TRIES" ]; then
+      log "chat $sid: Claudopus did not come back after $tries tries; left as it is until it beats again"
+      : > "$dir/$sid.gaveup"
+      continue
+    fi
+    changed=$t
+    printf '%s %s\n' "$t" "$quiet" >> "$dir/$sid.revived"
+    said=$(change "$settings" "$key" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')") || { log "chat $sid: quiet $quiet s, but its settings file could not be changed (not plain JSON, or a number too long to keep); left as it is"; : > "$dir/$sid.gaveup"; continue; }
+    if [ "$said" = off ]; then log "chat $sid: quiet $quiet s, and $key is turned off in the settings: nothing done"; : > "$dir/$sid.gaveup"; continue; fi
+    log "chat $sid: quiet $quiet s while its process $pid runs: the setting of $key changed, so Claude loads it again"
+  done
+  [ "$any" = 1 ] && idle=$t
+  [ $((t - idle)) -ge "$IDLE" ] && { log "no chat beating for $IDLE s: ended"; break; }
+done
+mine && rm -f "$dir/revive.pid"
+exit 0

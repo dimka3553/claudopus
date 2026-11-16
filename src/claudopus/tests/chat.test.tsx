@@ -20,6 +20,14 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   const words = files.get(`${MEMORY}/words/engine-id.md`) ?? ''
   expect(words).toContain('fix the upload page')
   expect(words).toContain('and the nose')
+
+  // Words of a long chat, over the 4 MB the engine gives whole, are added to, never written again as only the newest
+  const long = `## 2026-11-12T07:00:00.000Z\nthe first message\n\n${'x'.repeat(4_300_000)}\n\n`
+  files.set(`${MEMORY}/words/engine-id.md`, long)
+  await $.prompt.submit({ text: 'and the chin', wait: false, origin: composer })
+  const kept = files.get(`${MEMORY}/words/engine-id.md`) ?? ''
+  expect(kept.startsWith(long)).toBe(true)
+  expect(kept.slice(long.length)).toContain('and the chin')
 })
 
 test('work starts as a fresh agent from written instructions, never as a copy of the chat: a clearly stated job on Sonnet, the rest as a task, a fork or an agent with no model refused whatever an old config.json chose, and a brief gets the rules for the work', async ($, on) => {

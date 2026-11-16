@@ -42,6 +42,8 @@ const LIST = {
   requestId: 'claudopus',
   props: { title: 'Claudopus', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
 } as const
+// The most the engine's fs.read gives whole
+const FS_READ_MOST = 4_194_304
 declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
@@ -113,7 +115,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const wake = () => void sleepers.splice(0).forEach(one => one())
   // What each Bash call that ran the admin runner found waiting for it: the grants, as bin/admin would read them
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
-  mock.env(on, { HOME, ...options.env })
+  // The kit's clock moves only as a test moves it: the mod's look at how late its timer comes is left out, unless a test asks for it
+  mock.env(on, { HOME, CLAUDOPUS_TIMING: 'test', ...options.env })
   const clock = mock.clock(on, { now: 1_700_000_000_000 })
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
@@ -141,6 +144,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: files.get('manifest') ?? '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
+    // As the engine: no file over 4 MB is given whole
+    if (text.length > FS_READ_MOST) throw new Error(`${e.path} refused: the file is over the ${FS_READ_MOST}-byte limit`)
     return { value: text }
   })
   on('fs.write', (_, e) => {
@@ -167,6 +172,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { value: { content: [{ type: 'text', text }], isError: false } }
   })
   on('session.id', () => ({ value: 'engine-id' }))
+  // The mod's pause in a long step (breathe): answered after the test's own timers have had their turn, as the engine answers from
+  // outside the helper
+  on('session.turns', async () => (await new Promise(done => setTimeout(() => done(undefined), 0)), { value: 1 }))
   // A chat drawn on the desktop app, as most are; `headless` none, as a -p run
   // `narrow`: a terminal under 144 columns, as a phone over ssh, which draws only a tab opened as the person asked: here, one opened
   // while the test's press is still being answered (isPressing). The engine counts only what the press's own hook opens, which the kit
@@ -215,6 +223,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const [tool, ...rest] = e.argv
     const ok = (stdout = '', exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // The admin gate's wait between two looks at what was pressed: it lasts until the test lets it go with wake(), as a second passing
+    // The end or the first line of a file, as tail and head give them
+    if (tool === 'tail' && rest[0] === '-c') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').slice(-Number(rest[1]))) : ok('', 1)
+    if (tool === 'head' && rest[0] === '-n') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').split('\n').slice(0, Number(rest[1])).join('\n') + '\n') : ok('', 1)
+    // The chat's own process, as the shell the mod starts names its parent
+    if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
@@ -1526,6 +1539,52 @@ test('work the engine runs is listed even when the mod never saw it start, and w
   agents.a7 = 'failed'
   await clock.advance(20_000)
   expect((await until(() => pane.find({ type: 'Text', text: /^Nothing/ })))?.text).toBe('Nothing is running')
+  await pane.unmount()
+})
+
+test('a helper, and the work waiting on it, that ended while the mod was out are ended on their cards from their saved record, the work passed its result first, never drawn at work or warned about as stuck (16 Nov a second look that ended unheard was drawn at work for 47 minutes)', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const { clock, files, resumed, appended } = world(on, { agents })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Second look', prompt: 'go', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Picture', prompt: 'go', parentAgentId: 'a1' } as never)
+  // The work ends its step to wait on its helper: it is still at work
+  await $.turn.complete({ answer: 'Waiting on the second look.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await pane.find({ type: 'Text', text: /^Working on/ }))?.text).toBe('Working on 1 thing')
+  // The helper hands back its report while the mod is out: no end is heard, and the engine no longer lists either of them
+  const folder = `${HOME}/.claude/projects/-repo/engine-id/subagents`
+  const handback = (text: string) => JSON.stringify({ timestamp: '2026-11-16T13:25:13Z', type: 'assistant', message: { content: [{ type: 'tool_use', name: 'SubagentHandback', input: { message: text } }] } })
+  files.set(`${folder}/agent-a2.meta.json`, JSON.stringify({ description: 'Second look', spawnDepth: 2, parentAgentId: 'a1', finished: true }))
+  files.set(`${folder}/agent-a2.jsonl`, handback('Nothing wrong found.'))
+  files.set(`${folder}/agent-a1.meta.json`, JSON.stringify({ description: 'Fix the nose', spawnDepth: 1, finished: true }))
+  const saved = () => {
+    const kept = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}') as Record<'cards' | 'helpers' | 'ended', { id: string; status: string; answer: string }[] | undefined>
+    return [...(kept.cards ?? []), ...(kept.helpers ?? []), ...(kept.ended ?? [])]
+  }
+  // The helper ends on its card with its report, and the work that waited on it is passed that report and started again, not ended
+  await clock.advance(70_000)
+  expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: your helper "Second look" has finished') && one.endsWith('Nothing wrong found.')))).toBeDefined()
+  expect(saved().find(one => one.id === 'a2')).toMatchObject({ status: 'done', answer: 'Nothing wrong found.' })
+  expect(saved().find(one => one.id === 'a1')?.status).toBe('working')
+  // Started again, it runs (its record no longer says finished); its other helper's unheard end reaches it at its next step
+  agents.a1 = 'running'
+  files.set(`${folder}/agent-a1.meta.json`, JSON.stringify({ description: 'Fix the nose', spawnDepth: 1 }))
+  files.set(`${folder}/agent-a3.meta.json`, JSON.stringify({ description: 'Picture', spawnDepth: 2, parentAgentId: 'a1', finished: true }))
+  files.set(`${folder}/agent-a3.jsonl`, handback('The picture is drawn.'))
+  await clock.advance(2 * 60_000)
+  expect(await until(async () => appended.find(one => one.startsWith('a1: From Claudopus: your helper "Picture" has finished') && one.endsWith('The picture is drawn.')))).toBeDefined()
+  // then hands back its own report while the mod is out once more: its card ends with that report
+  expect(saved().find(one => one.id === 'a1')?.status).toBe('working')
+  delete agents.a1
+  files.set(`${folder}/agent-a1.meta.json`, JSON.stringify({ description: 'Fix the nose', spawnDepth: 1, finished: true }))
+  files.set(`${folder}/agent-a1.jsonl`, handback('The fix is released.'))
+  await clock.advance(31 * 60_000)
+  expect((await until(() => pane.find({ type: 'Text', text: /^Nothing/ })))?.text).toBe('Nothing is running')
+  expect(await pane.find({ type: 'Text', text: /No progress|quiet/ })).toBeUndefined()
+  expect(saved().filter(one => one.status === 'working').map(one => one.id)).toEqual([])
+  expect(saved().find(one => one.id === 'a1')?.answer).toBe('The fix is released.')
   await pane.unmount()
 })
 
