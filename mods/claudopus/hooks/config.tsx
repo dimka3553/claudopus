@@ -169,7 +169,7 @@ export const editing = { key: '', draft: '' }
 export type ConfigShown = {
   // The version this chat runs, and Check for updates as it stands
   version: string
-  check: { isChecking: boolean; said: string; isError: boolean }
+  check: { isChecking: boolean; said: string; isError: boolean; isOut?: boolean }
   // Where this chat's copy loads from, in words, and when the last look was and what it saw
   updates?: { where: string; lookedAt: number; seen: string; now: number }
   // Where updating stands, drawn by the mod as the panel's header box, with its presses: shown under Check now
@@ -404,10 +404,11 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
             ),
             false,
             () => undefined,
-            // What Check now found, unless that version was skipped since (then the Skipped line says it) or the update box below says it;
+            // What Check now found, unless that version was skipped since (then the Skipped line says it) or it is a newer version, which the
+            // update box below says;
             // then where updating stands, with its presses, right here
             <Box key="config-check-below" flexDirection="column" gap={1} flexShrink={0}>
-              {shown.check.said && (shown.check.isError || !shown.updateBox) && !(config.skipVersion && shown.updates?.seen === config.skipVersion) ? (
+              {shown.check.said && !(shown.check.isOut && shown.updateBox) && !(config.skipVersion && shown.updates?.seen === config.skipVersion) ? (
                 <Text key="config-check-said" color={shown.check.isError ? 'error' : undefined} wrap="wrap">{shown.check.said}</Text>
               ) : null}
               {shown.updateBox ?? null}

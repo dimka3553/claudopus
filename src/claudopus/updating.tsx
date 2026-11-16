@@ -111,7 +111,7 @@ const lookForNew = async ($: EngineInterface) => {
   }
 }
 // Config's Check now: the page read now, whatever the setting; it only looks, and Config and the panel offer what it found
-const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
+const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean; isOut?: boolean }> => {
   if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
   const loaded = (await versionsOf($)).version
   for (let tries = 0; tries < 20; tries++) {
@@ -126,7 +126,7 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
           if (!loaded || !isNewer(got.page.version, loaded)) return { text: `You're on the newest version (v${got.page.version}).`, isError: false }
           // Asked for now: a Not now pressed earlier no longer keeps it quiet, and Config shows its Update right under the press
           if ((await readOr($, laterPath())).trim()) await $.fs.write(laterPath(), JSON.stringify({ version: got.page.version, until: 0 }))
-          return { text: `v${got.page.version} is out.`, isError: false }
+          return { text: `v${got.page.version} is out.`, isError: false, isOut: true }
         }
       } finally {
         isUpdating = false
@@ -346,13 +346,15 @@ const installStep = async ($: EngineInterface, version: string, commit: string) 
 const laterPress = async ($: EngineInterface, version: string) => {
   presses += 1
   await $.fs.write(laterPath(), JSON.stringify({ version, until: (await $.clock.now()) + LATER_FOR }))
+  // What Check now said last is about the version just put off: no line is left in Config saying it is out with nothing to press
+  Object.assign(updateCheck, { said: '', isError: false, isOut: false })
   redraw($)
 }
 const skipPress = async ($: EngineInterface, version: string) => {
   presses += 1
   await setConfig($, dir, 'skipVersion', version)
   // What Check now said last is about the version just skipped
-  Object.assign(updateCheck, { said: '', isError: false })
+  Object.assign(updateCheck, { said: '', isError: false, isOut: false })
   await loadSettings($)
   redraw($)
 }

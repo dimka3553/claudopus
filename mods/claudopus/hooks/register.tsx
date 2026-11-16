@@ -1223,7 +1223,8 @@ const configButton = ($: EngineInterface, ui: Ui, isKeyed = false) => (
   </ui.Box>
 )
 // Check now as it stands in this chat: under way, and what the last press found, kept until the next press
-const updateCheck = { isChecking: false, said: '', isError: false }
+// (isOut: it found a newer version, which the update box under it then says with its presses)
+const updateCheck = { isChecking: false, said: '', isError: false, isOut: false }
 const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
   version: (await versionsOf($).catch(() => ({ version: '' }))).version,
   check: { ...updateCheck },
@@ -1305,12 +1306,12 @@ const configActs = ($: EngineInterface) => ({
   check: () => {
     if (updateCheck.isChecking) return
     presses += 1
-    Object.assign(updateCheck, { isChecking: true, said: '', isError: false })
+    Object.assign(updateCheck, { isChecking: true, said: '', isError: false, isOut: false })
     redraw($)
     void checkNow($)
-      .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true }))
+      .catch(err => ({ text: `Couldn't check: ${String(err instanceof Error ? err.message : err).slice(0, 160)}`, isError: true, isOut: false }))
       .then(said => {
-        Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError })
+        Object.assign(updateCheck, { isChecking: false, said: said.text, isError: said.isError, isOut: Boolean(said.isOut) })
         presses += 1
         redraw($)
       })
@@ -4800,7 +4801,7 @@ const lookForNew = async ($: EngineInterface) => {
   }
 }
 // Config's Check now: the page read now, whatever the setting; it only looks, and Config and the panel offer what it found
-const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
+const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean; isOut?: boolean }> => {
   if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
   const loaded = (await versionsOf($)).version
   for (let tries = 0; tries < 20; tries++) {
@@ -4815,7 +4816,7 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
           if (!loaded || !isNewer(got.page.version, loaded)) return { text: `You're on the newest version (v${got.page.version}).`, isError: false }
           // Asked for now: a Not now pressed earlier no longer keeps it quiet, and Config shows its Update right under the press
           if ((await readOr($, laterPath())).trim()) await $.fs.write(laterPath(), JSON.stringify({ version: got.page.version, until: 0 }))
-          return { text: `v${got.page.version} is out.`, isError: false }
+          return { text: `v${got.page.version} is out.`, isError: false, isOut: true }
         }
       } finally {
         isUpdating = false
@@ -5035,13 +5036,15 @@ const installStep = async ($: EngineInterface, version: string, commit: string) 
 const laterPress = async ($: EngineInterface, version: string) => {
   presses += 1
   await $.fs.write(laterPath(), JSON.stringify({ version, until: (await $.clock.now()) + LATER_FOR }))
+  // What Check now said last is about the version just put off: no line is left in Config saying it is out with nothing to press
+  Object.assign(updateCheck, { said: '', isError: false, isOut: false })
   redraw($)
 }
 const skipPress = async ($: EngineInterface, version: string) => {
   presses += 1
   await setConfig($, dir, 'skipVersion', version)
   // What Check now said last is about the version just skipped
-  Object.assign(updateCheck, { said: '', isError: false })
+  Object.assign(updateCheck, { said: '', isError: false, isOut: false })
   await loadSettings($)
   redraw($)
 }
@@ -14694,7 +14697,7 @@ const tabHooks = (on: On) => {
     const ui = uiOf($, e)
     return (
       <ui.Box flexDirection="column" gap={1} minHeight={e.props.scroll.bodyRows}>
-        {configView(ui, { ...(await configShown($)), updateBox: await configUpdateBox($, ui) }, configActs($), band, presses, dir)}
+        {configView(ui, { ...(await configShown($)), updateBox: updateCheck.isChecking ? null : await configUpdateBox($, ui) }, configActs($), band, presses, dir)}
       </ui.Box>
     )
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))

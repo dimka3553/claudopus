@@ -858,6 +858,11 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   expect((await until(() => keyed(config, 'update-download')))?.props.label).toBe('Update')
   expect(await config.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' })).toBeDefined()
   expect(await config.find({ type: 'Text', text: /from the panel/ })).toBeUndefined()
+  expect(await config.find({ type: 'Text', text: 'v0.1.2 is out.' })).toBeUndefined()
+  // Not now pressed there puts the box away and leaves no line saying it is out with nothing to press
+  await pressed(config, 'update-later-available')
+  expect(await until(async () => ((await keyed(config, 'update-download')) ? undefined : true))).toBe(true)
+  expect(await config.find({ type: 'Text', text: /0\.1\.2 is out/ })).toBeUndefined()
   expect(gitRan.filter(one => /^(fetch|merge)/.test(one) || one.includes('fetch --progress'))).toEqual([])
   expect(files.get('manifest')).toBeUndefined()
   // An older page with no fingerprint is no release: said as a failure, in the error colour
