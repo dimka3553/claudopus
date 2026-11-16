@@ -226,9 +226,60 @@ const sync = async ($: EngineInterface) => {
     for (const card of cards.values()) if (listed && card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
+  if (listed) await endUnheard($, live, now).catch(err => log($, `work that ended unheard not looked for: ${String(err)}`))
   await keepStoppedReports($, now)
   await lookEnds($)
   await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
+}
+
+// Work, or a helper, that ended while the mod was unloaded is never heard to end, and the engine drops it from its list a while
+// later: its card would be drawn at work, and warned about as stuck, for good (16 Nov a second look that handed back its report at
+// 17:25, while the mod was out from 17:24 to 17:26, was drawn at work for 47 minutes and held its task open). A card at work that
+// the engine no longer lists at all and whose saved record says it finished has ended: helpers first, then work with no helper at
+// work left and nothing it asked to be started again for. Looked at once a minute for each
+const UNHEARD_LOOK = 60_000
+const UNHEARD_QUIET = 60_000
+const unheardLooked = new Map<string, number>()
+const endUnheard = async ($: EngineInterface, live: { id: string }[], now: number) => {
+  const { id } = await read($, me)
+  if (!id || !dir) return
+  const isUnlisted = (one: Todo) =>
+    one.status === 'working' && !one.chat && !live.some(agent => agent.id === one.id) && !cutPending.has(one.id) && !isHeld(one) && now - Math.max(one.startedAt, one.newAt ?? 0) >= UNHEARD_QUIET
+  const list = await read($, todos)
+  const due = list.filter(one => isUnlisted(one) && now - (unheardLooked.get(one.id) ?? -Infinity) >= UNHEARD_LOOK)
+  if (!due.length) return
+  const home = (await $.env.get('HOME')) ?? ''
+  const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
+  const finished = new Map<string, { at: number; answer: string }>()
+  for (const one of due) {
+    unheardLooked.set(one.id, now)
+    const meta = parsedOr<{ finished?: boolean }>(await readOr($, `${folder}/agent-${one.id}.meta.json`), {})
+    if (meta.finished !== true) continue
+    const path = `${folder}/agent-${one.id}.jsonl`
+    const at = (await $.fs.stat(path).catch(() => undefined))?.mtimeMs || now
+    // Its report: what it handed back, or its last words, from the end of its record
+    const tail = ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '').split('\n')
+    let answer = ''
+    for (const row of tail.reverse()) {
+      const o = parsedOr<{ type?: string; message?: { content?: unknown } }>(row, {})
+      if (o.type !== 'assistant' || !Array.isArray(o.message?.content)) continue
+      const blocks = o.message.content as { type?: string; name?: string; text?: string; input?: { message?: unknown } }[]
+      answer = blocks.map(b => (b.type === 'tool_use' && b.name === 'SubagentHandback' && typeof b.input?.message === 'string' ? b.input.message : b.type === 'text' ? (b.text ?? '') : '')).join('').trim()
+      if (answer) break
+    }
+    finished.set(one.id, { at, answer: answer.slice(0, ANSWER_CHARS) })
+  }
+  if (!finished.size) return
+  await changeTodos($, all => {
+    const end = (one: Todo) => {
+      const f = finished.get(one.id)
+      return f ? { ...ended(one, 'done', Math.min(f.at, now)), answer: one.answer || f.answer, wakeWhen: undefined } : one
+    }
+    const helpersDone = all.map(one => (one.parentId ? end(one) : one))
+    return helpersDone.map(one => (one.parentId || one.wakeWhen || helpersDone.some(kid => kid.parentId === one.id && kid.status === 'working') ? one : end(one)))
+  })
+  await log($, `work that ended while the mod was out ended on its card: ${[...finished.keys()].join(', ')}`)
+  redraw($)
 }
 
 // Changes the to-do a piece of work belongs to; work the mod never saw start is looked up first, and a helper of unknown work changes nothing

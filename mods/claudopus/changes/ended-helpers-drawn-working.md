@@ -1,0 +1,1 @@
+- A helper or task that finished while Claudopus was out of the chat is now ended on its card when Claudopus comes back: it is no longer drawn as working, warned about as stuck, or keeps its finished task's card open.
