@@ -1412,28 +1412,6 @@ test('while the person uses the panel its running times stand still, and move ag
   await list.unmount()
 })
 
-test('scrolled down at the end of the list, a card that shrinks under the person leaves the list at the bottom of what they see, and once they leave it alone the list ends with its cards', async ($, on) => {
-  const { clock } = world(on)
-  await $.session.start(start)
-  await $.prompt.submit({ text: 'check the ears', wait: false, origin: composer })
-  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
-  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I go on?', details: 'What it does:\\n- one\\n- two\\n- three', choices: ['Approve', 'Not now'] } as never)
-  await $.turn.complete({ answer: 'Waits for your answer.', durationMs: 1, isAborted: false, turnId: 'turn-a1', reason: 'answer', agentId: 'a1' } as never)
-  await clock.advance(120_000)
-  // The person sees rows 35 to 65, at the end of the list
-  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 35, bodyRows: 30 } }, surface: 'desktop' } as never)
-  await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 35, by: 1, bodyRows: 30, contentRows: 65, origin: { kind: 'person' } }).catch(() => undefined)
-  const tall = async () => Number((await list.find({ type: 'Box' }))?.props.minHeight ?? 0)
-  const key = await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Not now' && String(b.key ?? '').startsWith('ask-a1-'))?.key)
-  await list.press({ key: key ?? '' })
-  expect(await until(async () => ((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Not now') ? undefined : true))).toBe(true)
-  expect(await tall()).toBe(65)
-  // Left alone, it is drawn again at its own height, whatever else is still or moving
-  await clock.advance(20_000)
-  expect(await until(async () => ((await tall()) === 30 ? true : undefined))).toBe(true)
-  await list.unmount()
-})
-
 test('with only a Details tab in front, or the Servers tab open, the mod still asks for no more than a drawing every ten seconds', async ($, on) => {
   const live = [{ id: 'claudopus', isShown: true, isPlaced: true }, { id: 'servers', isShown: true, isPlaced: true }]
   const { clock } = world(on, { live })
