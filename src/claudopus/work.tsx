@@ -264,19 +264,6 @@ const workHooks = (on: On) => {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
-    // A copy of the chat for a small job that has taken its steps hands what is left to a fresh task, and may only do that and end
-    if (dir && !isOff && e.agentId !== undefined && !isForkEnding(e as never)) {
-      const card = (await read($, todos)).find(one => one.id === e.agentId)
-      // A copy does its small job itself: it starts no helper and sets no other task to work, whose steps it would not count
-      if (card?.isFork && !card.parentId && (e.tool === 'Agent' || (e.tool === 'SendMessage' && String((e as { to?: unknown }).to ?? '') !== 'main'))) {
-        await log($, `refused copy ${e.agentId}'s ${e.tool} to other work`)
-        return { deny: FORK_ALONE() }
-      }
-      if (card?.isFork && !card.parentId && (card.steps ?? 0) >= FORK_STEPS) {
-        await log($, `refused a step of copy ${e.agentId} past its ${FORK_STEPS} steps`)
-        return { deny: FORK_PAST() }
-      }
-    }
     // The list of admin commands always allowed, and what seals it, are the person's alone
     if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {
       await log($, `refused ${e.tool} on the admin gate's own files`)
@@ -290,8 +277,8 @@ const workHooks = (on: On) => {
     // does a change to the person's own settings and texts. Never for a call the chat's own thread is refused below: nothing is asked
     // or granted for a call that does not run
     const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
-    // A single command the chat runs itself, unless the settings send everything to a task: one command and nothing joined to it
-    const chatCommand = isChatHere && e.tool === 'Bash' && lean.small !== 'full' ? String((e as { command?: unknown }).command ?? '') : ''
+    // A single command the chat runs itself: one command and nothing joined to it
+    const chatCommand = isChatHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
     if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
@@ -485,8 +472,7 @@ const workHooks = (on: On) => {
     // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
     if (e.tool === 'Agent') {
       const call = e as unknown as { subagent_type?: unknown; model?: unknown }
-      const isCopyAllowed = call.subagent_type === 'fork' && lean.small === 'copy'
-      if (!isCopyAllowed && (call.subagent_type === 'fork' || !String(call.model ?? '').trim())) {
+      if (call.subagent_type === 'fork' || !String(call.model ?? '').trim()) {
         await log($, `refused an Agent call ${call.subagent_type === 'fork' ? 'that copies the chat' : 'with no model'}`)
         return { deny: NO_COPY() }
       }
@@ -550,14 +536,19 @@ const workHooks = (on: On) => {
     // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
     // The engine presses work that ends its step without its report, while it sees nothing of the work's own at work: a command
-    // the work started detached, or what it asked Claudopus to wake it for, it does not see (16 Nov: 30 presses in 25 minutes ended a
-    // task early). That press is answered here with no model, so the work ends its step and is started again when that is done
-    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen) && (await isPressedForReport($, id))) {
-      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : 'it waits to be woken'}: let it end its step`)
+    // the work started detached, what it asked Claudopus to wake it for, or its helpers, which run in the background and whose
+    // results start it again, it does not see (16 Nov: 30 presses in 25 minutes ended a task early; five tasks waiting on a second
+    // look were each pressed and refused at their report). That press is answered here with no model, so the work ends its step and
+    // is started again when that is done
+    const helpers = id !== undefined && card && !isOff && card.handedBackAt === undefined ? runningHelpers(await read($, todos), id).length : 0
+    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen || helpers) && (await isPressedForReport($, id))) {
+      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : 'it waits to be woken'}: let it end its step`)
       yield { kind: 'text', index: 0, text: LEFT_AT_WORK }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
       return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
     }
+    // A step of its own: the chat is told again the next time it ends its step to wait
+    if (id !== undefined) toldWaitsOn.delete(id)
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
@@ -631,7 +622,7 @@ const workHooks = (on: On) => {
     // Every agent starts on a current model: one named an older model or Haiku on its family's newest, a copy of an agent on an
     // older model not at all, and one left to its parent's model, when that is older, on that family's newest. A check of what was
     // built, by a helper or a workflow's agent, runs on a model never weaker than its parent's, and at least on Opus
-    // One of the mod's own kinds starts as the settings say: everything, or only its tools, and on the model its kind runs on
+    // One of the mod's own kinds starts with only its tools, on the model its kind runs on
     const kinded = isOff ? {} : kindStart(asked)
     if (kinded.subagentType || kinded.model) await log($, `an agent of kind ${asked.subagentType} starts${kinded.subagentType ? ` as ${kinded.subagentType}` : ''}${kinded.model ? ` on ${modelName(kinded.model) || kinded.model}` : ''}`)
     const start = isOff || asked.resume ? undefined : startModel({ ...asked, ...kinded })
@@ -658,7 +649,7 @@ const workHooks = (on: On) => {
     // and where the runner is that does an admin command with a Mac's kept password
     const rules = isTold ? await workRules($) : ''
     const isBackground = isHelperSpawn(e)
-    const r = await next(isTold ? { ...e, prompt: `${e.fork ? `${FORK_HEAD()}\n\n` : ''}${e.prompt}\n\n${rules}` } : isBackground ? { ...e, background: true } : e)
+    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
     if (r.model) seeModel(r.model)
     // A resumed agent keeps the model it first started on, or none: the model it resumes on may be one the app moved it to after a flag. A

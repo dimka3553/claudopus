@@ -226,6 +226,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The end or the first line of a file, as tail and head give them
     if (tool === 'tail' && rest[0] === '-c') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').slice(-Number(rest[1]))) : ok('', 1)
     if (tool === 'head' && rest[0] === '-n') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').split('\n').slice(0, Number(rest[1])).join('\n') + '\n') : ok('', 1)
+    // The chat's own process, as the shell the mod starts names its parent
+    if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
@@ -757,7 +759,8 @@ test('three single lookups in a row are told to go together or to a helper; two 
 
 test("work never waits for its helpers: it is told it may end its step, it is let go when it does, and a helper's result that the engine hands the chat is passed on to it, which starts it again; a report handed back while helpers run is still held", async ($, on) => {
   const agents: Record<string, string> = {}
-  const { stopped, resumed, appended, clock } = world(on, { agents })
+  const talk: unknown[] = []
+  const { stopped, resumed, appended, clock, stepped } = world(on, { agents, talk })
   on('classic.SubagentStop', () => ({}) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -778,14 +781,41 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   // Its report would leave their results to the chat: held, with no command to wait with
   const handback = (await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb', agentId: 'a1', message: 'Fixed.' } as never)) as { deny?: string }
   expect(handback.deny).toContain("Don't hand back your report yet")
-  expect(handback.deny).not.toMatch(/bin\/helpers|Bash command/)
+  expect(handback.deny).not.toMatch(/bin\/helpers|Bash command|TaskStop/)
   // While it is at a step of its own the engine hands it the result itself: nothing is passed on
   agents.a2 = 'completed'
   await $.turn.complete({ answer: 'nose.ts', durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' } as never)
   expect(resumed.filter(one => one.startsWith('a1:'))).toEqual([])
   // Its step ended, the engine lists it as done; the second helper's result is passed on and starts it again, and the chat is told
   agents.a1 = 'completed'
+  // The engine, which does not count its helpers as its own at work, presses it for its report as it ends its step: answered with no
+  // model, it ends its step again (16 Nov: five tasks, pressed and refused at their report, were told to the chat as ended)
+  talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: 'Waiting for the drawing.' }] }, { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' })
+  const before = stepped.length
+  const said: string[] = []
+  for await (const chunk of $.turn.step({ turnId: 'h1p', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') said.push((chunk as { text: string }).text)
+  expect([stepped.length - before, said]).toEqual([0, ['My own work is still going; I am started again when it is done, and give my report then.']])
   await $.turn.complete({ answer: 'Waiting for the drawing.', durationMs: 1, isAborted: false, turnId: 'h1', reason: 'answer', agentId: 'a1' } as never)
+  // and the chat, which the engine tells it ended without its report, is told once it waits for its helper and is not to be asked
+  const waits = /^undefined: From Claudopus: the task ".*" ended its step without its report because it waits for a helper it started\..*Do not send it a message asking for its report/
+  expect(await until(async () => appended.find(one => waits.test(one)))).toBeDefined()
+  await $.turn.complete({ answer: 'Still waiting.', durationMs: 1, isAborted: false, turnId: 'h1b', reason: 'answer', agentId: 'a1' } as never)
+  expect(appended.filter(one => waits.test(one))).toHaveLength(1)
+  // A step of its own, and it ends its step to wait again: told again. Held by the engine on a command it sees, it is not: the
+  // engine tells the chat it waits
+  const step = async (turnId: string) => {
+    talk.splice(0, talk.length, { role: 'user', content: 'Carry on.' })
+    for await (const _ of $.turn.step({ turnId, index: 1, model: 'm', messageCount: 1, agentId: 'a1' })) void _
+  }
+  await step('h1c')
+  await $.turn.complete({ answer: 'Waiting again.', durationMs: 1, isAborted: false, turnId: 'h1c', reason: 'answer', agentId: 'a1' } as never)
+  expect(await until(async () => (appended.filter(one => waits.test(one)).length === 2) || undefined)).toBe(true)
+  await step('h1d')
+  agents.a1 = 'waiting'
+  await $.turn.complete({ answer: 'Waiting on the build too.', durationMs: 1, isAborted: false, turnId: 'h1d', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(1_000)
+  expect(appended.filter(one => waits.test(one))).toHaveLength(2)
+  agents.a1 = 'completed'
   // and its card stays at work with its helper under it, though the engine lists it as completed (16 Nov it vanished meanwhile)
   await clock.advance(25_000)
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)

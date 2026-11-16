@@ -226,6 +226,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The end or the first line of a file, as tail and head give them
     if (tool === 'tail' && rest[0] === '-c') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').slice(-Number(rest[1]))) : ok('', 1)
     if (tool === 'head' && rest[0] === '-n') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').split('\n').slice(0, Number(rest[1])).join('\n') + '\n') : ok('', 1)
+    // The chat's own process, as the shell the mod starts names its parent
+    if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
@@ -745,7 +747,7 @@ test('Config lists each thing a person can set with what is in force, edits a te
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config')
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  for (const name of ['Principles', "The chat's rules", 'Task rules', 'Your name', 'Background tasks', 'Sound', 'Notifications', 'Most tasks', 'Long searching and reading', 'Heavy tasks'])
+  for (const name of ['Principles', "The chat's rules", 'Task rules', 'Your name', 'Background tasks', 'Sound', 'Notifications', 'Most tasks', 'Clear jobs, searching and reading', 'Heavy tasks'])
     expect(await config.find({ type: 'Text', text: name })).toBeDefined()
   // Only what differs from what shipped has a Reset: here the name
   expect((await config.findAll({ type: 'Button' })).filter(one => one.props.label === 'Reset').length).toBe(1)
@@ -789,7 +791,7 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ models: { legwork: 'opus' } })
   // The chat is told at its next message, and the work's rules name the helpers' model
   const told = (await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })) as { context?: string[] }
-  expect((told.context ?? []).join('\n')).toContain('Long legwork such as indexing runs on Opus 5.5, `model: "opus"`.')
+  expect((told.context ?? []).join('\n')).toContain('A clearly stated job, and long legwork such as indexing, runs on Opus 5.5, `model: "opus"`.')
   await $.agent.spawn({ ...spawn, prompt: 'index the photos' } as never)
   expect(prompts[0]).not.toContain('{helpers}')
   expect(prompts[0]).not.toContain('{checker}')
@@ -798,19 +800,16 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })
 
-test("Config's Tasks band shows how work is handed out, each with its shipped choice, and a choice is written as lean in config.json", async ($, on) => {
+test("Config's Tasks band shows only when Fable runs and when a second agent checks, each with its shipped choice, and a choice is written as lean in config.json; the choices of how work is handed out are gone", async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   const settings: [string, string, string, string][] = [
     ['fable', 'When to use Fable 5.2', 'heavy', 'named'],
-    ['small', 'Small jobs', 'copy', 'full'],
-    ['quick', 'Quick task model', 'opus', 'work'],
-    ['start', 'What a task starts with', 'lean', 'all'],
     ['second', 'Second check', 'beyond', 'every'],
-    ['checker', 'Checker model', 'same', 'strongest'],
-    ['readers', 'Helpers that only read', 'sonnet', 'own'],
   ]
+  for (const [key, name] of [['small', 'Small jobs'], ['quick', 'Quick task model'], ['start', 'What a task starts with'], ['checker', 'Checker model'], ['readers', 'Helpers that only read']])
+    expect([name, Boolean(await config.find({ type: 'Text', text: name })), Boolean(await config.find({ type: 'Select', key: `config-lean-${key}-pick` } as never))]).toEqual([name, false, false])
   for (const [key, name, shipped, other] of settings) {
     expect([name, Boolean(await config.find({ type: 'Text', text: name }))]).toEqual([name, true])
     expect([key, (await config.find({ type: 'Select', key: `config-lean-${key}-pick` } as never))?.props.value]).toEqual([key, shipped])

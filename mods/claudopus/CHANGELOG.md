@@ -2,6 +2,21 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.165 · 16 November 2026
+- Removes a link to a local folder that an earlier release took in by mistake.
+
+## 0.2.164 · 16 November 2026
+- A task that ends its step to wait for its helpers, or for something it asked Claudopus to start it again for, is no longer reported to the chat as ended without a report: Claudopus tells the chat it is still at work and is not to be asked for its report, and answers Claude Code's reminders to report without using Claude
+- Tasks are no longer told to stop a helper of their own with TaskStop, which Claude Code refuses them: they tell it to hand back what it has instead
+
+## 0.2.163 · 16 November 2026
+- A job the chat can state clearly now goes to a fresh task on Sonnet with written instructions, by itself: measured on 108 jobs, it cost least at every chat size and model, and was fastest in 32 of 36 cases and within 9 seconds in the rest. It stays on Sonnet (Fable while every task runs on Fable) even when its title says check or test; a model you name for a job still counts, as a full task on it. Work that needs judgment still goes to a task on Opus.
+- The chat never hands a job to a copy of itself any more: a copy cost 1.4 to 5.9 times as much. It still runs a single safe command itself.
+- Config's Tasks band keeps only When to use Fable and Second check. Small jobs, Quick task model, What a task starts with, Checker model and Helpers that only read are gone; each now always works the cheapest and fastest measured way.
+
+## 0.2.162 · 16 November 2026
+- The watcher that brings Claudopus back names the setting your copy really has when Claudopus is loaded from a folder on your Mac, as its own checkout: before, it changed a setting nothing read, and Claudopus stayed off
+
 ## 0.2.161 · 16 November 2026
 - Claudopus stays on: Claude's engine switches off an add-on that keeps its shared helper busy for five seconds, and Claudopus now notices when it falls behind and does less (gives the panel as it was, leaves out looks that can wait) until it has caught up
 - If Claude switches Claudopus off anyway, it comes back by itself within about half a minute, with its tools, kinds of task, rules and panel, with nothing to type: a small watcher sees the chat go quiet and changes Claudopus's own hidden setting, which makes Claude load it again
