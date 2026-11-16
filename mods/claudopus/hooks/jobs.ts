@@ -586,6 +586,72 @@ export const waitOf = (cmd: string): Wait | undefined => {
   return { what: cond.replace(/\s+/g, ' ').trim().slice(0, 80) }
 }
 
+// A run of a work's own that still goes, as its card keeps it: its words, its command and its process where known
+export type OwnRun = { id: string; what: string; cmd: string; pid?: string }
+// The steps a command that only waits is made of: looking, counting, printing and sleeping (each step as split below, a test's or a
+// loop's own condition taken as a step of its own)
+const LOOKS = /^(?:(?:for|done|fi|break|continue|sleep|wait|kill\s+-0|kill\s+-s\s+0|pgrep|ps|seq|test|\[\[?|\]\]?|:|true|false|exit|date|tail|head|grep|egrep|rg|ls|cat|echo|printf|cut|wc|stat|du|sort|uniq|awk|sed(?!.*\s-i)|jq|cd|pwd|tr)(?:\s|$)|[A-Za-z_]\w*=\S*$|[A-Za-z_]\w*\s*[-+*/%<>]=?\s*\w+$|\d+$|\(+$)/
+// A pgrep's pattern, as plain words: the longest run of it with no pattern signs, so nothing the work wrote is run as a pattern
+const pgrepWords = (pattern: string) => pattern.split(/[.*+?^${}()|[\]\\]+/).reduce((a, b) => (b.trim().length > a.length ? b.trim() : a), '')
+// A command whose only job is to wait for a run of the same work to end: the run it waits on, by its process (kill -0, ps -p, wait)
+// or by a pgrep that waits for it to be gone. A run that ends wakes the work that started it, so such a wait only holds the next
+// step back until its loop comes round (16 Nov: an upload left detached was waited on by five waits in a row, the card saying 40%
+// done while it read 100%). A wait for a line in a log, a port or a file is let through: what it waits for comes while the run goes
+export const ownWaitOf = (cmd: string, runs: OwnRun[]): OwnRun | undefined => {
+  if (!runs.length) return undefined
+  const text = cmd.replace(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&]+)\s*(?:&&|;)\s*/, '')
+  // It waits: a loop that sleeps between its tries, or the shell's own wait on a process
+  // (found word by word in order, never by one pattern that tries every split of a long script)
+  const after = (from: number, word: RegExp) => {
+    const m = word.exec(text.slice(from))
+    return m ? from + m.index + m[0].length : -1
+  }
+  const isLoop = [/\b(?:for|while|until)\b/, /\bdo\b/, /\bsleep\s+[\d.]+/, /\bdone\b/].reduce((from, word) => (from < 0 ? -1 : after(from, word)), 0) >= 0
+  const isWait = /(?:^|[;&|]\s*)wait\s+\d+\s*(?:$|[;&|])/.test(text)
+  if (!isLoop && !isWait) return undefined
+  // and does nothing else: no step of its own does work, writes a file, or is sent off on its own
+  if (/(?:^|[^>&0-9])>>?\s*(?!\/dev\/null\b|&)\S/.test(unquoted(text))) return undefined
+  const steps = unquoted(text)
+    .split(/\s*(?:;|&&?|\|\|?|\n|\$\(\(?|\)\)?|`)\s*/)
+    .map(step => step.trim().replace(/^(?:(?:do|then|else|elif|if|while|until|!)\s+)+/, '').replace(/\s*\d?>+\s*\S+/g, '').trim())
+    .filter(step => step && !/^(?:do|then|else)$/.test(step))
+  if (!steps.every(step => LOOKS.test(step))) return undefined
+  // A loop that also waits for a line, a file or an answer waits for what comes while the run goes: its process is only its guard
+  const loopText = unquoted(text.slice(0, text.lastIndexOf('done') + 4))
+  const isOnlyProcess = !/(?:^|[\s;&|(!])(?:grep|egrep|rg|test|\[\[?|stat|ls|curl|wget|nc|find)\s/.test(loopText)
+  const pids = new Set([...(isOnlyProcess ? text : '').matchAll(/\b(?:kill\s+(?:-0|-s\s+0)|ps\s+(?:-\w+\s+)*-p|wait)\s+(\d+)/g)].map(m => m[1] ?? ''))
+  // (a pgrep that waits while it finds the run, or until it no longer does; its options that take a value are passed over, and
+  // a pattern too short to name one run counts for none)
+  const ends = [...text.matchAll(/\b(?:while|until\s+!)\s*pgrep\s+((?:-[uUgGPstF]\s+\S+\s+|-\w+\s+)*)("[^"]+"|'[^']+'|[^\s;&|)]+)/g)]
+    .map(m => pgrepWords((m[2] ?? '').replace(/^["']|["']$/g, '')))
+    .filter(words => words.length >= 8)
+  return runs.find(run => (run.pid && pids.has(run.pid)) || ends.some(words => run.cmd.includes(words)))
+}
+
+// A command made only of what reads and sifts another's output (tail, grep and their kind): left going, it only watches a run and
+// ends with nothing. `isFollow` when it follows a file as it grows, so it never ends of itself (16 Nov: pairs of "tail pic_eyes.log"
+// and "ugrep wrote" stood silent for an hour and a half under a card and two finished helpers, long after what they watched)
+const FILTER = /^(?:\S*\/)?(?:tail|grep|egrep|fgrep|ugrep|rg|awk|sed|cut|tr|head|cat|uniq)\b/
+export const watcherOf = (cmd: string): { isFollow: boolean } | undefined => {
+  if (/\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(cmd)) return undefined
+  const text = unquoted(cmd.replace(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&]+)\s*(?:&&|;)\s*/, ''))
+  // (one that writes a file makes something)
+  if (/(?:^|[^>&0-9])>>?\s*(?!\/dev\/null\b|&)\S/.test(text)) return undefined
+  const steps = text
+    .split(/\s*(?:\|\|?|;|&&?)\s*/)
+    .map(step => step.trim().replace(/\s*\d?>+\s*\S+/g, '').replace(/^(?:(?:nohup|setsid|stdbuf\s+-oL)\s+)+/, ''))
+    .filter(Boolean)
+  if (!steps.length || !steps.every(step => FILTER.test(step) && !/\bsed\b.*\s-i\b/.test(step))) return undefined
+  const isFollow = (step: string) => /^(?:\S*\/)?tail\b.*\s(?:-\w*[fF]\w*|--follow\S*)(?:\s|$)/.test(step)
+  // It watches only when it follows a file as it grows, or is a lone grep that sifts what is piped to it: its pattern and nothing
+  // more, with only options that change how it matches or prints (a search of a folder, of files or by a file of patterns is work)
+  const first = steps[0] ?? ''
+  if (isFollow(first)) return { isFollow: true }
+  const words = first.split(/\s+/).slice(1)
+  const isLoneGrep = steps.length === 1 && /^(?:\S*\/)?u?grep$|^(?:\S*\/)?[ef]grep$/.test(first.split(/\s+/)[0] ?? '') && words.every(word => !word.startsWith('-') || /^-(?:-line-buffered|-color(?:=\w+)?|[EFiovwxH]+)$/.test(word)) && words.filter(word => !word.startsWith('-')).length === 1
+  return isLoneGrep ? { isFollow: false } : undefined
+}
+
 // Jobs alike (the same kind, words and command, or the same wait) are one row that says how many they are, from the first one's
 // start; the newest one's output stands for them
 export const foldJobs = (jobs: Job[]): Job[] => {

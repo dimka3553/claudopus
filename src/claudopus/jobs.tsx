@@ -177,8 +177,28 @@ const lookJobs = async ($: EngineInterface) => {
   const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
   if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
     const runsOf = (one: Todo) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' as const }))
-    await changeTodos($, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined, ...keepEnded(one, runsOf(one)) } : one)))
+    // (what this look took off its card: a run another look or a stop already took off is not woken for again)
+    const taken = new Map<string, NonNullable<Todo['detached']>>()
+    await changeTodos($, cards =>
+      cards.map(one => {
+        const ended = (one.detached ?? []).filter(d => gone.includes(d.id))
+        if (!ended.length) return one
+        // (one being stopped now is told by its stop, read here as the run leaves its card)
+        taken.set(one.id, ended.filter(d => !stoppingJobs.has(d.id)))
+        const left = (one.detached ?? []).filter(d => !gone.includes(d.id))
+        return { ...one, detached: left.length ? left : undefined, ...keepEnded(one, runsOf(one)) }
+      }),
+    )
     void drawFresh($)
+    // The engine wakes work only for what it sent to the background itself: the work is woken here the moment a run it left
+    // detached ends, so it carries on at once and never waits on it. Not work the person stopped, a run they or the work stopped
+    // itself, a server, nor work that has handed back its report; one message for the runs of a card that ended together
+    const fresh = await read($, todos)
+    for (const [id, ended] of taken) {
+      const runs = ended.filter(d => !stoppingJobs.has(d.id) && !killedByWork.has(d.id) && !SERVER_CMD.test(d.cmd) && describedOf(d.what).kind !== 'server')
+      if (runs.length) void wakeForRun($, fresh.find(one => one.id === id), runs).catch(err => log($, `work ${id} not woken as its run ended: ${String(err)}`))
+    }
+    for (const id of gone) killedByWork.delete(id)
   }
   // Each background command's shell, found by its words among the engine's shells: paused when any of its processes is, and gone
   // when no shell has been found for it twice in a row while others were (so a way of running the engine has not changed), as one the engine never said ended (only once a minute has passed)
@@ -261,6 +281,7 @@ const lookJobs = async ($: EngineInterface) => {
   }
   // (not waited for: a work's chat may take its time to take a line, and the look goes on meanwhile)
   void tellSilent($, list, now).catch(err => log($, `silent runs not told: ${String(err)}`))
+  void endWatchers($, await read($, todos), now).catch(err => log($, `watchers not stopped: ${String(err)}`))
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
   if (isChanged) void drawFresh($)
@@ -385,7 +406,37 @@ const stopJob = async ($: EngineInterface, owner: string, job: Job) => {
     void drawFresh($)
   }
 }
-const stopping = async ($: EngineInterface, owner: string, job: Job) => {
+// A run that only watches (a tail or grep left going) outlives what it watches once no run of its work, the work above it or the
+// helpers under that one still goes, or once its work has ended: it is stopped then, and its work told while it is at work
+const WATCHER_STOPPED = (what: string) => `Claudopus stopped your command "${what}": it only watched commands that have all ended. Don't start a command that only watches another; you are woken the moment a command of yours ends.`
+const watchersTried = new Set<string>()
+const endWatchers = async ($: EngineInterface, list: Todo[], now: number) => {
+  const runsOf = (one: Todo) => [...(one.bg ?? []).filter(b => !b.isWatch).map(b => ({ id: b.id, cmd: b.cmd ?? '' })), ...(one.detached ?? []).map(d => ({ id: d.id, cmd: d.cmd }))]
+  for (const one of list) {
+    if (one.chat) continue
+    const watchers = runsOf(one).filter(run => watcherOf(run.cmd) && !stoppingJobs.has(run.id) && !watchersTried.has(run.id))
+    if (!watchers.length) continue
+    const top = topOf(list, one.id)
+    const tree = [list.find(card => card.id === top), ...underOf(list, top)].filter((card): card is Todo => Boolean(card))
+    const isWatched = tree.some(card => card.status === 'working' && (runsOf(card).some(run => !watcherOf(run.cmd)) || (card.running?.cmd !== undefined && !watcherOf(card.running.cmd)) || (card.id !== one.id && card.parentId !== undefined)))
+    if (one.status === 'working' && isWatched) continue
+    for (const run of watchers) {
+      const job = jobsOf(one, now).find(j => j.id === run.id) ?? jobsOf({ ...one, bg: one.bg?.filter(b => b.id === run.id), detached: one.detached?.filter(d => d.id === run.id), running: undefined }, now)[0]
+      if (!job || now - job.at < 60_000) continue
+      // (tried once: one that cannot be stopped is left to its row's Stop run)
+      watchersTried.add(job.id)
+      stoppingJobs.add(job.id)
+      try {
+        await stopping($, one.id, job, one.status === 'working' ? WATCHER_STOPPED(job.label) : '')
+      } finally {
+        stoppingJobs.delete(job.id)
+      }
+      await log($, `run ${job.id} of work ${one.id} stopped: it only watched runs that have ended`)
+    }
+  }
+}
+// (`said`: what the work is told instead of the person's stop, nothing when empty)
+const stopping = async ($: EngineInterface, owner: string, job: Job, said?: string) => {
   const now = await $.clock.now()
   const list = await read($, todos)
   const card = list.find(one => one.id === owner)
@@ -417,7 +468,11 @@ const stopping = async ($: EngineInterface, owner: string, job: Job) => {
     await changeTodos($, cards => cards.map(one => (one.id === owner && one.detached?.some(d => d.id === job.id) ? { ...one, detached: one.detached.filter(d => d.id !== job.id).length ? one.detached.filter(d => d.id !== job.id) : undefined, ...keepEnded(one, [{ id: detached.id, what: detached.what, at: detached.at, endedAt: now, how: 'stopped' }]) } : one)))
   }
   const silent = job.wroteAt && !job.isEmpty ? now - job.wroteAt : now - job.at
-  void tell($, owner, RUN_STOPPED(job.label, silent >= SILENT_WARN ? shortAgo(silent) : ''))
+  if (said === undefined) void tell($, owner, RUN_STOPPED(job.label, silent >= SILENT_WARN ? shortAgo(silent) : ''))
+  else if (said) void tell($, owner, said)
+  jobLog.delete(job.id)
+  silentTold.delete(job.id)
+  if (said !== undefined) return
   await log($, `the person stopped run ${job.id} of work ${owner}${pids.length ? ` (${pids.length} processes)` : ''}`)
   jobLog.delete(job.id)
   silentTold.delete(job.id)
@@ -425,6 +480,9 @@ const stopping = async ($: EngineInterface, owner: string, job: Job) => {
 
 // A run of a piece of work that has given no word for a minute is named to that work once, in its own chat: a run is never to be
 // stuck or silent, so it stops it or makes it report. Not a server or a watch, which speak only when there is something to say
+const RUN_ENDED = (what: string, log: string) =>
+  `Your command "${what}" has ended. Look at how it ended${log ? ` in its log, ${log},` : ''} and carry on with the next step now.`
+const RUNS_ENDED = (whats: string[]) => `Your commands ${whats.map(what => `"${what}"`).join(', ')} have ended. Look at how each ended in its log and carry on with the next step now.`
 const RUN_SILENT_TOLD = 60_000
 const silentTold = new Set<string>()
 const RUN_SILENT = (what: string, silent: string) =>
@@ -446,6 +504,38 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   // (a run that speaks again may be named again when it next goes silent)
   for (const id of silentTold) if (jobLog.get(id)?.wroteAt && now - (jobLog.get(id)?.wroteAt ?? 0) < RUN_SILENT_TOLD) silentTold.delete(id)
 }
+
+// The runs a card has going that end of themselves, as a wait for one names it: a background command, or one left detached by its
+// process (not a server, which is not waited on to end)
+const ownRunsOf = (one: Todo | undefined): OwnRun[] =>
+  [...(one?.bg ?? []).filter(b => !b.isWatch).map(b => ({ id: b.id, what: b.what, cmd: b.cmd ?? '' })), ...(one?.detached ?? []).map(d => ({ id: d.id, what: d.what, cmd: d.cmd, ...(d.pid ? { pid: d.pid } : {}) }))].filter(
+    run => !SERVER_CMD.test(run.cmd) && describedOf(run.what).kind !== 'server',
+  )
+// The detached runs a piece of work stopped itself with a kill naming its process: their end wakes no one
+const killedByWork = new Set<string>()
+const noteKills = (one: Todo | undefined, command: string) => {
+  for (const d of one?.detached ?? []) if (d.pid && new RegExp(`\\b(?:kill|pkill)\\b(?![^;&|]*-0\\b)[^;&|]*\\b${d.pid}\\b`).test(command)) killedByWork.add(d.id)
+}
+// A work whose run left detached has ended: told in its chat while it is at a step, and started again with a message once its step
+// has ended (its turn over, its card finished or waiting on the engine), as an answer of the person's starts it
+const wakeForRun = async ($: EngineInterface, one: Todo | undefined, runs: NonNullable<Todo['detached']>) => {
+  const first = runs[0]
+  if (!one || !first || isHeld(one) || one.status === 'stopped' || one.status === 'failed' || (one.status === 'done' && (one.handedBackAt !== undefined || endedByHandback.has(one.id) || one.endedAt < first.at))) return
+  const text = runs.length === 1 ? RUN_ENDED(runWords(first.what, first.cmd), first.log) : RUNS_ENDED(runs.map(d => runWords(d.what, d.cmd)))
+  if (one.status === 'working' && !one.waitsSince) {
+    await tell($, one.id, text)
+    return void (await log($, `work ${one.id} told ${runs.length} run(s) of it ended`))
+  }
+  const r = (await isReplaced($)) ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' } : await sendOwn($, { to: { agentId: one.id }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+  if (!r.isDelivered) return void (await log($, `work ${one.id} not started again as its runs ended: ${r.reason}`))
+  await wakeCard($, one.id)
+  await log($, `work ${one.id} started again as ${runs.length} run(s) of it ended`)
+}
+// A run in its own words, without the time it was given when it began
+const runWords = (what: string, cmd = '') => labelOf(what, cmd).replace(/\s*\((?:about|under|over|around|up to|~)?\s*[\d.,\-– ]+\s*(?:s|sec|seconds?|m|mins?|minutes?|h|hours?)\)\s*$/i, '').trim()
+
+// How a run ended, said after its words
+const RUN_ENDED_AS: Record<EndedRun['how'], string> = { finished: 'has finished', failed: 'failed', killed: 'was stopped', stopped: 'was stopped', 'timed out': 'ran out of time', ended: 'has ended' }
 
 // A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
 // it goes on; on this Mac only, as the window is this Mac's

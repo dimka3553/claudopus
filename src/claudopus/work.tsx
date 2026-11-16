@@ -51,6 +51,10 @@ const NO_PROGRESS_WAIT =
   'Not run: this wait would print nothing to show how it is going. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
 const NO_PROGRESS_SCRIPT =
   'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
+const NO_OWN_WAIT = (what: string) =>
+  `Not run: this only waits for your own command "${what}" to end, and you are woken the moment it ends, so carry on with what needs nothing from it or end your step now.`
+const NO_FOLLOW =
+  'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20); you are woken the moment your command ends.'
 const MOVED_BACK = (name: string) =>
   `Claudopus started this command in the background instead of holding it open, because it may run for minutes. ${name}'s replies reach you while it runs. Claudopus will tell you when it ends; its output is in the file named above. Continue with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 
@@ -205,6 +209,24 @@ const workHooks = (on: On) => {
     if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
       await log($, `refused work ${e.agentId}'s wait for the person: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       return { deny: NO_PERSON_WAIT(who()) }
+    }
+    // A run of its own ending wakes the work (the engine tells it of a background command, the mod of one left detached), so a
+    // command that only waits for one to end is not started: it would hold the next step back until its loop came round
+    if (dir && !isOff && e.agentId !== undefined && (e.tool === 'Bash' || e.tool === 'Monitor')) {
+      const command = String((e as { command?: unknown }).command ?? '')
+      const card = (await read($, todos)).find(one => one.id === e.agentId)
+      const waited = ownWaitOf(command, ownRunsOf(card))
+      if (waited) {
+        await log($, `refused work ${e.agentId}'s wait on its own run ${waited.id}`)
+        return { deny: NO_OWN_WAIT(runWords(waited.what, waited.cmd)) }
+      }
+      // A tail that follows a log never ends of itself and tells the work nothing as it runs: it only outlives what it watches
+      // (a Monitor watch is told each line as it comes, so it says something; a Bash call's output is read only as it ends)
+      if (e.tool === 'Bash' && watcherOf(command)?.isFollow && !/\|\s*(?:\S*\/)?(?:grep|egrep|ugrep|rg)\b[^|]*\s-(?:\w*[mq]\w*)\b|\|\s*sed\b[^|]*\/q\b/.test(command)) {
+        await log($, `refused work ${e.agentId}'s command that only follows a log`)
+        return { deny: NO_FOLLOW }
+      }
+      noteKills(card, command)
     }
     // Every run says how it goes at least every 10 seconds: a long wait or script of the work's own that would say nothing is not
     // started, and the work is told in one sentence how to make it report

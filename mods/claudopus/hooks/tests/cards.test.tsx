@@ -1768,7 +1768,8 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   isAlive = false
   expect(await until(async () => appended.find(line => /^a1: .*stopped your command "Fetch the CT scans" from the panel\. Don't start it again unless/.test(line)))).toBeDefined()
   await advance(5_000)
-  expect(await until(async () => ((await texts()).every(text => !/^Fetch the CT scans/.test(text)) || undefined))).toBe(true)
+  // (its row goes; the card's own line says it was stopped until the work writes again)
+  expect(await until(async () => ((await texts()).every(text => !/^Fetch the CT scans/.test(text) || text === 'Fetch the CT scans was stopped') || undefined))).toBe(true)
 })
 
 test('a run whose output cannot be found says so after a minute, so a blank row is never taken for one that moves', async ($, on) => {
@@ -1785,6 +1786,64 @@ test('a run whose output cannot be found says so after a minute, so a blank row 
   expect(shown.some(text => /^Fetch the CT scans/.test(text))).toBe(true)
   expect(shown.some(text => /^nothing printed for 1m [01]0s$/.test(text))).toBe(true)
   await list.unmount()
+})
+
+test('a run of a work\'s own wakes it the moment it ends: a wait on it is refused in one sentence, the work is told it ended, and its card no longer says how far it was (16 Nov an upload read 100% beside "about 40% done")', SLOW, async ($, on) => {
+  let isAlive = true
+  const { clock, appended, resumed, stopped } = world(on, { jobs: { output: () => 'progress: 8/8 GB uploading\n', wroteAt: () => 1_700_000_000_000, alive: () => isAlive } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'upload the zips', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Upload the zips', prompt: 'upload the zips' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', agentId: 'a1', command: 'cd /w && nohup curl -T zips.zip https://example.com/up > upload.log 2>&1 & echo $!', description: 'Upload both zips to the folder (about 15 min)' } as never)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'The upload is about 40% done; it should finish in about 15 minutes.' } as never)
+  await clock.advance(20_000)
+  // A wait on it, by its process or its log, does not run
+  for (const command of ['for i in $(seq 1 55); do kill -0 48213 2>/dev/null || break; echo "progress: $i/55 tries waiting for the upload"; sleep 10; done; grep -E "ERROR|Copied" /w/upload.log | tail -5', "until ! pgrep -f 'curl -T zips.zip' >/dev/null; do echo \"progress: 1 tries\"; sleep 10; done"]) {
+    const r = (await $.tool.call({ tool: 'Bash', tool_use_id: 'w1', agentId: 'a1', command, description: 'Wait for the upload to finish (about 9 min)', run_in_background: true } as never)) as { deny?: string }
+    expect(r.deny).toBe('Not run: this only waits for your own command "Upload both zips to the folder" to end, and you are woken the moment it ends, so carry on with what needs nothing from it or end your step now.')
+  }
+  // A Monitor that only waits for it to end, as a helper's would, is refused the same
+  expect(((await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'while kill -0 48213; do sleep 10; done', description: 'Wait for the upload' } as never)) as { deny?: string }).deny).toMatch(/^Not run: this only waits for your own command "Upload both zips to the folder" to end/)
+  // A sifter left going beside it, which ends with nothing: let through while the upload goes
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'g1', agentId: 'a1', command: 'ugrep --line-buffered wrote', description: 'Run a look for written files', run_in_background: true } as never)) as { deny?: string }).deny).toBeUndefined()
+  // A tail that waits for one line ends with it, and runs
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'w4', agentId: 'a1', command: 'tail -f /w/upload.log | grep -m1 Copied', description: 'Wait for the first file copied', run_in_background: true } as never)) as { deny?: string }).deny).toBeUndefined()
+  // A tail that follows its log never ends and tells the work nothing
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'w3', agentId: 'a1', command: 'tail -f /w/upload.log | grep --line-buffered ERROR', description: 'Watch the upload for errors', run_in_background: true } as never)) as { deny?: string }).deny).toMatch(/^Not run: this only follows a log and would never end/)
+  // A wait for a line in its log, or a look once, still runs
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'w2', agentId: 'a1', command: 'tail -5 /w/upload.log', description: 'Run a look at the upload' } as never)) as { deny?: string }).deny).toBeUndefined()
+  const line = async () => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
+    const texts = (await list.findAll({ type: 'Text' })).map(one => one.text)
+    await list.unmount()
+    return texts
+  }
+  expect((await line()).some(text => /about 40% done/.test(text))).toBe(true)
+  // It ends: the work is told at once, and the card says so in place of the line written while it ran
+  isAlive = false
+  await clock.advance(20_000)
+  expect(await until(async () => appended.find(one => one === 'a1: Your command "Upload both zips to the folder" has ended. Look at how it ended in its log, /w/upload.log, and carry on with the next step now.'))).toBeDefined()
+  expect(await until(async () => ((await line()).some(text => text === 'Upload both zips to the folder has ended') || undefined))).toBe(true)
+  expect((await line()).some(text => /about 40% done/.test(text))).toBe(false)
+  // The sifter outlived what it watched: stopped a minute on, and the work told why
+  await clock.advance(60_000)
+  expect(await until(async () => stopped.includes('bg-g1') || undefined)).toBe(true)
+  expect(await until(async () => appended.find(one => /^a1: Claudopus stopped your command ".*": it only watched commands that have all ended\./.test(one)))).toBeDefined()
+  // Told once, and a new line of the work's own stands again
+  await clock.advance(20_000)
+  expect(appended.filter(one => /has ended\. Look at how it ended/.test(one))).toHaveLength(1)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n2', agentId: 'a1', text: 'The upload is done; I am checking the files.' } as never)
+  expect(await until(async () => ((await line()).some(text => /I am checking the files/.test(text)) || undefined))).toBe(true)
+  // Work that ended its step with a run still going is started again the moment it ends, with a message
+  isAlive = true
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', agentId: 'a1', command: 'cd /w && nohup curl -T rest.zip https://example.com/up > rest.log 2>&1 & echo $!', description: 'Upload the rest (about 10 min)' } as never)
+  await $.turn.complete({ answer: 'The rest uploads; I am woken when it ends.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  await clock.advance(20_000)
+  expect(resumed.some(one => one.startsWith('a1: '))).toBe(false)
+  isAlive = false
+  await clock.advance(20_000)
+  expect(await until(async () => resumed.find(one => one === 'a1: Your command "Upload the rest" has ended. Look at how it ended in its log, /w/rest.log, and carry on with the next step now.'))).toBeDefined()
 })
 
 test('every run under a card says how it stands: a command held open shows its progress, one that printed nothing says so, a watch its last event; 15 Nov rows said only "updated 9m ago"', SLOW, async ($, on) => {

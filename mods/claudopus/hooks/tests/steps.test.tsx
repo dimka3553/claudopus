@@ -730,7 +730,7 @@ test('three single lookups in a row are told to go together or to a helper; two 
   expect(await run('t2', 'npm test -- ears')).toContain('Two long commands of one kind (npm test)')
 })
 
-test('the work waits for its helpers with a command of its own: a file it waits on names the helpers running and how each is doing, and changes as one ends', async ($, on) => {
+test('the work waits for its helpers with a command of its own: a file it waits on names the helpers running and how each is doing, and changes the moment one ends', async ($, on) => {
   const agents: Record<string, string> = {}
   const { clock, files } = world(on, { agents })
   await $.session.start(start)
@@ -751,7 +751,7 @@ test('the work waits for its helpers with a command of its own: a file it waits 
   expect(roll().split('\n')[0]).toBe('running: a2,a3 quiet: a2,a3')
   agents.a2 = 'completed'
   await $.turn.complete({ answer: 'nose.ts', durationMs: 1, isAborted: false, turnId: 'h2', reason: 'answer', agentId: 'a2' } as never)
-  await clock.advance(21_000)
+  // at once, with no look round between, so the wait on it lets go the moment the helper ends
   expect(roll().split('\n')[0]).toBe('running: a3 quiet: a3')
   expect(roll()).toContain('"Read the nose code" (a2): ended')
 })
