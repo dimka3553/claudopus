@@ -1,0 +1,284 @@
+"use strict";
+// The app's own prompts shown amber in every panel
+test("this chat waiting on the app's own prompt is listed with its prompt, and idle chats beside it are not", async ($, on) => {
+    const { files, clock, wake } = world(on);
+    files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }));
+    const idle = JSON.stringify({ chat: 'chat-q', title: 'Quiet one', folder: '/x', host: '', at: NOW, cards: [] });
+    files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${idle}\n`);
+    await $.session.start(start);
+    void $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build', description: 'Clear the build folder' } });
+    await clock.advance(10000);
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Clear the build folder' }))).toBeDefined();
+    expect(await list.find({ type: 'Text', text: 'Quiet one' })).toBeUndefined();
+    expect(await keyed(list, 'quiet-fold')).toBeUndefined();
+    await $.tool.call({ tool: 'Bash', command: 'rm -rf build', description: 'Clear the build folder' });
+    wake();
+    await list.unmount();
+});
+test("a chat stopped on the app's own prompt shows it amber at the top of its panel and in its file, says so aloud once, and clears as the call ends", async ($, on) => {
+    const { files, clock, notified, wake } = world(on);
+    await $.session.start(start);
+    await $.prompt.submit({ text: 'clean up the build', wait: false, origin: composer });
+    await $.agent.spawn({ ...spawn, description: 'Clean the build', prompt: 'clean up the build' });
+    // The work's call raises the app's prompt: the mod holds it for a press, and answered in the box it passes it on untouched
+    const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf build', description: 'Clear the build folder' }, agent_id: 'a1' });
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Clear the build folder' }))).toBeDefined();
+    // Yes and No on the card answer it; nothing tells the person to go and answer elsewhere
+    expect(await until(async () => button(list, 'prompt-yes-this-'))).toBeDefined();
+    expect(await button(list, 'prompt-no-this-')).toBeDefined();
+    expect(await list.find({ type: 'Text', text: 'Answer Yes or No in the box at the bottom of this chat.' })).toBeUndefined();
+    // It says which work asks, that it asks permission, the command whole, and what a yes and a no each do
+    expect(await list.find({ type: 'Text', text: 'Needs your permission' })).toBeDefined();
+    expect(await list.find({ type: 'Text', text: 'rm -rf build' })).toBeDefined();
+    expect(await list.find({ type: 'Text', text: 'Yes: the command runs on its Mac.' })).toBeDefined();
+    expect(await list.find({ type: 'Text', text: "No: it doesn't run, and Claudopus tells Claude you said no." })).toBeDefined();
+    // Amber, above the work's own card
+    const texts = (await list.findAll({ type: 'Text' })).map(one => one.text);
+    expect(texts.indexOf('Run a command: Clear the build folder')).toBeLessThan(texts.lastIndexOf('Clean the build'));
+    expect((await list.find({ type: 'Text', text: 'Run a command: Clear the build folder' }))?.props.color).toBe('#E5A50A');
+    // The others see it in this chat's file, with the work it came from
+    await clock.advance(1000);
+    expect(JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').prompts).toEqual([expect.objectContaining({ text: 'Run a command: Clear the build folder', title: 'Clean the build' })]);
+    // Not told before the app itself says the prompt is still waiting; then told once, as an ask is
+    await clock.advance(5000);
+    expect(notified.filter(line => line.includes('needs your OK'))).toEqual([]);
+    await $.classic.Notification({ message: 'Claude needs your permission', notification_type: 'permission_prompt' });
+    await $.classic.Notification({ message: 'Claude needs your permission', notification_type: 'permission_prompt' });
+    expect(notified.filter(line => line.includes('needs your OK'))).toEqual(['Clean the build needs your OK | Run a command: Clear the build folder']);
+    // The call ends, allowed and run: the amber prompt goes, here and in the file, and the card says what was answered and that it ran,
+    // for a minute, in this panel and in the file the others read
+    await $.tool.call({ tool: 'Bash', command: 'rm -rf build', description: 'Clear the build folder', agentId: 'a1' });
+    wake();
+    expect((await asked)?.decision).toBeUndefined();
+    const amber = async (text) => (await list.findAll({ type: 'Text', text })).find(one => one.props.color === '#E5A50A');
+    expect(await until(async () => ((await amber('Run a command: Clear the build folder')) ? undefined : true))).toBe(true);
+    expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it ran and is done' }))).toBeDefined();
+    expect(await list.find({ type: 'Text', text: 'Run a command: Clear the build folder' })).toBeDefined();
+    await clock.advance(1000);
+    const shared = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}');
+    expect(shared.prompts).toBeUndefined();
+    expect(shared.answeredPrompts).toEqual([expect.objectContaining({ text: 'Run a command: Clear the build folder', answered: 'yes', isRunning: false })]);
+    await clock.advance(61000);
+    expect(await until(async () => ((await list.find({ type: 'Text', text: 'You allowed it · it ran and is done' })) ? undefined : true))).toBe(true);
+    // A prompt answered at once is not told
+    await $.classic.PermissionRequest({ tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which colour for the nose?' }] } });
+    expect(await until(async () => list.find({ type: 'Text', text: 'Answer a question: Which colour for the nose?' }))).toBeDefined();
+    expect(await list.find({ type: 'Text', text: 'This chat itself' })).toBeDefined();
+    expect(await list.find({ type: 'Text', text: 'Pick your answer in the box at the bottom of this chat.' })).toBeDefined();
+    await $.tool.call({ tool: 'AskUserQuestion', questions: [{ question: 'Which colour for the nose?' }] });
+    await $.classic.Notification({ message: 'Claude needs your permission', notification_type: 'permission_prompt' });
+    expect(notified.filter(line => line.includes('needs your OK'))).toHaveLength(1);
+    await list.unmount();
+});
+test('a command allowed leaves the panel as soon as it is seen running, before it ends; a prompt a settings hook answered never shows', async ($, on) => {
+    const { files, clock, wake } = world(on);
+    await $.session.start(start);
+    // The same command already running elsewhere, as in a terminal, says nothing of this call
+    files.set('ps:running', "python3 scripts/count_lines.py --all\n/bin/zsh -c source snap && eval 'python3 scripts/count_lines.py --all' < /dev/null\n");
+    void $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'python3 scripts/count_lines.py --all', description: 'Count the lines' } });
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Count the lines' }))).toBeDefined();
+    await clock.advance(2000);
+    expect(await list.find({ type: 'Text', text: 'Run a command: Count the lines' })).toBeDefined();
+    files.set('ps:running', "python3 scripts/count_lines.py --all\n/bin/zsh -c source snap && eval 'python3 scripts/count_lines.py --all' < /dev/null\n/bin/zsh -c source snap && eval 'python3 scripts/count_lines.py --all' < /dev/null\n");
+    await clock.advance(2000);
+    // Seen running: no longer amber, and the card says it was allowed and runs now
+    expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it is running now' }))).toBeDefined();
+    expect((await list.findAll({ type: 'Text', text: 'Run a command: Count the lines' })).some(one => one.props.color === '#E5A50A')).toBe(false);
+    wake();
+    // Beneath the mod, a settings hook answers the request: no prompt is put to the person, and none shows
+    files.set('settings:allow', '1');
+    await $.classic.PermissionRequest({ tool_name: 'Write', tool_input: { file_path: '/repo/notes.md', content: 'x' } });
+    await clock.advance(1000);
+    expect(await list.find({ type: 'Text', text: 'Write the file notes.md' })).toBeUndefined();
+    await list.unmount();
+});
+test("another chat's open prompt shows amber under its name, first; on this Mac a press opens that chat, on another Mac it says where", async ($, on) => {
+    const { files, clock, shown } = world(on);
+    files.set(`${MEMORY}/config.json`, JSON.stringify({ macs: ['sam@m4.local'] }));
+    const waiting = (at, chat, title, link) => JSON.stringify({ chat, title, folder: '/Users/sam/GitHub', host: '', at, cards: [], prompts: [{ id: 'toolu_1', text: 'Allow a command: Cross-repo duplicate files', title: 'Interesting facts', at }], link });
+    // One M4 chat with Remote Control on, which opens here; one with only the app's own id there, which does not
+    const remote = JSON.stringify({ ...JSON.parse(waiting(NOW, 'chat-rc', 'M4 Remote', '')), link: { bridge: 'session_01M4Remote', app: 'local_m4-rc' } });
+    files.set('ssh:fetch', `${NOW / 1000}\n---claudopus-live---\n${waiting(NOW, 'chat-m4', 'M4 GitHub', 'claude://code/continue?session=local_m4')}\n---claudopus-live---\n${remote}\n`);
+    await $.session.start(start);
+    files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW));
+    // A chat of this Mac with no work but an open prompt is listed; a link that is not the app's own is dropped
+    files.set(`${MEMORY}/live/chat-w.json`, waiting(NOW, 'chat-w', 'Web chat', 'claude://code/continue?session=local_ab-12'));
+    files.set(`${MEMORY}/live/chat-x.json`, waiting(NOW, 'chat-x', 'Odd chat', 'https://example.com'));
+    await clock.advance(10000);
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'M4 GitHub' }))).toBeDefined();
+    expect(await list.find({ type: 'Text', text: 'Answer it in that chat, on m4' })).toBeDefined();
+    const bold = (await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text);
+    // Chats that wait on the person come before the one that only works
+    expect(bold.indexOf('Web chat')).toBeLessThan(bold.indexOf('Billing page'));
+    expect(bold.indexOf('M4 GitHub')).toBeLessThan(bold.indexOf('Billing page'));
+    expect(bold.filter(one => one === 'Allow a command: Cross-repo duplicate files')).toHaveLength(4);
+    // Open buttons: the M4 chat with Remote Control, by its Remote Control id, and the chat of this Mac with the app's link; the M4 chat
+    // with only the app's own id there says where to answer instead
+    const opens = (await list.findAll({ type: 'Button' })).filter(one => one.props.label === 'Open that chat');
+    expect(opens).toHaveLength(2);
+    expect(await list.find({ type: 'Text', text: 'Answer it in that chat, which runs on m4' })).toBeDefined();
+    await list.press({ key: opens.find(one => String(one.key).includes('chat-rc'))?.key ?? '' });
+    expect(await until(async () => shown.find(argv => argv[1]?.startsWith('claude://')))).toEqual(['open', 'claude://code/session_01M4Remote']);
+    await list.press({ key: opens.find(one => String(one.key).includes('chat-w'))?.key ?? '' });
+    expect(await until(async () => shown.find(argv => argv[1]?.includes('local_ab-12')))).toEqual(['open', 'claude://code/continue?session=local_ab-12']);
+    // Answered there, its file no longer carries it, and its amber card leaves; with nothing going on, its chat is listed no more
+    files.set(`${MEMORY}/live/chat-w.json`, JSON.stringify({ chat: 'chat-w', title: 'Web chat', folder: '/Users/sam/GitHub', host: '', at: NOW + 11000, cards: [] }));
+    await clock.advance(5000);
+    expect(await until(async () => ((await list.findAll({ type: 'Button' })).some(one => one.props.label === 'Open that chat' && String(one.key).includes('chat-w')) ? undefined : true))).toBe(true);
+    expect(await list.find({ type: 'Text', text: 'Web chat' })).toBeUndefined();
+    await list.unmount();
+});
+test('a message the chat passes to running work names that work and the message; a no is said plainly, a minute, then it goes', async ($, on) => {
+    const { files, clock, wake } = world(on);
+    await $.session.start(start);
+    await $.prompt.submit({ text: 'fix the cards', wait: false, origin: composer });
+    await $.agent.spawn({ ...spawn, description: 'Fix the panel cards', prompt: 'fix the cards' });
+    void $.classic.PermissionRequest({ tool_name: 'SendMessage', tool_input: { to: 'a1', message: 'Make the buttons bigger too' } });
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    await until(async () => list.find({ type: 'Text', text: 'Pass a message to the task “Fix the panel cards”' }));
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the task “Fix the panel cards”');
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Make the buttons bigger too');
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Yes: that task gets the message and acts on it.');
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain("No: it isn't sent, and the chat waits for what you say next.");
+    // No tool's own name anywhere on it
+    expect((await list.findAll({ type: 'Text' })).some(one => String(one.text).includes('SendMessage'))).toBe(false);
+    // The person says no
+    files.set('refuse', 'SendMessage');
+    await $.tool.call({ tool: 'SendMessage', to: 'a1', message: 'Make the buttons bigger too' });
+    wake();
+    await until(async () => list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" }));
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain("You said no · it didn't run, and Claude is waiting for what you say next");
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the task “Fix the panel cards”');
+    await clock.advance(61000);
+    expect(await until(async () => ((await list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" })) ? undefined : true))).toBe(true);
+    // Allowed, a message says it was sent
+    files.delete('refuse');
+    void $.classic.PermissionRequest({ tool_name: 'SendMessage', tool_input: { to: 'a1', message: 'One more thing' } });
+    await until(async () => list.find({ type: 'Text', text: 'Pass a message to the task “Fix the panel cards”' }));
+    await $.tool.call({ tool: 'SendMessage', to: 'a1', message: 'One more thing' });
+    wake();
+    await until(async () => list.find({ type: 'Text', text: 'You allowed it · it was sent' }));
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('You allowed it · it was sent');
+    // Interrupted before an answer: nothing happened
+    files.set('interrupt', 'Bash');
+    void $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'make clean', description: 'Clean up' }, agent_id: 'a1' });
+    await until(async () => list.find({ type: 'Text', text: 'Run a command: Clean up' }));
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Run a command: Clean up');
+    await $.tool.call({ tool: 'Bash', command: 'make clean', description: 'Clean up', agentId: 'a1' });
+    wake();
+    await until(async () => list.find({ type: 'Text', text: 'It ended before you answered · nothing happened' }));
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('It ended before you answered · nothing happened');
+    await list.unmount();
+});
+test("another chat's prompt and its answer show under that chat's name, titled by its work or as that chat's own", async ($, on) => {
+    const { files, clock } = world(on);
+    await $.session.start(start);
+    files.set(`${MEMORY}/live/chat-o.json`, JSON.stringify({ chat: 'chat-o', title: 'Other chat', folder: '/x', host: '', at: NOW, cards: [], prompts: [{ id: 'toolu_9', text: 'Run a command: Count files', kind: 'allow', at: NOW }], answeredPrompts: [{ id: 'toolu_8', text: 'Pass a message to the work “Tidy”', title: 'Tidy', kind: 'allow', answered: 'yes', done: 'it was sent', at: NOW, endedAt: NOW }] }));
+    await clock.advance(5000);
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    await until(async () => list.find({ type: 'Text', text: 'Run a command: Count files' }));
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Run a command: Count files');
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('That chat itself');
+    expect(await list.find({ type: 'Text', text: 'This chat itself' })).toBeUndefined();
+    expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('You allowed it · it was sent');
+    await list.unmount();
+});
+test("Yes on a prompt's card allows the call as Claude Code's own box would, and the card says it runs", async ($, on) => {
+    const { clock, wake } = world(on);
+    await $.session.start(start);
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'npm test', description: 'Run the tests' } });
+    expect(await until(async () => button(list, 'prompt-yes-this-'))).toBeDefined();
+    await list.press({ key: String((await button(list, 'prompt-yes-this-'))?.key) });
+    wake();
+    expect((await asked).decision).toEqual({ behavior: 'allow' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it is running now' }))).toBeDefined();
+    expect(await button(list, 'prompt-yes-this-')).toBeUndefined();
+    // The call runs and ends: the card says it is done
+    await $.tool.call({ tool: 'Bash', command: 'npm test', description: 'Run the tests' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it ran and is done' }))).toBeDefined();
+    await clock.advance(1000);
+    await list.unmount();
+});
+test("No on a prompt's card refuses the call: the chat's own turn stops, and work is told and carries on", async ($, on) => {
+    const { wake } = world(on);
+    await $.session.start(start);
+    await $.prompt.submit({ text: 'tidy up', wait: false, origin: composer });
+    await $.agent.spawn({ ...spawn, description: 'Tidy the repo', prompt: 'tidy up' });
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    const own = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'rm -rf dist', description: 'Delete the build' } });
+    expect(await until(async () => button(list, 'prompt-no-this-'))).toBeDefined();
+    await list.press({ key: String((await button(list, 'prompt-no-this-'))?.key) });
+    wake();
+    expect((await own).decision).toEqual({ behavior: 'deny', message: expect.stringContaining('said no'), interrupt: true });
+    expect(await until(async () => list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" }))).toBeDefined();
+    const work = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'git clean -fd', description: 'Clean the tree' }, agent_id: 'a1' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Clean the tree' }))).toBeDefined();
+    expect(await until(async () => button(list, 'prompt-no-this-'))).toBeDefined();
+    await list.press({ key: String((await button(list, 'prompt-no-this-'))?.key) });
+    wake();
+    const decision = (await work).decision;
+    expect(decision?.interrupt).toBeUndefined();
+    expect(decision?.message).toContain('continue without it');
+    expect(await until(async () => list.find({ type: 'Text', text: "You said no · it didn't run, and Claudopus told Claude" }))).toBeDefined();
+    await list.unmount();
+});
+test('a question or a plan has no Yes or No on its card: it says where to answer it', async ($, on) => {
+    const { wake } = world(on);
+    await $.session.start(start);
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    const r = await $.classic.PermissionRequest({ tool_name: 'AskUserQuestion', tool_input: { questions: [{ question: 'Which colour?' }] } });
+    expect(r?.decision).toBeUndefined();
+    expect(await until(async () => list.find({ type: 'Text', text: 'Pick your answer in the box at the bottom of this chat.' }))).toBeDefined();
+    expect(await button(list, 'prompt-yes-')).toBeUndefined();
+    wake();
+    await list.unmount();
+});
+test("another chat's held prompt has no Yes or No here, only where to answer it; an answer a file leaves for this chat's own prompt answers nothing", async ($, on) => {
+    const { files, clock, wake, logged } = world(on);
+    await $.session.start(start);
+    files.set(`${MEMORY}/live/chat-o.json`, JSON.stringify({ chat: 'chat-o', title: 'Other chat', folder: '/x', host: '', at: NOW, cards: [], prompts: [{ id: 'toolu_9', text: 'Run a command: Count files', kind: 'allow', at: NOW, isHeld: true }] }));
+    await clock.advance(5000);
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Count files' }))).toBeDefined();
+    expect(await button(list, 'prompt-yes--chat-o-toolu_9')).toBeUndefined();
+    expect(await list.find({ type: 'Text', text: 'Answer it in that chat' })).toBeDefined();
+    // This chat's own prompt: a Yes left in a file, as another chat or another Mac could leave one, does not answer it
+    let settled = false;
+    const asked = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'make', description: 'Build it' } }).then(r => ((settled = true), r));
+    expect(await until(async () => button(list, 'prompt-yes-this-'))).toBeDefined();
+    const id = String((await button(list, 'prompt-yes-this-'))?.key ?? '').replace(/^prompt-yes-this-/, '').replace(/-\d+$/, '');
+    files.set(`${MEMORY}/live/answers/engine-id/1-a.json`, JSON.stringify({ card: `prompt:${id}`, choice: 'yes', isReply: false, ask: 'Run a command: Build it', askAt: NOW, at: NOW + 6000 }));
+    await clock.advance(5000);
+    wake();
+    await clock.advance(1000);
+    wake();
+    expect(settled).toBe(false);
+    expect(files.has(`${MEMORY}/live/answers/engine-id/1-a.json`)).toBe(false);
+    expect((files.get(`${MEMORY}/log.md`) ?? '')).toContain('left in a file put away unread');
+    // Its own Yes, pressed in this chat's panel, still answers it
+    await list.press({ key: String((await button(list, 'prompt-yes-this-'))?.key) });
+    wake();
+    expect((await asked).decision).toEqual({ behavior: 'allow' });
+    void logged;
+    await list.unmount();
+});
+test("a No pressed after Claude Code's box said yes does not stand: the card says what the call did once it ends", async ($, on) => {
+    const { wake } = world(on);
+    await $.session.start(start);
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    void $.classic.PermissionRequest({ tool_name: 'WebFetch', tool_input: { url: 'https://example.com/a' } });
+    expect(await until(async () => button(list, 'prompt-no-this-'))).toBeDefined();
+    await list.press({ key: String((await button(list, 'prompt-no-this-'))?.key) });
+    wake();
+    expect(await until(async () => list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" }))).toBeDefined();
+    // The box had allowed it first: the call runs and ends well
+    await $.tool.call({ tool: 'WebFetch', url: 'https://example.com/a' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it ran and is done' }))).toBeDefined();
+    expect(await list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" })).toBeUndefined();
+    await list.unmount();
+});
