@@ -1,6 +1,6 @@
 #!/bin/sh
 # Waits for a piece of work's helpers, run by the work itself with Bash: back once the helpers it has running change (one ended,
-# one started or one went quiet), which the mod writes within about 20 seconds, or after 110 seconds, inside Bash's own two-minute limit; then
+# one started or one went quiet), which the mod writes at once as a helper ends and within about 20 seconds otherwise, or after 110 seconds, inside Bash's own two-minute limit; then
 # prints how each is doing. The file's first line names the helpers running and those gone quiet ("running: <ids> quiet: <ids>"),
 # the rest says how each is doing.
 f="$1"
@@ -19,6 +19,8 @@ while [ "$i" -lt 55 ]; do
   case "$now" in
     "running: "*) [ "$now" != "$first" ] && { changed=1; break; } ;;
   esac
+  # Its row says how it goes: one line every 10 seconds, so a wait on helpers is never taken for a run gone silent
+  [ $((i % 5)) -eq 0 ] && echo "progress: $(echo "$now" | sed 's/^running: //; s/ quiet:.*//' | tr ',' '\n' | grep -c .) helpers at work"
   sleep 2
   i=$((i + 1))
 done

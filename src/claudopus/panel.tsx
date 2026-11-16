@@ -193,11 +193,12 @@ const panelHooks = (on: On) => {
     }
     // Where a piece of work is: the line it last wrote about itself
     // While it works, a run of its own that ended after that line is said in its place, so a line written while the run went ("about
-    // 40% done") never stands beside a row that has ended (16 Nov), until the work writes again
+    // 40% done") never stands beside a row that has ended (16 Nov), until the work writes again; not while it asks the person something
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      const run = one.status === 'working' ? [...(one.endedRuns ?? [])].filter(r => r.endedAt > (entry?.at ?? 0)).sort((a, b) => a.endedAt - b.endedAt).at(-1) : undefined
-      return run ? `${runWords(run.what)} ${RUN_ENDED_AS[run.how]}` : (entry?.text ?? '')
+      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? "").trim()) : []
+      const run = runs.length === 1 ? runs[0] : undefined
+      return run ? `${runWords(String(run.what))} ${RUN_ENDED_AS[run.how]}` : runs.length ? `${runs.length} runs have ended` : (entry?.text ?? '')
     }
 
     const table = uiOf($, e)

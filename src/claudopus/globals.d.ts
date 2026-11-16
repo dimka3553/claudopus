@@ -248,6 +248,7 @@ declare global {
   export import SILENT_AFTER = M10.SILENT_AFTER
   export import SILENT_WARN = M10.SILENT_WARN
   export import ownWaitOf = M10.ownWaitOf
+  export import watcherOf = M10.watcherOf
   export import OpenCall = M10.OpenCall
   export import OwnRun = M10.OwnRun
   export import Proc = M10.Proc

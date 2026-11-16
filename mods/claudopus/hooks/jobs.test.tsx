@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, ownWaitOf, PLAIN_MOST } from './jobs'
+import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, ownWaitOf, watcherOf, PLAIN_MOST } from './jobs'
 import type { Job } from './jobs'
 
 test("a run's raw line becomes a few plain words or nothing: no paths, file names, times, codes, states, settings, sizes, programs or secrets; 16 Nov a row read \"35 MB · [run 11:27:50] waiting for the machine to start (Running)\"", async () => {
@@ -124,30 +124,56 @@ test('a command that only polls is a wait that says what for; one that does real
   expect(waitOf('python run_all.py')).toBeUndefined()
 })
 
-test('a command that only waits on a run of the same work that still goes is known, by its process, its log or its pattern; one that does more, or waits on something else, is not', async () => {
-  const upload = { id: 'u', what: 'Upload both evidence zips', cmd: 'nohup /opt/homebrew/bin/rclone copy /d "evidence:x" -P > /s/drive/upload.log 2>&1 &', pid: '6909', log: '/s/drive/upload.log' }
-  const build = { id: 'b', what: 'Build the app', cmd: 'npm run build', output: '/t/tasks/bk1.output' }
-  const runs = [upload, build]
+test('a command that only waits for a run of the same work to end is known, by its process or a pgrep for it; one that does more, waits for a line or a port, or could hang the mod, is not', async () => {
+  const upload = { id: 'u', what: 'Upload both evidence zips', cmd: 'nohup /opt/homebrew/bin/rclone copy /d "evidence:x" -P > /s/drive/upload.log 2>&1 &', pid: '6909' }
+  const server = { id: 's', what: 'Serve the tiles', cmd: 'nohup python serve.py > /w/server.log 2>&1 &', pid: '7001' }
+  const runs = [upload, server]
   const cases: [string, string | undefined][] = [
     // The waits of 16 Nov, as they ran
     ['for i in $(seq 1 55); do kill -0 6909 2>/dev/null || break; echo "progress: $i/55 tries waiting for the upload"; sleep 10; done; kill -0 6909 2>/dev/null && echo STILL_RUNNING || echo ENDED; grep -E "ERROR|Copied|INFO" /s/drive/upload.log | tail -5', 'u'],
-    ['n=0; until grep -q Transferred /s/drive/upload.log; do n=$((n+1)); echo "progress: $n tries"; sleep 10; done', 'u'],
+    ['n=0; while kill -0 6909; do n=$((n+1)); echo "progress: $n tries"; sleep 5; done', 'u'],
     ["until ! pgrep -f 'rclone copy' >/dev/null; do sleep 10; done; date", 'u'],
-    ['while kill -0 6909; do sleep 5; done', 'u'],
-    ['sleep 300; tail -5 /s/drive/upload.log', 'u'],
-    ['tail -f /t/tasks/bk1.output | grep -m1 built', 'b'],
+    ['while pgrep -u root -f "bin/rclone copy"; do sleep 10; done', 'u'],
     ['wait 6909', 'u'],
-    // Not only a wait: it starts what comes next
+    // Not only a wait: it starts or writes what comes next, or is sent off beside other work
     ['while kill -0 6909; do sleep 5; done; rclone lsl evidence:x', undefined],
-    // A wait on something no run of its own is
+    ['for f in a b; do sleep 1; done; if python finalize.py; then echo ok; fi; kill -0 6909', undefined],
+    ['until rclone copy /a remote:; do echo retry; sleep 10; kill -0 6909; done', undefined],
+    ['while kill -0 6909; do sleep 5; done & python post.py', undefined],
+    ['while kill -0 6909; do sleep 5; done; tail -100 /s/drive/upload.log > /w/summary.txt', undefined],
+    ['while kill -0 6909; do sleep 5; done; sed -i s/a/b/ /w/notes.txt', undefined],
+    // A wait for what comes while a run goes: a line in its log, a port
+    ['until grep -q Serving /w/server.log; do echo "progress: 1 tries"; sleep 1; done', undefined],
+    ['until grep -q Copied /s/drive/upload.log; do sleep 10; done', undefined],
     ['until curl -s localhost:3000 >/dev/null; do sleep 2; done', undefined],
+    // Something no run of its own is, or a pattern too short to name one
     ['while kill -0 4242; do sleep 5; done', undefined],
+    ['while pgrep -f python >/dev/null; do sleep 5; done', undefined],
     // A look once, with no wait in it
-    ['tail -5 /s/drive/upload.log', undefined],
     ['kill -0 6909 && echo RUNNING', undefined],
   ]
   for (const [cmd, id] of cases) expect([cmd, ownWaitOf(cmd, runs)?.id]).toEqual([cmd, id])
   expect(ownWaitOf('while kill -0 6909; do sleep 5; done', [])).toBeUndefined()
+  // A pattern is never run as one: a pattern that would take minutes to try takes no time
+  const at = Date.now()
+  expect(ownWaitOf('while pgrep -f "(a+)+b.*.*.*.*zz"; do sleep 5; done', [{ id: 'x', what: 'x', cmd: 'a'.repeat(400) }])).toBeUndefined()
+  expect(Date.now() - at).toBeLessThan(200)
+})
+
+test('a command made only of tail, grep and their kind only watches; one that follows a file never ends of itself; one that does anything more is no watcher', async () => {
+  const cases: [string, { isFollow: boolean } | undefined][] = [
+    // The rows of 16 Nov: one pipeline, its two processes found apart
+    ['tail -f /w/figs/pic_eyes.log | ugrep --line-buffered wrote', { isFollow: true }],
+    ['tail -F pic_eyes.log', { isFollow: true }],
+    ['ugrep wrote', { isFollow: false }],
+    ['cd /w && tail -n 0 -f run.log | grep --line-buffered -E "ERROR|Traceback"', { isFollow: true }],
+    ['tail -20 /w/run.log', { isFollow: false }],
+    ['tail -f run.log | python parse.py', undefined],
+    ['sed -i s/a/b/ notes.txt', undefined],
+    ['python train.py', undefined],
+    ['/x/mods/claudopus/bin/helpers /x/h.txt', undefined],
+  ]
+  for (const [cmd, want] of cases) expect([cmd, watcherOf(cmd)]).toEqual([cmd, want])
 })
 
 test('six alike waits are one row that says six; different jobs stay apart', async () => {

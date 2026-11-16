@@ -447,6 +447,8 @@ const chatHooks = (on: On) => {
       // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
       // held on its own background work leaves it once it ends (keepStoppedReports)
       const card = (await read($, todos)).find(one => one.id === id)
+      // A helper that has ended lets the work waiting on it go at once, not at the next look round
+      if (card?.parentId && card.status !== 'working') await writeRolls($, true).catch(err => log($, `helpers not written: ${String(err)}`))
       const report = (e.answer ?? '').trim() || answer
       if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
