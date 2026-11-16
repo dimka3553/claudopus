@@ -712,6 +712,34 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').folder).toBe(chat)
 })
 
+test('Stats draws whatever the history: the timeline of 240 pieces of work at once, each busy a minute in ten, in one drawing the app takes, and the rest of the tab as ever', async ($, on) => {
+  const { files } = world(on)
+  const M = 60_000
+  const t0 = 1_700_000_000_000 - 1000 * M
+  const chat = `${HOME}/.claude/projects/-repo`
+  const subs = `${chat}/engine-id/subagents`
+  files.set(`${chat}/engine-id.jsonl`, '{}')
+  files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [], u: [], d: [] }))
+  // 24,000 bars: on 0.2.139 a drawing of eleven million characters, which the app refuses with the whole tab
+  const spans = Array.from({ length: 100 }, (_, k) => [t0 + k * 10 * M, t0 + k * 10 * M + M])
+  for (let i = 0; i < 240; i++) {
+    files.set(`${subs}/agent-w${i}.jsonl`, '{}')
+    files.set(`${subs}/agent-w${i}.meta.json`, JSON.stringify({ description: `Work ${i}`, spawnDepth: 1, finished: true }))
+    files.set(`${subs}/agent-w${i}.jsonl.sum`, JSON.stringify({ s: spans, u: [[`m-${i}`, 'claude-opus-5-5', t0 + M, 0, 0, 0, 0, 0, 0, 1000]], d: [] }))
+  }
+  await $.session.start(start)
+  const stats = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, title: 'Stats', bodyColumns: 60 }, surface: 'desktop' } as never)
+  const allTime = await until(async () => (await stats.findAll({ type: 'Button' })).find(one => one.props.label === 'All time'))
+  await stats.press({ key: allTime?.key ?? '' })
+  // The timeline is drawn, its bars on a coarser grid, in one drawing the app takes
+  const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 pieces of work on a time axis'))
+  expect(String(timeline?.props.source)).toContain('#8A63F0')
+  expect((await stats.findAll({ type: 'Svg' })).filter(one => String(one.props.source).length > 131_072)).toEqual([])
+  // The rest of the tab is drawn as ever
+  expect(await stats.find({ type: 'Text', text: 'Saved by running side by side' })).toBeDefined()
+  expect(await stats.find({ type: 'Text', text: '240k' })).toBeDefined()
+})
+
 test('the bar keeps its buttons whole on a row of their own under the header, wrapping in a narrow pane', async ($, on) => {
   world(on)
   await $.session.start(start)

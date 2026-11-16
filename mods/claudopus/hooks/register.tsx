@@ -2,9 +2,9 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementTable, EngineInterface, McpToolResult, On, RasterProps, Register, RenderSurface, Timer, ToolCallInput, ToolCallResult, SessionMessage, ToolUseSummary } from 'claude-code'
 import type { Entry, Flow, FlowAgent, Item, Link, Me, Prompt, Report, Server, Shared, Stream, Todo, Wait } from '../types'
-import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
+import { capOf, doing, endOf, firstFit, fitWords, FLOW, FLOW_PANE, flowPaneOf, journalOf, metaOf, roundsOf, rowsOf, SQUARE_COLOR, SQUARE_GLYPH, squaresBefore, squaresKept, squaresOf, squaresSvg, squaresWidth, stageOf, titleOfFlow, withJournal } from './flows'
 import type { Round } from './flows'
-import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, view as statsShown } from './stats'
+import { CACHE_V, GAP, held, memoryHeld, parsed, READ_EVERY, reading, statsView, SUM_JQ, svgFits, view as statsShown } from './stats'
 import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
 import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
@@ -12022,12 +12022,19 @@ const panelHooks = (on: On) => {
     const squaresRow = (f: Flow, rounds: Round[], key: string, first = 1) => {
       const groups = squaresOf(f, rounds)
       if (!groups.length) groups.push(f.phases.length ? f.phases.map(() => 'waiting' as const) : ['waiting'])
-      const said = groups.map((g, i) => `round ${first + i}: ${g.join(', ')}`).join('; ')
-      return 'Svg' in table && e.surface !== 'terminal' ? (
-        <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={squaresSvg(groups, LINE)} alt={said} width={squaresWidth(groups)} height={LINE} isInteractive />
-        </Box>
-      ) : (
+      if ('Svg' in table && e.surface !== 'terminal') {
+        // One drawing holds so many squares: a long run draws its last rounds, after how many came before
+        const kept = squaresKept(groups)
+        const said = kept.groups.map((g, i) => `round ${first + kept.earlier + i}: ${g.join(', ')}`).join('; ')
+        const source = squaresSvg(kept.groups, LINE)
+        return (
+          <Box key={key} flexDirection="row" gap={1} alignItems="center" flexShrink={0}>
+            {squaresBefore(kept) ? <Text key={`${key}-earlier`} dimColor>{`${squaresBefore(kept)} ·`}</Text> : null}
+            {svgFits(source) ? <table.Svg key={`${key}-svg`} source={source} alt={said} width={squaresWidth(kept.groups)} height={LINE} isInteractive /> : <Text key={`${key}-too-big`} dimColor>{`${groups.length} rounds`}</Text>}
+          </Box>
+        )
+      }
+      return (
         <Box key={key} flexDirection="row" gap={1} flexShrink={0}>
           {groups.map((g, i) => (
             <Box key={`${key}-${i}`} flexDirection="row">

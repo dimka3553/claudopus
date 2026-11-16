@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { costOf, lengthOf, mostAtOnce, priceOf, statsOf, timeOf, todosOf, union } from './stats'
-import type { Msg, Run } from './stats'
+import { colorOf, costOf, lengthOf, mostAtOnce, priceOf, statsOf, SVG_MOST, svgFits, timelineSvg, timeOf, todosOf, union } from './stats'
+import type { Msg, Piece, Run, Span } from './stats'
 
 const M = 60_000
 const msg = (id: string, model: string, at: number, tokens: Partial<{ input: number; w5: number; w1: number; read: number; output: number; fast: boolean; long: boolean }>): Msg => [
@@ -91,4 +91,48 @@ test('stats add up tokens by model once each, work and its helpers as one piece,
   const later = statsOf(runs, day + 20 * M, Infinity)
   expect([later.finished, later.flows, later.messages, later.all.total]).toEqual([0, 1, 1, 5])
   expect([later.time.added, later.time.saved]).toEqual([10 * M, 0])
+})
+
+test('the timeline is one drawing the app takes whatever the history: each bar its own words while they fit, then each piece, then the bars alone', async () => {
+  const day = 1_800_000_000_000
+  const models = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2']
+  // `n` pieces of work over `days`, each in up to three stretches with gaps between, on one of three models
+  const many = (n: number, days: number): Piece[] =>
+    Array.from({ length: n }, (_, i) => {
+      const from = day + Math.floor((i / n) * days * 1440) * M
+      const spans: Span[] = Array.from({ length: 1 + (i % 3) }, (_, k): Span => [from + k * 40 * M, from + k * 40 * M + (5 + (i % 17)) * M])
+      const model = models[i % 3] ?? ''
+      return { id: `p${i}`, title: `A piece of work with a title of a usual length, number ${i}`, isFlow: false, isFinished: true, spans, bars: spans.map(([a, z]) => ({ from: a, to: z, model })), calls: [], ended: spans.at(-1)?.[1] ?? 0 }
+    })
+  // About the history that made the tab fail (355 pieces, 449 bars over two months, 210,000 characters): every bar keeps its own words, as the 468 of the real one do
+  const usual = many(230, 60)
+  const svg = timelineSvg(usual, 412)
+  expect(svg.length).toBeGreaterThan(0)
+  expect(svg.length).toBeLessThanOrEqual(SVG_MOST)
+  expect(svg.split('class="b"').length - 1).toBe(usual.reduce((n, p) => n + p.bars.length, 0))
+  // Far more: a piece's bars light up together with its name, then the bars alone, never past the limit
+  for (const [n, days, width, groups] of [[355, 60, 412, 355], [1500, 90, 412, 0], [5000, 365, 412, 0], [5000, 365, 1400, 0], [60, 1, 200, 'bars']] as const) {
+    const pieces = many(n, days)
+    const source = timelineSvg(pieces, width)
+    expect(svgFits(source)).toBe(true)
+    // Each model in its colour; drawn on a grid, each cell is the model that ran most in it
+    if (groups !== 0) for (const model of models) expect(source).toContain(colorOf(model))
+    if (typeof groups === 'number') expect(source.split('class="b"').length - 1).toBe(groups)
+    // Bars drawn one shape a model never lie over each other, so no model hides another
+    if (groups === 0) {
+      const taken = new Set<string>()
+      for (const [, d] of source.matchAll(/<path d="([^"]+)" fill="#/g)) {
+        let [x, y] = [0, 0]
+        for (const [, move, a, b, w] of (d ?? '').matchAll(/([Mm])(-?[\d.]+) (-?[\d.]+)h([\d.]+)/g)) {
+          ;[x, y] = move === 'M' ? [Number(a), Number(b)] : [x + Number(a), y]
+          for (let c = Math.round(x * 2); c < Math.round((x + Number(w)) * 2); c++) {
+            expect(taken.has(`${y}:${c}`)).toBe(false)
+            taken.add(`${y}:${c}`)
+          }
+        }
+      }
+      expect(taken.size).toBeGreaterThan(0)
+    }
+  }
+  expect(svgFits('x'.repeat(SVG_MOST + 1))).toBe(false)
 })
