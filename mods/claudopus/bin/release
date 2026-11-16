@@ -180,7 +180,7 @@ stage() { [ -n "$beatf" ] && printf '%s\n' "$1" >"$beatf.stage"; set_me stage "$
 start_ticker() {
   beatf="$1"; : >"$beatf"; echo "starting" >"$beatf.stage"
   ( trap - EXIT; while kill -0 "$2" 2>/dev/null; do
-      sleep "$beat"
+      sleep "$beat" </dev/null >/dev/null 2>&1
       /usr/bin/perl -e 'my @s = stat shift or exit 1; exit(time - $s[9] < shift ? 0 : 1)' "$beatf" "$beat" && continue
       kill -0 "$2" 2>/dev/null || break
       echo "progress: $(( $(date +%s) - $3 )) s $(cat "$beatf.stage" 2>/dev/null)" >&2; : >"$beatf"
@@ -298,14 +298,22 @@ fails_of_run() {
       case ",$GITHUB_CHECKS," in *", $name,"* | *",$name,"*) named=1 ;; *) named= ;; esac
       [ "$status" = completed ] || { echo "unnamed $name: not ended"; continue; }
       case $concl in success) continue ;; skipped | neutral) [ -n "$named" ] && echo "unnamed $name: $concl"; continue ;; esac
-      ghq api "repos/$repo/actions/jobs/$id/logs" >"$logf" 2>/dev/null || { echo "unnamed $name: log not read"; continue; }
+      # (gh refuses to print a log holding the terminal's colour codes, as GitHub's do, unless told it may; an older gh knows no such
+      # word and prints them anyway)
+      ghq api --allow-escape-sequences "repos/$repo/actions/jobs/$id/logs" >"$logf" 2>/dev/null || ghq api "repos/$repo/actions/jobs/$id/logs" >"$logf" 2>/dev/null || { echo "unnamed $name: log not read"; continue; }
+      # A failure counts by name only where the log names every one: the mod's tests' own count of failures must equal the failures
+      # named, a shell test that failed must have named what failed in its own group of lines, and any other error line names nothing
       /usr/bin/perl -ne 'BEGIN { $j = shift } s/^(?:\xef\xbb\xbf)?\d{4}-\d\d-\d\dT[\d:.]+Z //; s/\e\[[\d;]*m//g; s/\r?\n$//;
+        if (/^##\[group\](\S+\.test\.sh)\s*$/) { $g = $1; next }
+        if (/^##\[endgroup\]/) { $g = undef; next }
         if (/^(\S+\.test\.tsx):\s*$/) { $f = $1; next }
-        if (/^FAIL (.+?)\s*$/) { print "$j: $1\n"; $n++ }
-        elsif (/^NOT OK (?:\d+ )?-? ?(.+?)\s*$/) { print "$j: $1\n"; $n++ }
-        elsif (/^\(fail\) (.+?)(?: \[[\d.]+m?s\])?\s*$/) { print "$j: ", ($f // "?"), ": $1\n"; $n++ }
-        elsif (/^(?:##\[error\]|::error::)(\S+\.test\.sh) failed\s*$/) { print "$j: $1 failed\n"; $n++ }
-        END { exit($n ? 0 : 1) }' "$name" "$logf" ||
+        if (/^FAIL (.+?)\s*$/) { print "$j: $1\n"; $n++; $in{$g}++ if defined $g }
+        elsif (/^NOT OK (?:\d+ )?-? ?(.+?)(?:: ended \d+.*)?\s*$/) { print "$j: $1\n"; $n++; $in{$g}++ if defined $g }
+        elsif (/^\(fail\) (.+?)(?: \[[\d.]+m?s\])?\s*$/) { print "$j: ", ($f // "?"), ": $1\n"; $n++; $named++ }
+        elsif (/^ *(\d+) fail\s*$/) { $count = $1 }
+        elsif (/^(?:##\[error\]|::error::)(\S+\.test\.sh) failed\s*$/) { print $in{$1} ? "$j: $1 failed\n" : "unnamed $j: $1 failed, naming no test\n"; $n++ }
+        elsif (/^(?:##\[error\]|::error::)(.*)$/ && $1 !~ /^Process completed with exit code \d+\.?$/) { print "unnamed $j: $1\n"; $n++ }
+        END { print "unnamed $j: the mod'"'"'s tests failed ", ($count // "uncounted"), " where ", ($named // 0), " are named\n" if ($count // -1) != ($named // 0) && ($count || $named); exit($n ? 0 : 1) }' "$name" "$logf" ||
         { if [ -n "$steps" ]; then printf '%s\n' "$steps" | tr '|' '\n' | sed "s#^#unnamed $name: step #"; else echo "unnamed $name: $concl"; fi; }
     done
     # a named check with no job at all
@@ -354,8 +362,14 @@ start_checks() {
     st() { ps -o lstart= -p "$1" 2>/dev/null | tr -s " "; }
     until mkdir "$m" 2>/dev/null; do
       h=$(cat "$m/pid" 2>/dev/null); hs=$(cat "$m/started" 2>/dev/null)
-      if [ -n "$h" ] && { ! kill -0 "$h" 2>/dev/null || [ "$(st "$h")" != "$hs" ]; }; then mv "$m" "$m.gone.$$" 2>/dev/null && rm -rf "$m.gone.$$"; continue; fi
-      [ -z "$h" ] && [ -n "$(find "$m" -maxdepth 0 -mmin +1 2>/dev/null)" ] && { mv "$m" "$m.gone.$$" 2>/dev/null && rm -rf "$m.gone.$$"; continue; }
+      # (cleared by the one waiter holding the lock of the clearing, after it reads the holder again, so a fresh lock is never cleared)
+      if { [ -n "$h" ] && { ! kill -0 "$h" 2>/dev/null || [ "$(st "$h")" != "$hs" ]; }; } || { [ -z "$h" ] && [ -n "$(find "$m" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
+        [ -n "$(find "$m.clearing" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rmdir "$m.clearing" 2>/dev/null
+        if mkdir "$m.clearing" 2>/dev/null; then
+          [ "$(cat "$m/pid" 2>/dev/null)" = "$h" ] && [ "$(cat "$m/started" 2>/dev/null)" = "$hs" ] && rm -rf "$m"
+          rmdir "$m.clearing"; continue
+        fi
+      fi
       kill -0 "$3" 2>/dev/null || exit 1
       echo "waiting for another release'"'"'s checks on this Mac" >"$2.state"; sleep 1
     done
@@ -431,8 +445,9 @@ while :; do
   on_main=$(git -C "$top" rev-parse "$REMOTE/$MAIN")
   # The release ahead: the last one in the line before this one's own place whose release still runs (the line's files of ended ones go)
   ahead=
+  # (by number: this one's own place may not have its file yet, and none after it is ahead of it)
   for e in $(ls "$line" 2>/dev/null | grep -E '^[0-9]{8}$' | sort); do
-    [ "$line/$e" = "$me" ] && break
+    [ -n "$me" ] && [ ! "$e" \< "${me##*/}" ] && break
     alive "$line/$e" || { rm -f "$line/$e"; continue; }
     ahead="$line/$e"
   done
@@ -604,7 +619,7 @@ while :; do
             my @missing = grep { !$seen{$_} } sort keys %want;
             my ($status, $conclusion) = split /\t/, $ENV{RUN_STATE} // "";
             if (@red && !@busy) { print "red: ", join("; ", @red), (@missing ? "; missing: " . join(", ", @missing) : ""); exit }
-            if (@missing && !@busy && ($status // "") eq "completed") { print "red: the run ended without ", join(", ", @missing); exit }
+            if (@missing && !@busy && ($status // "") eq "completed") { print "red: the run ended with ", join(", ", map { "$_ not started" } @missing); exit }
             if (@busy || @missing) { print "wait: ", join(", ", (map { "$_ failed" } map { (split / \(/)[0] } @red), (map { "$_ running" } @busy), (map { "$_ not started" } @missing)); exit }
             if (($status // "") ne "completed") { print "wait: the run not ended"; exit }
             if (($conclusion // "") ne "success") { print "red: the run ended ", ($conclusion || "without a conclusion"); exit }
@@ -612,7 +627,7 @@ while :; do
         [ -n "$run" ] || verdict="wait: not started yet"
         case $verdict in green | red:*) break ;; esac
       fi
-      tick "GitHub's checks: ${verdict#wait: }; this Mac's checks $(mac_state)"
+      tick "waiting for GitHub's checks: ${verdict#wait: }; this Mac's checks $(mac_state)"
       sleep 1; too_long
     done
     # (this Mac's checks go on to be read below, unless what was decided leaves them nothing to decide)
