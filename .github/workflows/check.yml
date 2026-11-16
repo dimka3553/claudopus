@@ -54,6 +54,8 @@ jobs:
         run: bash mods/claudopus/bin/admin.test.sh
       - name: The keeper goes on with a chat's work
         run: bash mods/claudopus/bin/keep.test.sh
+      - name: The watcher brings Claudopus back in a chat where Claude switched it off
+        run: bash mods/claudopus/bin/revive.test.sh
       - name: What stands in on Linux for a Mac's own tools works
         run: bash mods/claudopus/bin/linux.test.sh
       # Every test, as the release runs them: Claude Code's own test kit, from its public npm package, pinned to a version that
