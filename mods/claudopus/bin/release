@@ -355,10 +355,12 @@ EOF
 start_checks() {
   lpid=; rm -f "$tmp.check" "$tmp.check.rc" "$tmp.check.state"
   [ -n "$CHECK" ] || return 0
-  set -m
+  # (the group is made by perl before bash starts, never by job control: a shell with no terminal, as on GitHub's Linux runner,
+  # may leave its jobs in its own group, and the stop of "the checks' group" then stopped every process beside the release, 16 Nov.
+  # Their group stops itself only when it is its own)
   # (the lock names its holder by number and start time; one whose holder is gone is moved aside, which only one waiter can do,
   # then removed; its holder removes it as it ends however it ends, short of a KILL)
-  bash -c 'm=$4
+  /usr/bin/perl -e 'setpgrp(0, 0) or exit 126; exec @ARGV or exit 127' bash -c 'm=$4
     st() { ps -o lstart= -p "$1" 2>/dev/null | tr -s " "; }
     until mkdir "$m" 2>/dev/null; do
       h=$(cat "$m/pid" 2>/dev/null); hs=$(cat "$m/started" 2>/dev/null)
@@ -376,10 +378,9 @@ start_checks() {
     trap "rm -rf \"$m\"" EXIT; trap "exit 1" TERM INT HUP
     st $$ >"$m/started"; echo $$ >"$m/pid"; echo "running" >"$2.state"
     bash -c "$1" >"$2" 2>&1 & c=$!
-    while kill -0 $c 2>/dev/null; do kill -0 "$3" 2>/dev/null || { rm -rf "$m"; kill -KILL 0; }; sleep 1; done
+    while kill -0 $c 2>/dev/null; do kill -0 "$3" 2>/dev/null || { rm -rf "$m"; [ "$(ps -o pgid= -p $$ | tr -d " ")" = "$$" ] && kill -KILL 0; kill -KILL $c; exit 1; }; sleep 1; done
     wait $c; r=$?; echo $r >"$2.rc"' sh "$CHECK" "$tmp.check" "$$" "$lock.mac" &
   lpid=$!
-  set +m
 }
 mac_state() {
   [ -n "${lpid:-}" ] || { echo "passed"; return; }
