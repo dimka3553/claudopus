@@ -8,7 +8,7 @@ const tabHooks = (on: On) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
-    if (e.plugin === 'claudopus') ((pressFrom = 0), freeTimes($), (freshness += 1), await engage($))
+    if (e.plugin === 'claudopus') ((pressFrom = 0), (pressedAt = await $.clock.now()), freeTimes($), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>

@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.158 · 16 November 2026
+- Panel buttons answer clicks again with many tasks at work: while the panel is slow to draw, it is drawn afresh at most about once a second (longer when a drawing is slower), and in between the drawing on screen is given again, so the button under the pointer is still there when the click arrives. A press is still drawn at once
+- From the moment a click starts until it lands, the panel keeps the drawing on screen, even one finished in that moment
+- New lines from running commands show at the panel's next calm drawing, every ten seconds or so, instead of drawing the panel afresh each time one prints
+
 ## 0.2.157 · 16 November 2026
 - When you answer in your own words above the chat, or paste a key or give a response there, Send is now the big button and Close the small one beside it.
 
