@@ -256,9 +256,11 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
     const meta = parsedOr<{ finished?: boolean }>(await readOr($, `${folder}/agent-${one.id}.meta.json`), {})
     if (meta.finished !== true) continue
     const path = `${folder}/agent-${one.id}.jsonl`
-    const at = (await $.fs.stat(path).catch(() => undefined))?.mtimeMs || now
+    const stat = await $.fs.stat(path).catch(() => undefined)
+    const at = stat?.mtimeMs || now
     // Its report: what it handed back, or its last words, from the end of its record
-    const tail = ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '').split('\n')
+    const size = stat?.size ?? 0
+    const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
     let answer = ''
     for (const row of tail.reverse()) {
       const o = parsedOr<{ type?: string; message?: { content?: unknown } }>(row, {})
