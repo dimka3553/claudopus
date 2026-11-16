@@ -24,11 +24,12 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
     </ui.Box>
   ) : null
 // The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
-// to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
+// to, the box, Send, the big one, and Close, small, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
 // panel's scrolling. The box is the card's own: the same answer, and the same box through a new question of its work, until the
 // person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
 const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
   const draft = barDraft(one.id)
+  const send = (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
   return (
     <ui.Box key="band-reply" flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
       <ui.Box flexShrink={1} minWidth={0}>
@@ -43,12 +44,13 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
             submitLabel="send"
             autoFocus
             onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
-            onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))}
+            onSubmit={send}
           />
         </ui.Box>
       ) : null}
-      <ui.Box flexShrink={0}>
-        <ui.Button key={`band-reply-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
+      <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+        <ui.Button key={`band-reply-send-${presses}`} label="Send" variant="primary" onPress={() => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? ''))} />
+        <ui.Button key={`band-reply-close-${presses}`} label="Close" plain dimColor onPress={press => openReply($, undefined, press.surface)} />
       </ui.Box>
     </ui.Box>
   )
