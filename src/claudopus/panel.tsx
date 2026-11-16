@@ -1777,10 +1777,15 @@ const panelHooks = (on: On) => {
     const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 
     // While the person uses the list scrolled down, it is drawn at least as tall as the bottom of what they see, so a card that
-    // shrinks under them (their own answer) never snaps the view up; never taller, so no blank space is ever held below the cards.
-    // The height the app reports is no guide: it is this drawing's own, held height included, and kept as the most it had ever been
-    // it left the list with the length of its longest moment of the chat, blank under three cards (16 Nov, Dima's screenshot)
+    // shrinks under them (their own answer) never snaps the view up. Blank space shows only where a card shrank inside the view, and
+    // only until they leave the list alone, when it is drawn again at its own height. The height the app reports is no guide: it
+    // is this drawing's own, held height included, and kept as the most it had ever been it left the list at the length of its
+    // longest moment of the chat, blank under three cards (16 Nov, Dima's screenshot)
     const heldRows = paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) ? e.props.scroll.offset + e.props.scroll.bodyRows : 0
+    if (heldRows > e.props.scroll.bodyRows) {
+      const until = engagedAt + ENGAGED
+      if (usedUntil !== until) ((usedUntil = until), $.clock.after(until - at + 20, () => void (usedUntil === until && drawFresh($))))
+    }
     return (
       <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, heldRows)}>
         {!alone ? (
