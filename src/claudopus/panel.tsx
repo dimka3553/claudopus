@@ -204,11 +204,14 @@ const panelHooks = (on: On) => {
     // Where a piece of work is: the line it last wrote about itself
     // While it works, a run of its own that ended after that line is said in its place, so a line written while the run went ("about
     // 40% done") never stands beside a row that has ended (16 Nov), until the work writes again; not while it asks the person something
+    // A launcher whose programs still work as rows of their own has not ended for the person, and is not said; the runs that are
+    // said are named with how each ended, never a bare count that reads as the rows still working (16 Nov "2 commands have ended"
+    // stood above the two programs a launcher that had ended left working)
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? "").trim()) : []
-      const run = runs.length === 1 ? runs[0] : undefined
-      return run ? `${runWords(String(run.what))} ${RUN_ENDED_AS[run.how]}` : runs.length ? `${runs.length} commands have ended` : (entry?.text ?? '')
+      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id)) : []
+      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))} ${RUN_ENDED_AS[r.how]}`)
+      return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} and ${second}` : `${first}, ${second} and ${runs.length - 2} more ended`
     }
 
     const table = uiOf($, e)
