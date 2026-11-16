@@ -536,14 +536,19 @@ const workHooks = (on: On) => {
     // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
     // The engine presses work that ends its step without its report, while it sees nothing of the work's own at work: a command
-    // the work started detached, or what it asked Claudopus to wake it for, it does not see (16 Nov: 30 presses in 25 minutes ended a
-    // task early). That press is answered here with no model, so the work ends its step and is started again when that is done
-    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen) && (await isPressedForReport($, id))) {
-      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : 'it waits to be woken'}: let it end its step`)
+    // the work started detached, what it asked Claudopus to wake it for, or its helpers, which run in the background and whose
+    // results start it again, it does not see (16 Nov: 30 presses in 25 minutes ended a task early; five tasks waiting on a second
+    // look were each pressed and refused at their report). That press is answered here with no model, so the work ends its step and
+    // is started again when that is done
+    const helpers = id !== undefined && card && !isOff && card.handedBackAt === undefined ? runningHelpers(await read($, todos), id).length : 0
+    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen || helpers) && (await isPressedForReport($, id))) {
+      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : helpers ? `${plural(helpers, 'a helper', 'helpers')} of its own ${helpers === 1 ? 'runs' : 'run'}` : 'it waits to be woken'}: let it end its step`)
       yield { kind: 'text', index: 0, text: LEFT_AT_WORK }
       yield { kind: 'stop', stopReason: 'end_turn', usage: null }
       return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
     }
+    // A step of its own: the chat is told again the next time it ends its step to wait
+    if (id !== undefined) toldWaitsOn.delete(id)
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
