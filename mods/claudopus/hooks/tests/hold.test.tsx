@@ -168,8 +168,10 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const text = e.tool === 'get_session' ? JSON.stringify({ sessionId: 'local_1', title: 'Old title' }) : '[]'
     return { value: { content: [{ type: 'text', text }], isError: false } }
   })
-  // Answered after the test's own timers have had their turn, as the engine answers from outside the helper
-  on('session.id', async () => (await new Promise(done => setTimeout(() => done(undefined), 0)), { value: 'engine-id' }))
+  on('session.id', () => ({ value: 'engine-id' }))
+  // The mod's pause in a long step (breathe): answered after the test's own timers have had their turn, as the engine answers from
+  // outside the helper
+  on('session.turns', async () => (await new Promise(done => setTimeout(() => done(undefined), 0)), { value: 1 }))
   // A chat drawn on the desktop app, as most are; `headless` none, as a -p run
   // `narrow`: a terminal under 144 columns, as a phone over ssh, which draws only a tab opened as the person asked: here, one opened
   // while the test's press is still being answered (isPressing). The engine counts only what the press's own hook opens, which the kit
@@ -701,11 +703,11 @@ const holdMeter = () => {
   return () => ((isDone = true), worst)
 }
 // One task's record as the engine saves it: rows of about `size` characters, each a step with what came back, to-dos and notes
-const recordOf = (size: number, from = Date.parse('2026-11-16T10:00:00Z')) => {
+const recordOf = (size: number) => {
   const rows: string[] = []
   let length = 0
   for (let k = 0; length < size; k++) {
-    const at = new Date(from + k * 1000).toISOString()
+    const at = `2026-11-16T${String(10 + Math.floor(k / 3600) % 14).padStart(2, '0')}:${String(Math.floor(k / 60) % 60).padStart(2, '0')}:${String(k % 60).padStart(2, '0')}Z`
     const row =
       k % 3 === 0
         ? JSON.stringify({ timestamp: at, type: 'assistant', message: { model: 'claude-opus-5-5', usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: 'tool_use', name: 'mcp__claudopus__todo', input: { item: `Step ${k % 40}`, state: 'done' } }, { type: 'tool_use', name: 'mcp__claudopus__note', input: { text: `Done step ${k}` } }] } })

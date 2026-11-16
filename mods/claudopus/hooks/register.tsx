@@ -230,8 +230,9 @@ const BREATH = 40
 let breathAt = 0
 const breathe = async ($: EngineInterface) => {
   if (Date.now() - breathAt < BREATH) return
-  // Any call to the engine will do: it is answered from outside the helper, which answers the engine's question meanwhile
-  await $.session.id()
+  // Any call to the engine will do: it is answered from outside the helper, which answers the engine's question meanwhile (one the
+  // mod makes nowhere else, so the test world can answer it as late as the engine does)
+  await $.session.turns()
   breathAt = Date.now()
 }
 // The engine gives no file over 4 MB whole (fs.read refuses it), and a whole one is worked through at once: what grows without end
@@ -9029,8 +9030,9 @@ const chatHooks = (on: On) => {
     }
     // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold)
     holdAt = 0
+    // (not in the test kit, whose clock a test moves by hours at once: there only a test that asks for it has it)
     isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
-    everyLoad($, HOLD_LOOK, () => lookHold($))
+    if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     let seconds = 0
     everyLoad($, 1000, async () => {
       if (drawnNow > (await read($, lastDrawn))) await update($, lastDrawn, () => drawnNow)
@@ -9104,9 +9106,6 @@ const chatHooks = (on: On) => {
     await takeCharge($)
     // A move to a newer version has its moment begin now that the load has started whole
     await readyUpdated($).catch(() => undefined)
-    // A pane left open by the copy before this one (a reload, or the engine switching Claudopus off) is drawn again by this one:
-    // the app showed it empty, "has not drawn in this pane", until it was opened again
-    for (const ms of [500, 3000]) afterLoad($, ms, () => $.ui.invalidate('ui.render'))
 
     return begun
   })
