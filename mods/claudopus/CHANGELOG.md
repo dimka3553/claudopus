@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.166 · 16 November 2026
+- A release now runs its checks on this Mac while GitHub runs its own, instead of one after the other, so each release, and each release queued behind it, takes a few minutes less. Main still moves only once both passed and you allowed it.
+
 ## 0.2.165 · 16 November 2026
 - Removes a link to a local folder that an earlier release took in by mistake.
 

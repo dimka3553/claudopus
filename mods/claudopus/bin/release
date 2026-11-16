@@ -19,7 +19,7 @@
 # must be signed in, which is checked before anything is pushed), GITHUB_CHECKS (names of GitHub's jobs, by commas, that must pass
 # on the very commit main is to become, run by main's own CHECKS_WORKFLOW (check.yml), which takes a `sha` input to check out and
 # is named "Release check <sha>": main moves only once every job of that run passed; red, a named one missing, or still running
-# after 40 minutes, and nothing reaches main). `release.local` in the repo's git folder, never committed, can set the same for this Mac only, such as AFTER.
+# after 40 minutes, and nothing reaches main; CHECK runs here while GitHub checks, and both must pass). `release.local` in the repo's git folder, never committed, can set the same for this Mac only, such as AFTER.
 # The settings are read in a shell of their own and only as values, main's own committed `.release` (never the branch's) and this Mac's
 # release.local, so nothing a branch writes there runs here, before the lock or after it.
 # Inside Claude Code it releases only what the person allowed with a press on the work's card in the Claudopus panel: the hook that
@@ -173,7 +173,8 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/claudopus-release.XXXXXX")/release"
 # The branch a release's commit waits on GitHub's checks under goes once it is decided, or as the release ends any other way
 cref=
 drop_candidate() { [ -n "$cref" ] && git -C "$top" push -q "$REMOTE" --delete "$cref" >/dev/null 2>&1; cref=; return 0; }
-cleanup() { drop_candidate; git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
+lpid=
+cleanup() { [ -n "$lpid" ] && kill -KILL -- "-$lpid" 2>/dev/null; drop_candidate; git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err" "$tmp.check" "$tmp.check.rc"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 
@@ -259,8 +260,41 @@ for try in 1 2 3 4 5; do
   stray=$(git ls-files --others --exclude-standard)
   [ -n "$stray" ] && die "the build left files the repo does not track: $(echo $stray | cut -c1-300). Nothing pushed." 3
   git add -u
-  if [ -n "$CHECK" ]; then out=$(bash -c "$CHECK" 2>&1) || { echo "$out" | tail -25 >&2; die "the checks failed on $MAIN with $branch; nothing pushed" 3; }; fi
-  [ -n "$(git ls-files --others --exclude-standard)" ] && die "the checks left files the repo does not track; nothing pushed" 3
+  # The checks here run on the very commit made below; with GITHUB_CHECKS, while GitHub checks that commit, so neither waits for
+  # the other. They run in a process group of their own, made before they start (job control sets it from this side too), so a red
+  # check on GitHub, a moved main or the end of this release stops every one of them, and their group stops itself once this
+  # release is gone, however it ended. Main moves only once both passed, and only if the checks left HEAD, the tree and the index as
+  # committed and no file the repo does not track
+  start_checks() {
+    lpid=; rm -f "$tmp.check" "$tmp.check.rc"
+    [ -n "$CHECK" ] || return 0
+    set -m
+    bash -c 'bash -c "$1" >"$2" 2>&1 & c=$!
+      while kill -0 $c 2>/dev/null; do kill -0 "$3" 2>/dev/null || kill -KILL 0; sleep 1; done
+      wait $c; echo $? >"$2.rc"' sh "$CHECK" "$tmp.check" "$$" &
+    lpid=$!
+    set +m
+  }
+  # Stops the checks' whole group and returns only once none of it is left (TERM, then KILL after five seconds)
+  stop_checks() {
+    [ -n "${lpid:-}" ] || return 0
+    local n=0
+    while kill -0 -- "-$lpid" 2>/dev/null; do
+      if [ $n -lt 25 ]; then kill -TERM -- "-$lpid" 2>/dev/null; else kill -KILL -- "-$lpid" 2>/dev/null; fi
+      sleep 0.2; n=$((n + 1))
+    done
+    wait "$lpid" 2>/dev/null; lpid=; return 0
+  }
+  end_checks() {
+    if [ -n "${lpid:-}" ]; then
+      say "waiting for this Mac's checks"
+      wait "$lpid"; lpid=
+      [ "$(cat "$tmp.check.rc" 2>/dev/null)" = 0 ] || { tail -25 "$tmp.check" >&2; drop_candidate; die "the checks failed on $MAIN with $branch; nothing pushed" 3; }
+    fi
+    [ "$(git rev-parse HEAD)" = "$candidate" ] && git diff --quiet HEAD -- && git diff --cached --quiet HEAD -- || { drop_candidate; die "the checks changed the release's commit or its files; nothing pushed" 3; }
+    [ -n "$(git ls-files --others --exclude-standard)" ] && { drop_candidate; die "the checks left files the repo does not track; nothing pushed" 3; }
+    return 0
+  }
   # The GitHub release's notes and gh's sign-in are made sure of before the push, so a release that cannot make its GitHub
   # release pushes nothing
   notes="$tmp.notes"
@@ -275,6 +309,7 @@ for try in 1 2 3 4 5; do
   what=${title:-$(git log --no-merges -1 --format=%s "$base..$branch")}
   label=${NAME:+$NAME }${ver:+$ver: }
   git commit -q -m "${label}${what}" -m "Released from $branch by release, on $(git rev-parse --short "$base")." || die "nothing to commit"
+  candidate=$(git rev-parse HEAD)
   # GitHub's own checks on the very commit main is to become, before main moves, run by main's own workflow (CHECKS_WORKFLOW), never
   # the branch's: the commit goes to a ref outside the branches (which starts no workflow), main's workflow is started on it, and
   # main is pushed only once every job of that run passed with every named check among them. Red, a named one missing, or still
@@ -285,12 +320,12 @@ for try in 1 2 3 4 5; do
     ghq auth status >/dev/null 2>&1 || die "gh is not signed in to GitHub (gh auth login), so its checks cannot be read; nothing pushed" 3
     repo=$(printf %s "$url" | sed -E 's#/+$##; s#\.git$##' | awk -F'[/:]' '{ print $(NF-1) "/" $NF }')
     workflow=${CHECKS_WORKFLOW:-check.yml}
-    candidate=$(git rev-parse HEAD)
     cref="refs/release-check/${ver:-x}-$(git rev-parse --short HEAD)"
     out=$(git push -q "$REMOTE" "HEAD:$cref" 2>&1) || { echo "$out" | tail -5 >&2; cref=; die "could not push $candidate for GitHub to check; nothing pushed to $MAIN" 3; }
     # Runs made before this dispatch are never taken (a minute's leeway for GitHub's clock)
     since=$(date -u -r $(( $(date +%s) - 60 )) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$(( $(date +%s) - 60 ))" +%Y-%m-%dT%H:%M:%SZ)
     out=$(ghq api -X POST "repos/$repo/actions/workflows/$workflow/dispatches" -f "ref=refs/heads/$MAIN" -f "inputs[sha]=$candidate" 2>&1) || { echo "$out" | tail -5 >&2; die "GitHub would not start $workflow on $MAIN for $(git rev-parse --short HEAD); nothing pushed to $MAIN" 3; }
+    start_checks
     every=${RELEASE_CHECK_EVERY:-15}; case $every in '' | *[!0-9]* | 0) every=15 ;; esac; [ "$every" -gt 60 ] && every=60
     t=0; verdict=; run=
     say "waiting for GitHub's checks ($workflow as on $MAIN) on $(git rev-parse --short HEAD): ${GITHUB_CHECKS}"
@@ -328,19 +363,23 @@ for try in 1 2 3 4 5; do
           if (($conclusion // "") ne "success") { print "red: the run ended ", ($conclusion || "without a conclusion"); exit }
           print "green" }')
       case $verdict in green | red:*) break ;; esac
+      # This Mac's checks failed while GitHub still checks: refused now, without waiting for GitHub
+      [ -n "$lpid" ] && [ -s "$tmp.check.rc" ] && [ "$(cat "$tmp.check.rc")" != 0 ] && end_checks
       [ -n "$run" ] || verdict="wait: $workflow not started yet"
       echo "progress: $t tries waiting for GitHub's checks: ${verdict#wait: }, eta $(( (check_deadline - $(date +%s) + 59) / 60 )) min at most" >&2
       sleep "$every"
     done
+    [ "$verdict" = green ] || stop_checks
     case $verdict in
-      green) say "GitHub's checks passed on $(git rev-parse --short "$candidate"): ${GITHUB_CHECKS}" ;;
+      green) say "GitHub's checks passed on $(git rev-parse --short "$candidate"): ${GITHUB_CHECKS}"; end_checks ;;
       moved) drop_candidate; cd "$top" || exit 1; say "$MAIN moved while GitHub checked; taking it again (try $try)"; continue ;;
       red:*) drop_candidate; die "GitHub's checks failed on $MAIN with $branch, so nothing was pushed to $MAIN: ${verdict#red: }" 3 ;;
       *) drop_candidate; die "GitHub's checks did not end in time (${verdict#wait: }); nothing pushed to $MAIN" 3 ;;
     esac
+  else
+    start_checks; end_checks
   fi
   # What goes to main and is tagged is the commit the checks passed on, never whatever the checkout holds after the wait
-  [ -n "${candidate:-}" ] || candidate=$(git rev-parse HEAD)
   [ "$(git rev-parse HEAD)" = "$candidate" ] || { drop_candidate; die "the release's checkout moved while GitHub checked it; nothing pushed to $MAIN" 3; }
   if pushed=$(RELEASE_PUSH=1 git push -q "$REMOTE" "$candidate:refs/heads/$MAIN" 2>&1); then
     drop_candidate
