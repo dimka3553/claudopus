@@ -1,0 +1,3 @@
+- Every background task, small task and helper now has the tool to ask Claudopus to wake it for a file, a page or a time: tasks started as Claudopus's own kinds had been told to use it without having it.
+- A task whose own detached command is still at work is no longer pressed again and again to hand back its report: it ends its step and is started again when the command ends.
+- A helper told not to wait is told to hand back what it waits for, rather than to use a tool helpers don't have.
