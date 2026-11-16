@@ -127,7 +127,7 @@ const touchesKeyring = (e: { tool: string }) => {
 // The rules every piece of work a chat starts is handed after its brief, as they stand now: where the chat's words are, the work's
 // own rules, and its panel's
 const workRules = async ($: EngineInterface) => {
-  const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).trim()
+  const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).trim()
   const words = `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md`
   return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }
@@ -243,6 +243,19 @@ const workHooks = (on: On) => {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
+    // A copy of the chat for a small job that has taken its steps hands what is left to a fresh task, and may only do that and end
+    if (dir && !isOff && e.agentId !== undefined && !isForkEnding(e as never)) {
+      const card = (await read($, todos)).find(one => one.id === e.agentId)
+      // A copy does its small job itself: it starts no helper and sets no other task to work, whose steps it would not count
+      if (card?.isFork && !card.parentId && (e.tool === 'Agent' || (e.tool === 'SendMessage' && String((e as { to?: unknown }).to ?? '') !== 'main'))) {
+        await log($, `refused copy ${e.agentId}'s ${e.tool} to other work`)
+        return { deny: FORK_ALONE() }
+      }
+      if (card?.isFork && !card.parentId && (card.steps ?? 0) >= FORK_STEPS) {
+        await log($, `refused a step of copy ${e.agentId} past its ${FORK_STEPS} steps`)
+        return { deny: FORK_PAST() }
+      }
+    }
     // The list of admin commands always allowed, and what seals it, are the person's alone
     if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {
       await log($, `refused ${e.tool} on the admin gate's own files`)
@@ -255,7 +268,17 @@ const workHooks = (on: On) => {
     // An admin command waits for the person's press on its card, unless they chose never to be asked; a release always does, and so
     // does a change to the person's own settings and texts. Never for a call the chat's own thread is refused below: nothing is asked
     // or granted for a call that does not run
-    const isRefusedHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
+    const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
+    // A single command the chat runs itself, unless the settings send everything to a task: one command and nothing joined to it
+    const chatCommand = isChatHere && e.tool === 'Bash' && lean.small !== 'full' ? String((e as { command?: unknown }).command ?? '') : ''
+    if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
+      await log($, "refused a chat's own command that is more than one command")
+      return { deny: NOT_ONE_COMMAND }
+    }
+    // The branch a push would go from, which is never main
+    const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
+    const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
+    const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
       // A call refused after a press (another of its commands denied, a grant not sealed) ends here: its note goes with it
@@ -442,7 +465,8 @@ const workHooks = (on: On) => {
     // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
     if (e.tool === 'Agent') {
       const call = e as unknown as { subagent_type?: unknown; model?: unknown }
-      if (call.subagent_type === 'fork' || !String(call.model ?? '').trim()) {
+      const isCopyAllowed = call.subagent_type === 'fork' && lean.small === 'copy'
+      if (!isCopyAllowed && (call.subagent_type === 'fork' || !String(call.model ?? '').trim())) {
         await log($, `refused an Agent call ${call.subagent_type === 'fork' ? 'that copies the chat' : 'with no model'}`)
         return { deny: NO_COPY() }
       }
@@ -463,6 +487,12 @@ const workHooks = (on: On) => {
       return r
     }
     if (OWN.includes(e.tool) || OWN_SERVERS.some(prefix => e.tool.startsWith(prefix))) return next(e)
+    // The chat's single command always runs in the background, so no command holds the chat; Claudopus stops it at its limit
+    if (isChatCommand) {
+      const r = await next({ ...e, run_in_background: true } as typeof e)
+      if (!r.deny && !r.isError) await chatCommandStarted($, e as never, r.result).catch(err => log($, `the chat's command not followed: ${String(err)}`))
+      return r
+    }
     // The chat reads for itself: a kept report to answer from, or the few files a question needs. A saved paste stays out of it:
     // the agent that needs it reads it
     const readPath = String((e as { file_path?: unknown; path?: unknown }).file_path ?? (e as { path?: unknown }).path ?? '')
@@ -574,13 +604,16 @@ const workHooks = (on: On) => {
     // Every agent starts on a current model: one named an older model or Haiku on its family's newest, a copy of an agent on an
     // older model not at all, and one left to its parent's model, when that is older, on that family's newest. A check of what was
     // built, by a helper or a workflow's agent, runs on a model never weaker than its parent's, and at least on Opus
-    const start = isOff || asked.resume ? undefined : startModel(asked)
+    // One of the mod's own kinds starts as the settings say: everything, or only its tools, and on the model its kind runs on
+    const kinded = isOff ? {} : kindStart(asked)
+    if (kinded.subagentType || kinded.model) await log($, `an agent of kind ${asked.subagentType} starts${kinded.subagentType ? ` as ${kinded.subagentType}` : ''}${kinded.model ? ` on ${modelName(kinded.model) || kinded.model}` : ''}`)
+    const start = isOff || asked.resume ? undefined : startModel({ ...asked, ...kinded })
     if (start?.deny) {
       await log($, `refused a copy of an agent on ${modelName(String(asked.parentModel ?? ''))}`)
       return { deny: start.deny }
     }
     if (start?.model) await log($, `${asked.workflow ? 'a workflow agent' : 'an agent'} asked to run on ${modelName(asked.model ?? '') || `its parent's ${modelName(String(asked.parentModel ?? '')) || 'model'}`} starts on ${modelName(start.model)}`)
-    const e = start?.model ? { ...asked, model: start.model } : asked
+    const e = { ...asked, ...kinded, ...(start?.model ? { model: start.model } : {}) }
     // An agent a workflow's script starts belongs to its run's blue card, not a card of its own
     if (e.workflow) {
       const r = await next(e)
@@ -598,7 +631,7 @@ const workHooks = (on: On) => {
     // and where the runner is that does an admin command with a Mac's kept password
     const rules = isTold ? await workRules($) : ''
     const isBackground = isHelperSpawn(e)
-    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}` } : isBackground ? { ...e, background: true } : e)
+    const r = await next(isTold ? { ...e, prompt: `${e.fork ? `${FORK_HEAD()}\n\n` : ''}${e.prompt}\n\n${rules}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
     if (r.model) seeModel(r.model)
     // A resumed agent keeps the model it first started on, or none: the model it resumes on may be one the app moved it to after a flag. A

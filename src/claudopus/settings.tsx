@@ -28,7 +28,7 @@ async function readConfig($: EngineInterface, memory: string) {
   return parse(await personText($, memory, 'config.json'))
 }
 // Sets one key, or with undefined puts it back to what shipped; every other key, ones this tab does not know included, is kept
-async function setConfig($: EngineInterface, memory: string, key: keyof Config, value: unknown, role?: Role) {
+async function setConfig($: EngineInterface, memory: string, key: keyof Config, value: unknown, role?: Role | LeanKey) {
   // A change is made on what is known, never on a copy changed since
   const path = `${memory}/config.json`
   const text = await personText($, memory, 'config.json')
@@ -41,12 +41,12 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
   })()
   // A file that does not parse is someone's edit under way: it is left as it is
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('config.json is not valid JSON')
-  if (key === 'models' && role) {
-    const models = { ...((config.models as Record<string, unknown>) ?? {}) }
+  if ((key === 'models' || key === 'lean') && role) {
+    const models = { ...((config[key] as Record<string, unknown>) ?? {}) }
     if (value === undefined) delete models[role]
     else models[role] = value
-    if (Object.keys(models).length) config.models = models
-    else delete config.models
+    if (Object.keys(models).length) config[key] = models
+    else delete config[key]
   } else if (value === undefined) delete config[key]
   else config[key] = value
   await personWrote($, memory, 'config.json', `${JSON.stringify(config, null, 2)}\n`)

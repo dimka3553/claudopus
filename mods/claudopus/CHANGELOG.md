@@ -2,6 +2,16 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.152 · 16 November 2026
+- Tasks, checks and helpers now start with only the tools their work takes, so each starts several times smaller; a task that needs a connector, a skill or the browser is still started with everything.
+- The chat runs a single command such as a push itself, always in the background with a 10-minute limit, and gets back only how it ended and its last 3 lines.
+- A small job that builds on what you just discussed goes to a copy of the chat for up to about 10 steps; past that, the copy hands what is left to a fresh task.
+- On your go-ahead to finish (Release it), the task's last step is done without waking the task: Claudopus releases a repo that has a release file itself, after the same allow box, and a small fresh task does any other last step. The task is woken only if the step fails in a way that needs it.
+- The repeated "task finished" notice no longer wakes the chat when the task's report has already come.
+- Helpers that only search and read run on Sonnet 5.5; helpers that build parts keep the task's model.
+- Checks are their own kind of agent, so a check never runs on a weaker model than what built the thing.
+- Seven new settings in Config, under Tasks: Fable 5.2 for, Small jobs, Quick task model, Tasks start with, Second check, Checker model, Helpers that only read.
+
 ## 0.2.151 · 16 November 2026
 - A command's line no longer counts "nothing printed for 10s, 15s…" while it is quiet for a few seconds. It says "nothing printed for 3m 00s", in amber, only once three minutes have passed with nothing new: of the commands that went quiet for a minute on 16 Nov, none was stuck. Claude is still told to look at a command quiet for a minute.
 - A command's percent, size and speed now move up on its line every few seconds as the command prints them. They were read only every 20 seconds, so a download rewriting its percent each second sat still and read as quiet.

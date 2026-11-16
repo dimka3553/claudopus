@@ -148,12 +148,17 @@ declare global {
   export import configView = M6.configView
   export import editing = M6.editing
   export import fillModels = M6.fillModels
+  export import leanOf = M6.leanOf
+  export import modelsIn = M6.modelsIn
   export import modelsOf = M6.modelsOf
   export import modelsShort = M6.modelsShort
   export import parse = M6.parse
+  export import quickModel = M6.quickModel
   export import TEXTS = M6.TEXTS
   export import Config = M6.Config
   export import ConfigShown = M6.ConfigShown
+  export import Lean = M6.Lean
+  export import LeanKey = M6.LeanKey
   export import Models = M6.Models
   export import Role = M6.Role
   export import Fail = M7.Fail

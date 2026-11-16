@@ -107,6 +107,31 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
 })
 
+test("Config's Tasks band shows how work is handed out, each with its shipped choice, and a choice is written as lean in config.json", async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  const settings: [string, string, string, string][] = [
+    ['fable', 'When to use Fable 5.2', 'heavy', 'named'],
+    ['small', 'Small jobs', 'copy', 'full'],
+    ['quick', 'Quick task model', 'opus', 'work'],
+    ['start', 'What a task starts with', 'lean', 'all'],
+    ['second', 'Second check', 'beyond', 'every'],
+    ['checker', 'Checker model', 'same', 'strongest'],
+    ['readers', 'Helpers that only read', 'sonnet', 'own'],
+  ]
+  for (const [key, name, shipped, other] of settings) {
+    expect([name, Boolean(await config.find({ type: 'Text', text: name }))]).toEqual([name, true])
+    expect([key, (await config.find({ type: 'Select', key: `config-lean-${key}-pick` } as never))?.props.value]).toEqual([key, shipped])
+    await config.select({ key: `config-lean-${key}-pick`, value: other })
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ lean: { [key]: other } })
+    expect([key, (await until(async () => ((await config.find({ type: 'Select', key: `config-lean-${key}-pick` } as never))?.props.value === other ? other : undefined)))]).toEqual([key, other])
+    // Picking what shipped takes the key out again
+    await config.select({ key: `config-lean-${key}-pick`, value: shipped })
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
+  }
+})
+
 test('Check now in Config only looks: it shows it is checking, then what it found, and a second press meanwhile starts no second look; nothing is fetched or moved', async ($, on) => {
   const { files, gitRan } = world(on, { release: { version: '0.1.2', commit: 'c'.repeat(40), tree: 'a'.repeat(40) } })
   let page = JSON.stringify({ version: '0.1.0', tree: 'a'.repeat(40) })
