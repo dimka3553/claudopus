@@ -51,6 +51,34 @@ const toolHooks = (on: On) => {
     return { result: items.map(item => `${item.state === 'done' ? '[x]' : item.state === 'dropped' ? '[dropped]' : item.state === 'doing' ? '[doing]' : '[ ]'} ${item.text}`).join('\n') }
   })
 
+  // A file, a page or a time nothing of the work's own makes is looked for by Claudopus, which starts the work again when it is
+  // there: no command of the work's ever only waits (lookWakes)
+  on('tool.call', { tool: 'mcp__claudopus__wake_me' }, async ($, e) => {
+    const input = e as unknown as { what?: unknown; file?: unknown; text?: unknown; url?: unknown; minutes?: unknown }
+    if (e.agentId === undefined) return { result: 'Only a background task is started again this way; the chat is started by the next message.' }
+    // A helper that ends its step has ended: it hands back what it found and what it waits for, and its task asks to be woken
+    if (!(await read($, todos)).some(one => one.id === e.agentId)) await sync($)
+    if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper is not started again this way: hand back your result now, saying what you were waiting for, and the task that started you asks Claudopus to wake it.' }
+    const what = cut(oneLine(String(input.what ?? '')), 80)
+    if (!what) return { result: 'Say in a few words what you wait for.' }
+    const file = typeof input.file === 'string' && input.file.trim() ? input.file.trim() : undefined
+    const url = typeof input.url === 'string' && /^https?:\/\/\S+$/.test(input.url.trim()) ? input.url.trim() : undefined
+    const text = file && typeof input.text === 'string' && input.text.trim() ? input.text.trim().slice(0, 200) : undefined
+    if (typeof input.url === 'string' && input.url.trim() && !url) return { result: 'A page is named by its whole web address, starting http:// or https://.' }
+    if (file && !file.startsWith('/') && !file.startsWith('~/')) return { result: 'Name the file by its full path.' }
+    const minutes = Math.min(WAKE_MOST, Math.max(0.25, Number(input.minutes) > 0 ? Number(input.minutes) : file || url ? WAKE_LONGEST : 0))
+    if (!file && !url && !(Number(input.minutes) > 0)) return { result: 'Name a file, a page, or the minutes after which to start you again.' }
+    const at = await $.clock.now()
+    // (its own card: a helper's is its own, not its work's)
+    const agent = e.agentId
+    if (!(await read($, todos)).some(one => one.id === agent)) await sync($)
+    let isCard = false
+    await changeTodos($, list => list.map(one => (one.id === agent ? ((isCard = true), { ...one, wakeWhen: { what, ...(file ? { file } : {}), ...(text ? { text } : {}), ...(url ? { url } : {}), at, until: at + minutes * 60_000 } }) : one)))
+    if (!isCard) return { result: 'Claudopus has no card for you here, so it cannot start you again: carry on with what you can do now.' }
+    redraw($)
+    return { result: `Claudopus looks ${file ? `for ${text ? `"${text}" in ` : ''}${file}` : url ? `at ${url}` : `at the clock`} and starts you again ${file || url ? `the moment it is there, or after ${Math.round(minutes)} min with word that it never came` : `in ${Math.round(minutes)} min`}. End your step now, or carry on with what needs nothing from it.` }
+  })
+
   // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each
   on('tool.call', { tool: 'mcp__claudopus__waits' }, async ($, e) => {
     const input = e as unknown as { items?: unknown }
