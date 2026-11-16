@@ -243,6 +243,14 @@ const workHooks = (on: On) => {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
+    // A copy of the chat for a small job that has taken its steps hands what is left to a fresh task, and may only do that and end
+    if (dir && !isOff && e.agentId !== undefined && !isForkEnding(e as never)) {
+      const card = (await read($, todos)).find(one => one.id === e.agentId)
+      if (card?.isFork && !card.parentId && (card.steps ?? 0) >= FORK_STEPS) {
+        await log($, `refused a step of copy ${e.agentId} past its ${FORK_STEPS} steps`)
+        return { deny: FORK_PAST() }
+      }
+    }
     // The list of admin commands always allowed, and what seals it, are the person's alone
     if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {
       await log($, `refused ${e.tool} on the admin gate's own files`)
@@ -258,11 +266,11 @@ const workHooks = (on: On) => {
     const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
     // A single command the chat runs itself, unless the settings send everything to a task: one command and nothing joined to it
     const chatCommand = isChatHere && e.tool === 'Bash' && lean.small !== 'full' ? String((e as { command?: unknown }).command ?? '') : ''
-    const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    if (isChatCommand && !isOneCommand(String((e as { command?: unknown }).command ?? ''))) {
+    if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
     }
+    const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
     const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
@@ -306,14 +314,6 @@ const workHooks = (on: On) => {
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       const shown = await hideKept($, call, r)
       return isMovedBack && !shown.deny && !shown.isError ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof shown) : shown
-    }
-    // A copy of the chat for a small job that has taken its steps hands what is left to a fresh task, and may only do that and end
-    if (dir && !isOff && e.agentId !== undefined && !FORK_ENDING.includes(e.tool)) {
-      const card = (await read($, todos)).find(one => one.id === e.agentId)
-      if (card?.isFork && !card.parentId && (card.steps ?? 0) >= FORK_STEPS) {
-        await log($, `refused a step of copy ${e.agentId} past its ${FORK_STEPS} steps`)
-        return { deny: FORK_PAST() }
-      }
     }
     // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
     // no fresh agent for the same task, until their next message
@@ -600,7 +600,7 @@ const workHooks = (on: On) => {
     // One of the mod's own kinds starts as the settings say: everything, or only its tools, and on the model its kind runs on
     const kinded = isOff ? {} : kindStart(asked)
     if (kinded.subagentType || kinded.model) await log($, `an agent of kind ${asked.subagentType} starts${kinded.subagentType ? ` as ${kinded.subagentType}` : ''}${kinded.model ? ` on ${modelName(kinded.model) || kinded.model}` : ''}`)
-    const start = isOff || asked.resume ? undefined : startModel({ ...asked, ...kinded, ...(KIND_OF(asked.subagentType ?? '') === 'reader' ? { description: '' } : {}) })
+    const start = isOff || asked.resume ? undefined : startModel({ ...asked, ...kinded })
     if (start?.deny) {
       await log($, `refused a copy of an agent on ${modelName(String(asked.parentModel ?? ''))}`)
       return { deny: start.deny }

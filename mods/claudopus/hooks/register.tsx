@@ -647,9 +647,11 @@ const recorderHooks = (on: On) => {
 const BRIEF =
   'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command, a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
-  'This chat\'s own thread only reads (Read, Grep, Glob) and runs a single command as its rules allow; it changes no file. Start a fresh agent for this: the Agent tool with subagent_type "claudopus:task", the model named, and the task\'s instructions as the prompt.'
+  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this: the Agent tool with subagent_type "claudopus:task", the model named, and the task\'s instructions as the prompt.'
 const NO_COPY = () =>
-  `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:task", the model named (${modelsShort(models)}), and the task's instructions as the prompt.`
+  lean.small === 'copy'
+    ? `A fresh task needs the model named (${modelsShort(models)}): the Agent tool with subagent_type "claudopus:task" and the task's instructions as the prompt. Only a small job that builds on this talk goes to a copy of this chat, subagent_type "fork".`
+    : `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:task", the model named (${modelsShort(models)}), and the task's instructions as the prompt.`
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
 // or that would point the runner at another store or another box
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
@@ -5697,7 +5699,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   if (!working && !isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
     redraw($)
-    void lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
+    await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
     return void askGone($, one, said)
   }
   const to = isReply ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}`
@@ -5768,7 +5770,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
   sentReplies.set(one.id, { ...sent, to: 'work' })
   redraw($)
   // One message for a work: a second answer for the same one joins the first
-  const same = wakes.find(w => w.target === target)
+  const same = wakes.find(w => w.target === target && !w.spawn)
   if (same) return void ((same.text = `${same.text}\n\n${text}`), same.answers.push({ one, sent }))
   const wake = { target, text, answers: [{ one, sent }] }
   wakes.push(wake)
@@ -5777,7 +5779,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
     if (at < 0) return
     wakes.splice(at, 1)
     void log($, `work ${target} started again from a timer: no hook of the mod ran within ${WAKE_WAIT / 1000} s, so its panel tools will not answer`)
-    void sendWake($, wake)
+    void sendWake($, wake, false)
   })
 }
 // Sends what waits, from inside the hook that calls it; a press's or a reply's hook first waits for the answer it started
@@ -5788,9 +5790,12 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
     if (wake) await sendWake($, wake)
   }
 }
-const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
-  // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards
-  if (wake.spawn) {
+const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHook = true) => {
+  // Work the person stopped is not woken by an answer that was on its way
+  if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`))
+  // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards; from the timer, where
+  // the mod's hooks would be skipped for it, its work is started again instead, as before
+  if (wake.spawn && isInHook) {
     const r = await $.agent.spawn(wake.spawn).catch(err => ({ deny: String(err) }) as { deny: string })
     if (!r.deny) return void (await log($, `a small task ${(r as { agentId?: string }).agentId ?? ''} does the last step of ${wake.target}`))
     await log($, `the last step's small task not started (${r.deny}): its work is started again instead`)
@@ -8394,15 +8399,16 @@ const AGENT_HEAD =
   'You are an agent of Claude Code, working in the background on a task you are given. Use the tools you have to do it fully: no more than it asks, and not half done. Read files you know you need yourself; send calls that need nothing from each other together. Paths you give are absolute. When you are done, give your report: what was done, what you found, and what is not done or not checked, short, with the file paths that matter. Use no emojis.'
 // The panel's tools, which work keeps its card with, and the handback its report goes through
 const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall']
-const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'SubagentHandback']
-const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit', 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'WebFetch', 'WebSearch', 'SubagentHandback', ...PANEL_TOOLS]
+const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback']
+// ToolSearch loads the ones among these the engine holds back until asked (Monitor, SendMessage, TaskStop and the like)
+const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit', 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback', ...PANEL_TOOLS]
 // The kinds, by their short name: the engine names each `claudopus:<name>`
 const KINDS = {
   task: { description: 'A background task the chat starts: builds, fixes, researches, releases. Starts with only its working tools.', tools: WORK_TOOLS, prompt: AGENT_HEAD },
   quick: {
     description: 'A small fresh task of a few steps: a push and a look at the build, a merge, a quick look-up. Starts small.',
     tools: WORK_TOOLS,
-    prompt: `${AGENT_HEAD}\nThis is a small job: do it in as few steps as it takes. It needs no second agent to check it unless it changes code.`,
+    prompt: `${AGENT_HEAD}\nThis is a small job: do it in as few steps as it takes.`,
   },
   helper: { description: "A task's helper that builds a part beside others, on the task's own model.", tools: WORK_TOOLS.filter(one => one !== 'mcp__claudopus__update' && one !== 'mcp__claudopus__waits'), prompt: AGENT_HEAD },
   reader: {
@@ -8412,7 +8418,7 @@ const KINDS = {
   },
   check: {
     description: 'A second agent that did not build the work, and looks for what is wrong with it before the person sees it.',
-    tools: [...READ_TOOLS.filter(one => one !== 'SubagentHandback'), 'Agent', 'SendMessage', 'SubagentHandback'],
+    tools: [...READ_TOOLS.filter(one => one !== 'SubagentHandback'), 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'SubagentHandback'],
     prompt: `${AGENT_HEAD}\nYou check work someone else built: look for what is wrong with it, from the change itself (the diff) and the pictures you are given, which you look at. You fix nothing. Report each fault you find with where it is and why it is wrong, most serious first, and say plainly what you did not check.`,
   },
 } as const
@@ -8424,7 +8430,11 @@ const KIND_OF = (type: string): Kind | undefined => {
 // Registered as the session starts, and again as the settings change nothing about them: a failure is logged, and the chat's rules
 // still name `general-purpose` for what needs everything
 const registerKinds = async ($: EngineInterface) => {
-  for (const [name, kind] of Object.entries(KINDS)) await $.agent.register({ name, description: kind.description, prompt: kind.prompt, tools: kind.tools }).catch(err => log($, `agent kind ${name} not registered: ${String(err)}`))
+  for (const [name, kind] of Object.entries(KINDS))
+    await $.agent
+      .register({ name, description: kind.description, prompt: kind.prompt, tools: kind.tools })
+      .then(r => log($, `agent kind ${(r as { agent?: string }).agent ?? name} registered`))
+      .catch(err => log($, `agent kind ${name} not registered: ${String(err)}`))
 }
 // What a start of one of the mod's kinds becomes under the settings: everything for all of them when Tasks start with Everything; a
 // reader on Sonnet, or on its parent's model; a check on a model never weaker than what built it, the strongest when chosen
@@ -8455,20 +8465,40 @@ const CHAT_TAIL = 3
 const isOneCommand = (command: string) => {
   const text = command.trim()
   if (!text || /\n/.test(text)) return false
-  // outside quotes: no joining, piping, sending into a file or running in a subshell
+  // anywhere, quoted or not: no command run inside it (a shell runs $( ) and backticks in double quotes too); outside quotes: no
+  // joining, piping or sending into a file
+  if (/`|\$\(|<\(|>\(/.test(text)) return false
   const bare = text.replace(/'[^']*'|"(?:[^"\\]|\\.)*"/g, '""')
-  return shellWords(text).length === 1 && !/[;&|>`]|\$\(/.test(bare)
+  return shellWords(text).length === 1 && !/[;&|<>]/.test(bare)
 }
 // What the chat's own command may not be: a file read or search, which the chat does with Read, Grep and Glob, one that names a saved
 // paste (the agent that needs it reads it), and a runner of the mod's (an admin command, a key, a release), which a task runs
-const CHAT_READERS = ['cat', 'head', 'tail', 'less', 'more', 'grep', 'egrep', 'fgrep', 'rg', 'sed', 'awk', 'find', 'xxd', 'od', 'strings', 'base64']
+// It changes no file: only git's and gh's looks and a push or fetch, and a few that only say how things stand. Anything else (a
+// script, a deploy, a file moved or removed, a merge, a pull) goes to a task
+const CHAT_GIT = ['push', 'fetch', 'status', 'log', 'diff', 'show', 'branch', 'remote', 'rev-parse', 'ls-remote', 'describe', 'shortlog', 'blame']
+const CHAT_GH = ['view', 'list', 'status', 'checks', 'diff']
+const CHAT_LOOKS = ['ls', 'pwd', 'date', 'uptime', 'whoami', 'hostname', 'df', 'sw_vers', 'uname', 'which']
 const isChatRunnable = (command: string) => {
+  if (!isOneCommand(command) || RUNNER_NAMED.test(command) || /claudopus\/p\W?stes|\bpastes\b/.test(command)) return false
   const words = shellWords(command)[0] ?? []
-  const head = (words[commandAt(words)] ?? '').split('/').pop() ?? ''
-  return Boolean(head) && !CHAT_READERS.includes(head) && !RUNNER_NAMED.test(command) && !/\/\.claude\/claudopus\/pastes\b|claudopus\/pastes\//.test(command)
+  // nothing set or wrapped before it: the command's own words only
+  if (/^\w+=/.test(words[0] ?? '')) return false
+  const head = words[0] ?? ''
+  if (head === 'git') {
+    let i = 1
+    while (i < words.length && words[i]!.startsWith('-')) i += /^-[Cc]$/.test(words[i]!) ? 2 : 1
+    const verb = words[i] ?? ''
+    // a branch made, moved or removed, a remote changed: a task's. git branch only lists; git remote only shows
+    const rest = words.slice(i + 1)
+    if (verb === 'branch' && rest.some(one => !/^(?:-a|-r|-v|-vv|--all|--remotes|--list|--show-current|--merged|--no-merged|--contains)$/.test(one))) return false
+    if (verb === 'remote' && !(rest.length === 0 || (rest.length === 1 && rest[0] === '-v') || (['get-url', 'show'].includes(rest[0] ?? '') && rest.length === 2))) return false
+    return CHAT_GIT.includes(verb) && !words.includes('--no-verify') && !words.some(one => /^--(?:output|exec|upload-pack|receive-pack)\b|^-o$/.test(one))
+  }
+  if (head === 'gh') return ['pr', 'run', 'issue', 'release', 'repo', 'workflow'].includes(words[1] ?? '') && CHAT_GH.includes(words[2] ?? '') && !words.some(one => /^--(?:web|output)\b|^-w$/.test(one))
+  return CHAT_LOOKS.includes(head)
 }
 const NOT_ONE_COMMAND =
-  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>` or a subshell). Start a task for anything with more than one step.'
+  'Not run: the chat runs only a single command with nothing joined to it (no `&&`, `;`, `|`, `>`, `$( )` or backticks), and only one that changes no file: a push, a fetch, or a look with git or gh. Start a task for anything else.'
 // The chat's own commands under way, by their background id: when each started and what it was
 const chatCommands = new Map<string, { at: number; command: string; description: string }>()
 // The background id a command sent to the background answers with, as the engine writes it
@@ -8503,7 +8533,10 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
     const file = /<output-file>([^<]+)<\/output-file>/.exec(body)?.[1] ?? ''
     const status = /<status>([^<]+)<\/status>/.exec(body)?.[1] ?? ''
     const summary = /<summary>([^<]+)<\/summary>/.exec(body)?.[1] ?? ''
-    const lines = file ? (await readOr($, file)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL) : []
+    const raw = file ? (await readOr($, file)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n') : ''
+    // with every kept key hidden, as in any tool's answer; withheld when that could not be checked
+    const hidden = raw ? await hiddenJson($, JSON.stringify(raw)) : JSON.stringify('')
+    const lines = hidden === undefined ? ["(withheld: Claudopus couldn't check them for saved keys)"] : [String(JSON.parse(hidden))]
     const isLate = (await $.clock.now()) - run.at >= CHAT_COMMAND_MS
     told.push(`Your command "${run.description || cut(oneLine(run.command), 80)}" ${isLate ? 'was stopped at its 10-minute limit' : `ended (${summary || status})`}. Its last lines:\n${lines.join('\n') || '(nothing printed)'}\nTell ${who()} from this; do not read its output file.`)
   }
@@ -8518,9 +8551,11 @@ const FORK_STEPS = 10
 const FORK_HEAD = () =>
   named(`You are a copy of the chat, started for one small job: you are now a background task, not the chat. The chat's rule that it runs no commands does not apply to you; the rules for every task below do. Do the job in at most about ${FORK_STEPS} steps. If it needs more, hand what is left to a fresh task with the \`note\` tool and its \`task\` (the chat starts it), and end with your report.`)
 const FORK_PAST = () =>
-  named(`Not run: this copy of the chat has taken its ${FORK_STEPS} steps. Hand what is left to a fresh task now: call the \`note\` tool with \`task\` set to what is left, in one line with the folder and what done looks like (the chat starts it), then end with your report of what you did and what you handed on.`)
+  named(`Not run: this copy of the chat has taken its ${FORK_STEPS} steps. Hand what is left to a fresh task now: call the \`note\` tool with \`task\` set to what is left, in one line with the folder and what done looks like, send the message it gives you to the chat, then end with your report of what you did and what you handed on.`)
 // The tools a copy past its steps may still call: the ones that hand on what is left and end it
-const FORK_ENDING = ['mcp__claudopus__note', 'mcp__claudopus__todo', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'SubagentHandback']
+const FORK_ENDING = ['mcp__claudopus__note', 'mcp__claudopus__todo', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'SubagentHandback', 'ToolSearch']
+// and SendMessage to the chat alone, which the note's hand-on goes through
+const isForkEnding = (e: { tool: string; to?: unknown }) => FORK_ENDING.includes(e.tool) || (e.tool === 'SendMessage' && String(e.to ?? '') === 'main')
 
 // ---- The repeated notice ----
 
@@ -8539,7 +8574,7 @@ const isRepeatOnly = (text: string) => {
 // `.release` released by Claudopus itself, with no model, after the same allow box on the card a release always waits for; any other
 // step by a small fresh task given the folder, the branch and the step. The work is started again only when the step fails in a way
 // that needs what it knows
-const RELEASE_STEP = /^\s*(?:release|run (?:the )?release(?: runner)?)\b|\bbin\/release\b/i
+const RELEASE_STEP = /^\s*(?:release|run (?:the )?release(?: runner)?)\s*\.?\s*$|\bbin\/release\b/i
 // How often a release Claudopus runs is looked at, and the longest it is waited for
 const STEP_LOOK = 10_000
 const STEP_LONGEST = 90 * 60_000
@@ -8557,7 +8592,8 @@ const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['as
   const wakeText = `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\n${RESUMED_BY_ANSWER}`
   const isFixed = Boolean(repo && branch && branch !== 'HEAD' && RELEASE_STEP.test(step) && (await $.fs.stat(`${repo}/.release`).catch(() => undefined))?.kind === 'file')
   await log($, `last step of ${one.id} on ${who()}'s go-ahead: ${isFixed ? 'the release, run by Claudopus' : 'a small fresh task'}`)
-  if (isFixed) return releaseItself($, one, ask, said, repo, branch, wakeText)
+  // held for the person's allow, so never awaited in the press's own hook
+  if (isFixed) return void releaseItself($, one, ask, said, repo, branch, wakeText).catch(err => log($, `release of ${one.id} not done: ${String(err)}`))
   const prompt = named(
     `Do the last step of the task "${titleOf(one)}", which {name} just gave the go-ahead for by pressing "${said}" (to: ${ask.text}): ${step}\nWork in ${folder}${branch && branch !== 'HEAD' ? `, on its branch ${branch}` : ''}. It is this one step: do only that, then report in one or two lines what happened. If it fails in a way that needs what the task that built it knows (a merge conflict, a failing check, a question only it can answer), send that task, "${one.id}", a message with SendMessage saying what failed and the last lines of the output, and end; do not fix it yourself.`,
   )
@@ -8568,7 +8604,7 @@ const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['as
     const at = wakes.indexOf(wake)
     if (at < 0) return
     wakes.splice(at, 1)
-    void sendWake($, wake)
+    void sendWake($, wake, false)
   })
 }
 // The release with no model: the card's allow box first, as for any release, then the runner on its own, followed by the mod
@@ -8581,10 +8617,11 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   await stepLine($, one.id, `On your "${said}", Claudopus releases ${branch} itself once you allow it below`)
   const allowed = await holdGate($, {}, gate, one.id)
   if (allowed !== 'once') return stepLine($, one.id, `Nothing was released: the release was ${allowed === 'deny' ? 'denied' : 'not allowed'}`)
+  const logFile = `${dir}/releases/${id}.log`
+  const isLogged = await $.fs.write(logFile, '').then(() => true).catch(() => false)
+  if (!isLogged) return stepLine($, one.id, 'Nothing was released: Claudopus could not start the release')
   const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
   if (!grant) return stepLine($, one.id, 'Nothing was released: the allow could not be secured')
-  const logFile = `${dir}/releases/${id}.log`
-  await $.fs.write(logFile, '')
   // Detached, so it outlives the ten minutes a call of the mod may take; its exit is written as its last line
   const run = await $.process
     .run(['/bin/sh', '-c', 'nohup /bin/sh -c \'"$1" > "$2" 2>&1; echo "claudopus-exit $?" >> "$2"\' sh "$1" "$2" > /dev/null 2>&1 &', 'sh', `${$.plugin.root}/bin/release`, logFile], { cwd: repo, env: { CLAUDECODE: '1' }, timeoutMs: 15_000 })
@@ -8607,8 +8644,8 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
         await sayInChat($, named(`Claudopus released "${titleOf(one)}" on {name}'s go-ahead. Its last lines:\n${tail}`), `Released "${titleOf(one)}".`)
         return
       }
-      await stepLine($, one.id, `The release ${isLate ? 'ran past its time' : `stopped (exit ${exit})`}: Claude is started again to sort it out`)
-      await toEnded($, one, one.id, `${wakeText}\nClaudopus ran the release itself after the go-ahead, and it ${isLate ? 'ran past 90 minutes' : `failed with exit ${exit}`}. Its log is ${logFile}; its last lines:\n${tail}\nSort out what it needs (exit 2: merge main and keep what both sides meant; exit 3: a build or check failed), then run the release as your rules say.`, { text: said, ask: ask.text, at, line: '', isCard: true, askAt: ask.at })
+      await stepLine($, one.id, `The release ${isLate ? 'has run 90 minutes' : `stopped (exit ${exit})`}: Claude is started again to look at it`)
+      await toEnded($, one, one.id, isLate ? `${wakeText}\nClaudopus started the release itself after the go-ahead, and it has run 90 minutes without ending. It may still be running: look at its log, ${logFile}, and at what is running, before anything else; do not start a second release while it runs. Its last lines:\n${tail}` : `${wakeText}\nClaudopus ran the release itself after the go-ahead, and it failed with exit ${exit}. Its log is ${logFile}; its last lines:\n${tail}\nSort out what it needs (exit 2: merge main and keep what both sides meant; exit 3: a build or check failed), then run the release as your rules say.`, { text: said, ask: ask.text, at, line: '', isCard: true, askAt: ask.at })
     })().catch(err => log($, `release of ${one.id} not followed: ${String(err)}`))
   })
 }
@@ -8686,6 +8723,8 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
+    // The mod's own kinds of agent, each starting with only the tools its work takes
+    void registerKinds($)
     termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
     ;[termFrom = '', , termHere = '', termPort = ''] = ((await $.env.get('SSH_CONNECTION')) ?? '').trim().split(/\s+/)
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {
@@ -10880,6 +10919,14 @@ const workHooks = (on: On) => {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
+    // A copy of the chat for a small job that has taken its steps hands what is left to a fresh task, and may only do that and end
+    if (dir && !isOff && e.agentId !== undefined && !isForkEnding(e as never)) {
+      const card = (await read($, todos)).find(one => one.id === e.agentId)
+      if (card?.isFork && !card.parentId && (card.steps ?? 0) >= FORK_STEPS) {
+        await log($, `refused a step of copy ${e.agentId} past its ${FORK_STEPS} steps`)
+        return { deny: FORK_PAST() }
+      }
+    }
     // The list of admin commands always allowed, and what seals it, are the person's alone
     if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {
       await log($, `refused ${e.tool} on the admin gate's own files`)
@@ -10895,11 +10942,11 @@ const workHooks = (on: On) => {
     const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
     // A single command the chat runs itself, unless the settings send everything to a task: one command and nothing joined to it
     const chatCommand = isChatHere && e.tool === 'Bash' && lean.small !== 'full' ? String((e as { command?: unknown }).command ?? '') : ''
-    const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
-    if (isChatCommand && !isOneCommand(String((e as { command?: unknown }).command ?? ''))) {
+    if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
     }
+    const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
     const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)
@@ -10943,14 +10990,6 @@ const workHooks = (on: On) => {
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
       const shown = await hideKept($, call, r)
       return isMovedBack && !shown.deny && !shown.isError ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof shown) : shown
-    }
-    // A copy of the chat for a small job that has taken its steps hands what is left to a fresh task, and may only do that and end
-    if (dir && !isOff && e.agentId !== undefined && !FORK_ENDING.includes(e.tool)) {
-      const card = (await read($, todos)).find(one => one.id === e.agentId)
-      if (card?.isFork && !card.parentId && (card.steps ?? 0) >= FORK_STEPS) {
-        await log($, `refused a step of copy ${e.agentId} past its ${FORK_STEPS} steps`)
-        return { deny: FORK_PAST() }
-      }
     }
     // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
     // no fresh agent for the same task, until their next message
@@ -11237,7 +11276,7 @@ const workHooks = (on: On) => {
     // One of the mod's own kinds starts as the settings say: everything, or only its tools, and on the model its kind runs on
     const kinded = isOff ? {} : kindStart(asked)
     if (kinded.subagentType || kinded.model) await log($, `an agent of kind ${asked.subagentType} starts${kinded.subagentType ? ` as ${kinded.subagentType}` : ''}${kinded.model ? ` on ${modelName(kinded.model) || kinded.model}` : ''}`)
-    const start = isOff || asked.resume ? undefined : startModel({ ...asked, ...kinded, ...(KIND_OF(asked.subagentType ?? '') === 'reader' ? { description: '' } : {}) })
+    const start = isOff || asked.resume ? undefined : startModel({ ...asked, ...kinded })
     if (start?.deny) {
       await log($, `refused a copy of an agent on ${modelName(String(asked.parentModel ?? ''))}`)
       return { deny: start.deny }
@@ -11499,7 +11538,9 @@ const toolHooks = (on: On) => {
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     const words = [...(card?.entries ?? [])].reverse().find(entry => entry.kind === 'steer')?.text ?? ''
     said = words || task
-    const handed = `A message from ${who()} to the task "${card?.title || 'in the background'}" is a new task of its own, not part of that task, and that task hasn't done it. Start it as its own background task: ${task}${words ? `\n${who(true)}'s words: “${words}”` : ''}`
+    const handed = card?.isFork
+      ? `The copy of this chat that did "${card.title || 'a small job'}" took its steps and hands on what is left. Start it as its own background task: ${task}`
+      : `A message from ${who()} to the task "${card?.title || 'in the background'}" is a new task of its own, not part of that task, and that task hasn't done it. Start it as its own background task: ${task}${words ? `\n${who(true)}'s words: “${words}”` : ''}`
 
     return { result: `Noted. Hand the task to the chat now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${handed}\nThen continue your own task; don't do that new one here.` }
   })

@@ -71,6 +71,8 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
+    // The mod's own kinds of agent, each starting with only the tools its work takes
+    void registerKinds($)
     termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
     ;[termFrom = '', , termHere = '', termPort = ''] = ((await $.env.get('SSH_CONNECTION')) ?? '').trim().split(/\s+/)
     for (const [art, file] of Object.entries(ART_FILES) as [keyof typeof ART, string][]) {

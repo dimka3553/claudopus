@@ -418,7 +418,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   if (!working && !isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
     redraw($)
-    void lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
+    await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
     return void askGone($, one, said)
   }
   const to = isReply ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}`
@@ -489,7 +489,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
   sentReplies.set(one.id, { ...sent, to: 'work' })
   redraw($)
   // One message for a work: a second answer for the same one joins the first
-  const same = wakes.find(w => w.target === target)
+  const same = wakes.find(w => w.target === target && !w.spawn)
   if (same) return void ((same.text = `${same.text}\n\n${text}`), same.answers.push({ one, sent }))
   const wake = { target, text, answers: [{ one, sent }] }
   wakes.push(wake)
@@ -498,7 +498,7 @@ const toEnded = async ($: EngineInterface, one: Todo, target: string, text: stri
     if (at < 0) return
     wakes.splice(at, 1)
     void log($, `work ${target} started again from a timer: no hook of the mod ran within ${WAKE_WAIT / 1000} s, so its panel tools will not answer`)
-    void sendWake($, wake)
+    void sendWake($, wake, false)
   })
 }
 // Sends what waits, from inside the hook that calls it; a press's or a reply's hook first waits for the answer it started
@@ -509,9 +509,12 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
     if (wake) await sendWake($, wake)
   }
 }
-const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
-  // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards
-  if (wake.spawn) {
+const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number], isInHook = true) => {
+  // Work the person stopped is not woken by an answer that was on its way
+  if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`))
+  // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards; from the timer, where
+  // the mod's hooks would be skipped for it, its work is started again instead, as before
+  if (wake.spawn && isInHook) {
     const r = await $.agent.spawn(wake.spawn).catch(err => ({ deny: String(err) }) as { deny: string })
     if (!r.deny) return void (await log($, `a small task ${(r as { agentId?: string }).agentId ?? ''} does the last step of ${wake.target}`))
     await log($, `the last step's small task not started (${r.deny}): its work is started again instead`)
