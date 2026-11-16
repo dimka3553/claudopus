@@ -310,9 +310,9 @@ const startModel = (e: { model?: string; subagentType?: string; parentModel?: st
   const parent = rightModel(parentModel) ?? parentModel
   // An alias or `inherit` the engine resolves to the newest, or the parent's; an older id or Haiku goes to its family's newest
   let model = asked && asked !== 'inherit' ? (rightModel(asked) ?? '') : rightModel(parentModel) && (!asked || asked === 'inherit') ? parent : ''
-  // A check of what was built never runs weaker than what started it, nor below Opus. A quick task is a clearly stated job, however its
-  // title reads ("Push and check the build"), and keeps its kind's model
-  if (e.subagentType !== 'claudopus:quick' && isChecker(e.description ?? '')) {
+  // A check of what was built never runs weaker than what started it, nor below Opus. A quick task the chat starts is a clearly stated
+  // job, however its title reads ("Push and check the build"), and keeps its kind's model; one a task starts is held to the check rule
+  if (!(e.subagentType === 'claudopus:quick' && !e.parentAgentId) && isChecker(e.description ?? '')) {
     const runs = model || (asked && asked !== 'inherit' ? asked : parent)
     const least = rankOf(parent) >= RANK.Opus! ? parent : (newestModel('Opus') ?? 'opus')
     if (rankOf(runs) < rankOf(least)) model = least
@@ -325,7 +325,7 @@ const startedOn = new Map<string, string>()
 const sentElsewhere = new Set<string>()
 // What a fork is answered when the model it would copy is such a model
 const WRONG_MODEL = (named: string) =>
-  `Claudopus doesn't run tasks on ${modelName(named) || named}. Start a fresh agent and name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
+  `Claudopus doesn't run tasks on ${modelName(named) || named}. Start a fresh agent and name the model by its alias: ${modelsShort(models, lean)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
 // The line written into a piece of work's own chat when the person moves it to another model; the panel draws it as a line of its own
 const MODEL_HEAD = 'Model changed to '
 const MODEL_LINE = /^Model changed to (.+?) at (\d{1,2}:\d{2})\./

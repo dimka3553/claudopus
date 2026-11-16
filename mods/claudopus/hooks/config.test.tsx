@@ -35,6 +35,8 @@ test('the chat hands a clearly stated job to a quick task on Sonnet, on Fable on
   expect(all).toContain('`subagent_type: "claudopus:quick"` and `model: "fable"`')
   expect(all).not.toContain('A clearly stated job, and long legwork such as indexing, runs on Sonnet')
   expect(modelsShort(m)).toContain('"sonnet" for a clearly stated job (subagent_type "claudopus:quick")')
+  expect(modelsShort(m, leanOf({ lean: { fable: 'all' } }))).toContain('"fable" for a clearly stated job')
+  expect(shipped).toContain('when {name} names a model for the job, start it as a full task on that model')
 })
 
 test('the principles read by their parts, numbered or bulleted', async () => {

@@ -337,9 +337,9 @@ const startModel = (e: { model?: string; subagentType?: string; parentModel?: st
   const parent = rightModel(parentModel) ?? parentModel
   // An alias or `inherit` the engine resolves to the newest, or the parent's; an older id or Haiku goes to its family's newest
   let model = asked && asked !== 'inherit' ? (rightModel(asked) ?? '') : rightModel(parentModel) && (!asked || asked === 'inherit') ? parent : ''
-  // A check of what was built never runs weaker than what started it, nor below Opus. A quick task is a clearly stated job, however its
-  // title reads ("Push and check the build"), and keeps its kind's model
-  if (e.subagentType !== 'claudopus:quick' && isChecker(e.description ?? '')) {
+  // A check of what was built never runs weaker than what started it, nor below Opus. A quick task the chat starts is a clearly stated
+  // job, however its title reads ("Push and check the build"), and keeps its kind's model; one a task starts is held to the check rule
+  if (!(e.subagentType === 'claudopus:quick' && !e.parentAgentId) && isChecker(e.description ?? '')) {
     const runs = model || (asked && asked !== 'inherit' ? asked : parent)
     const least = rankOf(parent) >= RANK.Opus! ? parent : (newestModel('Opus') ?? 'opus')
     if (rankOf(runs) < rankOf(least)) model = least
@@ -352,7 +352,7 @@ const startedOn = new Map<string, string>()
 const sentElsewhere = new Set<string>()
 // What a fork is answered when the model it would copy is such a model
 const WRONG_MODEL = (named: string) =>
-  `Claudopus doesn't run tasks on ${modelName(named) || named}. Start a fresh agent and name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
+  `Claudopus doesn't run tasks on ${modelName(named) || named}. Start a fresh agent and name the model by its alias: ${modelsShort(models, lean)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
 // The line written into a piece of work's own chat when the person moves it to another model; the panel draws it as a line of its own
 const MODEL_HEAD = 'Model changed to '
 const MODEL_LINE = /^Model changed to (.+?) at (\d{1,2}:\d{2})\./
@@ -664,7 +664,7 @@ const BRIEF =
 const REFUSED =
   'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
-  `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models)}), and the task's instructions as the prompt.`
+  `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models, lean)}), and the task's instructions as the prompt.`
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
 // or that would point the runner at another store or another box
 const KEYCHAIN_READ = /\bsecurity\s+(?:-\S+\s+)*(?:-i\b|find-(?:generic|internet)-password\b[^;&|]*\s-[a-zA-Z]*[wg][a-zA-Z]*\b|dump-keychain\b[^;&|]*\s-[a-zA-Z]*d[a-zA-Z]*\b|export\b)|\bCLAUDOPUS_(?:SECRET_(?:SERVICE|ASK)|ADMIN_SERVICE)\b|\bkeyring['"]?\s+get\b|claudopus\/keyring\b/
@@ -12427,7 +12427,7 @@ const panelHooks = (on: On) => {
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
     const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD))
-    // A piece of work's context window is this chat's when it runs on this chat's model, as a copy (of a task's) always does.
+    // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of a chat does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)

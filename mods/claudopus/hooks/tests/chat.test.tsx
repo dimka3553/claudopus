@@ -805,7 +805,7 @@ test("the mod's own kinds start the cheapest measured way: a reader and a quick 
     ['claudopus:quick', { model: 'inherit', parentModel: 'claude-fable-5-2' }, ['sonnet', 'claudopus:quick']],
     ['claudopus:quick', { model: 'opus' }, ['sonnet', 'claudopus:quick']],
     // a title that reads like a check (16 Nov second look: "Push and check the build" went to the parent's Fable)
-    ['claudopus:quick', { model: 'fable', description: 'Push and check the build', parentModel: 'claude-fable-5-2' }, ['sonnet', 'claudopus:quick']],
+    ['claudopus:quick', { model: 'fable', description: 'Push and check the build', parentModel: 'claude-fable-5-2', parentAgentId: undefined }, ['sonnet', 'claudopus:quick']],
     ['claudopus:quick', { model: 'sonnet' }, ['sonnet', 'claudopus:quick']],
     ['claudopus:task', { model: 'opus' }, ['opus', 'claudopus:task']],
   ]
@@ -823,6 +823,11 @@ test("the mod's own kinds start the cheapest measured way: a reader and a quick 
     ['Explore', {}, [undefined, 'Explore']],
   ]
   for (const [type, e, want] of old) expect([type, e, await go(type, e)]).toEqual([type, e, want])
+  // A quick task a task starts as a check is held to the check rule; with Fable for every task a clear job runs on Fable
+  expect(await go('claudopus:quick', { description: 'Review the fix', parentModel: 'claude-fable-5-2' })).toEqual(['claude-fable-5-2', 'claudopus:quick'])
+  ownSet(files, 'config.json', JSON.stringify({ lean: { fable: 'all' } }))
+  await $.session.start(start)
+  expect(await go('claudopus:quick', { model: 'sonnet', parentAgentId: undefined })).toEqual(['fable', 'claudopus:quick'])
 })
 
 test('what counts as current follows the newest model the engine offers, never a version written into the mod', async ($, on) => {
@@ -1090,6 +1095,8 @@ test("a chat's own thread may only read, run a single command in the background,
   // Only a look or a push: one that changes or reads files, a script, a pull, a branch or remote changed, a paste or a shell is a task's
   for (const [i, command] of ['rm -rf build', 'git pull', 'git checkout .', 'git branch -D old', 'git remote add x y', './deploy.sh', 'cp -r ~/.claude/claudopus/p?stes /tmp/p', 'npm install', 'GIT_DIR=x git status', "bash -c 'git add -A'"].entries())
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1f${i}`, command } as never)).deny).toContain('Start a fresh agent')
+  // and it names the quick task for a clearly stated job
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1f-q', command: 'git pull' } as never)).deny).toContain('"claudopus:quick" for a clearly stated job')
   for (const [i, command] of ['git status', 'git log --oneline -5', 'gh pr checks 12', 'git branch -a', 'git remote -v'].entries())
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command } as never)).deny).toBeUndefined()
   // A push only of the branch it is on, never from main and never to it by another spelling, nor anything git is set to run
