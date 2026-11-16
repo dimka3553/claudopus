@@ -160,6 +160,73 @@ const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
   const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : fn())))
   return timer
 }
+// ---- Never holding Claude's helper ----
+// Claude's engine runs every add-on's hooks on one shared helper and asks it each second whether it is there. With no answer for five
+// seconds it starts the helper again and switches off the add-on whose code was running, until /reload-plugins: Claudopus went off
+// three times in one afternoon (16 Nov). The helper answers between two of the mod's steps, so the mod keeps each step short and,
+// when it falls behind, does less until it has caught up
+// How often the mod looks at how late its own timer comes, and how late counts as behind: then fresh drawings and the looks that can
+// wait are left out for BEHIND_FOR
+const HOLD_LOOK = 250
+const LATE = 400
+const BEHIND_FOR = 10_000
+// and a drawing is given as it was for this long at most, however long the mod stays behind
+const BEHIND_HELD = 30_000
+// A hold this long is written in the log with the steps begun meanwhile, so a switch-off can be traced to the step that caused it
+const HOLD_SAID = 1500
+let holdAt = 0
+// Looks left while behind: each late one starts the count again
+let behindLooks = 0
+let longestHold = 0
+const isBehind = () => behindLooks > 0
+// The heavier steps the mod began lately, by name, so a long hold names them: those begun from a second before the last look on time
+const begun: { at: number; name: string }[] = []
+const during = (name: string) => void (begun.push({ at: Date.now(), name }), begun.length > 40 && begun.splice(0, begun.length - 40))
+// The test kit's clock moves only when a test moves it, so there the gaps in real time are the test's own: its world says so
+let isTimed = true
+// Each look: the helper was held for as long as the timer came late
+const lookHold = ($: EngineInterface) => {
+  const now = Date.now()
+  const late = holdAt && isTimed ? now - holdAt - HOLD_LOOK : 0
+  holdAt = now
+  if (late < LATE) {
+    // Caught up: drawn again, with what was left out meanwhile
+    if (behindLooks > 0 && (behindLooks -= 1) === 0) $.ui.invalidate('ui.render')
+    return
+  }
+  behindLooks = BEHIND_FOR / HOLD_LOOK
+  longestHold = Math.max(longestHold, late)
+  if (late < HOLD_SAID) return
+  const steps = [...new Set(begun.filter(one => one.at >= now - late - HOLD_LOOK - 1000).map(one => one.name))]
+  void log($, `Claude's helper was held ${late} ms${steps.length ? `; steps begun then: ${steps.join(', ')}` : ''}`)
+}
+// A step that goes through much at once hands the helper back every BREATH ms, so the engine's question is answered meanwhile
+const BREATH = 40
+let breathAt = 0
+const breathe = async ($: EngineInterface) => {
+  if (Date.now() - breathAt < BREATH) return
+  // Any call to the engine will do: it is answered from outside the helper, which answers the engine's question meanwhile (one the
+  // mod makes nowhere else, so the test world can answer it as late as the engine does)
+  await $.session.turns()
+  breathAt = Date.now()
+}
+// The engine gives no file over 4 MB whole (fs.read refuses it), and a whole one is worked through at once: what grows without end
+// (a log, a command's output) is read from its end
+const TAIL_BYTES = 200_000
+const fileEnd = async ($: EngineInterface, path: string, bytes = TAIL_BYTES) => {
+  const r = await $.process.run(['tail', '-c', String(bytes), path], { timeoutMs: 10_000 }).catch(() => undefined)
+  return r?.exitCode === 0 ? r.stdout : ''
+}
+// and is added to at its end, never read and written back whole: a file over 4 MB read as nothing would be written back as only the
+// new text
+const appendTo = async ($: EngineInterface, path: string, text: string) => {
+  const r = await $.process.run(['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', path, text]).catch(() => undefined)
+  if (r?.exitCode === 0) return
+  const was = await $.fs.read(path).then(String, (err: unknown) => (/ENOENT|no such file/i.test(String(err)) ? '' : undefined))
+  if (was === undefined) throw new Error(`${path} not added to: it could not be read`)
+  await $.fs.write(path, `${was}${text}`)
+}
+
 // and one that fires once, unless a newer load took charge before it does
 const afterLoad = ($: EngineInterface, ms: number, fn: () => unknown) => $.clock.after(ms, () => void isReplaced($).then(left => (left ? undefined : fn())))
 
@@ -357,9 +424,9 @@ const tidyLog = async ($: EngineInterface) => {
   if (text.includes('\u0000')) await $.fs.write(`${dir}/log.md`, text.replaceAll('\u0000', '')).catch(() => undefined)
 }
 // A chat's saved words, words/<chat id>.md: the person's messages and Claude's answers, added to the end
-const appendWords = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/words/${chatId}.md`, `${await readOr($, `${dir}/words/${chatId}.md`)}${text}`)
+const appendWords = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/words/${chatId}.md`, text)
 // A chat's asks and answers, asks/<chat id>.md, added to the end
-const appendAsks = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/asks/${chatId}.md`, `${await readOr($, `${dir}/asks/${chatId}.md`)}${text}`)
+const appendAsks = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/asks/${chatId}.md`, text)
 
 type Ui = ElementTable
 // A colour with a see-through part, #RRGGBBAA, and how much of it shows (0 to 255)
