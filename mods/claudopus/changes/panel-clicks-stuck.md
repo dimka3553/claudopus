@@ -1,0 +1,4 @@
+- Panel buttons answer clicks again with many tasks at work: the panel is drawn afresh at most about once a second (longer when a drawing is slow), and in between the drawing on screen is given again, so the button under the pointer is still there when the click arrives. A press, an ask, a box or a picture is still drawn at once
+- A click held for still gets its drawing at once, before anything is read, instead of after a slow read that came too late
+- New lines from running commands show at the panel's next calm drawing, every ten seconds or so, instead of drawing the panel afresh each time one prints
+- A click that reached no button no longer leaves that button holding the focus, which made the panel jump back to it at every drawing

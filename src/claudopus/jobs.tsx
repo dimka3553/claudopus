@@ -285,8 +285,12 @@ const lookJobs = async ($: EngineInterface) => {
   if (psText !== undefined) void endWaiters($, await read($, todos), now).catch(err => log($, `waits not stopped: ${String(err)}`))
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
-  if (isChanged) void drawFresh($)
+  // A command that ended leaves its row at once; new output alone waits for the panel's next calm drawing (calmLook, every CALM while
+  // work runs): drawn afresh at each output, seven tasks' commands drew the panel without a pause and no click held (16 Nov)
+  if (ended.length) void drawFresh($)
+  else if (isChanged) outputMoved = true
 }
+let outputMoved = false
 
 // The memory a followed process and all it started hold, as the processes were last listed
 const memSeen = (pid?: string) => {

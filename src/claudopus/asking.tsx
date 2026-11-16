@@ -175,9 +175,46 @@ let isPressMissed = false
 const holdForPress = async ($: EngineInterface) => {
   const at = (pressFrom = await $.clock.now())
   pressFresh = freshness
-  $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), isPressMissed && ((isPressMissed = false), drawAgain($)))))
+  // A hold that ends with no press reaching the mod (a click on a button already gone) gives the buttons new keys: the app keeps a
+  // focused button in view and scrolls back to it at every drawing, which threw the panel down and back as the person clicked on
+  $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), (presses += 1), (isPressMissed = false), drawAgain($))))
 }
 const isPressHeld = (at: number) => pressFrom > 0 && at - pressFrom < PRESS_HOLD && pressFresh === freshness
+// A pane drawn afresh is given again, as it was, until FRESH_GAP has passed (or four times what its drawing took, when longer), and
+// then drawn afresh once. The engine retires a drawing's buttons the moment a newer drawing of that pane is made, and a newer ask for
+// one drops the reply of the drawing still under way: with seven tasks, their helpers and commands, the panel was asked for about
+// five times a second and each drawing took 300 ms, so no drawing reached the app for half a minute while every one retired the
+// buttons on screen, and every click named a button already gone (16 Nov, 0.2.153: Close pressed twenty times, all "not handled").
+// Given again, a drawing is the same tree, keeps its buttons, and is answered at once. A press of the person's is drawn at once
+const FRESH_GAP = 1000
+const SLOW_DRAW = 100
+const freshDrawn = new Map<string, { at: number; ms: number; fresh: number }>()
+const freshDue = new Set<string>()
+// The panes being drawn afresh just now: an ask that comes meanwhile gets the drawing before, and the pane is asked for again the
+// moment the fresh one is made, since the engine drops the reply of a drawing a newer ask overtook
+const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean }>()
+let pressedAt = 0
+const isFreshTooSoon = ($: EngineInterface, key: string, at: number) => {
+  const going = freshUnderWay.get(key)
+  if (going && going.fresh === freshness) return (going.isOvertaken = true)
+  const last = freshDrawn.get(key)
+  // The mod's own calls for a drawing (an ask, a box, a press, a picture: freshness) come at once
+  if (!last || pressedAt >= last.at || last.fresh !== freshness) return false
+  // Only while drawings are slow, as under a load that drops them: a quick one reaches the app before the next is asked for
+  if (last.ms < SLOW_DRAW) return false
+  const gap = Math.max(FRESH_GAP, last.ms * 4)
+  if (at - last.at >= gap) return false
+  if (!freshDue.has(key)) (freshDue.add(key), $.clock.after(gap - (at - last.at) + 20, () => void (freshDue.delete(key), drawAgain($))))
+  return true
+}
+// Around each drawing made afresh: one asked for while it was made is made again the moment it is done
+const freshBegins = (key: string) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false }), freshness)
+const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
+  const isOvertaken = freshUnderWay.get(key)?.isOvertaken
+  freshUnderWay.delete(key)
+  if (made) freshDrawn.set(key, made)
+  if (isOvertaken) drawAgain($)
+}
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 // Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
@@ -196,8 +233,9 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   if (isNew) return void ((list.side = side), drawAgain($), (list.side = sideSign()))
   // Counted from the panel's last drawing afresh or the last of these, so a Details tab or the band drawn without the panel moves on
   // every CALM too, not each second
-  if (!isMoving || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
+  if (!(isMoving || outputMoved) || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
   calmAt = now
+  outputMoved = false
   await writeHeldOthers($)
   recordEvent($, 'redraw-calm')
   $.ui.invalidate('ui.render')
@@ -675,3 +713,5 @@ const sentLine = (one: Todo, now: number) => {
   if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : '; Claude still has this question'}`
   return `✓ You answered “${cut(sent.text, 60)}” · ${how}`
 }
+
+
