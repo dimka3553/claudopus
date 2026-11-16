@@ -19,6 +19,8 @@ let keysAsk = ''
 const listOffsets = new Map<string, number>()
 // How many things wait on the person at the top of the list, as last drawn
 let waitsAtTop = 0
+// The last drawing made of each pane on each surface, what a press under way keeps on screen (isPressHeld)
+const lastShown = new Map<string, unknown>()
 const panelHooks = (on: On) => {
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
@@ -58,6 +60,9 @@ const panelHooks = (on: On) => {
     const shape = await paneShape($, paneId)
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
+    // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
+    const shown = paneId === LIST && isPressHeld(heldAt) ? lastShown.get(`${paneId}|${e.surface}`) : undefined
+    if (shown) return ((listHeldAt = heldAt), shown as Awaited<ReturnType<typeof next>>)
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
@@ -1730,6 +1735,7 @@ const panelHooks = (on: On) => {
     )
     })()
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    lastShown.set(`${paneId}|${e.surface}`, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     return drawing
     } finally {

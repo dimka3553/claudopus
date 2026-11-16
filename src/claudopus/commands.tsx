@@ -22,6 +22,8 @@ const commandHooks = (on: On) => {
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
+      // A button the person put the focus on holds the panel's drawing until it is pressed (PRESS_HOLD)
+      pressFrom = e.plugin === 'claudopus' && e.requestId === LIST && !isTypedBox(e.element) ? await $.clock.now() : 0
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
       if (!isInBarBox) barBoxAt = 0

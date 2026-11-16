@@ -1,0 +1,1 @@
+- A button in the panel, such as What's new or Close in the update note, works on the first click: the panel holds still from the moment you press until the press lands, where before a redraw in between lost the click.

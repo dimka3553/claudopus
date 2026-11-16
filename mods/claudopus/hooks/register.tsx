@@ -5417,6 +5417,13 @@ const sideSign = () =>
 // move again ENGAGED after the person's last move
 const ENGAGED = 15_000
 let engagedAt = 0
+// A click is the focus moving onto a button, then the press: a drawing between them is a new button under the pointer, and the
+// click did nothing (16 Nov, recorded: the update note's What's new took several clicks while other chats' writes drew the panel
+// twice a second). From the person's focus on one of the panel's buttons until its press, or PRESS_HOLD, the panel is drawn as it
+// last was, whatever moved
+const PRESS_HOLD = 2000
+let pressFrom = 0
+const isPressHeld = (at: number) => pressFrom > 0 && at - pressFrom < PRESS_HOLD
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 // Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
@@ -10573,6 +10580,8 @@ const commandHooks = (on: On) => {
     if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
       // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
       if (e.plugin === 'claudopus') await engage($)
+      // A button the person put the focus on holds the panel's drawing until it is pressed (PRESS_HOLD)
+      pressFrom = e.plugin === 'claudopus' && e.requestId === LIST && !isTypedBox(e.element) ? await $.clock.now() : 0
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
       if (!isInBarBox) barBoxAt = 0
@@ -11285,6 +11294,8 @@ let keysAsk = ''
 const listOffsets = new Map<string, number>()
 // How many things wait on the person at the top of the list, as last drawn
 let waitsAtTop = 0
+// The last drawing made of each pane on each surface, what a press under way keeps on screen (isPressHeld)
+const lastShown = new Map<string, unknown>()
 const panelHooks = (on: On) => {
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
@@ -11324,6 +11335,9 @@ const panelHooks = (on: On) => {
     const shape = await paneShape($, paneId)
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
+    // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
+    const shown = paneId === LIST && isPressHeld(heldAt) ? lastShown.get(`${paneId}|${e.surface}`) : undefined
+    if (shown) return ((listHeldAt = heldAt), shown as Awaited<ReturnType<typeof next>>)
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
@@ -12996,6 +13010,7 @@ const panelHooks = (on: On) => {
     )
     })()
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
+    lastShown.set(`${paneId}|${e.surface}`, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     return drawing
     } finally {
@@ -13015,7 +13030,7 @@ const tabHooks = (on: On) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
-    if (e.plugin === 'claudopus') (freeTimes($), (freshness += 1), await engage($))
+    if (e.plugin === 'claudopus') ((pressFrom = 0), freeTimes($), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>
