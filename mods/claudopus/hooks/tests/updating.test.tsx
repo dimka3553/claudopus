@@ -719,6 +719,8 @@ test('F-019 · the look only reads the version page: the panel says a newer vers
   await shownIn(panel, 'The bar shows the battery · and 3 more changes')
   expect((await keyed(panel, 'update-download'))?.props.label).toBe('Update')
   expect(await keyed(panel, 'update-install')).toBeUndefined()
+  // (with no panel drawing each second of the half hour below)
+  await panel.unmount()
   // Another look once the last is over an hour old, and through all of them nothing was fetched or moved, nothing installed or reloaded
   const aged = async () => files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: (await clock.now()) - 2 * 3_600_000, version: '0.1.2', result: 'seen' }))
   await aged()

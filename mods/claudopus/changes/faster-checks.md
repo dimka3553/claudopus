@@ -1,3 +1,1 @@
-- A release runs its checks on this Mac while GitHub runs its own, instead of one after the other, so each release and the queue behind it are about four minutes shorter; main still moves only once both passed and you allowed it.
-- The release's shell tests run beside the mod's tests, on this Mac and on GitHub, and the admin test no longer waits 15 seconds for a panel that is never there.
-- Work can run only the tests of the areas it changed, in seconds, and the check that a new test guards something runs only the files that hold it.
+- A release now runs its checks on this Mac while GitHub runs its own, instead of one after the other, so each release, and each release queued behind it, takes a few minutes less. Main still moves only once both passed and you allowed it.

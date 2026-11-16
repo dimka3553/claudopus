@@ -18,7 +18,7 @@
 //       is now: what to run while working, as the release runs every test.
 //
 // break takes one build and one run of every test: about a minute on a quiet Mac, a few on a busy one; area and new run only
-// their files, the longest area well under a minute. ENGINE names the engine (the `claude` on the PATH when unset).
+// their files, as long as the slowest of them. ENGINE names the engine (the `claude` on the PATH when unset).
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -37,7 +37,6 @@ const copy = () => {
   execFileSync('git', ['init', '-q'], { cwd: to })
   return to
 }
-// The tests of a run by name, passed or failed
 // The test file's area: hooks/tests/cards.test.tsx and src/claudopus/tests/cards.test.tsx are both cards
 const areaOf = path => path.split('/').pop().replace(/\.test\.tsx$/, '')
 // The engine's plugin test, saying how many tests have ended at least every 10 seconds, as it runs; what it printed comes back
@@ -52,7 +51,8 @@ const engineTests = (dir, areas) =>
     child.on('error', error => (clearInterval(every), reject(error)))
     child.on('close', () => (clearInterval(every), told(), resolve(text)))
   })
-// Builds the copy and runs its tests: with `areas`, only the joined test files of those areas
+// Builds the copy and runs its tests, giving back the tests by name, passed or failed: with `areas`, only the joined test files of
+// those areas
 const run = async (dir, areas) => {
   const built = spawnSync('node', ['src/claudopus/build.mjs'], { cwd: dir, encoding: 'utf8' })
   if (built.status !== 0) throw new Error(`the build failed:\n${built.stdout}${built.stderr}`.trimEnd())
@@ -151,7 +151,7 @@ if (verb === 'break') {
   }
 } else if (verb === 'area') {
   if (!args.length) throw new Error('area takes one or more areas, such as cards')
-  const areas = args.map(area => area.replace(/\.test\.tsx$/, ''))
+  const areas = args.map(areaOf)
   const dir = copy()
   try {
     const { passed, failed } = await run(dir, areas)
