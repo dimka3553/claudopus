@@ -245,6 +245,8 @@ declare global {
   export import PS_COLUMNS = M10.PS_COLUMNS
   export import plainOf = M10.plainOf
   export import reportsOf = M10.reportsOf
+  export import SILENT_AFTER = M10.SILENT_AFTER
+  export import SILENT_WARN = M10.SILENT_WARN
   export import OpenCall = M10.OpenCall
   export import Proc = M10.Proc
   export import Span = M10.Span

@@ -267,7 +267,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       if (!rest.includes('--targets')) dropped.push([...e.argv])
       return { value: { exitCode: 0, stdout: rest.includes('--targets') ? options.tailscale : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
-    if (tool === 'kill') killed.push(String(rest[0]))
+    if (tool === 'kill') killed.push(...rest.map(String))
     // A release on GitHub, where the test gives one: the mod's folder is Claudopus's main checkout on main, a fetch of the release's
     // tag lays its commit under the download ref (and git's progress where the step reads it), and the folder's tree in that commit
     // is the one the release published unless the test says what came down instead

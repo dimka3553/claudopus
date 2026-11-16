@@ -626,17 +626,16 @@ const panelHooks = (on: On) => {
       const [state, short, isWarn]: [string, string, boolean] =
         job.isPaused ? ['paused', 'paused', true]
         : job.target ? [job.target, job.target.replace(/^what it waits (?:for|on) (?:is|has) /, '').replace(/^not changed for /, 'still for '), true]
-        // (a run left going whose output goes to no file is one that gives no word, as any other)
-        : quiet === undefined ? [`no word from it in ${ago(ran)}`, `silent ${ago(ran)}`, ran >= JOB_QUIET]
-        // (a server speaks only when asked, so its quiet is no warning)
-        : quiet >= JOB_QUIET && job.kind !== 'server' ? [`no word from it for ${ago(quiet)}`, `silent ${ago(quiet)}`, true]
-        : job.kind === 'watch' ? [`last event ${ago(quiet)} ago`, `event ${ago(quiet)} ago`, false]
-        : job.kind === 'wait' ? [`checked ${ago(quiet)} ago`, `${ago(quiet)} ago`, false]
-        : job.kind === 'server' && quiet >= 60_000 ? [`serving, last asked ${ago(quiet)} ago`, `serving ${ago(quiet)}`, false]
-        : [`active ${ago(quiet)} ago`, `${ago(quiet)} ago`, false]
+        // A server or a watch speaks only when there is something to say, so its quiet is no fault
+        : job.kind === 'server' ? ['serving', 'serving', false]
+        : job.kind === 'watch' ? ['watching', 'watching', false]
+        // Any other run gives word at least every 10 seconds: past that it is silent, and from a minute that is a fault, in amber.
+        // While it gives word nothing is said of when (a run is never to be anything but active)
+        : (quiet ?? ran) >= SILENT_AFTER ? [`silent for ${ago(quiet ?? ran)}`, `silent ${ago(quiet ?? ran)}`, (quiet ?? ran) >= SILENT_WARN]
+        : ['', '', false]
       const warn = isWarn
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
-      const isFresh = !warn && quiet !== undefined && quiet < 60_000
+      const isFresh = quiet !== undefined && quiet < SILENT_AFTER
       const guess = guessLeft(job, ran)
       const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
@@ -651,12 +650,13 @@ const panelHooks = (on: On) => {
       // Its own plain words go before its sign of life, cut to the room left; a watch's are its last event
       // (none once it has been quiet for minutes: they would be old news)
       const words = warn ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, `${job.label} ${job.waitsFor ?? ''}`)
-      const parts = far.split(' · ')
-      const end = parts.at(-1) === state || parts.at(-1) === short ? parts.length - 1 : parts.length
-      const room = width - far.length - 3
+      const parts = far ? far.split(' · ') : []
+      const end = state && (parts.at(-1) === state || parts.at(-1) === short) ? parts.length - 1 : parts.length
+      const room = width - far.length - (far ? 3 : 0)
       const said = words && room >= 12 ? (words.length <= room ? words : `${words.slice(0, room - 1).replace(/\s+\S*$/, '')}…`) : ''
       const text = said ? [...parts.slice(0, end), said, ...parts.slice(end)].join(' · ') : far
-      return { text, isWarn: warn }
+      // A run that gives word but says nothing plain of how far it is or what it does: that it is at work, and its kind's word
+      return { text: text || (job.kind === 'wait' ? 'waiting' : job.kind === 'download' ? 'downloading' : 'working'), isWarn: warn }
     }
     // A job's two lines: what it is, in the work's own words, with its time; and under it how it stands, then the latest line it
     // printed where that is not the progress already said
@@ -667,6 +667,10 @@ const panelHooks = (on: On) => {
       const width = perRow - 4 - t.depth * 2
       const ran = at - job.at
       const { time, isPast: isLong } = jobTime(job, ran)
+      // Stop, at its end, where it can be stopped from here: it ends the run and tells the work it was stuck
+      const owner = t.one?.id ?? ''
+      // (not on a row too narrow to say how far it is beside it; Details, wider, has it)
+      const isStoppable = Boolean(owner) && canStopJob(job) && !job.id.startsWith('more-') && width >= 44
       const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
       const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -685,7 +689,13 @@ const panelHooks = (on: On) => {
         </Box>
       )
       if (job.id.startsWith('more-')) return head
-      const { text: stand, isWarn } = jobStand(job, width)
+      // (Stop sits at the end of its second line, under its time, so its name keeps its room)
+      const stopButton = isStoppable ? (
+        <Box key={`stop-box-${key}`} flexShrink={0}>
+          <Button key={`stop-${key}-${presses}`} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop run'} plain hover={{ scope: `stop-${key}`, underline: true }} onPress={() => void stopJob($, owner, job).catch(err => log($, `run not stopped: ${String(err)}`))} />
+        </Box>
+      ) : null
+      const { text: stand, isWarn } = jobStand(job, width - (isStoppable ? 10 : 0))
       // Its percent, in blue, where the line says it as a part of its own
       const pctAt = job.pct && !isWarn ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
       // (its plain words are in the line itself, which every run has)
@@ -714,6 +724,7 @@ const panelHooks = (on: On) => {
                 </Box>
               ) : null}
             </Box>
+            {stopButton}
           </Box>
         </Box>
       )

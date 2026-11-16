@@ -147,7 +147,7 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
 const WATCH_MOST = 30 * 60_000
 type EndedRun = NonNullable<Todo['endedRuns']>[number]
 // How a run ended, said plainly: on its card's summary and in Details
-const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => (run.how === 'failed' ? `failed${run.code ? ` (exit code ${run.code})` : ''}` : run.how === 'stopped' ? 'stopped by the work' : run.how)
+const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => (run.how === 'failed' ? `failed${run.code ? ` (exit code ${run.code})` : ''}` : run.how === 'stopped' ? 'stopped' : run.how)
 // The closing row under a card: how many helpers and runs have ended, then how many of the runs did not finish well, in words
 const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`

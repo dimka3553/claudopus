@@ -57,6 +57,10 @@ export const JOB_SHAPE: Record<JobKind, 'square' | 'diamond' | 'down' | 'open'> 
 // A job whose output has not changed for this long says, in amber, that it has gone quiet, and one that has printed nothing at all
 // says so: work is told to print progress at least every 10 seconds, so a few minutes of nothing is worth a look
 export const JOB_QUIET = 3 * 60_000
+// A run that has given no word this long is silent on its row, and from a minute that is in amber: work is told to give word at
+// least every 10 seconds, so a run is never anything but at work
+export const SILENT_AFTER = 10_000
+export const SILENT_WARN = 60_000
 // A job whose output has not been found this long after it started says so on its row
 export const JOB_UNREAD = 60_000
 
