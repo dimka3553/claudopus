@@ -1100,7 +1100,7 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   await list.unmount()
   expect(await until(async () => killed.includes('48213') || undefined)).toBe(true)
   isAlive = false
-  expect(await until(async () => appended.find(line => /^a1: .*stopped your run "Fetch the CT scans" from the panel: it had given no word for 4\ds/.test(line)))).toBeDefined()
+  expect(await until(async () => appended.find(line => /^a1: .*stopped your run "Fetch the CT scans" from the panel\. Do not start it again unless/.test(line)))).toBeDefined()
   await advance(5_000)
   expect(await until(async () => ((await texts()).every(text => !/^Fetch the CT scans/.test(text)) || undefined))).toBe(true)
 })
@@ -1159,7 +1159,7 @@ test('every run under a card says how it stands: a command held open shows its p
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
     const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
     await list.unmount()
-    return all.includes('Download the CT scans') && all.some(text => /^460 MB of 1 GB|^silent for 1\ds$/.test(text)) ? all : undefined
+    return all.includes('Download the CT scans') && all.some(text => /^460 MB of 1 GB|^working$/.test(text)) ? all : undefined
   })
   expect(early).toBeDefined()
   // Five minutes, past the 1.5 times its three minutes where it turns amber, in steps of 5 s: the stand-in ps ages the shell from

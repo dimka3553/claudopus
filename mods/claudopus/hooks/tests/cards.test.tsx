@@ -268,6 +268,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return { value: { exitCode: 0, stdout: rest.includes('--targets') ? options.tailscale : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (tool === 'kill') killed.push(...rest.map(String))
+    // A run stopped from the panel: its processes asked to end, then made to, all of them gone
+    if (tool === 'sh' && String(rest[1]).startsWith('kill -TERM "$@"')) return (killed.push(...rest.slice(3).map(String)), ok(''))
     // A release on GitHub, where the test gives one: the mod's folder is Claudopus's main checkout on main, a fetch of the release's
     // tag lays its commit under the download ref (and git's progress where the step reads it), and the folder's tree in that commit
     // is the one the release published unless the test says what came down instead
@@ -1764,7 +1766,7 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   await list.unmount()
   expect(await until(async () => killed.includes('48213') || undefined)).toBe(true)
   isAlive = false
-  expect(await until(async () => appended.find(line => /^a1: .*stopped your run "Fetch the CT scans" from the panel: it had given no word for 4\ds/.test(line)))).toBeDefined()
+  expect(await until(async () => appended.find(line => /^a1: .*stopped your run "Fetch the CT scans" from the panel\. Do not start it again unless/.test(line)))).toBeDefined()
   await advance(5_000)
   expect(await until(async () => ((await texts()).every(text => !/^Fetch the CT scans/.test(text)) || undefined))).toBe(true)
 })
@@ -1823,7 +1825,7 @@ test('every run under a card says how it stands: a command held open shows its p
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
     const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
     await list.unmount()
-    return all.includes('Download the CT scans') && all.some(text => /^460 MB of 1 GB|^silent for 1\ds$/.test(text)) ? all : undefined
+    return all.includes('Download the CT scans') && all.some(text => /^460 MB of 1 GB|^working$/.test(text)) ? all : undefined
   })
   expect(early).toBeDefined()
   // Five minutes, past the 1.5 times its three minutes where it turns amber, in steps of 5 s: the stand-in ps ages the shell from

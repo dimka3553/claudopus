@@ -268,6 +268,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
       return { value: { exitCode: 0, stdout: rest.includes('--targets') ? options.tailscale : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (tool === 'kill') killed.push(...rest.map(String))
+    // A run stopped from the panel: its processes asked to end, then made to, all of them gone
+    if (tool === 'sh' && String(rest[1]).startsWith('kill -TERM "$@"')) return (killed.push(...rest.slice(3).map(String)), ok(''))
     // A release on GitHub, where the test gives one: the mod's folder is Claudopus's main checkout on main, a fetch of the release's
     // tag lays its commit under the download ref (and git's progress where the step reads it), and the folder's tree in that commit
     // is the one the release published unless the test says what came down instead
@@ -794,7 +796,7 @@ test('xargs -P sending its output nowhere is a run that says it runs and gives n
   await advance(20_000)
   const shown = await until(async () => {
     const all = await leftTexts($)
-    return all.some(text => /^silent for \d/.test(text)) ? all : undefined
+    return all.some(text => /GB memory$/.test(text)) ? all : undefined
   })
   expect(shown?.some(text => text.startsWith('Run every drawing eight at a time'))).toBe(true)
   expect(shown?.some(text => text.includes('5.7 GB'))).toBe(true)

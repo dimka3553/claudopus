@@ -631,7 +631,9 @@ const panelHooks = (on: On) => {
         : job.kind === 'watch' ? ['watching', 'watching', false]
         // Any other run gives word at least every 10 seconds: past that it is silent, and from a minute that is a fault, in amber.
         // While it gives word nothing is said of when (a run is never to be anything but active)
-        : (quiet ?? ran) >= SILENT_AFTER ? [`silent for ${ago(quiet ?? ran)}`, `silent ${ago(quiet ?? ran)}`, (quiet ?? ran) >= SILENT_WARN]
+        // (one whose output has not been read yet is not known to be silent until a minute has passed)
+        : quiet === undefined && !job.isEmpty && ran < SILENT_WARN ? ['', '', false]
+        : (quiet ?? ran) >= SILENT_AFTER ?[`silent for ${ago(quiet ?? ran)}`, `silent ${ago(quiet ?? ran)}`, (quiet ?? ran) >= SILENT_WARN]
         : ['', '', false]
       const warn = isWarn
       // its speed and time left only while it prints: a minute old, they are no longer how it goes

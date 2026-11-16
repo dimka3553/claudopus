@@ -106,7 +106,7 @@ const lookJobs = async ($: EngineInterface) => {
   // Held open: a command a card has waited on long enough to be a row of its own
   const held = list.flatMap(one => (one.status === 'working' && one.running?.cmd && now - one.running.at >= ROW_SHOWN ? [{ owner: one.id, id: `call-${one.id}`, cmd: one.running.cmd, at: one.running.at }] : []))
   // A row's command that changed (another held call of the same card ran longest) starts afresh
-  for (const [id, was] of callFiles) if (!held.some(h => h.id === id && h.at === was.at)) (callFiles.delete(id), jobLog.delete(id))
+  for (const [id, was] of callFiles) if (!held.some(h => h.id === id && h.at === was.at)) (callFiles.delete(id), jobLog.delete(id), silentTold.delete(id))
   const owned = [
     // A watch's output is its events, read as any other
     ...list.flatMap(one => (one.bg ?? []).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
@@ -368,12 +368,24 @@ const isLike = (command: string, pattern: string) => {
 const canStopJob = (job: Job) => !isRunFromAfar && !job.id.startsWith('more-')
 const stoppingJobs = new Set<string>()
 const RUN_STOPPED = (what: string, silent: string) =>
-  `${who(true)} stopped your run "${what}" from the panel${silent ? `: it had given no word for ${silent}` : ''}. A run must never be stuck or silent. Do not start it again as it was: find out why it stalled, make it print a plain \`progress:\` line at least every 10 seconds, and start it again only if it is still needed.`
+  silent
+    ? `${who(true)} stopped your run "${what}" from the panel as stuck: it had given no word for ${silent}. A run must never be stuck or silent. Do not start it again as it was: find out why it stalled, make it print a plain \`progress:\` line at least every 10 seconds, and start it again only if it is still needed.`
+    : `${who(true)} stopped your run "${what}" from the panel. Do not start it again unless ${who()} asks for it; carry on without it, or ask them if you need it.`
 const stopJob = async ($: EngineInterface, owner: string, job: Job) => {
   if (!canStopJob(job) || stoppingJobs.has(job.id)) return
   stoppingJobs.add(job.id)
   presses += 1
   drawAgain($)
+  try {
+    await stopping($, owner, job)
+  } finally {
+    stoppingJobs.delete(job.id)
+    presses += 1
+    jobsLookedAt = 0
+    void drawFresh($)
+  }
+}
+const stopping = async ($: EngineInterface, owner: string, job: Job) => {
   const now = await $.clock.now()
   const list = await read($, todos)
   const card = list.find(one => one.id === owner)
@@ -381,28 +393,34 @@ const stopJob = async ($: EngineInterface, owner: string, job: Job) => {
   const detached = card?.detached?.find(d => d.id === job.id)
   // The processes to end: the detached one's, or the held shell's, with every process under them
   const procs = jobProcs.length ? jobProcs : procsOf((await $.process.run(['ps', '-axww', '-o', PS_COLUMNS], { timeoutMs: 5000 }).catch(() => ({ stdout: '' }))).stdout, now)
-  const top = detached?.pid ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined)
+  // A background command's own shell, found as the look finds it, so it is ended even where the engine does not stop it
+  const bgShell = bg && !bg.isWatch && procs.length ? shellsOf(procs, [{ id: bg.id, cmd: bg.cmd ?? '', at: bg.at }]).get(bg.id) : undefined
+  const top = detached?.pid ?? (typeof bgShell === 'string' ? bgShell : undefined) ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined)
   // (the top one itself even where the processes could not be listed)
   const pids = top ? [...new Set([top, ...treeOf(procs, top).map(p => p.pid)])].filter(isPid) : []
+  let isStopped = false
   if (bg) {
     const r = await $.tool.call({ tool: 'TaskStop', task_id: bg.id }).catch(err => ({ deny: String(err) }))
     if ((r as { deny?: unknown }).deny) await log($, `run ${bg.id} not stopped by the engine: ${String((r as { deny?: unknown }).deny)}`)
-    await dropBackground($, [bg.id], 'stopped')
+    else isStopped = true
   }
+  // Asked to end, then made to a moment later if it has not
   if (pids.length) {
-    const r = await $.process.run(['kill', '-TERM', ...pids], { timeoutMs: 5000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
-    if (r.exitCode !== 0) await log($, `run ${job.id} not wholly stopped: ${String((r as { stderr?: unknown }).stderr ?? '').trim().slice(0, 160)}`)
+    const r = await $.process.run(['sh', '-c', 'kill -TERM "$@" 2>/dev/null; sleep 2; for p; do kill -0 "$p" 2>/dev/null && kill -KILL "$p" 2>/dev/null; done; for p; do kill -0 "$p" 2>/dev/null && exit 1; done; exit 0', 'sh', ...pids], { timeoutMs: 10_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
+    if (r.exitCode === 0) isStopped = true
+    else await log($, `run ${job.id} not wholly stopped: ${String((r as { stderr?: unknown }).stderr ?? '').trim().slice(0, 160)}`)
   }
+  // Nothing found to stop: nothing is said to have stopped, and the row stays as it is
+  if (!isStopped) return void (await log($, `run ${job.id} of work ${owner} could not be stopped: nothing of it was found`))
+  if (bg) await dropBackground($, [bg.id], 'stopped')
   if (detached) {
     await changeTodos($, cards => cards.map(one => (one.id === owner && one.detached?.some(d => d.id === job.id) ? { ...one, detached: one.detached.filter(d => d.id !== job.id).length ? one.detached.filter(d => d.id !== job.id) : undefined, ...keepEnded(one, [{ id: detached.id, what: detached.what, at: detached.at, endedAt: now, how: 'stopped' }]) } : one)))
   }
   const silent = job.wroteAt && !job.isEmpty ? now - job.wroteAt : now - job.at
-  void tell($, owner, RUN_STOPPED(job.label, silent >= 10_000 ? shortAgo(silent) : ''))
+  void tell($, owner, RUN_STOPPED(job.label, silent >= SILENT_WARN ? shortAgo(silent) : ''))
   await log($, `the person stopped run ${job.id} of work ${owner}${pids.length ? ` (${pids.length} processes)` : ''}`)
   jobLog.delete(job.id)
-  stoppingJobs.delete(job.id)
-  jobsLookedAt = 0
-  void drawFresh($)
+  silentTold.delete(job.id)
 }
 
 // A run of a piece of work that has given no word for a minute is named to that work once, in its own chat: a run is never to be
@@ -410,14 +428,16 @@ const stopJob = async ($: EngineInterface, owner: string, job: Job) => {
 const RUN_SILENT_TOLD = 60_000
 const silentTold = new Set<string>()
 const RUN_SILENT = (what: string, silent: string) =>
-  `Your run "${what}" has given no word for ${silent}. A run must never be stuck or silent: if it is stuck, stop it now (TaskStop for a background command, kill for a detached one) and find out why; if it is working, make it print a plain \`progress:\` line at least every 10 seconds next time.`
+  `Your run "${what}" has given no word for ${silent}. Look at it now: if it is stuck, stop it (TaskStop for a background command, kill for a detached one) and find out why; if it is still working, let it finish, and make what you run next print a plain \`progress:\` line at least every 10 seconds.`
 const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   for (const one of list) {
     if (one.status !== 'working') continue
     for (const job of jobsOf(one, now)) {
-      if (job.kind === 'server' || job.kind === 'watch' || job.id.startsWith('more-') || silentTold.has(job.id)) continue
-      const silent = job.wroteAt && !job.isEmpty ? now - job.wroteAt : now - job.at
-      if (silent < RUN_SILENT_TOLD || (!job.wroteAt && !job.isEmpty && !job.id.startsWith('call-') && !jobLog.has(job.id))) continue
+      // (not one paused, one whose output cannot be read, or the mod's own runners, which say how they go themselves)
+      if (job.kind === 'server' || job.kind === 'watch' || job.id.startsWith('more-') || silentTold.has(job.id) || job.isPaused || job.isUntold || /\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(job.cmd)) continue
+      if (!job.wroteAt) continue
+      const silent = job.isEmpty ? now - job.at : now - job.wroteAt
+      if (silent < RUN_SILENT_TOLD) continue
       silentTold.add(job.id)
       void tell($, one.id, RUN_SILENT(job.label, shortAgo(silent)))
       await log($, `work ${one.id} told its run ${job.id} has been silent ${shortAgo(silent)}`)

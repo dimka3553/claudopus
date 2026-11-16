@@ -130,7 +130,7 @@ test('xargs -P sending its output nowhere is a run that says it runs and gives n
   await advance(20_000)
   const shown = await until(async () => {
     const all = await leftTexts($)
-    return all.some(text => /^silent for \d/.test(text)) ? all : undefined
+    return all.some(text => /GB memory$/.test(text)) ? all : undefined
   })
   expect(shown?.some(text => text.startsWith('Run every drawing eight at a time'))).toBe(true)
   expect(shown?.some(text => text.includes('5.7 GB'))).toBe(true)
