@@ -1060,7 +1060,8 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   expect(await until(async () => ((await texts()).includes('460 MB of 1 GB · ') || undefined))).toBe(true)
   const shown = await texts()
   expect(shown).toContain('45%')
-  expect(shown).toContain(' · 10.5 MB/s · 55s left')
+  // (the 55 seconds curl said were left, less the moment since it said them)
+  expect(shown.some(text => /^ · 10\.5 MB\/s · 5[0-5]s left$/.test(text))).toBe(true)
   // While it gives word nothing is said of when
   expect(shown.some(text => /active|ago/.test(text))).toBe(false)
   // In a narrower panel its speed gives way first
@@ -1259,7 +1260,8 @@ test('every run under a card says how it stands: a command held open shows its p
   // past it, the run's own time left makes a fresh expectation, never the old figure as if it held
   expect(shown).toContain('5m 00s of ~5m 53s')
   expect(shown.some(text => /of ~3m/.test(text))).toBe(false)
-  expect(shown).toContain(' · 10.5 MB/s · 55s left')
+  // (the 55 seconds curl said were left, less the moment since it said them)
+  expect(shown.some(text => /^ · 10\.5 MB\/s · 5[0-5]s left$/.test(text))).toBe(true)
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
   expect(shown.some(text => /^nothing printed for 5m 00s$/.test(text))).toBe(true)
@@ -1424,14 +1426,15 @@ test("a run's second line starts under its name, with the tree's lines carried d
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   const shown = (await pane.findAll({ type: 'Text' })).map(one => one.text).join('\n')
   await pane.unmount()
-  expect(shown).toContain('4m left')
-  expect(shown).toMatch(/~2m left/)
+  // (each less the moment since it was printed)
+  expect(shown).toMatch(/ (?:4m|3m 5\ds) left/)
+  expect(shown).toMatch(/~(?:2m|1m 5\ds) left/)
   expect(shown).not.toMatch(/printed/)
   // A narrow panel keeps how long is left before the percent
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 40 }, surface: 'terminal' } as never)
   const tight = (await narrow.findAll({ type: 'Text' })).map(one => one.text)
-  expect(tight).toContain('3/6 steps · ~2m left')
+  expect(tight.some(text => /^3\/6 steps · ~(?:2m|1m 5\ds) left$/.test(text))).toBe(true)
   // and one under a helper, with less room, keeps its count beside it
-  expect(tight).toContain('10/40 · ~6m left')
+  expect(tight.some(text => /^10\/40 · ~(?:6m|5m 5\ds) left$/.test(text))).toBe(true)
   await narrow.unmount()
 })
