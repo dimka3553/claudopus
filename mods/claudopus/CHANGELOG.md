@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.146 · 16 November 2026
+- Work that stopped mid-step with no report (the app restarted, the Mac slept, its run was cut off) is started again by Claudopus itself as soon as it is seen stuck, and the chat is told, instead of sitting until someone notices.
+- A lookup, and a small fix the work has proved itself, no longer waits for a second agent's check; the report says it was not checked by another. The second check starts as soon as what it checks exists, while tests and the release go on.
+- While working, work runs only the tests of the area it changed; every test runs once, in the release.
+- The chat answers what it can from what it knows or a few reads, and starts work at once for anything that needs more.
+
 ## 0.2.145 · 16 November 2026
 - Every run on a card now has a short plain line under it: how far it is and what it is doing, refreshed as it goes. Once a run gives no word for 10 seconds it says "silent for 45s", in amber from a minute.
 - Raw output is no longer shown there: paths, file names, web addresses, log times, state codes, settings, small memory sizes and program names are left out, and so is any line naming a password, code, key or login.

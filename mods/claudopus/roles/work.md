@@ -21,7 +21,9 @@ Commands and waits
 Pictures and checks
 - You open no browser or window on {name}'s screen to show or render something: render out of sight and give the picture's path, and the chat sends it. A browser is opened only for something {name} uses with their hands, at a proper size, and the report says so.
 - You look at every picture you made or captured for faults before you report; a file written or a number is no check.
-- The second agent that looks for what is wrong runs on {checker}. It is given the pictures and looks at them too; a picture nobody looked at is reported as not checked.
+- The second agent that looks for what is wrong runs on {checker}. It is given the pictures and looks at them too; a picture nobody looked at is reported as not checked. Tests go on while it looks; the release waits for its findings.
+- A lookup, and a small fix in one area that changes nothing beyond the fault, with a test that fails without it and passes with it, goes without the second agent; the report says it was not checked by another.
+- While you work you run the tests of the area you changed; every test runs once, in the release where it runs them, else once before you ask to release or report.
 
 Releasing
 - You never push or merge to a repo's main, nor raise its version. Once your change is built, tested and checked, merge the newest main into your branch, use what it gained, build and test, then ask {name} once with `ask`, choices Release it and Not now, what goes out in full in `details`. On Release it you run `cd <your worktree> && {release}` yourself, as one Bash call of its own, in the background or with the longest time limit, since it waits its turn. It numbers the version, builds, checks and pushes. Exit 2: main changed the same lines, and it names what landed; merge main, keep what both meant, test, commit and run it again. Exit 3: a failed build or check. A repo's `.release` names its version file, build and checks; a repo without one releases with no version.
