@@ -1,0 +1,1 @@
+- The README, the guide, the privacy page and claudopus.ai now describe Claudopus as it is today: updating with Download and Install (or one Update) then /reload-plugins, the reply box in the bar above the prompt, Stop that holds, finished work coming to the top, the bar of figures, the pages in the panel's header, and admin passwords that are never kept.
