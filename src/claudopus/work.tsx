@@ -47,6 +47,10 @@ const asksNow = (list: Todo[], agent: string) => {
 }
 const NO_PERSON_WAIT = (name: string) =>
   `Not run: this waits for ${name}, and a wait with a time limit gives them one. Do not wait for ${name} with a command at all. End your step now: your ask stays on the card for as long as it takes, and ${name}'s answer starts you again the moment they give it. Anything you need to see of what they did (a recording, a file, a page) you look at once their answer has come.`
+const NO_PROGRESS_WAIT =
+  'Not run: this wait would give no word of how it goes. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
+const NO_PROGRESS_SCRIPT =
+  'Not run: this long run would give no word of how far it is. Make its script print, flushed at once, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
 const MOVED_BACK = (name: string) =>
   `This command may run for minutes, so it was started in the background rather than held open: ${name}'s replies reach you while it runs. You are told when it ends; its output is in the file named above. Carry on with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 
@@ -201,6 +205,16 @@ const workHooks = (on: On) => {
     if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
       await log($, `refused work ${e.agentId}'s wait for the person: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       return { deny: NO_PERSON_WAIT(who()) }
+    }
+    // Every run says how it goes at least every 10 seconds: a long wait or script of the work's own that would say nothing is not
+    // started, and the work is told in one sentence how to make it report
+    if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
+      const command = String((e as { command?: unknown }).command ?? '')
+      const silent = reportsOf(command, String((e as { description?: unknown }).description ?? ''), Boolean((e as { run_in_background?: unknown }).run_in_background), await scriptsRun($, command), Number((e as { timeout?: unknown }).timeout ?? 0))
+      if (silent) {
+        await log($, `refused work ${e.agentId}'s ${silent === 'wait' ? 'wait' : 'long script'} that gives no progress`)
+        return { deny: silent === 'wait' ? NO_PROGRESS_WAIT : NO_PROGRESS_SCRIPT }
+      }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {

@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.145 · 16 November 2026
+- Every run on a card now has a short plain line under it: how far it is and what it is doing, refreshed as it goes. Once a run gives no word for 10 seconds it says "silent for 45s", in amber from a minute.
+- Raw output is no longer shown there: paths, file names, web addresses, log times, state codes, settings, small memory sizes and program names are left out, and so is any line naming a password, code, key or login.
+- Each run's row has a Stop button: it ends the run and tells the work it was stuck. Work is also told itself once one of its runs has been silent for a minute, and to stop it.
+- A command held open shows as a row after ten seconds instead of two minutes.
+- A long wait or script that would give no progress is not started: work is told in one sentence how to add a progress line.
+
 ## 0.2.144 · 16 November 2026
 - What chats and work are told is about a third shorter, with each rule said once where it is needed, so every message and every piece of work costs fewer tokens.
 - Chats no longer send a card's answer to its work a second time, and a repeated report is not relayed again.

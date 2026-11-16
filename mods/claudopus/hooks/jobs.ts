@@ -21,6 +21,8 @@ export type Job = {
   left?: string
   isEarlier?: boolean
   isOwn?: boolean
+  // The plain words of the work's own progress line, after its numbers
+  words?: string
   isEmpty?: boolean
   // A run left going whose output goes to no file: it runs, and says nothing of how far it is
   isUntold?: boolean
@@ -55,6 +57,10 @@ export const JOB_SHAPE: Record<JobKind, 'square' | 'diamond' | 'down' | 'open'> 
 // A job whose output has not changed for this long says, in amber, that it has gone quiet, and one that has printed nothing at all
 // says so: work is told to print progress at least every 10 seconds, so a few minutes of nothing is worth a look
 export const JOB_QUIET = 3 * 60_000
+// A run that has given no word this long is silent on its row, and from a minute that is in amber: work is told to give word at
+// least every 10 seconds, so a run is never anything but at work
+export const SILENT_AFTER = 10_000
+export const SILENT_WARN = 60_000
 // A job whose output has not been found this long after it started says so on its row
 export const JOB_UNREAD = 60_000
 
@@ -134,7 +140,119 @@ const pctOf = (line: string) => {
 // and how fast it goes when it says. Read from the progress shapes tools print (curl, wget, rsync, az and azcopy, aws, gsutil,
 // pip, git, docker, tqdm and the like) and the line work's own scripts are told to print: `progress: 3/6 steps fitting`,
 // `progress: 4.2/10 GB uploading`, `progress: 45%`
-export type Progress = { pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean }
+export type Progress = { pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string }
+
+// The one shape a run's second line has, for every run however it was started: how far it is (a count of how many, a percent, a
+// size of a size, its speed, time left), a few plain words of what it does now, and when it last gave a sign of life, at most
+// PLAIN_MOST characters of words. Never shown: paths, file names, web addresses, clock times and dates, codes in brackets, state
+// words, ids, settings (key=value), sizes that say nothing of how far (memory), program names, and any line that names a
+// password, key or token. A raw line that is not plain words once those are taken out is not shown at all
+export const PLAIN_MOST = 60
+// A line that names a password, key, token, code or login, says who is signed in, or echoes what was typed at a prompt is never
+// shown, not even in part
+const SECRETISH =
+  /\b(pass(?:word|phrase|wd|code)?s?|secrets?|tokens?|api[-_ ]?keys?|keys?|bearer|authori[sz]ation|credentials?|codes?|pins?|verification|verify|otp|2fa|mfa|ssh-(?:rsa|ed25519)|log(?:s|ging|ged)?[ -]?in|sign(?:s|ing|ed)?[ -]?in|authenticat\w*|user ?names?|accounts?|e-?mail)\b|\b(?:sk|pk|ghp|gho|xox[abp])[-_][A-Za-z0-9]{8,}|\S@\S|\(\w*\):\s*\S|[?:]\s*$/i
+const PROGRAMS = /\b(?:curl|wget|python3?(?:\.\d+)?|node|npm|npx|pnpm|yarn|pip3?|git|az|aws|gcloud|gsutil|azcopy|rsync|scp|ssh|bash|zsh|sh|sudo|docker|kubectl|make|tar|unzip|ffmpeg|brew|uv|conda|apt(?:-get)?)\b:?/gi
+const FILES = /\b[\w.-]+\.(?:py|sh|js|mjs|ts|tsx|json|jsonl|log|txt|csv|tsv|zip|tar|gz|tgz|png|jpe?g|webp|gif|mp4|nii|dcm|ply|obj|stl|pkl|pt|pth|ckpt|safetensors|bin|h5|npz|npy|ya?ml|toml|md|html|out|err|lock|rs|go|java|c|cpp|h)\b/gi
+// A line that is a command or a build step, not news of how a run goes
+// (case counts: a log's "[run 11:27:50]" is no Docker RUN)
+const COMMANDISH = /^\s*(?:\$|>|#\d+\s|[Ss]tep \d+\/\d+\s*:)|\bRUN\s|\s-{1,2}[a-z][\w-]*(?:\s|$)|^\s*at\s+\S+\s+\(|^\s*File\s|\bthrow\b|^\s*\^\s*$/
+// A single word that is technical whatever the line: one with a path's, a name's or a setting's marks in it (/ \ @ < > { } | :: _),
+// a flag, a number with points (a version, an address), a short hash, a word of letters and numbers joined by - or .
+const isTechWord = (word: string) =>
+  /[/\\@<>{}|^`$]|::|_/.test(word) ||
+  /^-/.test(word) ||
+  /^\(?v?\d+(?:\.\d+){2,}/.test(word) ||
+  /^\d{1,3}(?:\.\d{1,3}){3}/.test(word) ||
+  /^[\w-]+(?:\.[\w-]+)+$/.test(word.replace(/[.,;:!?)]+$/, '')) && /[a-z]{2,}$/i.test(word.replace(/[.,;:!?)]+$/, '')) ||
+  (/^[0-9a-f]{7,}$/i.test(word) && /\d/.test(word) && /[a-f]/i.test(word)) ||
+  (/\d/.test(word) && /[A-Za-z]/.test(word) && /[-.]/.test(word.replace(/[.,;:!?)]+$/, ''))) ||
+  word.length >= 24 ||
+  (word.length >= 12 && /\d/.test(word) && /[A-Za-z]/.test(word)) ||
+  /^E[A-Z]{3,}$/.test(word) ||
+  /^:\d+/.test(word) ||
+  /^[^\w·…%]+$/.test(word)
+const STOP = new Set(['the', 'and', 'for', 'with', 'from', 'into', 'onto', 'that', 'this', 'its', 'now', 'all', 'are', 'was', 'has', 'have', 'been', 'being', 'then', 'still', 'run', 'running'])
+const stem = (word: string) => word.toLowerCase().slice(0, 4)
+export const plainOf = (line: string | undefined, title = ''): string => {
+  if (!line || SECRETISH.test(line) || COMMANDISH.test(line)) return ''
+  let t = line.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/^.*?\bprogress:\s*/i, '')
+  t = t
+    // web addresses, paths (Windows' too) and file names
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ')
+    .replace(/\b[A-Za-z]:\\\S*/g, ' ')
+    .replace(/(^|[\s'"(=:,])(?:~|\.{1,2})?\/[^\s'",)]*/g, '$1 ')
+    .replace(FILES, ' ')
+    // a state said as a setting (Status: Running), an npm or log marker
+    .replace(/\b(?:status|state|phase)\s*:\s*\w+/gi, ' ')
+    .replace(/\bERR!/g, ' ')
+    // anything in square brackets (a log's time or level, an error number), a single word in round ones (a state: (Running))
+    .replace(/\[[^\]]*\]/g, ' ')
+    .replace(/\(\s*[\w-]+\s*\)/g, ' ')
+    // dates and clock times
+    .replace(/\b\d{4}-\d\d-\d\d(?:[T ]\d\d:\d\d(?::\d\d(?:\.\d+)?)?(?:Z|[+-]\d\d:?\d\d)?)?\b/g, ' ')
+    .replace(/\b\d{1,2}:\d\d(?::\d\d(?:\.\d+)?)?\b/g, ' ')
+    // a log's level at its head
+    .replace(/^\s*(?:INFO|DEBUG|TRACE|NOTICE|VERBOSE)\b:?/i, ' ')
+    // an error's own program name said as the word error (FileNotFoundError: → error:)
+    .replace(/\b[A-Z]\w*(?:Error|Exception)\b:?/g, 'error:')
+    // settings, ids and codes: key=value, long hex or mixed strings, error names in capitals (ENOENT), line numbers
+    .replace(/\S+=\S*/g, ' ')
+    .replace(/\b[0-9a-f]{8,}(?:-[0-9a-f]{4,})*\b/gi, ' ')
+    .replace(/\bline \d+\b/gi, ' ')
+    // sizes alone, which say nothing of how far (how far is said from the numbers, not from these words)
+    .replace(new RegExp(String.raw`(\d[\d,]*(?:\.\d+)?)\s?(?:[KMGTP]i?B|bytes?)\b(?:\/s)?`, 'gi'), ' ')
+    .replace(PROGRAMS, ' ')
+    // quotes, then a word at a time: technical words go (one at a time, so no long word is tried again and again)
+    .replace(/["'`]/g, ' ')
+    .replace(/\S+/g, word => (isTechWord(word) ? ' ' : word))
+    .replace(/\(\s*\)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/([,;:])(?=[,;:.])/g, '')
+    .replace(/^[\s,.;:!?·|>#*=+~\-"'`]+|[\s,;:|>#*=+~\-"'`]+$/g, '')
+    .trim()
+  const words = t.match(/[A-Za-z]{2,}/g) ?? []
+  const letters = (t.match(/[A-Za-z]/g) ?? []).length
+  if (words.length < 2 || letters < t.replace(/\s/g, '').length * 0.6) return ''
+  // Words that only say again what its name says are no news
+  const named = new Set((title.match(/[A-Za-z]{3,}/g) ?? []).map(stem))
+  const own = words.filter(word => word.length >= 3 && !STOP.has(word.toLowerCase()))
+  // Words that only name what is counted (epoch 3 step) are said by the count already
+  if (!own.some(word => !COUNTED.test(word))) return ''
+  if (title && own.every(word => named.has(stem(word)) || /^(wait(s|ing)?|for|until)$/i.test(word))) return ''
+  if (t.length <= PLAIN_MOST) return t
+  const cut = t.slice(0, PLAIN_MOST - 1)
+  return `${cut.slice(0, cut.lastIndexOf(' ') > 30 ? cut.lastIndexOf(' ') : cut.length).replace(/[\s,;:]+$/, '')}…`
+}
+// A long command that would give no word of how far it is: a wait loop, or a script of the work's own (a file it runs, as read),
+// run in the background, detached, or said to take a minute or more, that prints no progress line and runs no tool with a meter of
+// its own. '' for any other: a short one, one that reports, or a program whose words the mod reads as they come (its row then
+// says when it last gave a sign of life). The mod's own runners report for themselves
+const METER = /\b(?:curl|wget|rsync|azcopy|pip3?|git\s+clone|hf\s+download|huggingface-cli|tqdm|rich\.progress|aria2c|docker\s+pull)\b/
+const SILENCED = /\bcurl\b[^|;&\n]*\s(?:-[a-zA-Z]*s[a-zA-Z]*|--silent)\b|\bwget\b[^|;&\n]*\s(?:-q\b|--quiet\b|-[a-zA-Z]*q[a-zA-Z]*O\b)|\btqdm\([^)\n]*disable\s*=\s*True/
+// A line it prints that the card reads as how far it is: a count of a total (`{i}/{n}`, `$i/$n`, `%d/%d`) or a percent
+const PRINTS_COUNT = /\b(?:print|echo|printf|log\w*|console\.log|write)\b[^\n]*(?:\{[^}\n]*\}\s*\/\s*\{|\$\{?\w+\}?\s*\/\s*\$|%[ds]\s*\/\s*%[ds]|\{[^}\n]*:\.?\d*%\}|%%)/
+// The word progress, once what only turns it off is taken out (# no progress bar, --no-progress, progress_bar=False)
+const saysProgress = (text: string) => /\bprogress\b/i.test(text.replace(/\bno[-_ ]progress[\w-]*|progress[-_ ]?bar\s*=\s*(?:False|off|0|None)\b/gi, ' '))
+export const reportsOf = (command: string, description: string, isBackground: boolean, scripts: string[], timeoutMs = 0): 'wait' | 'script' | '' => {
+  if (/\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(command)) return ''
+  const said = describedOf(description)
+  // A server or a watch never says how far it is: its row says when it was last asked or its last event
+  if (said.kind === 'server' || said.kind === 'watch' || SERVER_CMD.test(command)) return ''
+  const isDetached = Boolean(detachedOf(command))
+  const isLongSaid = (said.expect ?? 0) >= 60_000 || timeoutMs > 2 * 60_000
+  const all = [command, ...scripts]
+  if (all.some(saysProgress)) return ''
+  // A wait loop sent off or held open for long: every loop that sleeps between its tries
+  if ((isBackground || isDetached || isLongSaid) && /\b(?:until|while|for)\b[\s\S]*?\bdo\b[\s\S]*?\bsleep\b/.test(command)) return 'wait'
+  // A script of its own said to take a minute or more, or started detached (sent to the background alone it may be short)
+  if (!(isDetached || isLongSaid) || !scripts.length) return ''
+  return all.some(text => (METER.test(text) && !SILENCED.test(text)) || PRINTS_COUNT.test(text)) ? '' : 'script'
+}
+// The plain words after the numbers of a work's own progress line, without the time left it gives (said on its own)
+const ownWords = (rest: string) =>
+  plainOf(rest.replace(new RegExp(String.raw`,?\s*\beta:?\s*${TIME}|,?\s*\b${TIME}\s*(?:left|remaining|to go)\b`, 'gi'), ' ').replace(/^\s*(?:[KMGTP]i?B|B|bytes?)\b/i, ' ')) || undefined
 // How long a run says it has left, as it says it (eta 55s, eta 0:00:55, [01:18<01:28], 3m left, curl's Time Left), in words; the
 // panel works one out from its percent only where the run says none
 const secondsIn = (text: string) => {
@@ -210,7 +328,7 @@ const lineProgress = (line: string): Progress | undefined => {
   if (own !== undefined) {
     const rest = own
     const pct = rest.match(/^(\d+(?:\.\d+)?)\s?%/)
-    if (pct && Number(pct[1]) <= 100) return { pct: pctText(Number(pct[1])), isOwn: true }
+    if (pct && Number(pct[1]) <= 100) return { pct: pctText(Number(pct[1])), isOwn: true, words: ownWords(rest.slice(pct[0].length)) }
     // done/total with a unit after the total or after both: 3/6 steps, 4.2/10 GB, 4.2 GB / 10 GB, 4.2GB/10GB
     const m = rest.match(/^(\d[\d,]*(?:\.\d+)?)\s*([A-Za-z]+)?\s*(?:\/|of)\s*(\d[\d,]*(?:\.\d+)?)\s*([A-Za-z]+)?/)
     if (m) {
@@ -221,8 +339,11 @@ const lineProgress = (line: string): Progress | undefined => {
       const isSizeUnit = (u: string) => /^([KMGTP]i?B|B|bytes?)$/i.test(u)
       const unit = isSizeUnit(u2) ? u2 : isSizeUnit(u1) ? u1 : u2 && !u1 && (COUNTED.test(u2) || /^[a-z]{3,}s$/i.test(u2)) ? u2 : ''
       const isSize = isSizeUnit(unit)
-      if (nb > 0 && na <= nb) return { done: isSize ? `${a} ${unit}` : countText(na), total: `${isSize ? b : countText(nb)}${unit ? ` ${unit}` : ''}`, pct: percentOf(na, nb), rate: rateOf(rest), isOwn: true }
+      if (nb > 0 && na <= nb) return { done: isSize ? `${a} ${unit}` : countText(na), total: `${isSize ? b : countText(nb)}${unit ? ` ${unit}` : ''}`, pct: percentOf(na, nb), rate: rateOf(rest), isOwn: true, words: ownWords(rest.slice(m[0].length)) }
     }
+    // A count with no end known, as a wait counts its tries: progress: 7 tries waiting for the deploy
+    const so = rest.match(/^(\d[\d,]*)\s+([a-z]{3,})\b/i)
+    if (so) return { done: `${countText(Number(so[1]?.replace(/,/g, '')))} ${so[2]?.toLowerCase()}`, isOwn: true, words: ownWords(rest.slice(so[0].length)) }
   }
   // curl's meter: % Total % Received % Xferd Average-speeds Times Current-speed, sizes in 1024s
   const curl = line.match(/^\s*(\d{1,3})\s+(\d[\d.]*[kMGTP]?)\s+(\d{1,3})\s+(\d[\d.]*[kMGTP]?)\s+\d{1,3}\s+\d[\d.]*[kMGTP]?\s+\d[\d.]*[kMGTP]?\s+\d[\d.]*[kMGTP]?\s+[-\d:]+\s+[-\d:]+\s+([-\d:]+)\s+(\d[\d.]*[kMGTP]?)\s*$/)
@@ -283,7 +404,9 @@ const lineProgress = (line: string): Progress | undefined => {
     const isProgress = isBracketed || isBeside || COUNTED.test(before) || /^\s*(steps?|frames?|epochs?|batch(es)?|files?|items?|chunks?|parts?|samples?|images?|scans?|cases?|jobs?|tasks?|runs?|shards?|pages?|rows?|records?|subjects?|volumes?|layers?|objects?|blobs?|videos?|clips?|meshes|fits?)\b/i.test(after) || /^\s*\[[=>.#\s-]{4,}\]/.test(after)
     // with what it counts, said after the count or before it (Processed 9 of 20 files, frame 81/120)
     const unit = after.match(/^\s*([a-z]{3,}s)\b/i)?.[1] ?? before.match(/\b([a-z]{3,}s)\s*[:#]?\s*$/i)?.[1] ?? ''
-    const named = unit && COUNTED.test(unit) ? ` ${unit.toLowerCase()}` : ''
+    // (or said once before it, as a log says step 1200/5000)
+    const one = before.match(/\b([a-z]{3,})\s*[:#]?\s*$/i)?.[1] ?? ''
+    const named = unit && COUNTED.test(unit) ? ` ${unit.toLowerCase()}` : one && !one.endsWith('s') && COUNTED.test(`${one}s`) ? ` ${one.toLowerCase()}s` : ''
     if (isProgress && b > 0 && a <= b) return { done: countText(a), total: `${countText(b)}${named}`, pct: isBeside ? pctSeen : percentOf(a, b), rate: rateOf(line) }
   }
   // Else a percent alone, with any size it says is done (git: Receiving objects: 45% (450/1000), 460.00 MiB | 10.20 MiB/s)
@@ -309,7 +432,7 @@ export const progressOf = (lines: string[]): Progress => {
   for (const line of lines.slice(0, -1).reverse()) {
     if (ownOf(line) === undefined) continue
     const own = lineProgress(line)
-    if (own && (own.pct || own.done)) return tidy({ ...own, rate: undefined, left: undefined, isEarlier: true })
+    if (own && (own.pct || own.done)) return tidy({ ...own, rate: undefined, left: undefined, words: undefined, isEarlier: true })
   }
   return {}
 }

@@ -1,7 +1,70 @@
 import { expect, test } from 'claude-code/testing'
 
-import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, portOf, procsOf, shellsOf, treeOf, waitOf } from './jobs'
+import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, PLAIN_MOST } from './jobs'
 import type { Job } from './jobs'
+
+test("a run's raw line becomes a few plain words or nothing: no paths, file names, times, codes, states, settings, sizes, programs or secrets; 16 Nov a row read \"35 MB · [run 11:27:50] waiting for the machine to start (Running)\"", async () => {
+  const cases: [string, string, string][] = [
+    ['[run 11:27:50] waiting for the machine to start (Running)', 'Run the Mac deletion now and start the Azure deletion', 'waiting for the machine to start'],
+    ['2026-11-16 11:40:02 INFO uploading scans to the archive', '', 'uploading scans to the archive'],
+    ["FileNotFoundError: [Errno 2] No such file or directory: '/Users/x/w/list.csv'", '', 'error: No such file or directory'],
+    ['epoch 3 step 1200/5000 loss=0.2345 lr=1e-04 gpu_mem=10.2GB', '', ''],
+    ['Saved /Users/x/out/mesh_final.ply', '', ''],
+    ['curl: (6) Could not resolve host: example.com', '', 'Could not resolve host'],
+    ['Downloading https://example.com/model.bin 35 MB', '', ''],
+    ['  45 1024M   45  460M    0     0  10.2M      0  0:01:40  0:00:45  0:00:55 10.5M', '', ''],
+    ['Enter your password to go on', '', ''],
+    ['using token ghp_abcdefghijklmnop1234', '', ''],
+    ['resource 3f9a2c1b7e4d5a60 deleted', '', 'resource deleted'],
+    ['waiting for the Azure deletion', 'Wait for the Azure deletion to finish', ''],
+    ['Running', '', ''],
+    // what is typed, a code, a login or a name is never shown, not even in part
+    ['Your verification code is 482913, it expires soon', '', ''],
+    ['Please enter the code 123456 shown on your phone', '', ''],
+    ['Your PIN: 4821 was accepted', '', ''],
+    ['Logging in as admin with hunter2 now', '', ''],
+    ['Authenticated as someone@example.com via SSO', '', ''],
+    ['Name (sam): sam', '', ''],
+    ['progress: 3/9 entering code 482913 for the vault', '', ''],
+    // commands, build steps, stack lines, Windows paths, versions and leftover marks
+    ['Step 4/12 : RUN apt-get update && apt-get install -y libgl1', '', ''],
+    ['  File "C:\\Users\\sam\\proj\\train.py", line 42, in main', '', ''],
+    ['    at Object.<anonymous> (/w/index.js:3:9)', '', ''],
+    ['Successfully installed torch-2.3.0', '', 'Successfully installed'],
+    ['Completed 256.0 KiB/1.2 GiB (2.1 MiB/s) with 1 file(s) remaining', '', 'Completed with 1 file remaining'],
+    ['Status: Running on the cluster now', '', 'on the cluster now'],
+  ]
+  for (const [line, title, plain] of cases) expect({ line, plain: plainOf(line, title) }).toEqual({ line, plain })
+  expect(plainOf(`${'drawing the next frame of the face '.repeat(4)}`).length).toBeLessThanOrEqual(PLAIN_MOST)
+  // A wait's count of tries with no end known is how far it is, and its words after are kept apart
+  expect(latestOf('progress: 7 tries waiting for the Azure deletion\n')).toMatchObject({ done: '7 tries', isOwn: true, words: 'waiting for the Azure deletion' })
+  expect(latestOf('progress: 3/6 steps fitting the face, eta 4m\n')).toMatchObject({ done: '3', total: '6 steps', words: 'fitting the face', left: '4m left' })
+})
+
+test('a long wait or script of its own that would give no progress is told apart from one that reports, a short one, a meter and the mod\'s own runners', async () => {
+  const loop = 'until az group show -n rg 2>&1 | grep -q NotFound; do sleep 15; done'
+  const cases: [string, string, boolean, string[], string, number?][] = [
+    [loop, 'Wait for the Azure deletion to finish (about 8 min)', true, [], 'wait'],
+    // a for loop, and one held open with a long time limit and no time in its words
+    ['for i in $(seq 60); do az ml job show -n j | grep -q Completed && break; sleep 10; done', 'Wait for the training run', true, [], 'wait'],
+    [loop, 'Wait for the training run', false, [], 'wait', 600_000],
+    // a server, a watch, a quick script sent off, a script that prints a count, one whose only progress word turns it off
+    ['python serve.py', 'Serve the preview page', true, ['import http.server\n'], ''],
+    ['python watch.py', 'Watch the folder for new scans', true, ['import time\n'], ''],
+    ['node scripts/x.mjs', 'Run a quick check', true, ['console.log(1)\n'], ''],
+    ['python fit.py', 'Run the fit (about 20 min)', true, ['for i in range(n):\n  print(f"step {i}/{n} loss {l}")\n'], ''],
+    ['python fit.py', 'Run the fit (about 20 min)', true, ['# no progress bar here\nfor i in range(n): fit(i)\n'], 'script'],
+    [loop.replace('do ', 'do n=$((n+1)); echo "progress: $n tries waiting"; '), 'Wait for the Azure deletion to finish (about 8 min)', true, [], ''],
+    ['python3 sort.py', 'Run the sorting of the scans (about 6 min)', true, ['import os\nfor f in os.listdir("."):\n  pass\n'], 'script'],
+    ['python3 sort.py', 'Run the sorting of the scans (about 6 min)', true, ['for i, f in enumerate(fs):\n  print(f"progress: {i}/{len(fs)} scans", flush=True)\n'], ''],
+    ['python3 sort.py', 'Run the sorting of the scans', false, ['import os\n'], ''],
+    ['cd /w && nohup bash fetch.sh > fetch.log 2>&1 & echo $!', 'Download the scans', false, ['curl -L -o a.zip https://example.com/a.zip\n'], ''],
+    ['cd /w && nohup bash fetch.sh > fetch.log 2>&1 & echo $!', 'Download the scans', false, ['curl -sL -o a.zip https://example.com/a.zip\n'], 'script'],
+    ['npm run build', 'Run the build (about 3 min)', true, [], ''],
+    ['/p/bin/release', 'Run the release (about 5 min)', true, ['while true; do sleep 1; done\n'], ''],
+  ]
+  for (const [command, description, isBackground, scripts, said, timeout] of cases) expect({ command, description, said: reportsOf(command, description, isBackground, scripts, timeout) }).toEqual({ command, description, said })
+})
 
 test('a job is told by its command: a server with its port, a download, else a script; its latest line is what a progress bar shows last', async () => {
   expect(jobKindOf('python3 -m http.server 8765 --directory out', 'Serve the mesh viewer')).toBe('server')
@@ -114,14 +177,14 @@ test('how far a run is, read from the progress tools print and the line work is 
   expect(of('14/11/2026 done')).toEqual({ pct: undefined, done: undefined, total: undefined, rate: undefined })
   expect(of('loss 3/4 of baseline').done).toBeUndefined()
   // nor how full a memory or a disk is, a table cell, a log's date, a score or a test count (a second look on 15 Nov)
-  expect(of('epoch 3/10 step 100/1000 loss 0.5 mem 12.3G/80G')).toEqual({ pct: '30%', done: '3', total: '10', rate: undefined })
+  expect(of('epoch 3/10 step 100/1000 loss 0.5 mem 12.3G/80G')).toEqual({ pct: '30%', done: '3', total: '10 epochs', rate: undefined })
   expect(of('disk 460G/1.0T 45% used').done).toBeUndefined()
   expect(of('| 12 | 3/4 | 55 |').done).toBeUndefined()
   expect(of('[11/15 12:00:01] starting').done).toBeUndefined()
   expect(of('job finished with score 3/4').done).toBeUndefined()
   expect(of('Tests: 3/4 passed').done).toBeUndefined()
   expect(of('accuracy 95% on 1000/1000 samples').pct).toBeUndefined()
-  expect(of('step 300/1000 | loss 0.12 | 12.3GB/24.0GB | 45.0MB/s')).toMatchObject({ done: '300', total: '1,000' })
+  expect(of('step 300/1000 | loss 0.12 | 12.3GB/24.0GB | 45.0MB/s')).toMatchObject({ done: '300', total: '1,000 steps' })
   expect(of('| model-a | 12/50 | 24% |').done).toBeUndefined()
   expect(of('no progress: 3/6 were skipped').done).toBeUndefined()
   expect(of('progress: 7/6').done).toBeUndefined()

@@ -17,7 +17,7 @@ import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUD
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
-import { leftoversOf, memOf, leftName, PS_COLUMNS } from './jobs'
+import { leftoversOf, memOf, leftName, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import type { OpenCall, Proc, Span } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
@@ -5994,14 +5994,14 @@ const shareMine = async ($: EngineInterface) => {
     const seen = Object.fromEntries(
       [...(one.bg ?? []), ...(one.detached ?? [])].flatMap(job => {
         const s = jobLog.get(job.id)
-        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}) }]] : []
+        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}), ...(s.words ? { words: s.words } : {}), ...(s.isOwn ? { isOwn: true } : {}), ...(s.isEarlier ? { isEarlier: true } : {}), ...(s.isEmpty ? { isEmpty: true } : {}), ...(s.target ? { target: s.target } : {}) }]] : []
       }),
     )
     return Object.keys(seen).length ? { ...one, seenJobs: seen } : one
   }
   const cards = shareable(list, now).map(withSeen)
   const helpers = shareableHelpers(list, cards).map(withSeen)
-  const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}`).join('|')).join(' ')
+  const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}:${Math.floor((s.wroteAt ?? 0) / 30_000)}:${s.target ?? ''}`).join('|')).join(' ')
   const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
   const prompts: Prompt[] = waiting.map(shareOf)
   // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open
@@ -8826,7 +8826,7 @@ const keepBackground = async ($: EngineInterface, agent: string, call: { tool: s
 const WATCH_MOST = 30 * 60_000
 type EndedRun = NonNullable<Todo['endedRuns']>[number]
 // How a run ended, said plainly: on its card's summary and in Details
-const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => (run.how === 'failed' ? `failed${run.code ? ` (exit code ${run.code})` : ''}` : run.how === 'stopped' ? 'stopped by the work' : run.how)
+const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => (run.how === 'failed' ? `failed${run.code ? ` (exit code ${run.code})` : ''}` : run.how === 'stopped' ? 'stopped' : run.how)
 // The closing row under a card: how many helpers and runs have ended, then how many of the runs did not finish well, in words
 const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
@@ -8890,7 +8890,7 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; mem?: string; isUntold?: boolean; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; mem?: string; isUntold?: boolean; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -8911,6 +8911,9 @@ let tasksMissedAt = 0
 const callFiles = new Map<string, { file: string; at: number }>()
 // The file each row's output was last read from, by its id, so a press on the row can show it whole
 const jobFiles = new Map<string, string>()
+// A command held open is a row of its own once it has run this long, so no command runs past ten seconds without a line that
+// says how it goes (it was two minutes, and on 16 Nov commands ran for minutes with nothing on their card)
+const ROW_SHOWN = 10_000
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen): Job => {
@@ -8926,7 +8929,7 @@ const jobsOf = (one: Todo, at: number): Job[] =>
   foldJobs([
     ...(one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id])),
     ...(one.detached ?? []).map(d => jobOf(d.id, d.what, d.cmd, d.at, false, one.seenJobs?.[d.id])),
-    ...(one.status === 'working' && one.running?.cmd && !isWaitOnly(one.running.cmd) && at - one.running.at >= RUNNING_SHOWN
+    ...(one.status === 'working' && one.running?.cmd && at - one.running.at >= ROW_SHOWN
       ? [jobOf(`call-${one.id}`, one.running.label ?? '', one.running.cmd, one.running.at)]
       : []),
   ])
@@ -8986,9 +8989,9 @@ const lookJobs = async ($: EngineInterface) => {
   jobsLookedAt = now
   const list = await read($, todos)
   // Held open: a command a card has waited on long enough to be a row of its own
-  const held = list.flatMap(one => (one.status === 'working' && one.running?.cmd && now - one.running.at >= RUNNING_SHOWN ? [{ owner: one.id, id: `call-${one.id}`, cmd: one.running.cmd, at: one.running.at }] : []))
+  const held = list.flatMap(one => (one.status === 'working' && one.running?.cmd && now - one.running.at >= ROW_SHOWN ? [{ owner: one.id, id: `call-${one.id}`, cmd: one.running.cmd, at: one.running.at }] : []))
   // A row's command that changed (another held call of the same card ran longest) starts afresh
-  for (const [id, was] of callFiles) if (!held.some(h => h.id === id && h.at === was.at)) (callFiles.delete(id), jobLog.delete(id))
+  for (const [id, was] of callFiles) if (!held.some(h => h.id === id && h.at === was.at)) (callFiles.delete(id), jobLog.delete(id), silentTold.delete(id))
   const owned = [
     // A watch's output is its events, read as any other
     ...list.flatMap(one => (one.bg ?? []).map(b => ({ owner: one.id, id: b.id, file: '', pid: undefined as string | undefined }))),
@@ -9035,7 +9038,8 @@ const lookJobs = async ($: EngineInterface) => {
     return wait ? [{ id: j.id, wait }] : []
   }))
   const targets = waits.flatMap(w => (w.wait.file ? [w.wait.file] : []))
-  const isPs = now - jobProcsAt >= JOB_PS
+  // (sooner while a command held open is not yet found, so its row reads its output within seconds)
+  const isPs = now - jobProcsAt >= JOB_PS || (unfound.length > 0 && now - jobProcsAt >= JOB_LOOK)
   // One kept before process numbers were checked, such as 000, is never asked after: it counts as ended, and leaves its card
   const pids = owned.flatMap(o => (o.pid && isPid(o.pid) ? [o.pid] : []))
   // One go: the end of each output with when it last changed, when each polled file last changed, which detached processes still
@@ -9089,7 +9093,7 @@ const lookJobs = async ($: EngineInterface) => {
       if (runs.some(p => treeOf(jobProcs, p.pid).some(isPausedProc))) return 'what it waits for is paused'
     }
     const at = wait.file ? changed.get(wait.file) : undefined
-    return at && now - at >= JOB_QUIET ? `${wait.file?.split('/').at(-1)} unchanged ${shortAgo(now - at)}` : ''
+    return at && now - at >= JOB_QUIET ? `what it waits on has not changed for ${shortAgo(now - at)}` : ''
   }
   const parts = body.split(/\n@@JOB@@ ([^\n]*)\n/)
   let isChanged = false
@@ -9111,7 +9115,7 @@ const lookJobs = async ($: EngineInterface) => {
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
     const next: Seen = { ...seen, ...memSeen(job?.pid), tail: tailOf(text), ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
+    const isSame = was?.latest === next.latest && was?.words === next.words && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
     // Memory alone moving (a MB or so at each look) is kept for the next drawing, never a reason to draw the panel afresh under the pointer
     if (isSame) {
       if (was?.mem !== next.mem) jobLog.set(id, next)
@@ -9140,6 +9144,8 @@ const lookJobs = async ($: EngineInterface) => {
     for (const id of ended) (jobLog.delete(id), shellMissed.delete(id))
     isChanged = true
   }
+  // (not waited for: a work's chat may take its time to take a line, and the look goes on meanwhile)
+  void tellSilent($, list, now).catch(err => log($, `silent runs not told: ${String(err)}`))
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
   if (isChanged) void drawFresh($)
@@ -9238,6 +9244,92 @@ const isLike = (command: string, pattern: string) => {
   } catch {
     return command.includes(pattern)
   }
+}
+
+// A press on Stop on a run's row ends it: a command sent to the background is stopped as the engine stops one, a command started
+// detached or left going has its process and all it started ended, a command held open has its shell's processes ended (the work's
+// call then comes back with it ended). The work is told in its own chat that the person stopped it as stuck, and what to do next.
+// On this Mac only, as the processes are this Mac's
+const canStopJob = (job: Job) => !isRunFromAfar && !job.id.startsWith('more-')
+const stoppingJobs = new Set<string>()
+const RUN_STOPPED = (what: string, silent: string) =>
+  silent
+    ? `${who(true)} stopped your run "${what}" from the panel as stuck: it had given no word for ${silent}. A run must never be stuck or silent. Do not start it again as it was: find out why it stalled, make it print a plain \`progress:\` line at least every 10 seconds, and start it again only if it is still needed.`
+    : `${who(true)} stopped your run "${what}" from the panel. Do not start it again unless ${who()} asks for it; carry on without it, or ask them if you need it.`
+const stopJob = async ($: EngineInterface, owner: string, job: Job) => {
+  if (!canStopJob(job) || stoppingJobs.has(job.id)) return
+  stoppingJobs.add(job.id)
+  presses += 1
+  drawAgain($)
+  try {
+    await stopping($, owner, job)
+  } finally {
+    stoppingJobs.delete(job.id)
+    presses += 1
+    jobsLookedAt = 0
+    void drawFresh($)
+  }
+}
+const stopping = async ($: EngineInterface, owner: string, job: Job) => {
+  const now = await $.clock.now()
+  const list = await read($, todos)
+  const card = list.find(one => one.id === owner)
+  const bg = card?.bg?.find(b => b.id === job.id)
+  const detached = card?.detached?.find(d => d.id === job.id)
+  // The processes to end: the detached one's, or the held shell's, with every process under them
+  const procs = jobProcs.length ? jobProcs : procsOf((await $.process.run(['ps', '-axww', '-o', PS_COLUMNS], { timeoutMs: 5000 }).catch(() => ({ stdout: '' }))).stdout, now)
+  // A background command's own shell, found as the look finds it, so it is ended even where the engine does not stop it
+  const bgShell = bg && !bg.isWatch && procs.length ? shellsOf(procs, [{ id: bg.id, cmd: bg.cmd ?? '', at: bg.at }]).get(bg.id) : undefined
+  const top = detached?.pid ?? (typeof bgShell === 'string' ? bgShell : undefined) ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined)
+  // (the top one itself even where the processes could not be listed)
+  const pids = top ? [...new Set([top, ...treeOf(procs, top).map(p => p.pid)])].filter(isPid) : []
+  let isStopped = false
+  if (bg) {
+    const r = await $.tool.call({ tool: 'TaskStop', task_id: bg.id }).catch(err => ({ deny: String(err) }))
+    if ((r as { deny?: unknown }).deny) await log($, `run ${bg.id} not stopped by the engine: ${String((r as { deny?: unknown }).deny)}`)
+    else isStopped = true
+  }
+  // Asked to end, then made to a moment later if it has not
+  if (pids.length) {
+    const r = await $.process.run(['sh', '-c', 'kill -TERM "$@" 2>/dev/null; sleep 2; for p; do kill -0 "$p" 2>/dev/null && kill -KILL "$p" 2>/dev/null; done; for p; do kill -0 "$p" 2>/dev/null && exit 1; done; exit 0', 'sh', ...pids], { timeoutMs: 10_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
+    if (r.exitCode === 0) isStopped = true
+    else await log($, `run ${job.id} not wholly stopped: ${String((r as { stderr?: unknown }).stderr ?? '').trim().slice(0, 160)}`)
+  }
+  // Nothing found to stop: nothing is said to have stopped, and the row stays as it is
+  if (!isStopped) return void (await log($, `run ${job.id} of work ${owner} could not be stopped: nothing of it was found`))
+  if (bg) await dropBackground($, [bg.id], 'stopped')
+  if (detached) {
+    await changeTodos($, cards => cards.map(one => (one.id === owner && one.detached?.some(d => d.id === job.id) ? { ...one, detached: one.detached.filter(d => d.id !== job.id).length ? one.detached.filter(d => d.id !== job.id) : undefined, ...keepEnded(one, [{ id: detached.id, what: detached.what, at: detached.at, endedAt: now, how: 'stopped' }]) } : one)))
+  }
+  const silent = job.wroteAt && !job.isEmpty ? now - job.wroteAt : now - job.at
+  void tell($, owner, RUN_STOPPED(job.label, silent >= SILENT_WARN ? shortAgo(silent) : ''))
+  await log($, `the person stopped run ${job.id} of work ${owner}${pids.length ? ` (${pids.length} processes)` : ''}`)
+  jobLog.delete(job.id)
+  silentTold.delete(job.id)
+}
+
+// A run of a piece of work that has given no word for a minute is named to that work once, in its own chat: a run is never to be
+// stuck or silent, so it stops it or makes it report. Not a server or a watch, which speak only when there is something to say
+const RUN_SILENT_TOLD = 60_000
+const silentTold = new Set<string>()
+const RUN_SILENT = (what: string, silent: string) =>
+  `Your run "${what}" has given no word for ${silent}. Look at it now: if it is stuck, stop it (TaskStop for a background command, kill for a detached one) and find out why; if it is still working, let it finish, and make what you run next print a plain \`progress:\` line at least every 10 seconds.`
+const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
+  for (const one of list) {
+    if (one.status !== 'working') continue
+    for (const job of jobsOf(one, now)) {
+      // (not one paused, one whose output cannot be read, or the mod's own runners, which say how they go themselves)
+      if (job.kind === 'server' || job.kind === 'watch' || job.id.startsWith('more-') || silentTold.has(job.id) || job.isPaused || job.isUntold || /\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(job.cmd)) continue
+      if (!job.wroteAt) continue
+      const silent = job.isEmpty ? now - job.at : now - job.wroteAt
+      if (silent < RUN_SILENT_TOLD) continue
+      silentTold.add(job.id)
+      void tell($, one.id, RUN_SILENT(job.label, shortAgo(silent)))
+      await log($, `work ${one.id} told its run ${job.id} has been silent ${shortAgo(silent)}`)
+    }
+  }
+  // (a run that speaks again may be named again when it next goes silent)
+  for (const id of silentTold) if (jobLog.get(id)?.wroteAt && now - (jobLog.get(id)?.wroteAt ?? 0) < RUN_SILENT_TOLD) silentTold.delete(id)
 }
 
 // A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
@@ -10027,6 +10119,10 @@ const asksNow = (list: Todo[], agent: string) => {
 }
 const NO_PERSON_WAIT = (name: string) =>
   `Not run: this waits for ${name}, and a wait with a time limit gives them one. Do not wait for ${name} with a command at all. End your step now: your ask stays on the card for as long as it takes, and ${name}'s answer starts you again the moment they give it. Anything you need to see of what they did (a recording, a file, a page) you look at once their answer has come.`
+const NO_PROGRESS_WAIT =
+  'Not run: this wait would give no word of how it goes. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
+const NO_PROGRESS_SCRIPT =
+  'Not run: this long run would give no word of how far it is. Make its script print, flushed at once, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
 const MOVED_BACK = (name: string) =>
   `This command may run for minutes, so it was started in the background rather than held open: ${name}'s replies reach you while it runs. You are told when it ends; its output is in the file named above. Carry on with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 
@@ -10181,6 +10277,16 @@ const workHooks = (on: On) => {
     if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
       await log($, `refused work ${e.agentId}'s wait for the person: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       return { deny: NO_PERSON_WAIT(who()) }
+    }
+    // Every run says how it goes at least every 10 seconds: a long wait or script of the work's own that would say nothing is not
+    // started, and the work is told in one sentence how to make it report
+    if (dir && !isOff && e.agentId !== undefined && e.tool === 'Bash') {
+      const command = String((e as { command?: unknown }).command ?? '')
+      const silent = reportsOf(command, String((e as { description?: unknown }).description ?? ''), Boolean((e as { run_in_background?: unknown }).run_in_background), await scriptsRun($, command), Number((e as { timeout?: unknown }).timeout ?? 0))
+      if (silent) {
+        await log($, `refused work ${e.agentId}'s ${silent === 'wait' ? 'wait' : 'long script'} that gives no progress`)
+        return { deny: silent === 'wait' ? NO_PROGRESS_WAIT : NO_PROGRESS_SCRIPT }
+      }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
@@ -11905,26 +12011,33 @@ const panelHooks = (on: On) => {
       const fresh = left ? timeLeftText(Math.max(ran / 1000, printedAt / 1000 + left))?.replace(/ left$/, '') : undefined
       return fresh ? { time: `${took(ran)} of ~${fresh}`, isPast: false } : { time: `${took(ran)} · past ~${job.expectText}`, isPast: true }
     }
+    // Every run's second line has the one shape plainOf describes: how far, a few plain words, and its sign of life, which changes
+    // as time goes so the line never stands still while the run goes on. Nothing raw is shown: a line that is not plain words is
+    // left out, and a run that has given no word says so and for how long, in amber past a few minutes
     const jobStand = (job: Job, width: number) => {
       const pct = job.pct ? [job.pct] : []
-      const quiet = job.wroteAt ? at - job.wroteAt : 0
+      const quiet = job.wroteAt && !job.isEmpty ? at - job.wroteAt : undefined
       const ran = at - job.at
+      // (to ten seconds past a minute, so the line moves at each drawing however long it has been)
+      const ago = (ms: number) => {
+        const all = Math.max(0, Math.floor(ms / 1000))
+        return all < 60 || all >= 3600 ? shortAgo(ms) : `${Math.floor(all / 60)}m ${String(Math.floor((all % 60) / 10) * 10).padStart(2, '0')}s`
+      }
       const [state, short, isWarn]: [string, string, boolean] =
         job.isPaused ? ['paused', 'paused', true]
-        : job.kind === 'wait' && (job.target || !job.wroteAt || job.isEmpty) ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
-        : job.kind === 'watch' ? (job.wroteAt && !job.isEmpty ? [`last event ${shortAgo(quiet)} ago`, `event ${shortAgo(quiet)} ago`, false] : ['no event yet', 'no event', false])
-        // A run left going whose output goes to no file: it runs, and gives no progress (nothing is warned of, as it was never told)
-        : job.isUntold ? ['running, no progress given', 'no progress given', false]
-        : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
-        // (a server prints only when asked, so its quiet is no warning)
-        : job.wroteAt && quiet >= JOB_QUIET && job.kind !== 'server' ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
-        : job.wroteAt ? ['', '', false]
-        // A job whose output cannot be found says so, so a blank row is never taken for one that moves
-        : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', 'no output', true]
+        : job.target ? [job.target, job.target.replace(/^what it waits (?:for|on) (?:is|has) /, '').replace(/^not changed for /, 'still for '), true]
+        // A server or a watch speaks only when there is something to say, so its quiet is no fault
+        : job.kind === 'server' ? ['serving', 'serving', false]
+        : job.kind === 'watch' ? ['watching', 'watching', false]
+        // Any other run gives word at least every 10 seconds: past that it is silent, and from a minute that is a fault, in amber.
+        // While it gives word nothing is said of when (a run is never to be anything but active)
+        // (one whose output has not been read yet is not known to be silent until a minute has passed)
+        : quiet === undefined && !job.isEmpty && ran < SILENT_WARN ? ['', '', false]
+        : (quiet ?? ran) >= SILENT_AFTER ?[`silent for ${ago(quiet ?? ran)}`, `silent ${ago(quiet ?? ran)}`, (quiet ?? ran) >= SILENT_WARN]
         : ['', '', false]
-      const warn = isWarn && Boolean(state)
+      const warn = isWarn
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
-      const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
+      const isFresh = quiet !== undefined && quiet < SILENT_AFTER
       const guess = guessLeft(job, ran)
       const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
@@ -11932,10 +12045,20 @@ const panelHooks = (on: On) => {
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
       // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
-      // the memory it holds, where it is known, until the line has no room for it
-      const mem = job.mem ? [job.mem] : []
-      const text = firstFit([[...full, ...pct, ...rate, ...left, state, ...mem], [...full, ...pct, ...rate, ...left, short, ...mem], [...full, ...pct, ...left, short, ...mem], [...compact, ...pct, ...left, short, ...mem], [...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
-      return { text, isWarn: warn }
+      // The memory it holds only where it is a gigabyte or more, said as memory, as it counts against what this Mac may hold; a few
+      // megabytes say nothing to a person (16 Nov a row led with "35 MB"), and it goes first when the line has no room
+      const mem = job.mem && /\b[GT]B\b/.test(job.mem) ? [`${job.mem} memory`] : []
+      const far = firstFit([[...full, ...pct, ...rate, ...left, state, ...mem], [...full, ...pct, ...left, short, ...mem], [...compact, ...pct, ...left, short, ...mem], [...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...compact, ...left], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
+      // Its own plain words go before its sign of life, cut to the room left; a watch's are its last event
+      // (none once it has been quiet for minutes: they would be old news)
+      const words = warn ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, `${job.label} ${job.waitsFor ?? ''}`)
+      const parts = far ? far.split(' · ') : []
+      const end = state && (parts.at(-1) === state || parts.at(-1) === short) ? parts.length - 1 : parts.length
+      const room = width - far.length - (far ? 3 : 0)
+      const said = words && room >= 12 ? (words.length <= room ? words : `${words.slice(0, room - 1).replace(/\s+\S*$/, '')}…`) : ''
+      const text = said ? [...parts.slice(0, end), said, ...parts.slice(end)].join(' · ') : far
+      // A run that gives word but says nothing plain of how far it is or what it does: that it is at work, and its kind's word
+      return { text: text || (job.kind === 'wait' ? 'waiting' : job.kind === 'download' ? 'downloading' : 'working'), isWarn: warn }
     }
     // A job's two lines: what it is, in the work's own words, with its time; and under it how it stands, then the latest line it
     // printed where that is not the progress already said
@@ -11946,6 +12069,10 @@ const panelHooks = (on: On) => {
       const width = perRow - 4 - t.depth * 2
       const ran = at - job.at
       const { time, isPast: isLong } = jobTime(job, ran)
+      // Stop, at its end, where it can be stopped from here: it ends the run and tells the work it was stuck
+      const owner = t.one?.id ?? ''
+      // (not on a row too narrow to say how far it is beside it; Details, wider, has it)
+      const isStoppable = Boolean(owner) && canStopJob(job) && !job.id.startsWith('more-') && width >= 44
       const name = cut(jobHead(job), Math.max(12, width - time.length - 1))
       const head = (
         <Box key={`twig-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
@@ -11964,15 +12091,17 @@ const panelHooks = (on: On) => {
         </Box>
       )
       if (job.id.startsWith('more-')) return head
-      const { text: stand, isWarn } = jobStand(job, width)
+      // (Stop sits at the end of its second line, under its time, so its name keeps its room)
+      const stopButton = isStoppable ? (
+        <Box key={`stop-box-${key}`} flexShrink={0}>
+          <Button key={`stop-${key}-${presses}`} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop run'} plain hover={{ scope: `stop-${key}`, underline: true }} onPress={() => void stopJob($, owner, job).catch(err => log($, `run not stopped: ${String(err)}`))} />
+        </Box>
+      ) : null
+      const { text: stand, isWarn } = jobStand(job, width - (isStoppable ? 10 : 0))
       // Its percent, in blue, where the line says it as a part of its own
       const pctAt = job.pct && !isWarn ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
-      // The latest line, unless it is only a progress bar its percent already says; a wait says the work's own words for it.
-      // A run read from a progress line above its last still shows the last, such as an error after it
-      const latest = job.kind === 'wait' && job.waitsFor ? (job.isNamed && !isKindSaid(job.label) ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
-      const rest = width - stand.length - (stand ? 3 : 0)
-      const detail = latest && rest >= 10 ? cut(latest, rest) : ''
-      if (!stand && !detail) return head
+      // (its plain words are in the line itself, which every run has)
+      const detail = ''
       return (
         <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
           {head}
@@ -11997,6 +12126,7 @@ const panelHooks = (on: On) => {
                 </Box>
               ) : null}
             </Box>
+            {stopButton}
           </Box>
         </Box>
       )
@@ -12340,8 +12470,8 @@ const panelHooks = (on: On) => {
     const underTwig = (t: Twig) => {
       const pad = t.depth * 2 + 4
       if (t.job) {
-        // the line its row already says is not said again
-        const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).filter(line => line.trim() !== (t.job?.latest ?? '').trim()).slice(-OUTPUT_LINES)
+        // (its row says it in plain words, so the last line is here as it was printed too)
+        const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).slice(-OUTPUT_LINES)
         if (!tail.length) return null
         return (
           <Box key={`tail-${t.job.id}`} flexDirection="row" paddingLeft={pad} flexShrink={0}>
