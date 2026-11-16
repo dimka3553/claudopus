@@ -42,7 +42,9 @@ test('a chat whose ended tasks have records of 4 MB and 170 MB loads without hol
   const folder = `${HOME}/.claude/projects/-repo/engine-id/subagents`
   // Forty ended tasks just under what the engine gives whole, and two far over it, as the 16 Nov chat had (169 MB)
   const near = recordOf(4_100_000)
-  const huge = near.repeat(42)
+  // (one over the 4 MB the engine gives whole takes the same way at any size: its end is read, so twice that stands for 170 MB here,
+  // and the areas' tests running beside this one are not slowed by a string of that size)
+  const huge = near.repeat(2)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   let least = Infinity
   for (let round = 0; round < TRIES && least >= HOLD_MOST; round++) {
