@@ -20,8 +20,10 @@ sed -e "s#^gh_bin=.*#gh_bin=$tmp/bin/gh#" -e 's#^\[ "\$granted" = granted \] || 
 chmod +x "$tmp/bin/release"
 [ "$(grep -cE "^gh_bin=$tmp/bin/gh\$|^granted=granted; " "$tmp/bin/release")" = 2 ] || { echo "FAIL the runner's copy could not be made"; exit 1; }
 
-# The stand-in for gh. A run of a commit takes $S/secs seconds and fails, in the job "check (linux)", when the commit's linux-red
-# names tests. Main's own runs on a push are found by commit, ended at once
+# The stand-in for gh, answering the calls the runner makes in the shapes GitHub's API gives them. A run of a commit has two jobs:
+# "check (linux)", ended after $S/secs seconds, failing when the commit's linux-red names tests (a line each, written as the
+# shell tests write them: FAIL <name>, or as given when it starts NOT OK), and "check (mac)", ended three seconds later, passing.
+# Main's own runs on a push are found by commit and ended at once. Logs carry GitHub's time stamps, the first line its BOM
 cat >"$tmp/bin/gh" <<EOF
 #!/bin/bash
 S=$S R=$R
@@ -32,9 +34,13 @@ jq= prev= url= sha=
 for a in "$@"; do [ "$prev" = --jq ] && jq=$a; case $a in repos/*) url=$a ;; inputs\[sha\]=*) sha=${a#*=} ;; esac; prev=$a; done
 red() { git -C $R show "$1:linux-red" 2>/dev/null | grep .; }
 concl() { [ -n "$(red "$1")" ] && echo failure || echo success; }
-state() { # <run id>: status, conclusion and commit
-  if [ -f $S/runs/$1 ]; then read -r c h t <$S/runs/$1; [ $(( $(date +%s) - t )) -ge "$secs" ] && echo "completed $(concl $c) $c" || echo "in_progress - $c"
-  else echo "completed $(concl $(cat $S/push/$1)) $(cat $S/push/$1)"; fi
+# <run id> <job: 0 linux, 1 mac, or run>: status, conclusion and commit
+state() {
+  local c h t age=999 need
+  if [ -f $S/runs/$1 ]; then read -r c h t <$S/runs/$1; age=$(( $(date +%s) - t )); else c=$(cat $S/push/$1); fi
+  case $2 in 0) need=$secs ;; *) need=$((secs + 3)) ;; esac
+  [ $age -ge $need ] || { echo "in_progress - $c"; return; }
+  case $2 in 0 | run) echo "completed $(concl $c) $c" ;; 1) echo "completed success $c" ;; esac
 }
 [ "$1" = auth ] && exit 0
 case $url in
@@ -46,22 +52,30 @@ case $url in
     git -C $R merge-base --is-ancestor $c main 2>/dev/null || exit 0
     id=$(grep -lx $c $S/push/* 2>/dev/null | head -1); id=${id##*/}
     [ -n "$id" ] || { id=$(( $(cat $S/p 2>/dev/null || echo 900) + 1 )); echo $id >$S/p; echo $c >$S/push/$id; }
-    set -- $(state $id); printf '%s\t%s\t%s\n' $id completed $2 ;;
+    set -- $(state $id run); printf '%s\t%s\t%s\n' $id completed $2 ;;
   *'runs?event=workflow_dispatch'*)
     want=$(printf %s "$jq" | grep -oE 'Release check [0-9a-f]{40}' | cut -d' ' -f3)
     for f in $S/runs/*; do
       [ -f "$f" ] || continue; read -r c h t <$f; [ "$c" = "$want" ] || continue
-      id=${f##*/}; set -- $(state $id)
+      id=${f##*/}; set -- $(state $id run)
       case $jq in *status*) printf '%s\t%s\t%s\n' $id $1 "$([ $1 = completed ] && echo $2)" ;; *) printf '%s\t%s\n' $id $h ;; esac
     done ;;
-  */jobs/*/logs) id=${url%/logs}; id=${id##*/}; id=$((id / 10)); set -- $(state $id); red $3 | sed 's/^/2026-01-01T00:00:00.0000000Z FAIL /' ;;
+  */jobs/*/logs)
+    id=${url%/logs}; id=${id##*/}; job=$((id % 10)); id=$((id / 10)); set -- $(state $id $job)
+    printf '\357\273\2772026-01-01T00:00:00.0000000Z Set up job\n'
+    [ $job = 0 ] && red $3 | sed -e '/^NOT OK/!s/^/FAIL /' -e 's/^/2026-01-01T00:00:01.1234567Z /'
+    [ $job = 0 ] && [ -n "$(red $3)" ] && echo "2026-01-01T00:00:02.0000000Z ##[error]Process completed with exit code 1." ;;
   */jobs*)
-    id=${url#*/runs/}; id=${id%%/*}; set -- $(state $id)
-    case $jq in
-      *html_url*) printf '%s\t%s\t%s\t%s\n' "check (linux)" $1 "$([ $1 = completed ] && echo $2)" "https://example/$id" ;;
-      *) [ $1 = completed ] && [ $2 = failure ] && printf '%s\t%s\t%s\t%s\n' $((id * 10)) "check (linux)" failure "The tests pass" ;;
-    esac ;;
-  */runs/*) id=${url##*/}; set -- $(state $id); printf '%s\t%s\n' $1 "$([ $1 = completed ] && echo $2)" ;;
+    id=${url#*/runs/}; id=${id%%/*}
+    for job in 0 1; do
+      set -- $(state $id $job); name="check (linux)"; [ $job = 1 ] && name="check (mac)"
+      done=$([ $1 = completed ] && echo $2)
+      case $jq in
+        *html_url*) printf '%s\t%s\t%s\t%s\n' "$name" $1 "$done" "https://example/$id/$job" ;;
+        *) printf '%s\t%s\t%s\t%s\t%s\n' $((id * 10 + job)) "$name" $1 "${done:-none}" "$([ "$done" = failure ] && echo "The tests pass")" ;;
+      esac
+    done ;;
+  */runs/*) id=${url##*/}; set -- $(state $id run); printf '%s\t%s\n' $1 "$([ $1 = completed ] && echo $2)" ;;
 esac
 exit 0
 EOF
@@ -75,7 +89,7 @@ git config user.email t@t; git config user.name t
 cat >.release <<'EOF'
 VERSION_FILE=version.txt
 CHECK="sh check.sh"
-GITHUB_CHECKS="check (linux)"
+GITHUB_CHECKS="check (linux), check (mac)"
 EOF
 printf 'sleep 1\n[ ! -e mac-red ]\n' >check.sh
 echo 1.0.0 >version.txt
@@ -104,7 +118,7 @@ echo 3 >"$S/secs"
 branch alone
 release alone
 one=$(took alone)
-[ "$(exit_of alone)" = 0 ] && on_main alone.txt && ok "a release alone goes out (${one} s)" || { no "a release alone goes out"; cat "$tmp/out/alone"; }
+[ "$(exit_of alone)" = 0 ] && on_main alone.txt && ok "a release alone goes out" || { no "a release alone goes out"; cat "$tmp/out/alone"; }
 
 # 2. Three released at once are checked side by side, each on the one ahead, and land in turn, each with its own number; none
 # goes quiet past its beat
@@ -115,11 +129,13 @@ sleep 0.3; touch "$barrier"; wait
 barrier=
 all=$(perl -e 'printf "%.1f", $ARGV[1] - $ARGV[0]' "$(head -1 "$tmp/out/a" | cut -d' ' -f1)" "$(for n in a b c; do tail -1 "$tmp/out/$n" | cut -d' ' -f1; done | sort -n | tail -1)")
 if [ "$(exit_of a)$(exit_of b)$(exit_of c)" = 000 ] && on_main a.txt && on_main b.txt && on_main c.txt; then ok "three at once all go out"; else no "three at once all go out"; tail -5 "$tmp/out/a" "$tmp/out/b" "$tmp/out/c"; fi
-[ "$(git -C "$tmp/repo" show origin/main:version.txt)" = 1.0.4 ] && [ "$(git -C "$tmp/repo" ls-remote --tags origin 'v1.0.*' | wc -l | tr -d ' ')" = 4 ] && ok "each has its own number, 1.0.2 to 1.0.4, and its tag" || no "each has its own number and its tag (main has $(git -C "$tmp/repo" show origin/main:version.txt))"
-perl -e 'exit !($ARGV[0] < 2 * $ARGV[1])' "$all" "$one" && ok "three at once take less than two alone ($all s against $one s alone)" || no "three at once take less than two alone ($all s against $one s alone)"
+[ "$(git -C "$tmp/repo" show origin/main:version.txt)" = 1.0.4 ] && [ "$(git -C "$tmp/repo" ls-remote --tags origin 'v1.0.*' | wc -l | tr -d ' ')" = 4 ] && ok "each has its own number, 1.0.2 to 1.0.4, and its tag" || { no "each has its own number, 1.0.2 to 1.0.4, and its tag"; echo "     main has $(git -C "$tmp/repo" show origin/main:version.txt)"; }
+echo "     three at once took $all s, one alone $one s"
+perl -e 'exit !($ARGV[0] < 2 * $ARGV[1])' "$all" "$one" && ok "three at once take less than two alone" || no "three at once take less than two alone"
 q=$(for n in a b c; do quiet_of $n; done | sort -n | tail -1)
-[ "$q" -le 3 ] && ok "none of them goes quiet for more than a few seconds (at most $q s, with a beat of 1 s)" || { no "none of them goes quiet for more than a few seconds (one went $q s)"; }
-[ -z "$(ls "$tmp/locks" | grep -v '\.line$')" ] && [ -z "$(ls "$tmp/locks/"*.line 2>/dev/null | grep -v '^seq$')" ] && ok "the lock and the line are left empty" || no "the lock and the line are left empty: $(ls -R "$tmp/locks")"
+echo "     the longest any went quiet: $q s, with a beat of 1 s"
+[ "$q" -le 3 ] && ok "none of them goes quiet for more than a few seconds" || no "none of them goes quiet for more than a few seconds"
+[ -z "$(ls "$tmp/locks" | grep -v '\.line$')" ] && [ -z "$(ls "$tmp/locks/"*.line 2>/dev/null | grep -v '^seq$')" ] && ok "the lock and the line are left empty" || { no "the lock and the line are left empty"; ls -R "$tmp/locks"; }
 
 # 3. The one ahead fails GitHub's checks with a failure of its own: it alone is refused, and the one behind, checked on top of it,
 # is made again on main and goes out by itself
@@ -140,9 +156,9 @@ git -C "$tmp/wt-red" add -A && git -C "$tmp/wt-red" commit -qm "red main" && REL
 branch plain; release plain
 [ "$(exit_of plain)" = 0 ] && on_main plain.txt && ok "on a main that fails, a release that brings no failure of its own goes out" || { no "on a main that fails, a release that brings no failure of its own goes out"; tail -5 "$tmp/out/plain"; }
 grep -q 'failed only where main already fails' "$tmp/out/plain" && ok "it says main already failed there" || no "it says main already failed there"
-branch worse; printf 'one watcher at a time\na file it cannot carry whole\na new fault\n' >"$tmp/wt-worse/linux-red"; git -C "$tmp/wt-worse" commit -qam worse
+branch worse; printf 'one watcher at a time\na file it cannot carry whole\nNOT OK 7 - the gate holds\n' >"$tmp/wt-worse/linux-red"; git -C "$tmp/wt-worse" commit -qam worse
 release worse
-[ "$(exit_of worse)" = 3 ] && ! on_main worse.txt && grep -q 'what this release brings: check (linux): a new fault' "$tmp/out/worse" && ok "one that brings a new failure is refused, naming only that one" || { no "one that brings a new failure is refused, naming only that one"; tail -4 "$tmp/out/worse"; }
+[ "$(exit_of worse)" = 3 ] && ! on_main worse.txt && grep -q 'what this release brings: check (linux): the gate holds;' "$tmp/out/worse" && ok "one that brings a new failure is refused, naming only that one" || { no "one that brings a new failure is refused, naming only that one"; tail -4 "$tmp/out/worse"; }
 branch half; printf 'a file it cannot carry whole\n' >"$tmp/wt-half/linux-red"; git -C "$tmp/wt-half" commit -qam half
 release half
 [ "$(exit_of half)" = 0 ] && [ "$(git -C "$tmp/repo" show origin/main:linux-red)" = "a file it cannot carry whole" ] && ok "a fix of one of main's failures goes out while the other still fails" || { no "a fix of one of main's failures goes out while the other still fails"; tail -5 "$tmp/out/half"; }
@@ -151,7 +167,7 @@ release half
 echo 8 >"$S/secs"
 branch mac; touch "$tmp/wt-mac/mac-red"; git -C "$tmp/wt-mac" add -A; git -C "$tmp/wt-mac" commit -qm mac
 release mac
-[ "$(exit_of mac)" = 3 ] && ! on_main mac.txt && perl -e 'exit !($ARGV[0] < 7)' "$(took mac)" && ok "a release whose checks on this Mac fail is refused before GitHub ends ($(took mac) s)" || { no "a release whose checks on this Mac fail is refused before GitHub ends ($(took mac) s)"; tail -4 "$tmp/out/mac"; }
+[ "$(exit_of mac)" = 3 ] && ! on_main mac.txt && perl -e 'exit !($ARGV[0] < 7)' "$(took mac)" && ok "a release whose checks on this Mac fail is refused before GitHub ends" || { no "a release whose checks on this Mac fail is refused before GitHub ends"; tail -4 "$tmp/out/mac"; }
 
-[ -z "$(git -C "$R" for-each-ref refs/release-check)" ] && ok "no commit is left waiting on GitHub's checks" || no "no commit is left waiting on GitHub's checks: $(git -C "$R" for-each-ref refs/release-check)"
+[ -z "$(git -C "$R" for-each-ref refs/release-check)" ] && ok "no commit is left waiting on GitHub's checks" || { no "no commit is left waiting on GitHub's checks"; git -C "$R" for-each-ref refs/release-check; }
 [ "$fails" -eq 0 ] && echo "release.test.sh: all passed" || { echo "release.test.sh: $fails failed"; exit 1; }

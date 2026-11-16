@@ -77,7 +77,14 @@ locks=${RELEASE_LOCKS:-$HOME/.claude/claudopus/locks}
 lock="$locks/$(printf %s "$url" | shasum | cut -c1-12).lock"
 
 if [ "${1:-}" = --status ]; then
-  if [ -d "$lock" ] && kill -0 "$(cat "$lock/pid" 2>/dev/null)" 2>/dev/null; then echo "releasing now: $(cat "$lock/who" 2>/dev/null)"; else echo "no release running for $(basename "$top")"; fi
+  n=0
+  for e in $(ls "$lock.line" 2>/dev/null | grep -E '^[0-9]{8}$' | sort); do
+    p=$(sed -n 's/^pid=//p' "$lock.line/$e" | head -1); at=$(sed -n 's/^started=//p' "$lock.line/$e" | head -1)
+    [ -n "$p" ] && [ "$(ps -o lstart= -p "$p" 2>/dev/null | tr -s ' ')" = "$at" ] || continue
+    echo "releasing now: $(sed -n 's/^branch=//p' "$lock.line/$e" | head -1), at $(sed -n 's/^stage=//p' "$lock.line/$e" | head -1)"; n=$((n + 1))
+  done
+  [ -d "$lock" ] && kill -0 "$(cat "$lock/pid" 2>/dev/null)" 2>/dev/null && { echo "taking its place in line: $(cat "$lock/who" 2>/dev/null)"; n=$((n + 1)); }
+  [ $n -gt 0 ] || echo "no release running for $(basename "$top")"
   exit 0
 fi
 title=
@@ -154,20 +161,33 @@ fi
 mkdir -p "$locks"
 line="$lock.line"
 mkdir -p "$line"
-# A line, flushed, at least every RELEASE_BEAT seconds (10, or 1 to 10 for trials) while a release waits on anything, saying what
-# for: `progress: <seconds so far>/<seconds expected> s <what>`
+# A line, flushed, at least every RELEASE_BEAT seconds (10, or 1 to 10 for trials) whatever the release is at, saying what:
+# `progress: <seconds so far> s <what>`. The waits say it in their own words; a ticker beside the release says the stage it is at
+# whenever nothing else was said for a beat (a build, a push, logs read from GitHub)
 beat=${RELEASE_BEAT:-10}; case $beat in '' | *[!0-9]* | 0) beat=10 ;; esac; [ "$beat" -gt 10 ] && beat=10
-started=$(date +%s) last_tick=0 expect=600
+started=$(date +%s) last_tick=0
+beatf=
 tick() {
   local now; now=$(date +%s)
   [ $((now - last_tick)) -ge "$beat" ] || return 0
   last_tick=$now
-  local so_far=$((now - started))
-  [ $so_far -ge $((expect - 30)) ] && expect=$((so_far + 120))
-  echo "progress: $so_far/$expect s $1, eta $(( (expect - so_far + 59) / 60 )) min" >&2
+  echo "progress: $((now - started)) s $1" >&2
+  [ -n "$beatf" ] && : >"$beatf"
+  return 0
+}
+# What the ticker says when the release itself says nothing
+stage() { [ -n "$beatf" ] && printf '%s\n' "$1" >"$beatf.stage"; set_me stage "$1"; return 0; }
+start_ticker() {
+  beatf="$1"; : >"$beatf"; echo "starting" >"$beatf.stage"
+  ( trap - EXIT; while kill -0 "$2" 2>/dev/null; do
+      sleep "$beat"
+      /usr/bin/perl -e 'my @s = stat shift or exit 1; exit(time - $s[9] < shift ? 0 : 1)' "$beatf" "$beat" && continue
+      kill -0 "$2" 2>/dev/null || break
+      echo "progress: $(( $(date +%s) - $3 )) s $(cat "$beatf.stage" 2>/dev/null)" >&2; : >"$beatf"
+    done ) &
 }
 # Never longer than 90 minutes in all, whatever it waits for
-too_long() { [ $(( $(date +%s) - started )) -gt 5400 ] && die "ran 90 minutes without its turn coming; nothing pushed to ${MAIN:-main}" 3; return 0; }
+too_long() { [ $(( $(date +%s) - started )) -gt 5400 ] && { stop_checks; drop_candidate; die "ran 90 minutes without landing; nothing pushed to ${MAIN:-main}" 3; }; return 0; }
 have_lock=
 take_lock() {
   local waited=0 holder
@@ -197,7 +217,10 @@ me=
 val() { sed -n "s/^$2=//p" "$1" 2>/dev/null | head -1; }
 put_me() { local t="$me.tmp.$$"; printf '%s\n' "$@" >"$t" && mv -f "$t" "$me"; }
 set_me() { [ -n "$me" ] && [ -f "$me" ] || return 0; local t="$me.tmp.$$"; { grep -v "^$1=" "$me"; echo "$1=$2"; } >"$t" && mv -f "$t" "$me"; }
-alive() { local p; p=$(val "$1" pid); [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
+# (a release's process by its number and its start time, so a number used again by another process is no release)
+started_of() { ps -o lstart= -p "$1" 2>/dev/null | tr -s ' '; }
+alive() { local p; p=$(val "$1" pid); [ -n "$p" ] && kill -0 "$p" 2>/dev/null && [ "$(started_of "$p")" = "$(val "$1" started)" ]; }
+my_start=$(started_of $$)
 # The release ahead of this one is settled for this one's commit once it is gone, died, or no longer stands on the commit this one
 # built on (it failed and makes its own again)
 ahead_settled() { [ -z "${ahead:-}" ] || [ ! -f "$ahead" ] || ! alive "$ahead" || [ "$(val "$ahead" candidate)" != "$base" ] || [ "$(val "$ahead" state)" = redo ]; }
@@ -210,7 +233,7 @@ wait_ahead() {
     [ "$1" = settled ] && ahead_settled && break
     [ "$1" = made ] && [ "$(val "$ahead" state)" != redo ] && break
     s=$(val "$ahead" stage)
-    tick "waiting for the release of $a_branch ahead of this one (${s:-ending})"
+    tick "waiting for the release of $a_branch ahead of this one, at ${s:-its end}"
     sleep 1; too_long
   done
 }
@@ -227,17 +250,20 @@ clear_old_checkouts() {
 }
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/claudopus-release.XXXXXX")/release"
 echo $$ >"$(dirname "$tmp")/pid"
+start_ticker "$tmp.beat" $$ "$started"
+tpid=$!
 # The branch a release's commit waits on GitHub's checks under goes once it is decided, or as the release ends any other way
 cref=
 drop_candidate() { [ -n "$cref" ] && git -C "$top" push -q "$REMOTE" --delete "$cref" >/dev/null 2>&1; cref=; return 0; }
 lpid=
 cleanup() {
+  [ -n "${tpid:-}" ] && kill "$tpid" 2>/dev/null
   [ -n "$lpid" ] && kill -KILL -- "-$lpid" 2>/dev/null
   drop_candidate
   [ -n "$me" ] && rm -f "$me" "$me.tmp.$$"
   let_go
   git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1
-  rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err" "$tmp.check" "$tmp.check.rc" "$tmp.check.state" "$tmp.release" "$tmp.fails" "$tmp.known"
+  rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err" "$tmp.check" "$tmp.check.rc" "$tmp.check.state" "$tmp.release" "$tmp.fails" "$tmp.known" "$tmp".log.* "$tmp.beat" "$tmp.beat.stage"
   rm -f "$(dirname "$tmp")/pid"; rmdir "$(dirname "$tmp")" 2>/dev/null
 }
 trap cleanup EXIT
@@ -259,22 +285,35 @@ ghq() { env -u GH_HOST -u GH_ENTERPRISE_TOKEN -u GITHUB_ENTERPRISE_TOKEN -u GH_C
 wait_s=${RELEASE_CHECK_WAIT:-2400}; case $wait_s in '' | *[!0-9]* | 0) wait_s=2400 ;; esac; [ "$wait_s" -gt 2400 ] && wait_s=2400
 every=${RELEASE_CHECK_EVERY:-15}; case $every in '' | *[!0-9]* | 0) every=15 ;; esac; [ "$every" -gt 60 ] && every=60
 # What failed in a run of GitHub's checks, a line each, sorted: `<job>: <test file>: <test>` for each failed test the mod's test
-# kit names, `<job>: <test>` for a shell test's FAIL line, and `<job>: step <step>` (or `<job>: <conclusion>`) for a job whose
-# log names no failed test. Empty when nothing failed; exit 1 when the run could not be read whole
+# kit names, `<job>: <test>` for a shell test's FAIL or NOT OK line, `<job>: <file>.test.sh failed` for a shell test file that
+# failed. What names no test is `unnamed <job>: ...` (a job that failed before its tests, a log not read, a named check skipped or
+# missing), and is never taken as main's: a failure only known by name can be told apart. Exit 1 when the run could not be read
 fails_of_run() {
   local jobs id name concl steps logf
-  jobs=$(ghq api --paginate "repos/$repo/actions/runs/$1/jobs?per_page=100" --jq '.jobs[] | select((.conclusion // "") as $c | $c != "success" and $c != "skipped" and $c != "neutral") | [.id, .name, (.conclusion // "none"), ([.steps[]? | select(.conclusion == "failure") | .name] | join("|"))] | @tsv' 2>/dev/null) || return 1
+  jobs=$(ghq api --paginate "repos/$repo/actions/runs/$1/jobs?per_page=100" --jq '.jobs[] | [.id, .name, .status, (.conclusion // "none"), ([.steps[]? | select(.conclusion == "failure") | .name] | join("|"))] | @tsv' 2>/dev/null) || return 1
   logf="$tmp.log.$1"
-  printf '%s\n' "$jobs" | while IFS="$(printf '\t')" read -r id name concl steps; do
-    [ -n "$id" ] || continue
-    ghq api "repos/$repo/actions/jobs/$id/logs" >"$logf" 2>/dev/null || { echo "$name: log not read"; continue; }
-    /usr/bin/perl -ne 'BEGIN { $j = shift } s/^(?:\xef\xbb\xbf)?\d{4}-\d\d-\d\dT[\d:.]+Z //; s/\r?\n$//;
-      if (/^(\S+\.test\.tsx):\s*$/) { $f = $1; next }
-      if (/^FAIL (.+?)\s*$/) { print "$j: $1\n"; $n++ }
-      elsif (/^\(fail\) (.+?)(?: \[[\d.]+m?s\])?\s*$/) { print "$j: ", ($f // "?"), ": $1\n"; $n++ }
-      END { exit($n ? 0 : 1) }' "$name" "$logf" ||
-      { if [ -n "$steps" ]; then printf '%s\n' "$steps" | tr '|' '\n' | sed "s#^#$name: step #"; else echo "$name: $concl"; fi; }
-  done | sort -u
+  {
+    printf '%s\n' "$jobs" | while IFS="$(printf '\t')" read -r id name status concl steps; do
+      [ -n "$id" ] || continue
+      case ",$GITHUB_CHECKS," in *", $name,"* | *",$name,"*) named=1 ;; *) named= ;; esac
+      [ "$status" = completed ] || { echo "unnamed $name: not ended"; continue; }
+      case $concl in success) continue ;; skipped | neutral) [ -n "$named" ] && echo "unnamed $name: $concl"; continue ;; esac
+      ghq api "repos/$repo/actions/jobs/$id/logs" >"$logf" 2>/dev/null || { echo "unnamed $name: log not read"; continue; }
+      /usr/bin/perl -ne 'BEGIN { $j = shift } s/^(?:\xef\xbb\xbf)?\d{4}-\d\d-\d\dT[\d:.]+Z //; s/\e\[[\d;]*m//g; s/\r?\n$//;
+        if (/^(\S+\.test\.tsx):\s*$/) { $f = $1; next }
+        if (/^FAIL (.+?)\s*$/) { print "$j: $1\n"; $n++ }
+        elsif (/^NOT OK (?:\d+ )?-? ?(.+?)\s*$/) { print "$j: $1\n"; $n++ }
+        elsif (/^\(fail\) (.+?)(?: \[[\d.]+m?s\])?\s*$/) { print "$j: ", ($f // "?"), ": $1\n"; $n++ }
+        elsif (/^(?:##\[error\]|::error::)(\S+\.test\.sh) failed\s*$/) { print "$j: $1 failed\n"; $n++ }
+        END { exit($n ? 0 : 1) }' "$name" "$logf" ||
+        { if [ -n "$steps" ]; then printf '%s\n' "$steps" | tr '|' '\n' | sed "s#^#unnamed $name: step #"; else echo "unnamed $name: $concl"; fi; }
+    done
+    # a named check with no job at all
+    for want in $(printf '%s' "$GITHUB_CHECKS" | tr ',' '\n' | sed 's/^ *//; s/ *$//' | tr ' ' '\001'); do
+      want=$(printf '%s' "$want" | tr '\001' ' ')
+      printf '%s\n' "$jobs" | cut -f2 | grep -qxF "$want" || echo "unnamed $want: missing"
+    done
+  } | sort -u
   rm -f "$logf"
 }
 # What already failed on the commit this release built on, in its own checks on GitHub (its run on the push to main, and the
@@ -309,16 +348,22 @@ start_checks() {
   lpid=; rm -f "$tmp.check" "$tmp.check.rc" "$tmp.check.state"
   [ -n "$CHECK" ] || return 0
   set -m
+  # (the lock names its holder by number and start time; one whose holder is gone is moved aside, which only one waiter can do,
+  # then removed; its holder removes it as it ends however it ends, short of a KILL)
   bash -c 'm=$4
+    st() { ps -o lstart= -p "$1" 2>/dev/null | tr -s " "; }
     until mkdir "$m" 2>/dev/null; do
-      h=$(cat "$m/pid" 2>/dev/null); { [ -n "$h" ] && ! kill -0 "$h" 2>/dev/null; } && rm -rf "$m"
+      h=$(cat "$m/pid" 2>/dev/null); hs=$(cat "$m/started" 2>/dev/null)
+      if [ -n "$h" ] && { ! kill -0 "$h" 2>/dev/null || [ "$(st "$h")" != "$hs" ]; }; then mv "$m" "$m.gone.$$" 2>/dev/null && rm -rf "$m.gone.$$"; continue; fi
+      [ -z "$h" ] && [ -n "$(find "$m" -maxdepth 0 -mmin +1 2>/dev/null)" ] && { mv "$m" "$m.gone.$$" 2>/dev/null && rm -rf "$m.gone.$$"; continue; }
       kill -0 "$3" 2>/dev/null || exit 1
       echo "waiting for another release'"'"'s checks on this Mac" >"$2.state"; sleep 1
     done
-    echo $$ >"$m/pid"; echo "running" >"$2.state"
+    trap "rm -rf \"$m\"" EXIT; trap "exit 1" TERM INT HUP
+    st $$ >"$m/started"; echo $$ >"$m/pid"; echo "running" >"$2.state"
     bash -c "$1" >"$2" 2>&1 & c=$!
     while kill -0 $c 2>/dev/null; do kill -0 "$3" 2>/dev/null || { rm -rf "$m"; kill -KILL 0; }; sleep 1; done
-    wait $c; r=$?; rm -rf "$m"; echo $r >"$2.rc"' sh "$CHECK" "$tmp.check" "$$" "$lock.mac" &
+    wait $c; r=$?; echo $r >"$2.rc"' sh "$CHECK" "$tmp.check" "$$" "$lock.mac" &
   lpid=$!
   set +m
 }
@@ -339,8 +384,8 @@ stop_checks() {
 # This Mac's checks to their end, saying how far they got: 0 passed, 1 failed (their last lines said)
 end_checks() {
   if [ -n "${lpid:-}" ]; then
-    set_me stage "this Mac's checks"
-    while kill -0 "$lpid" 2>/dev/null; do tick "this Mac's checks $(mac_state)"; sleep 1; done
+    stage "this Mac's checks"
+    while kill -0 "$lpid" 2>/dev/null; do tick "this Mac's checks $(mac_state)"; sleep 1; too_long; done
     wait "$lpid"; lpid=
     [ "$(cat "$tmp.check.rc" 2>/dev/null)" = 0 ] || { tail -25 "$tmp.check" >&2; return 1; }
   fi
@@ -353,11 +398,11 @@ end_checks() {
 # this one's (1)
 again_after_ahead() {
   [ -n "${ahead:-}" ] || return 1
-  stop_checks; drop_candidate
   say "$1, on top of the release of $(val "$ahead" branch) ahead of it: waiting for that one to end, to see whose it is"
   wait_ahead gone
   git -C "$top" fetch -q "$REMOTE" "+refs/heads/$MAIN:refs/remotes/$REMOTE/$MAIN" || die "could not fetch $REMOTE/$MAIN"
-  [ "$(git -C "$top" rev-parse "$REMOTE/$MAIN")" = "$base" ] && return 1
+  [ "$(git -C "$top" rev-parse "$REMOTE/$MAIN")" = "$base" ] && { ahead=; return 1; }
+  stop_checks; drop_candidate
   set_me state redo; cd "$top" || exit 1
   say "the release ahead did not land; making this one again on main"
   return 0
@@ -371,6 +416,7 @@ while :; do
   [ $try -gt 12 ] && die "main or the releases ahead kept moving; gave up after 12 tries; nothing pushed"
   too_long
   candidate=
+  stage "waiting to take its place in line"
   take_lock
   if [ $try -eq 1 ]; then clear_old_checkouts; fi
   if [ -z "$(git -C "$top" ls-remote --heads "$REMOTE" "$MAIN" 2>/dev/null)" ]; then
@@ -405,10 +451,14 @@ while :; do
     base=$a_cand
   fi
   # This release's place: the next number in the line, kept across its tries so the ones behind it stay behind
+  # (past both the count kept and the highest place taken, so a count cut short never gives a place already taken)
   if [ -z "$me" ]; then
-    n=$(( $(cat "$line/seq" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$line/seq"
+    n=$(cat "$line/seq" 2>/dev/null); case $n in '' | *[!0-9]*) n=0 ;; esac
+    hi=$(ls "$line" 2>/dev/null | grep -E '^[0-9]{8}$' | sort | tail -1 | sed 's/^0*//'); [ "${hi:-0}" -gt "$n" ] && n=$hi
+    n=$((n + 1)); echo "$n" >"$line/seq.$$" && mv -f "$line/seq.$$" "$line/seq"
     me="$line/$(printf %08d "$n")"
   fi
+  stage "building"
   [ -n "$(git -C "$top" rev-list -1 "$base..$branch")" ] || die "$branch has nothing $MAIN lacks"
   if [ -d "$tmp" ]; then cd "$tmp" && git merge --abort >/dev/null 2>&1; git -C "$tmp" reset -q --hard "$base"; git -C "$tmp" clean -qfdx
   else git -C "$top" worktree add -q --detach "$tmp" "$base" >/dev/null 2>&1 || die "could not make the release's own checkout"; fi
@@ -488,10 +538,10 @@ while :; do
   fi
   what=${title:-$(git log --no-merges -1 --format=%s "$base..$branch")}
   label=${NAME:+$NAME }${ver:+$ver: }
-  git commit -q -m "${label}${what}" -m "Released from $branch by release, on $(git rev-parse --short "$on_main")." || die "nothing to commit"
+  git commit -q -m "${label}${what}" -m "Released from $branch by release, on $(git rev-parse --short "$on_main")${ahead:+ with the release of $(val "$ahead" branch) ahead of it}." || die "nothing to commit"
   candidate=$(git rev-parse HEAD)
   # In line: what it built on and its commit, read by the ones behind it, then the lock goes
-  put_me "pid=$$" "branch=$branch" "base=$base" "candidate=$candidate" "ver=$ver" "state=checking" "stage=checking"
+  put_me "pid=$$" "started=$my_start" "branch=$branch" "base=$base" "candidate=$candidate" "ver=$ver" "state=checking" "stage=checking"
   let_go
   [ -n "$ahead" ] && say "checking side by side with the release of $(val "$ahead" branch) ahead of it, on top of it"
   # GitHub's own checks on the very commit main is to become, before main moves, run by main's own workflow (CHECKS_WORKFLOW), never
@@ -513,7 +563,7 @@ while :; do
     start_checks
     check_deadline=$(( $(date +%s) + wait_s ))
     verdict=; run=; looked=0
-    set_me stage "GitHub's checks"
+    stage "GitHub's checks"
     say "waiting for GitHub's checks ($workflow as on $MAIN) on $(git rev-parse --short HEAD): ${GITHUB_CHECKS}"
     while [ "$(date +%s)" -lt "$check_deadline" ]; do
       # The one ahead failed or makes its commit again: this commit, on top of it, is no longer the one main will have
@@ -542,18 +592,20 @@ while :; do
           state=$(ghq api "repos/$repo/actions/runs/$run" --jq '[.status, (.conclusion // "")] | @tsv' 2>/dev/null) || state=
           runs=$(ghq api --paginate "repos/$repo/actions/runs/$run/jobs?per_page=100" --jq '.jobs[] | [.name, .status, (.conclusion // ""), .html_url] | @tsv' 2>/dev/null) || runs=
         fi
-        # pass: the run passed, every named check is in it and passed, and no other job failed; red: any job failed; else wait (a list
-        # gh could not read whole is waited on, never judged)
+        # pass: the run passed, every named check is in it and passed, and no other job failed; red: a job failed and none runs any more
+        # (what failed is then compared with main's, whole), or the run ended without a named check; else wait (a list gh could not
+        # read whole is waited on, never judged)
         verdict=$(printf '%s\n' "$runs" | RUN_STATE=$state NAMES=$GITHUB_CHECKS /usr/bin/perl -F'\t' -lane '
           BEGIN { %want = map { s/^\s+|\s+$//g; ($_ => 1) } grep { /\S/ } split /,/, $ENV{NAMES} }
           next unless @F >= 2; $seen{$F[0]} = 1;
           if ($F[1] ne "completed") { push @busy, $F[0]; next }
           if ($F[2] !~ /^(success|skipped|neutral)$/ || ($want{$F[0]} && $F[2] ne "success")) { push @red, "$F[0] ($F[2]) $F[3]" }
           END {
-            if (@red) { print "red: ", join("; ", @red); exit }
             my @missing = grep { !$seen{$_} } sort keys %want;
-            if (@busy || @missing) { print "wait: ", join(", ", (map { "$_ running" } @busy), (map { "$_ not started" } @missing)); exit }
             my ($status, $conclusion) = split /\t/, $ENV{RUN_STATE} // "";
+            if (@red && !@busy) { print "red: ", join("; ", @red), (@missing ? "; missing: " . join(", ", @missing) : ""); exit }
+            if (@missing && !@busy && ($status // "") eq "completed") { print "red: the run ended without ", join(", ", @missing); exit }
+            if (@busy || @missing) { print "wait: ", join(", ", (map { "$_ failed" } map { (split / \(/)[0] } @red), (map { "$_ running" } @busy), (map { "$_ not started" } @missing)); exit }
             if (($status // "") ne "completed") { print "wait: the run not ended"; exit }
             if (($conclusion // "") ne "success") { print "red: the run ended ", ($conclusion || "without a conclusion"); exit }
             print "green" }')
@@ -561,7 +613,7 @@ while :; do
         case $verdict in green | red:*) break ;; esac
       fi
       tick "GitHub's checks: ${verdict#wait: }; this Mac's checks $(mac_state)"
-      sleep 1
+      sleep 1; too_long
     done
     # (this Mac's checks go on to be read below, unless what was decided leaves them nothing to decide)
     case $verdict in green | red:* | mac) ;; *) stop_checks ;; esac
@@ -575,14 +627,15 @@ while :; do
         # Whose failure: with one ahead still checking, it may be that one's; else the ones the commit it was built on already has are
         # main's, and only a failure of this release's own holds it up
         again_after_ahead "GitHub's checks failed" && continue
-        set_me stage "comparing GitHub's failures with main's"
+        stage "comparing GitHub's failures with main's"
         say "GitHub's checks failed: $red. Comparing with what already fails on the commit it was built on, $(git rev-parse --short "$base")"
         fails_of_run "$run" >"$tmp.fails" || : >"$tmp.fails"
         until known_fails; do
           [ "$(date +%s)" -lt "$check_deadline" ] || { stop_checks; drop_candidate; die "GitHub's checks failed on $MAIN with $branch, and main's own run did not end in time to compare; nothing pushed to $MAIN: $red" 3; }
-          tick "waiting for main's own checks to end, to compare failures"; sleep 1
+          tick "waiting for main's own checks to end, to compare failures"; sleep 1; too_long
         done
-        new=$(comm -23 "$tmp.fails" "$tmp.known")
+        # (what names no test is this release's to answer for, whatever main has)
+        new=$( { grep '^unnamed ' "$tmp.fails"; comm -23 "$tmp.fails" "$tmp.known" | grep -v '^unnamed '; } | sort -u)
         if [ ! -s "$tmp.fails" ] || [ -n "$new" ]; then
           stop_checks; drop_candidate
           [ -s "$tmp.known" ] && say "main already fails: $(tr '\n' ';' <"$tmp.known" | cut -c1-600)"
@@ -612,7 +665,7 @@ while :; do
   fi
   # What goes to main and is tagged is the commit the checks passed on, never whatever the checkout holds after the wait
   [ "$(git rev-parse HEAD)" = "$candidate" ] || { drop_candidate; die "the release's checkout moved while GitHub checked it; nothing pushed to $MAIN" 3; }
-  set_me stage pushing
+  stage "pushing"
   if pushed=$(RELEASE_PUSH=1 git push -q "$REMOTE" "$candidate:refs/heads/$MAIN" 2>&1); then
     drop_candidate
     set_me state pushed
