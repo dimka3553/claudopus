@@ -1,0 +1,2 @@
+- A box asking for a key has no field of its own in the panel any more, so the panel no longer jumps while you type in it: press Paste the key or Give a response instead, and its field opens in the row above the chat's prompt, as a reply in your own words does.
+- Give a response instead tells the task that asked something other than the key, such as where it already is on this Mac: your words go to that task, nothing is saved, and it carries on from them. Words that look like the key itself are held until you say whether to keep them as the key or send them anyway.

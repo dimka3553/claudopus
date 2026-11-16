@@ -80,7 +80,7 @@ const bandHooks = (on: On) => {
       // it is drawn in the card's own box, and nothing is held as typed in any more
       const open = canBox ? undefined : cards.find(one => one.id === replyTo)
       if (open) (carryDraft($, open, barDraft(open.id)), freeTimes($))
-      if (!canBox) ((replyTo = ''), (replyMark = ''), barHeld.delete(e.surface))
+      if (!canBox) ((replyTo = ''), (replyMark = ''), (boxOpen = undefined), barHeld.delete(e.surface))
       barBoxAt = 0
       // Only a card that asks is drawn differently for it
       if (asksForBar(cards).length && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
@@ -147,6 +147,27 @@ const bandHooks = (on: On) => {
           </Box>
         )
       }
+    }
+    // A key box's field the person opened from its box in the panel, while the box waits: held as drawn while it is typed in or
+    // holds the cursor, as the reply box is below
+    const keyBox = canBox ? barKeyTarget() : undefined
+    if (boxOpen && canBox && !keyBox) boxOpen = undefined
+    if (keyBox && boxOpen) {
+      const shape = `${barKeyBoxKey(keyBox.id, boxOpen.mode)}|${boxSaid.get(keyBox.id) ?? ''}|${boxHeldReply.has(keyBox.id)}`
+      const held = barHeld.get(e.surface)
+      if ((isTyping || (barBoxAt > 0 && flipAt - barBoxAt < BAR_BOX_HELD)) && held?.shape === shape) return held.drawing as Awaited<ReturnType<typeof next>>
+      const marker = await waitMarker($, ui, e.surface)
+      const row = barKeyRow($, ui, keyBox, boxOpen.mode)
+      const drawing = marker ? (
+        <Box flexDirection="column">
+          {marker}
+          {row}
+        </Box>
+      ) : (
+        row
+      )
+      barHeld.set(e.surface, { shape, drawing })
+      return drawing
     }
     // The reply box the person opened from a card, while that card still asks; its ask answered or gone, the box goes with it
     const target = canBox ? barTarget(cards) : undefined

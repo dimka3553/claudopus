@@ -1413,6 +1413,65 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
   await settle()
 })
 
+test("where the bar above the prompt takes a box, a key box has no field in the panel, whose window the app drags to a field that holds the cursor: Paste the key or Give a response instead opens its field in the bar; the key goes only to the keychain, a response only to the command that asked, and one that looks like the key itself is held until the person says which", async ($, on) => {
+  const { keep, settle, files, logged, keychain, clock } = world(on, { panes: ['claudopus'] })
+  await $.session.start(start)
+  void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  type Site = typeof list
+  const fieldsIn = async (site: Site, id: string) => (await site.findAll({ type: 'Input' } as never)).filter(one => (one.key ?? '').includes(id))
+  const labelled = async (site: Site, label: string) => (await site.findAll({ type: 'Button' })).filter(b => b.props.label === label)
+  const press = async (site: Site, label: string) => site.press({ key: (await until(async () => (await labelled(site, label))[0]))?.key ?? '' })
+  const ask = async (id: string) => (files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 })), await clock.advance(1000))
+  // The key: no field in the panel, two buttons and Cancel; Paste the key opens the field in the bar, and the box says where it is
+  const key = '0a1e2d3c-4b5a-4987-a654-3210fedcba98'
+  await ask(key)
+  expect(await until(async () => list.find({ type: 'Text', text: GITHUB_BOX }))).toBeDefined()
+  expect(await until(async () => ((await labelled(list, 'Give a response instead')).length === 1 ? true : undefined))).toBe(true)
+  expect(await fieldsIn(list, key)).toEqual([])
+  expect((await labelled(list, 'Cancel')).length).toBe(1)
+  await press(list, 'Paste the key')
+  const pasted = await until(async () => (await fieldsIn(bar, key))[0])
+  expect(await list.find({ type: 'Text', text: '✎ Type it in the box above the chat' })).toBeDefined()
+  expect(await fieldsIn(list, key)).toEqual([])
+  await bar.input({ key: pasted?.key ?? '', text: 'ghp_kept0nlyInKeychain' })
+  expect(await until(async () => keychain.find(one => one.includes(key)))).toContain('-w "ghp_kept0nlyInKeychain"')
+  expect(await until(async () => ((await fieldsIn(bar, key)).length === 0 ? true : undefined))).toBe(true)
+  expect(files.has(`${MEMORY}/boxes/${key}.reply`)).toBe(false)
+  // A response: its words go beside the request for the runner, which prints them to the command's caller; nothing is kept
+  const said = '1a1e2d3c-4b5a-4987-a654-3210fedcba98'
+  await ask(said)
+  await press(list, 'Give a response instead')
+  const words = await until(async () => (await fieldsIn(bar, said))[0])
+  const kept = keychain.length
+  await bar.input({ key: words?.key ?? '', text: 'It is already in the .env of the other repo, use it from there' })
+  expect(await until(async () => files.get(`${MEMORY}/boxes/${said}.reply`))).toBe('The person answered in the Claudopus panel instead of giving GITHUB_TOKEN, in their own words: It is already in the .env of the other repo, use it from there\n')
+  expect(await until(async () => (files.has(`${MEMORY}/boxes/${said}.json`) ? undefined : true))).toBe(true)
+  expect(keychain.length).toBe(kept)
+  expect(await until(async () => list.find({ type: 'Text', text: 'You gave a response instead · it went to the command that asked, and nothing was saved' }))).toBeDefined()
+  // Words that look like the key itself are held, sent nowhere, until the person keeps them as the key or sends them anyway
+  const slip = '2a1e2d3c-4b5a-4987-a654-3210fedcba98'
+  await ask(slip)
+  await press(list, 'Give a response instead')
+  const slipped = await until(async () => (await fieldsIn(bar, slip))[0])
+  await bar.input({ key: slipped?.key ?? '', text: 'here: ghp_A1b2C3d4E5f6G7h8I9j0' })
+  expect(await until(async () => (await bar.findAll({ type: 'Text' })).find(one => (one.text ?? '').startsWith('That looks like the key itself')))).toBeDefined()
+  expect(files.has(`${MEMORY}/boxes/${slip}.reply`)).toBe(false)
+  expect(logged.some(line => line.includes('A1b2C3'))).toBe(false)
+  await press(bar, 'Keep it as the key')
+  expect(await until(async () => keychain.find(one => one.includes(slip)))).toContain('-w "here: ghp_A1b2C3d4E5f6G7h8I9j0"')
+  expect(files.has(`${MEMORY}/boxes/${slip}.reply`)).toBe(false)
+  // and an admin password box keeps its own field
+  const admin = '3a1e2d3c-4b5a-4987-a654-3210fedcba98'
+  files.set(`${MEMORY}/boxes/${admin}.json`, JSON.stringify({ id: admin, kind: 'admin', host: 'here', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }))
+  await clock.advance(1000)
+  expect(await until(async () => (await fieldsIn(list, admin))[0])).toBeDefined()
+  await list.unmount()
+  await bar.unmount()
+  await settle()
+})
+
 test('a chat on this Mac\'s own screen asks in the panel the same way, and opens the panel for it', async ($, on) => {
   const { keep, settle, files, logged, keychain, clock, opened } = world(on)
   await $.session.start(start)
