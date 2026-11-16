@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.154 · 16 November 2026
+- A run one task leaves going is shown on the card of the task whose command started it, never on another task's command that ran at the same moment: a code search's row no longer shows another task's "0 of 2 heads" and its memory. A run that no command names, started while two tasks' commands ran, is shown on neither.
+- The Mac's own file indexer, which ps lists in brackets as it ends, no longer shows up as runs under your tasks.
+
 ## 0.2.153 · 16 November 2026
 - No task or helper can start a command whose only job is to wait, whatever shape it takes: a loop that keeps checking for a file, a line, a page or a command, a long sleep, a wait on a process, a tool made to wait, a log followed until one line comes, or a short script that only polls. Claudopus refuses it in one sentence that says what wakes Claude instead. This now covers helpers too, which is where the "36 tries · waiting for sheets" rows came from. A waiting command written in a shape the first check misses is caught while it runs: if all its processes do nothing but sleep or follow a log for two looks in a row, Claudopus stops it and tells Claude what wakes it instead.
 - A task no longer waits for its helpers ("Wait for the three builders"). It ends its step and carries on when each helper's result comes. Seen live: when a task ends its step, the app hands the helper's result to the chat. Claudopus now passes it on to the task, starts the task again, and tells the chat there is nothing to do.
