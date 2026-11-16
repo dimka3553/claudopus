@@ -222,7 +222,7 @@ const workHooks = (on: On) => {
       }
       // A tail that follows a log never ends of itself and tells the work nothing as it runs: it only outlives what it watches
       // (a Monitor watch is told each line as it comes, so it says something; a Bash call's output is read only as it ends)
-      if (e.tool === 'Bash' && watcherOf(command)?.isFollow) {
+      if (e.tool === 'Bash' && watcherOf(command)?.isFollow && !/\|\s*(?:\S*\/)?(?:grep|egrep|ugrep|rg)\b[^|]*\s-(?:\w*[mq]\w*)\b|\|\s*sed\b[^|]*\/q\b/.test(command)) {
         await log($, `refused work ${e.agentId}'s command that only follows a log`)
         return { deny: NO_FOLLOW }
       }

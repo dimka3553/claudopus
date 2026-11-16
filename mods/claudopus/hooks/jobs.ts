@@ -601,7 +601,12 @@ export const ownWaitOf = (cmd: string, runs: OwnRun[]): OwnRun | undefined => {
   if (!runs.length) return undefined
   const text = cmd.replace(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&]+)\s*(?:&&|;)\s*/, '')
   // It waits: a loop that sleeps between its tries, or the shell's own wait on a process
-  const isLoop = /\b(?:for|while|until)\b[^]*?\bdo\b[^]*?\bsleep\s+[\d.]+[^]*?\bdone\b/.test(text)
+  // (found word by word in order, never by one pattern that tries every split of a long script)
+  const after = (from: number, word: RegExp) => {
+    const m = word.exec(text.slice(from))
+    return m ? from + m.index + m[0].length : -1
+  }
+  const isLoop = [/\b(?:for|while|until)\b/, /\bdo\b/, /\bsleep\s+[\d.]+/, /\bdone\b/].reduce((from, word) => (from < 0 ? -1 : after(from, word)), 0) >= 0
   const isWait = /(?:^|[;&|]\s*)wait\s+\d+\s*(?:$|[;&|])/.test(text)
   if (!isLoop && !isWait) return undefined
   // and does nothing else: no step of its own does work, writes a file, or is sent off on its own
@@ -611,7 +616,10 @@ export const ownWaitOf = (cmd: string, runs: OwnRun[]): OwnRun | undefined => {
     .map(step => step.trim().replace(/^(?:(?:do|then|else|elif|if|while|until|!)\s+)+/, '').replace(/\s*\d?>+\s*\S+/g, '').trim())
     .filter(step => step && !/^(?:do|then|else)$/.test(step))
   if (!steps.every(step => LOOKS.test(step))) return undefined
-  const pids = new Set([...text.matchAll(/\b(?:kill\s+(?:-0|-s\s+0)|ps\s+(?:-\w+\s+)*-p|wait)\s+(\d+)/g)].map(m => m[1] ?? ''))
+  // A loop that also waits for a line, a file or an answer waits for what comes while the run goes: its process is only its guard
+  const loopText = unquoted(text.slice(0, text.lastIndexOf('done') + 4))
+  const isOnlyProcess = !/(?:^|[\s;&|(!])(?:grep|egrep|rg|test|\[\[?|stat|ls|curl|wget|nc|find)\s/.test(loopText)
+  const pids = new Set([...(isOnlyProcess ? text : '').matchAll(/\b(?:kill\s+(?:-0|-s\s+0)|ps\s+(?:-\w+\s+)*-p|wait)\s+(\d+)/g)].map(m => m[1] ?? ''))
   // (a pgrep that waits while it finds the run, or until it no longer does; its options that take a value are passed over, and
   // a pattern too short to name one run counts for none)
   const ends = [...text.matchAll(/\b(?:while|until\s+!)\s*pgrep\s+((?:-[uUgGPstF]\s+\S+\s+|-\w+\s+)*)("[^"]+"|'[^']+'|[^\s;&|)]+)/g)]
@@ -623,15 +631,28 @@ export const ownWaitOf = (cmd: string, runs: OwnRun[]): OwnRun | undefined => {
 // A command made only of what reads and sifts another's output (tail, grep and their kind): left going, it only watches a run and
 // ends with nothing. `isFollow` when it follows a file as it grows, so it never ends of itself (16 Nov: pairs of "tail pic_eyes.log"
 // and "ugrep wrote" stood silent for an hour and a half under a card and two finished helpers, long after what they watched)
-const FILTER = /^(?:\S*\/)?(?:tail|grep|egrep|fgrep|ugrep|rg|awk|sed|cut|tr|head|cat|uniq)\b/
+const FILTER = /^(?:\S*\/)?(tail|grep|egrep|fgrep|ugrep|rg|awk|sed|cut|tr|head|cat|uniq)\b/
+// The words a filter takes before what it reads: one given more reads files, a search or a copy, and is no watcher
+const OWN_WORDS: Record<string, number> = { grep: 1, egrep: 1, fgrep: 1, ugrep: 1, rg: 1, awk: 1, sed: 1, tr: 2, cut: 0, head: 0, uniq: 0, cat: 0, tail: 0 }
 export const watcherOf = (cmd: string): { isFollow: boolean } | undefined => {
   if (/\bbin\/(?:helpers|admin|secret|release|keyring)\b/.test(cmd)) return undefined
-  const steps = unquoted(cmd.replace(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&]+)\s*(?:&&|;)\s*/, ''))
+  const text = unquoted(cmd.replace(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&]+)\s*(?:&&|;)\s*/, ''))
+  // (one that writes a file makes something)
+  if (/(?:^|[^>&0-9])>>?\s*(?!\/dev\/null\b|&)\S/.test(text)) return undefined
+  const steps = text
     .split(/\s*(?:\|\|?|;|&&?)\s*/)
     .map(step => step.trim().replace(/\s*\d?>+\s*\S+/g, '').replace(/^(?:(?:nohup|setsid|stdbuf\s+-oL)\s+)+/, ''))
     .filter(Boolean)
   if (!steps.length || !steps.every(step => FILTER.test(step) && !/\bsed\b.*\s-i\b/.test(step))) return undefined
-  return { isFollow: steps.some(step => /^(?:\S*\/)?tail\b.*\s(?:-\w*[fF]\w*|--follow\S*)(?:\s|$)/.test(step)) }
+  const isFollow = (step: string) => /^(?:\S*\/)?tail\b.*\s(?:-\w*[fF]\w*|--follow\S*)(?:\s|$)/.test(step)
+  // It watches when it follows a file as it grows, or its first step reads only what is piped to it (a value an option takes, as
+  // -n 20 or -e PAT, is no word of its own)
+  const first = steps[0] ?? ''
+  const name = FILTER.exec(first)?.[1] ?? ''
+  const words = first.split(/\s+/).slice(1).filter((word, n, all) => !word.startsWith('-') && !/^-(?:[nmABCcef]|-max-count|-regexp)$/.test(all[n - 1] ?? '') && word !== '""')
+  const given = /\s(?:-e|--regexp)\s/.test(first) ? 1 : 0
+  if (!isFollow(first) && words.length > Math.max(0, (OWN_WORDS[name] ?? 0) - given)) return undefined
+  return { isFollow: steps.some(isFollow) }
 }
 
 // Jobs alike (the same kind, words and command, or the same wait) are one row that says how many they are, from the first one's

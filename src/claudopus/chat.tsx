@@ -415,6 +415,7 @@ const chatHooks = (on: On) => {
       if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
+      if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now } : one)))
       // Work nothing holds any more has nothing of its own left running in the background
       if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
       await changeTodos($, list => {

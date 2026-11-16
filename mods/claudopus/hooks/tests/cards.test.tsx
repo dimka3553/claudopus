@@ -1806,7 +1806,9 @@ test('a run of a work\'s own wakes it the moment it ends: a wait on it is refuse
   // A Monitor that only waits for it to end, as a helper's would, is refused the same
   expect(((await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'while kill -0 48213; do sleep 10; done', description: 'Wait for the upload' } as never)) as { deny?: string }).deny).toMatch(/^Not run: this only waits for your own run "Upload both zips to the folder"/)
   // A sifter left going beside it, which ends with nothing: let through while the upload goes
-  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'g1', agentId: 'a1', command: 'cat /w/pipe | grep --line-buffered wrote', description: 'Run a look for written files', run_in_background: true } as never)) as { deny?: string }).deny).toBeUndefined()
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'g1', agentId: 'a1', command: 'ugrep --line-buffered wrote', description: 'Run a look for written files', run_in_background: true } as never)) as { deny?: string }).deny).toBeUndefined()
+  // A tail that waits for one line ends with it, and runs
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'w4', agentId: 'a1', command: 'tail -f /w/upload.log | grep -m1 Copied', description: 'Wait for the first file copied', run_in_background: true } as never)) as { deny?: string }).deny).toBeUndefined()
   // A tail that follows its log never ends and tells the work nothing
   expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'w3', agentId: 'a1', command: 'tail -f /w/upload.log | grep --line-buffered ERROR', description: 'Watch the upload for errors', run_in_background: true } as never)) as { deny?: string }).deny).toMatch(/^Not run: this only follows a log and would never end/)
   // A wait for a line in its log, or a look once, still runs

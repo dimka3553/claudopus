@@ -142,7 +142,9 @@ test('a command that only waits for a run of the same work to end is known, by i
     ['while kill -0 6909; do sleep 5; done & python post.py', undefined],
     ['while kill -0 6909; do sleep 5; done; tail -100 /s/drive/upload.log > /w/summary.txt', undefined],
     ['while kill -0 6909; do sleep 5; done; sed -i s/a/b/ /w/notes.txt', undefined],
-    // A wait for what comes while a run goes: a line in its log, a port
+    // A wait for what comes while a run goes: a line in its log, a file, a port, with its process only a guard
+    ['until grep -q "epoch 3" /s/train.log || ! kill -0 6909; do echo progress; sleep 10; done', undefined],
+    ['while [ ! -f out/done.flag ] && kill -0 6909; do echo progress; sleep 5; done', undefined],
     ['until grep -q Serving /w/server.log; do echo "progress: 1 tries"; sleep 1; done', undefined],
     ['until grep -q Copied /s/drive/upload.log; do sleep 10; done', undefined],
     ['until curl -s localhost:3000 >/dev/null; do sleep 2; done', undefined],
@@ -157,6 +159,7 @@ test('a command that only waits for a run of the same work to end is known, by i
   // A pattern is never run as one: a pattern that would take minutes to try takes no time
   const at = Date.now()
   expect(ownWaitOf('while pgrep -f "(a+)+b.*.*.*.*zz"; do sleep 5; done', [{ id: 'x', what: 'x', cmd: 'a'.repeat(400) }])).toBeUndefined()
+  expect(ownWaitOf('for do sleep 1 '.repeat(3000), runs)).toBeUndefined()
   expect(Date.now() - at).toBeLessThan(200)
 })
 
@@ -167,8 +170,14 @@ test('a command made only of tail, grep and their kind only watches; one that fo
     ['tail -F pic_eyes.log', { isFollow: true }],
     ['ugrep wrote', { isFollow: false }],
     ['cd /w && tail -n 0 -f run.log | grep --line-buffered -E "ERROR|Traceback"', { isFollow: true }],
-    ['tail -20 /w/run.log', { isFollow: false }],
+    ['tail -20 /w/run.log', undefined],
     ['tail -f run.log | python parse.py', undefined],
+    // A search, a sum or a copy over files is real work, however long it runs
+    ["awk '{s+=$2} END {print s}' big.csv > sum.txt", undefined],
+    ['grep -rn TODO /', undefined],
+    ['rg -l foo ~/Documents', undefined],
+    ['cat a.bin b.bin > c.bin', undefined],
+    ['grep --line-buffered -E "a|b"', { isFollow: false }],
     ['sed -i s/a/b/ notes.txt', undefined],
     ['python train.py', undefined],
     ['/x/mods/claudopus/bin/helpers /x/h.txt', undefined],
