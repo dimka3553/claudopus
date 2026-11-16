@@ -241,16 +241,25 @@ export const rawOfMac = (text: string, at: number, footprint?: Record<string, nu
   const gpuNs = gpuTimesOf(s.GPUP ?? '')
   const netBy = netByOf(s.NETP ?? '')
   const ru = rusageOf(s.RU ?? '')
-  const load = Number(/"SystemLoad"=(\d+)/.exec(s.POWER ?? '')?.[1] ?? 0)
+  const load = loadOf(s.POWER ?? '')
   const own = {
     ...(Object.keys(gpuNs).length ? { gpuNs } : {}),
     ...(Object.keys(netBy.netIn).length ? { netInBy: netBy.netIn, netOutBy: netBy.netOut } : {}),
     ...(Object.keys(ru.disk).length ? { diskBy: ru.disk, energyBy: ru.energy } : {}),
     ...(ru.cpuNj !== undefined ? { cpuNj: ru.cpuNj, gpuNj: ru.gpuNj } : {}),
     energyAll: true as const,
-    ...(load > 0 ? { watts: load / 1000 } : {}),
+    ...(load !== undefined ? { watts: load / 1000 } : {}),
   }
   return { ...own, names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used } : {}), ...netSplitOf(s.NET ?? '', false), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed, memTotal, ncpu: ncpu || 1, disk, net, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}) }
+}
+
+// The whole Mac's draw in milliwatts, as the battery's gauge tells it. The gauge writes a signed number as an unsigned 64-bit
+// one, so a glitch below zero reads as nearly 2^64: read it back as signed, and keep only a draw a Mac can make
+const loadOf = (text: string): number | undefined => {
+  const digits = /"SystemLoad"=(\d+)/.exec(text)?.[1]
+  if (!digits) return undefined
+  const mw = Number(BigInt.asIntN(64, BigInt(digits)))
+  return mw > 0 && mw <= 2_000_000 ? mw : undefined
 }
 
 // A Linux look: processes from /proc/<pid>/stat (Claude's memory is each process's resident memory less what it shares)

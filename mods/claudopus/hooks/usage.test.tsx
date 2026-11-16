@@ -239,7 +239,7 @@ test('programs are named as a person knows them: the app, Claude Code\'s engine 
 
 test("Claude's own part, where the Mac tells each process's: of the graphics processor, the disk, the network, and the power its processors draw", async () => {
   // The renderer (932, under the app) draws with the graphics processor; Safari too. A process of another user gives no rusage
-  const own = (o: { gpu932: number; gpu700: number; in932: number; out932: number; in700: number; disk1423: number; disk700: number; nj1423: number; load: number }) =>
+  const own = (o: { gpu932: number; gpu700: number; in932: number; out932: number; in700: number; disk1423: number; disk700: number; nj1423: number; load: number | string }) =>
     [
       '@@GPU@@',
       '"Device Utilization %"=50',
@@ -274,6 +274,12 @@ test("Claude's own part, where the Mac tells each process's: of the graphics pro
   // 38 joules over five seconds is 7.6 W of the 98 W the Mac draws
   expect(near(f?.wattsClaude)).toBe(7.6)
   expect(near(f?.watts)).toBe(98.316)
+  // The gauge's draw below zero, written as an unsigned 64-bit number (a battery Mac read 18446744073709544 W), and a draw no
+  // Mac makes, show no draw at all
+  for (const load of ['18446744073709544064', '9223372036854775808', '5000000', '0']) {
+    const odd = nextKept(first, `${macLook(look)}${own({ gpu932: 2e9, gpu700: 4e9, in932: 0, out932: 0, in700: 0, disk1423: 0, disk700: 0, nj1423: 0, load })}`, 5000, false)
+    expect(odd?.figures?.watts).toBeUndefined()
+  }
   // A Mac that tells none of it shows none
   const bare = nextKept(nextKept(undefined, macLook(look), 0, false), macLook(look), 5000, false)?.figures
   expect([bare?.gpuClaude, bare?.diskClaude, bare?.netInClaude, bare?.wattsClaude, bare?.watts]).toEqual([undefined, undefined, undefined, undefined, undefined])
