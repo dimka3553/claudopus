@@ -21,6 +21,8 @@ function test(name: string, options: TestBody | { timeoutMs?: number }, body?: T
   else kitTest(name, { ...SLOW, ...options }, body as TestBody)
 }
 const MEMORY = `${HOME}/.claude/claudopus`
+// This Mac's keychain, there unless a test takes it away as a home of a trial chat's own has none
+const KEYCHAIN = `${HOME}/Library/Keychains/login.keychain-db`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
 const PANE = {
@@ -57,6 +59,7 @@ type Release = { version: string; commit: string; tree: string; got?: string; ma
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
 const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
+  files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
   const titles: string[] = []
@@ -231,6 +234,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The admin gate's seals: one for each message, under the key the keychain holds as keychain:gate; "make" makes a key where
     // there is none and "new" always, as the Mac's own shell does
     if (tool === '/bin/sh' && String(rest[1]).includes('claudopus-admin-gate')) {
+      // Where the home holds no keychain, macOS asks on the person's screen for one to keep the key in
+      if (!files.has(KEYCHAIN)) files.set('keychain:dialog', 'the gate')
       const [, , , said, ...messages] = rest
       // The kept copy of the settings and texts has its key apart, as keychain:known
       const item = String(said).startsWith('known-') ? 'keychain:known' : 'keychain:gate'
@@ -270,6 +275,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'osascript') osa.push([...e.argv])
     // What was handed to this Mac's keychain on security's stdin
+    if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
@@ -996,6 +1002,25 @@ test('F-021 · an old kept copy put back with the old file is not taken by a cha
   await $.session.start(start)
   await bash('o2', 'ls')
   expect(await until(async () => (logged.some(line => /could not use its key/.test(line)) ? true : undefined))).toBe(true)
+  // A home with no keychain, as a trial chat's own (no folder of keychains, or one holding only the metadata file): the keychain
+  // is never asked, so macOS puts no "Keychain Not Found" on the screen, and the panel says so as for one that does not answer
+  files.delete('keychain:refused')
+  files.delete(KEYCHAIN)
+  for (const [i, left] of [[], [`${HOME}/Library/Keychains/metadata.keychain-db`]].entries()) {
+    for (const one of left) files.set(one, '')
+    for (const item of ['keychain:known', 'keychain:gate', `${MEMORY}/admin-known.json`, `${MEMORY}/log.md`]) files.delete(item)
+    await $.session.start(start)
+    await bash(`o3-${i}`, 'ls')
+    expect(await until(async () => (/not in force: the keychain did not answer/.test(files.get(`${MEMORY}/log.md`) ?? '') ? true : undefined))).toBe(true)
+    expect(files.get('keychain:dialog')).toBeUndefined()
+    expect(files.has('keychain:known')).toBe(false)
+  }
+  // A keychain made later is used at once
+  files.set(`${HOME}/Library/Keychains/login.keychain-db`, '')
+  files.delete(`${MEMORY}/log.md`)
+  await $.session.start(start)
+  await bash('o4', 'ls')
+  expect(await until(async () => (files.has('keychain:known') ? true : undefined))).toBe(true)
 })
 
 test("F-021 · another chat's Config change is never undone here: not while the keychain does not answer, nor when it lands with a lower count", async ($, on) => {

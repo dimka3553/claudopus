@@ -21,6 +21,8 @@ function test(name: string, options: TestBody | { timeoutMs?: number }, body?: T
   else kitTest(name, { ...SLOW, ...options }, body as TestBody)
 }
 const MEMORY = `${HOME}/.claude/claudopus`
+// This Mac's keychain, there unless a test takes it away as a home of a trial chat's own has none
+const KEYCHAIN = `${HOME}/Library/Keychains/login.keychain-db`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
 const PANE = {
@@ -57,6 +59,7 @@ type Release = { version: string; commit: string; tree: string; got?: string; ma
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
 const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
+  files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
   const titles: string[] = []
@@ -231,6 +234,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The admin gate's seals: one for each message, under the key the keychain holds as keychain:gate; "make" makes a key where
     // there is none and "new" always, as the Mac's own shell does
     if (tool === '/bin/sh' && String(rest[1]).includes('claudopus-admin-gate')) {
+      // Where the home holds no keychain, macOS asks on the person's screen for one to keep the key in
+      if (!files.has(KEYCHAIN)) files.set('keychain:dialog', 'the gate')
       const [, , , said, ...messages] = rest
       // The kept copy of the settings and texts has its key apart, as keychain:known
       const item = String(said).startsWith('known-') ? 'keychain:known' : 'keychain:gate'
@@ -270,6 +275,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'osascript') osa.push([...e.argv])
     // What was handed to this Mac's keychain on security's stdin
+    if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {

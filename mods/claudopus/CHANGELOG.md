@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.159 · 16 November 2026
+- Claudopus no longer makes macOS show "Keychain Not Found" when it runs in a home folder that has no keychain, such as a test's or a trial chat's own: it leaves the keychain alone there and says in the panel that it could not use its key.
+
 ## 0.2.158 · 16 November 2026
 - Panel buttons answer clicks again with many tasks at work: while the panel is slow to draw, it is drawn afresh at most about once a second (longer when a drawing is slower), and in between the drawing on screen is given again, so the button under the pointer is still there when the click arrives. A press is still drawn at once
 - From the moment a click starts until it lands, the panel keeps the drawing on screen, even one finished in that moment
