@@ -21,62 +21,62 @@ const askedFor = (agent: string | undefined, tool: string, input: unknown) => {
   return one?.id
 }
 // What the prompt asks, in plain words and never a tool's own name: what is asked, exactly what (the command, the message, the page),
-// and what a yes and a no each do. A message names the work it goes to, by its card
+// and what a yes and a no each do. A message names the task it goes to, by its card
 type Asks = Pick<Prompt, 'text' | 'kind' | 'detail' | 'yes' | 'no' | 'done'>
-const NO_SKIPS = 'No: it does not happen, and it stops to wait for what you say next.'
-const NO_TOLD = 'No: it does not happen, and the work is told you said no.'
+const NO_SKIPS = "No: it doesn't run, and the chat waits for what you say next."
+const NO_TOLD = "No: it doesn't run, and Claudopus tells Claude you said no."
 const promptOf = (tool: string, input: unknown, list: Todo[], isWork = false): Asks => {
   const given = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
   const field = (key: string) => (typeof given[key] === 'string' ? oneLine(given[key] as string) : '')
   const whole = (key: string, max: number) => (typeof given[key] === 'string' ? cut((given[key] as string).trim(), max) : '')
   const file = (path: string) => path.split('/').filter(Boolean).pop() ?? ''
   const workNamed = (id: string) => {
-    if (!id) return 'another piece of work'
+    if (!id) return 'another task'
     if (id === 'main' || id === 'parent') return 'its chat'
     const card = list.find(one => one.id === id) ?? list.find(one => id.startsWith(one.id))
-    return card ? `the work “${titleOf(card)}”` : 'another piece of work'
+    return card ? `the task “${titleOf(card)}”` : 'another task'
   }
   const allow = (text: string, yes: string, detail = '', no = isWork ? NO_TOLD : NO_SKIPS): Asks => ({ text, kind: 'allow', ...(detail ? { detail } : {}), yes: `Yes: ${yes}`, no })
   if (tool === 'Bash' || tool === 'PowerShell')
-    return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'one with no words'}`, 'the command runs on its Mac.', whole('command', 400))
+    return allow(`Run a command: ${cut(field('description'), 90) || cut(field('command'), 90) || 'no description'}`, 'the command runs on its Mac.', whole('command', 400))
   if (tool === 'Write') return allow(`Write the file ${file(field('file_path')) || 'a file'}`, 'the file is saved, replacing any file of that name.', field('file_path'))
   if (tool === 'Edit' || tool === 'MultiEdit' || tool === 'NotebookEdit')
     return allow(`Change the file ${file(field('file_path') || field('notebook_path')) || 'a file'}`, 'the change is made to the file.', field('file_path') || field('notebook_path'))
-  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'it reads the file; nothing is changed.', field('file_path'))
-  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'it searches; nothing is changed.', field('path'))
-  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'it reads the page; nothing is sent but the address.', field('url'))
-  if (tool === 'WebSearch') return allow(`Search the web for “${cut(field('query'), 80)}”`, 'it searches the web and reads the results.')
+  if (tool === 'Read') return allow(`Read the file ${file(field('file_path')) || 'a file'}`, 'Claude reads the file; nothing is changed.', field('file_path'))
+  if (tool === 'Glob' || tool === 'Grep') return allow(`Search files for ${cut(field('pattern'), 80) || 'a pattern'}`, 'Claude searches; nothing is changed.', field('path'))
+  if (tool === 'WebFetch') return allow(`Open a web page on ${field('url').match(/^https?:\/\/([^/?#]+)/)?.[1] ?? 'the web'}`, 'Claude reads the page; nothing is sent but the address.', field('url'))
+  if (tool === 'WebSearch') return allow(`Search the web for “${cut(field('query'), 80)}”`, 'Claude searches the web and reads the results.')
   if (tool === 'SendMessage') {
     const to = workNamed(field('to'))
     return {
       ...allow(
         to === 'its chat' ? 'Pass a message back to its chat' : `Pass a message to ${to}`,
-        to === 'its chat' ? 'its chat gets the message.' : 'that work gets the message and acts on it.',
+        to === 'its chat' ? 'its chat gets the message.' : 'that task gets the message and acts on it.',
         whole('message', 400) || field('summary'),
-        isWork ? 'No: it is not sent, and the work is told you said no.' : 'No: it is not sent, and it stops to wait for what you say next.',
+        isWork ? "No: it isn't sent, and Claudopus tells Claude you said no." : "No: it isn't sent, and the chat waits for what you say next.",
       ),
       done: 'it was sent',
     }
   }
   if (tool === 'Agent' || tool === 'Task')
-    return { ...allow(`Start a piece of work: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : 'No: it is not started, and the chat stops to wait for what you say next.'), done: 'it was started' }
+    return { ...allow(`Start a background task: ${cut(field('description'), 90) || 'with no title'}`, 'it starts in the background and gets a card here.', whole('prompt', 300), isWork ? NO_TOLD : "No: it isn't started, and the chat waits for what you say next."), done: 'it was started' }
   if (tool === 'TaskStop')
-    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that work is stopped where it is.', '', isWork ? 'No: that work keeps running, and the work that asked is told you said no.' : 'No: that work keeps running, and the chat stops to wait for what you say next.'), done: 'it was stopped' }
-  if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`, 'it loads those instructions and follows them.')
+    return { ...allow(`Stop ${workNamed(field('task_id') || field('id'))}`, 'that task is stopped where it is.', '', isWork ? 'No: that task keeps running, and Claudopus tells Claude you said no.' : 'No: that task keeps running, and the chat waits for what you say next.'), done: 'it was stopped' }
+  if (tool === 'Skill') return allow(`Use the skill “${field('skill') || field('name')}”`, 'Claude loads those instructions and follows them.')
   if (tool === 'AskUserQuestion') {
     const first = Array.isArray(given.questions) ? (given.questions[0] as { question?: unknown } | undefined)?.question : undefined
     return {
       text: typeof first === 'string' && first.trim() ? `Answer a question: ${cut(oneLine(first), 120)}` : 'Answer a question',
       kind: 'question',
-      yes: 'Pick an answer: it goes back and the work carries on with it.',
-      no: 'Skip it: no answer goes back, and it waits for what you say next.',
+      yes: 'Pick an answer: it goes back and Claude continues with it.',
+      no: 'Skip it: no answer goes back, and Claude waits for what you say next.',
     }
   }
   if (tool === 'ExitPlanMode')
-    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: it starts doing what the plan says.', no: 'No: it keeps planning; say what to change.' }
+    return { text: 'Approve a plan', kind: 'plan', detail: whole('plan', 400), yes: 'Yes: Claude starts doing what the plan says.', no: 'No: Claude keeps planning; say what to change.' }
   const mcp = tool.match(/^mcp__(.+?)__(.+)$/)
   const words = field('description') || field('text') || field('query') || field('title') || field('name') || field('url')
-  if (mcp) return allow(`Use “${(mcp[2] ?? '').replace(/_/g, ' ')}” from ${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '').replace(/[_-]/g, ' ')}`, 'it runs that action.', cut(words, 300))
+  if (mcp) return allow(`Use “${(mcp[2] ?? '').replace(/_/g, ' ')}” from ${(mcp[1] ?? '').replace(/^plugin_[^_]+_/, '').replace(/[_-]/g, ' ')}`, 'that action runs.', cut(words, 300))
   return allow(words ? `Use a tool: ${cut(words, 90)}` : 'Use one of its tools', 'that tool runs.', '')
 }
 // The start of a command up to its first quote, `$` or line break, as a running shell shows it whatever the quoting
@@ -217,8 +217,8 @@ const promptHeld = new Set<string>()
 const pressedNo = new Set<string>()
 // The longest a prompt waits for a press: past it the hook hands the prompt back to whatever else answers it
 const HOLD_LONGEST = 10 * 60_000
-const PRESSED_NO = 'The person said no to this on its card in the Claudopus panel. It did not run. Wait for what they say next.'
-const PRESSED_NO_WORK = 'The person said no to this on its card in the Claudopus panel. It did not run: do not try it another way; carry on without it.'
+const PRESSED_NO = "The person said no to this on its card in the Claudopus panel. It didn't run. Wait for what they say next."
+const PRESSED_NO_WORK = "The person said no to this on its card in the Claudopus panel. It didn't run: don't try it another way; continue without it."
 const markHeld = ($: EngineInterface, id: string, isHeld: boolean) => {
   waiting = waiting.map(one => (one.id !== id ? one : isHeld ? { ...one, isHeld: true } : (({ isHeld: _held, ...rest }) => rest)(one)))
   redraw($)
@@ -298,7 +298,7 @@ const promptHooks = (on: On) => {
     const said = await holdPrompt($, next, id)
     if (!said) return r
     if (said === 'yes') return { ...r, decision: { behavior: 'allow' } }
-    // No from the chat's own thread stops its turn, as the box's No does; work is told, and carries on without it
+    // No from the chat's own thread stops its turn, as the box's No does; Claude is told, and continues without it
     return { ...r, decision: { behavior: 'deny', message: one.agent ? PRESSED_NO_WORK : PRESSED_NO, ...(one.agent ? {} : { interrupt: true }) } }
   })
   on('classic.Notification', async ($, e, next) => {

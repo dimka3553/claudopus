@@ -43,10 +43,10 @@ test('work cut off as the process ended is started again with a message, its car
   expect(resumed.map(one => one.split(':')[0])).toEqual(['a7', 'a8'])
   expect(resumed[0]).toContain("this chat's process was ended at")
   expect(resumed[0]).toContain('not by')
-  const lines = await cardText($ as never, /^Cut off at /)
+  const lines = await cardText($ as never, /^Interrupted at /)
   expect(lines).toHaveLength(2)
-  expect(lines[0]?.text).toMatch(/^Cut off at \d\d:\d\d as the chat's process ended; going again since \d\d:\d\d\.$/)
-  expect(logged.some(line => /^2 pieces of work were cut off at \d\d:\d\d and have been going again since \d\d:\d\d\.$/.test(line))).toBe(true)
+  expect(lines[0]?.text).toMatch(/^Interrupted at \d\d:\d\d because the chat's process ended; running again since \d\d:\d\d\.$/)
+  expect(logged.some(line => /^2 tasks were interrupted at \d\d:\d\d and have been running again since \d\d:\d\d\.$/.test(line))).toBe(true)
   expect(files.get(`${MEMORY}/log.md`)).toContain('cut-off notice pushed')
   // The keeper's file says both are at work again
   expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ count: 2 })
@@ -58,15 +58,15 @@ test('in the copy kept on this Mac, work Claude Code started again itself is onl
   await $.session.start(start)
   await clock.advance(31_000)
   expect(resumed).toEqual([])
-  const lines = await cardText($ as never, /^Cut off at /)
+  const lines = await cardText($ as never, /^Interrupted at /)
   const said = (end: string) => lines.find(one => one.text?.endsWith(end))
   expect(lines.map(one => one.text?.replace(/\d\d:\d\d/g, 'hh:mm')).sort()).toEqual([
-    "Cut off at hh:mm as the chat's process ended; going again since hh:mm.",
-    "Cut off at hh:mm as the chat's process ended; it could not be started again.",
+    "Interrupted at hh:mm because the chat's process ended; it couldn't be restarted.",
+    "Interrupted at hh:mm because the chat's process ended; running again since hh:mm.",
   ])
-  expect(said('could not be started again.')?.color).toBe('#E5A50A')
-  expect(lines.find(one => one.text?.includes('going again'))?.color).toBeUndefined()
-  expect(logged.some(line => line.includes('has been going on this Mac by itself') && line.includes('could not be started again'))).toBe(true)
+  expect(said("it couldn't be restarted.")?.color).toBe('#E5A50A')
+  expect(lines.find(one => one.text?.includes('running again'))?.color).toBeUndefined()
+  expect(logged.some(line => line.includes('has been running on this Mac by itself') && line.includes("couldn't be restarted"))).toBe(true)
 })
 
 test('a chat with no keeper starts nothing again, and a cut is taken up once, through a reload of the mod before it was done', SLOW, async ($, on) => {
@@ -102,8 +102,8 @@ test('the notice names each piece by its own title', SLOW, async ($, on) => {
   leftAtWork(files, ['a7', 'a8'])
   await $.session.start(start)
   await clock.advance(31_000)
-  const said = logged.find(line => line.includes('was cut off at')) ?? ''
-  expect(said).toMatch(/^"Solve the cameras" was cut off at \d\d:\d\d and has been going again since \d\d:\d\d\. "Train the splats" cut off at \d\d:\d\d could not be started again\.$/)
+  const said = logged.find(line => line.includes('was interrupted at')) ?? ''
+  expect(said).toMatch(/^"Solve the cameras" was interrupted at \d\d:\d\d and has been running again since \d\d:\d\d\. "Train the splats" interrupted at \d\d:\d\d couldn't be restarted\.$/)
 })
 
 test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper, its work counted as at work', SLOW, async ($, on) => {

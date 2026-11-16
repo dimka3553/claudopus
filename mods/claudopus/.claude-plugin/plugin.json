@@ -1,8 +1,8 @@
 {
   "name": "claudopus",
   "displayName": "Claudopus",
-  "version": "0.2.146",
-  "description": "Every chat hands its work to background agents and a panel beside it shows how each piece is going; your words, results and a brief per subject are kept so chats stay small. macOS and Linux",
+  "version": "0.2.147",
+  "description": "Every chat starts background tasks for Claude to do, and a panel beside it shows how far each has got. Claudopus saves your words, results and instructions for each topic, so chats stay small. macOS and Linux",
   "author": { "name": "dimka3553", "url": "https://github.com/dimka3553" },
   "homepage": "https://www.claudopus.ai",
   "repository": "https://github.com/dimka3553/claudopus",

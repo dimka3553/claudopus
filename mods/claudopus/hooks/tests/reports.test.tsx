@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -737,7 +737,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await until(async () => opened.includes(id) || undefined)
   const one = await $.ui.mount({ ...LIST, requestId: id, props: { ...LIST.props, title: 'Weekly revenue', bodyColumns: 80 }, surface: 'desktop' } as never)
   const heads = (await one.findAll({ type: 'Text' })).filter(text => text.props.bold).map(text => text.text)
-  expect(heads).toEqual(['Weekly revenue', 'Waiting on you', 'Finding', 'Pictures', 'In full', 'Carry on'])
+  expect(heads).toEqual(['Weekly revenue', 'Waiting on you', 'Finding', 'Pictures', 'In full', 'Continue'])
   expect((await one.find({ type: 'Markdown', text: /Revenue rose 12%/ }))?.props.text).toBe(`${report}\n`)
   // Its picture is shown in the pane, never handed to another app: where it cannot be drawn, its path is given as text
   expect(await keyed(one, 'report-page')).toBeUndefined()
@@ -748,7 +748,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
   await pressed(one, 'report-say-0-Yes')
   await until(async () => submitted.length > 0 || undefined)
-  expect(submitted[0]).toContain('From the Claudopus panel: The person pressed "Yes" in answer to what the result "Weekly revenue"')
+  expect(submitted[0]).toContain('From the Claudopus panel: The person pressed "Yes" to answer the question in the result "Weekly revenue"')
   expect(submitted[0]).not.toMatch(/\b(me|my)\b/)
   expect(submitted[0]).toContain('Shall I send it to the team?')
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
@@ -766,7 +766,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
 
   // The chat is told of the reports with each message, and reads one itself to answer from it
   const next = await $.prompt.submit({ text: 'what was revenue again', wait: false, origin: composer })
-  expect(next.context?.join('\n')).toContain('Results kept')
+  expect(next.context?.join('\n')).toContain('Results saved')
   expect(next.context?.join('\n')).toContain(`${folder}/report.md`)
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: `${folder}/report.md` } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'r2', command: `cat ${folder}/report.md` } as never)).deny).toContain('Start a fresh agent')
@@ -852,8 +852,8 @@ test('an older report waits by its one question, a report that only ends with a 
   expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^2$/ })).toBeDefined()
   const told = (await $.prompt.submit({ text: 'what waits', wait: false, origin: composer })).context?.join('\n') ?? ''
-  expect(told).toContain('waits on: Ship the old one?')
-  expect(told).toContain('waits on: Make it public?')
+  expect(told).toContain('waiting on: Ship the old one?')
+  expect(told).toContain('waiting on: Make it public?')
   expect(told).not.toContain('Delete the folder?')
   expect(told).not.toContain('Shall I go on?')
 })

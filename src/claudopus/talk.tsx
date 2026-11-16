@@ -164,7 +164,7 @@ const newest = (lines: Line[]) => {
 // list as it was. A press on Details for work whose tab is open brings that tab to the front
 const WORK_PANE = 'work-'
 const workPaneOf = (id: string) => `${WORK_PANE}${id.replace(/[^A-Za-z0-9_-]/g, '-')}`.slice(0, 64)
-const titleOf = (one: Todo) => one.title || quoted(one.words, 60) || 'Background work'
+const titleOf = (one: Todo) => one.title || quoted(one.words, 60) || 'Background task'
 const openWork = ($: EngineInterface, id: string) => {
   presses += 1
   void comingTab((async () => {

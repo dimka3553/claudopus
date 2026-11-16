@@ -284,8 +284,8 @@ const stop = async ($: EngineInterface, id: string) => {
 const startAgain = async ($: EngineInterface, id: string) => {
   const one = (await read($, todos)).find(todo => todo.id === id)
   if (!one || one.status !== 'stopped' || !one.byYou) return
-  const target = one.parentId && one.parentId !== HELPER ? `the work "${titleOf((await read($, todos)).find(todo => todo.id === one.parentId) ?? one)}" (${one.parentId}), to start again its helper` : 'the work'
-  await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Start again" on "${titleOf(one)}" (${id}), which they had stopped. Start it again: send ${target} "${titleOf(one)}" (${id}) a message with SendMessage to carry on from where it stood.`)
+  const target = one.parentId && one.parentId !== HELPER ? `the task "${titleOf((await read($, todos)).find(todo => todo.id === one.parentId) ?? one)}" (${one.parentId}), to start again its helper` : 'the task'
+  await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "Start again" on "${titleOf(one)}" (${id}), which they had stopped. Start it again: send ${target} "${titleOf(one)}" (${id}) a message with SendMessage so it continues from where it stopped.`)
 }
 
 // Moves running work to another model: its card names it at once, each step it sends from now on goes to it, and the work is

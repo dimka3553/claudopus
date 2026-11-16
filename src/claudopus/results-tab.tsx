@@ -2,7 +2,7 @@
 
 // Puts a line naming the report in the chat's box, for the person to finish and send; where there is no box, nothing is sent for them
 const carryOn = async ($: EngineInterface, r: Report, now: number) => {
-  const text = `Carry on from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `
+  const text = `Continue from the result "${r.title}" (${dated(r.at, now)}), ${reportPath(r)}/report.md: `
   // What the person had typed stays: the line goes after it
   const typed = (await $.prompt.read().catch(() => ({ text: '' }))).text
   const filled = await $.prompt.fill(typed.trim() ? { text: `\n${text}`, mode: 'append' } : { text, mode: 'replace' }).catch(() => ({ isFilled: false }))
@@ -16,7 +16,7 @@ const answerWait = async ($: EngineInterface, r: Report, index: number, said: 'Y
   // A second press before the answer is kept sends nothing more
   if (!wait || wait.answer || answering.has(`${r.id}:${index}`)) return
   answering.add(`${r.id}:${index}`)
-  if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" in answer to what the result "${r.title}" (${dated(r.at, now)}) waits on them for: ${wait.text}\nThe result: ${reportPath(r)}/report.md`)
+  if (said !== 'Not now') await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`)
   // Not now kept nowhere can be pressed again; a Yes or No already sent is not sent twice
   await markReport($, r, stored => ({ waiting: waitsOf(stored).map((one, at) => (at === index ? { ...one, answer: said } : one)) })).catch(err => {
     if (said === 'Not now') answering.delete(`${r.id}:${index}`)
@@ -421,7 +421,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
                     {pictureSaidRow($, ui, `report-pic-said-${n}-${gen}`, one.path)}
                   </Box>
                 ))}
-                <Text dimColor wrap="wrap">{termFrom ? 'A press sends the picture to the device you are at' : 'A press opens the picture'}</Text>
+                <Text dimColor wrap="wrap">{termFrom ? 'Press a picture to send it to the device you’re using' : 'Press a picture to open it'}</Text>
               </Box>
             ) : (
             <Box flexDirection="column" gap={1}>
@@ -457,11 +457,11 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
       {band(
         ui,
         'report-carry',
-        'Carry on',
+        'Continue',
         '',
         <Box flexDirection="column" alignItems="flex-start" gap={1}>
-          <Text dimColor wrap="wrap">Puts a line naming this result in the chat's box, for you to finish and send.</Text>
-          <Button key={`report-carry-${gen}`} label="Carry on from this" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
+          <Text dimColor wrap="wrap">Claudopus puts a line naming this result in the chat's box, for you to finish and send.</Text>
+          <Button key={`report-carry-${gen}`} label="Continue from this" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
           {kin.length ? (
             <Box flexDirection="column" alignItems="flex-start">
               {kin.map(one => (

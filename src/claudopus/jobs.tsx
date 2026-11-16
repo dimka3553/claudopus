@@ -369,8 +369,8 @@ const canStopJob = (job: Job) => !isRunFromAfar && !job.id.startsWith('more-')
 const stoppingJobs = new Set<string>()
 const RUN_STOPPED = (what: string, silent: string) =>
   silent
-    ? `${who(true)} stopped your run "${what}" from the panel as stuck: it had given no word for ${silent}. A run must never be stuck or silent. Do not start it again as it was: find out why it stalled, make it print a plain \`progress:\` line at least every 10 seconds, and start it again only if it is still needed.`
-    : `${who(true)} stopped your run "${what}" from the panel. Do not start it again unless ${who()} asks for it; carry on without it, or ask them if you need it.`
+    ? `${who(true)} stopped your command "${what}" from the panel because it looked stuck: it had printed nothing for ${silent}. A command must never be stuck or silent. Don't start it again as it was: find out why it stalled, make it print a plain \`progress:\` line at least every 10 seconds, and start it again only if it is still needed.`
+    : `${who(true)} stopped your command "${what}" from the panel. Don't start it again unless ${who()} asks for it. Continue without it, or ask them if you need it.`
 const stopJob = async ($: EngineInterface, owner: string, job: Job) => {
   if (!canStopJob(job) || stoppingJobs.has(job.id)) return
   stoppingJobs.add(job.id)
@@ -428,7 +428,7 @@ const stopping = async ($: EngineInterface, owner: string, job: Job) => {
 const RUN_SILENT_TOLD = 60_000
 const silentTold = new Set<string>()
 const RUN_SILENT = (what: string, silent: string) =>
-  `Your run "${what}" has given no word for ${silent}. Look at it now: if it is stuck, stop it (TaskStop for a background command, kill for a detached one) and find out why; if it is still working, let it finish, and make what you run next print a plain \`progress:\` line at least every 10 seconds.`
+  `Your command "${what}" has printed nothing for ${silent}. Look at it now: if it is stuck, stop it (TaskStop for a background command, kill for a detached one) and find out why; if it is still working, let it finish, and make what you run next print a plain \`progress:\` line at least every 10 seconds.`
 const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   for (const one of list) {
     if (one.status !== 'working') continue
@@ -460,7 +460,7 @@ const openJobOutput = async ($: EngineInterface, job: Job) => {
   const base = `${dir}/terminal`
   const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
   const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file)
-  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'Its output is not there (yet): this window shows it once it is written.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
+  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'No output yet. This window shows it as soon as the command prints something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
   await $.fs.write(`${home}/output.command`, script)
   const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready

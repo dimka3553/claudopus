@@ -15,7 +15,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
     await pane.unmount()
     return r
   }
-  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^Nothing new for / }))
+  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^No progress for / }))
 
   // The work waits on its helpers, and they each wait on a start signal only it could give: nothing comes back to any of them
   await bash('a1', 'git log', 'p1')
@@ -25,11 +25,11 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   expect(await stuck()).toBeUndefined()
   await clock.advance(2 * 60_000)
   expect((await stuck())?.props.color).toBe('#E5A50A')
-  expect((await stuck())?.text).toMatch(/^Nothing new for 1[23] min\.$/)
-  expect(logged.filter(line => line.includes('"One merger for all pushes" has had nothing new'))).toHaveLength(1)
+  expect((await stuck())?.text).toMatch(/^No progress for 1[23] min\.$/)
+  expect(logged.filter(line => line.includes(`"One merger for all pushes" hasn't made progress`))).toHaveLength(1)
   // Looked at again, nothing more is said
   await clock.advance(60_000)
-  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(1)
 
   // Something new comes back: the flag goes at the next look
   void keep(bash('h1', 'hold release', 'b3'))
@@ -44,12 +44,12 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   letPoll?.('released Thing 0.1.7')
   await clock.advance(13 * 60_000)
   expect(await stuck()).toBeDefined()
-  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(2)
-  expect(resumed.filter(line => line.includes('stopped mid-step'))).toEqual([])
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(2)
+  expect(resumed.filter(line => line.includes('stopped partway through'))).toEqual([])
   await settle()
 })
 
-test('stuck work the engine no longer runs had stopped mid-step: the mod starts it again at once and tells the chat; work that waits on a helper the engine runs is only flagged', SLOW, async ($, on) => {
+test('stuck work the engine no longer runs had stopped partway through: the mod starts it again at once and tells the chat; work that waits on a helper the engine runs is only flagged', SLOW, async ($, on) => {
   const agents: Record<string, string> = { a1: 'idle', a2: 'idle', a3: 'running' }
   const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose', a3: 'general-purpose' }
   const { settle, clock, logged, resumed } = world(on, { agents, kinds, parents: { a3: 'a2' } })
@@ -59,15 +59,15 @@ test('stuck work the engine no longer runs had stopped mid-step: the mod starts 
   await $.agent.spawn({ ...spawn, description: 'Render the lids', prompt: 'render', parentAgentId: 'a2' } as never)
   for (const id of ['a1', 'a2', 'a3']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
   await clock.advance(13 * 60_000)
-  expect(resumed.filter(line => line.includes('stopped mid-step'))).toHaveLength(1)
-  expect(logged.filter(line => line.includes('"Fit the video" had stopped mid-step') && line.includes('started it again'))).toHaveLength(1)
-  expect(logged.filter(line => line.includes('"Fit the video" has had nothing new'))).toEqual([])
-  expect(logged.filter(line => line.includes('"Draw the lids" has had nothing new'))).toHaveLength(1)
+  expect(resumed.filter(line => line.includes('stopped partway through'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes('"Fit the video" had stopped partway through') && line.includes('restarted it'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes(`"Fit the video" hasn't made progress`))).toEqual([])
+  expect(logged.filter(line => line.includes(`"Draw the lids" hasn't made progress`))).toHaveLength(1)
   // Stuck again, it is not started a second time: the chat is only told
   await $.tool.call({ tool: 'Bash', tool_use_id: 's-a1-again', agentId: 'a1', command: 'git status' } as never)
   await clock.advance(13 * 60_000)
-  expect(resumed.filter(line => line.includes('stopped mid-step'))).toHaveLength(1)
-  expect(resumed.every(line => !line.includes('stopped mid-step') || line.startsWith('a1: From Claudopus, not'))).toBe(true)
+  expect(resumed.filter(line => line.includes('stopped partway through'))).toHaveLength(1)
+  expect(resumed.every(line => !line.includes('stopped partway through') || line.startsWith('a1: From Claudopus, not'))).toBe(true)
   await settle()
 })
 
@@ -116,7 +116,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   await clock.advance(25_000)
   const look = async () => {
     const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-    const r = await pane.find({ type: 'Text', text: /^Nothing new for / })
+    const r = await pane.find({ type: 'Text', text: /^No progress for / })
     await pane.unmount()
     return r
   }
@@ -128,7 +128,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   await $.turn.complete({ answer: `The build is watched. ${'Every check passes and it is pushed. '.repeat(15)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
   await clock.advance(13 * 60_000)
   expect(await look()).toBeUndefined()
-  expect(logged.filter(line => line.includes('has had nothing new'))).toEqual([])
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toEqual([])
   await settle()
 })
 
@@ -139,8 +139,8 @@ test('work asking the person something waits on them and is never flagged', SLOW
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] } as never)
   await clock.advance(30 * 60_000)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
-  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(0)
+  expect(await pane.find({ type: 'Text', text: /^No progress for / })).toBeUndefined()
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(0)
   await pane.unmount()
 })
 

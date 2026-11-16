@@ -93,7 +93,7 @@ const cutPending = new Set<string>()
 const markCut = ($: EngineInterface, id: string, handled: CutHandled) => $.fs.write(keepFile(id, 'cut'), JSON.stringify(handled)).catch(err => log($, `cut-off work not noted: ${String(err)}`))
 // The words the work is started again with
 const CUT_TELL = (cutAt: number, here: boolean) =>
-  `From Claudopus, not {name}: this chat's process was ended at ${hhmm(cutAt)} while you were at work, not by {name}, and the chat has started again${here ? ' on this Mac by itself, under its own sign-in' : ''}. Carry on from where you were: first check what you already have, and whether a command you started still runs (one started detached goes on), then go on with your to-dos.`
+  `From Claudopus, not {name}: this chat's process was ended at ${hhmm(cutAt)} while you were working, not by {name}, and the chat has started again${here ? ' on this Mac by itself, under its own sign-in' : ''}. Continue from where you were: first check what you already have and whether a command you started is still running (a detached one keeps running), then continue with your to-dos.`
 const hhmm = (at: number) => new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 
 // As the chat starts: only a cut the keeper saw counts (a chat with no keeper, or one quit before any, starts nothing again),
@@ -147,8 +147,8 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
   const titled = (one: string) => `"${titleOf(cards.find(card => card.id === one) ?? started(one, '', '', '', cutAt))}"`
   const where = isCopy ? 'on this Mac by itself' : 'again'
   const text = [
-    back.length ? `${back.length === 1 ? `${titled(back[0] ?? '')} was cut off at ${hhmm(cutAt)} and has been going ${where}` : `${back.length} pieces of work were cut off at ${hhmm(cutAt)} and have been going ${where}`} since ${hhmm(now)}.` : '',
-    lost.length ? `${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} pieces of work`} cut off at ${hhmm(cutAt)} could not be started again.` : '',
+    back.length ? `${back.length === 1 ? `${titled(back[0] ?? '')} was interrupted at ${hhmm(cutAt)} and has been running ${where}` : `${back.length} tasks were interrupted at ${hhmm(cutAt)} and have been running ${where}`} since ${hhmm(now)}.` : '',
+    lost.length ? `${lost.length === 1 ? titled(lost[0] ?? '') : `${lost.length} tasks`} interrupted at ${hhmm(cutAt)} couldn't be restarted.` : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -161,9 +161,9 @@ const bringBack = async ($: EngineInterface, id: string, ids: string[], cutAt: n
 const tellDevice = async ($: EngineInterface, text: string) => {
   const pushed = await $.tool.call({ tool: 'PushNotification', message: text.slice(0, 199) } as never).catch(err => ({ deny: String(err) }))
   await log($, `cut-off notice pushed: ${JSON.stringify(pushed).slice(0, 200)}`)
-  await alertPerson($, 'cut', 'Work cut off and started again', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
+  await alertPerson($, 'cut', 'Task interrupted and restarted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`)
 }
 
 // The line on a card of cut-off work: when, and whether it goes on again
 const cutLine = (one: Todo) =>
-  one.cutAt ? (one.backAt ? `Cut off at ${hhmm(one.cutAt)} as the chat's process ended; going again since ${hhmm(one.backAt)}.` : `Cut off at ${hhmm(one.cutAt)} as the chat's process ended; it could not be started again.`) : ''
+  one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; running again since ${hhmm(one.backAt)}.` : `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; it couldn't be restarted.`) : ''

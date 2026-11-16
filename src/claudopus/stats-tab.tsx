@@ -61,7 +61,7 @@ async function runsOf($: EngineInterface, home: string, memory: string, chatId: 
       if (!f.id) return { id: chatId, kind: 'chat', parent: '', title: 'This chat', isFinished: false, sum }
       const meta = parsed<Meta>(await readOr($, f.path.replace(/\.jsonl$/, '.meta.json')), {})
       if (f.flow) return { id: f.id, kind: 'flow', parent: f.flow, title: flowTitle.get(f.flow) ?? 'Workflow', isFinished: Boolean(meta.finished) || (sum.s.at(-1)?.[1] ?? 0) < Date.now() - GAP, sum }
-      return { id: f.id, kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background work', isFinished: Boolean(meta.finished), sum }
+      return { id: f.id, kind: (meta.spawnDepth ?? 1) > 1 ? 'helper' : 'work', parent: meta.parentAgentId ?? '', title: meta.description ?? 'Background task', isFinished: Boolean(meta.finished), sum }
     }),
   )
 }
@@ -82,7 +82,7 @@ async function loadStats($: EngineInterface, scope: Scope, home: string, memory:
     const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat()
     held.set(scope, { runs, at: now })
   } catch (err) {
-    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Stats reads Claude’s records with jq, and jq was not found on ${thisMac()}.` : `The records could not be read: ${String(err)}` })
+    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Stats reads Claude’s records with jq, and jq was not found on ${thisMac()}.` : `Claudopus couldn’t read the records: ${String(err)}` })
   } finally {
     reading.delete(scope)
     drawAgain($)
@@ -97,13 +97,13 @@ async function loadMemorySizes($: EngineInterface, memory: string) {
   const subjects = index.split('\n').filter(row => row.startsWith('- ')).length
   const reports = await names('reports')
   const parts: MemoryPart[] = [
-    { name: 'Subjects', count: subjects, bytes: kb.get('index.md') ?? 0 },
-    { name: 'Briefs', count: (await names('streams')).length, bytes: kb.get('streams') ?? 0 },
+    { name: 'Topics', count: subjects, bytes: kb.get('index.md') ?? 0 },
+    { name: 'Topic notes', count: (await names('streams')).length, bytes: kb.get('streams') ?? 0 },
     { name: 'Your words, by chat', count: (await names('words')).length, bytes: kb.get('words') ?? 0 },
-    { name: 'Asks and answers, by chat', count: (await names('asks')).length, bytes: kb.get('asks') ?? 0 },
+    { name: 'Questions and answers, by chat', count: (await names('asks')).length, bytes: kb.get('asks') ?? 0 },
     { name: 'Results', count: reports.filter(e => e.kind === 'dir').length, bytes: kb.get('reports') ?? 0 },
-    { name: 'Finished work, by chat', count: (await names('finished')).length, bytes: kb.get('finished') ?? 0 },
-    { name: 'Workflow runs', count: (await names('flows')).length, bytes: kb.get('flows') ?? 0 },
+    { name: 'Finished tasks, by chat', count: (await names('finished')).length, bytes: kb.get('finished') ?? 0 },
+    { name: 'Workflows', count: (await names('flows')).length, bytes: kb.get('flows') ?? 0 },
     { name: 'Thumbnails and sums', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
   ]
   const bytes = [...kb.values()].reduce((sum, n) => sum + n, 0)

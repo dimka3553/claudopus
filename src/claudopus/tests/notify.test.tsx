@@ -37,19 +37,19 @@ test('work that is ready plays one sound and raises one notification; helpers, a
   await end('a4', 't4')
   await clock.advance(1_000)
   expect(played).toHaveLength(2)
-  expect(notified.at(-1)).toBe('2 pieces of work are ready | Check the ears: ready · Draw the eyes: ready')
+  expect(notified.at(-1)).toBe('2 tasks are done | Check the ears: done · Draw the eyes: done')
   await $.agent.spawn({ ...spawn, description: 'Check the chin', prompt: 'check the chin' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', agentId: 'a5', items: ['Do you want the chin rounder?'] } as never)
   await end('a5', 't5')
   await clock.advance(1_000)
-  expect(notified.at(-1)).toBe('Check the chin | Waits on the person: Do you want the chin rounder?')
+  expect(notified.at(-1)).toBe('Check the chin | Waiting for the person: Do you want the chin rounder?')
 
   // Failed work: a notification that says so, and no sound
   await $.agent.spawn({ ...spawn, description: 'Paint the hair', prompt: 'paint the hair' } as never)
   await end('a6', 't6', '', { reason: 'error' })
   await clock.advance(1_000)
   expect(played).toHaveLength(3)
-  expect(notified.at(-1)).toBe('Paint the hair | Stopped by an error.')
+  expect(notified.at(-1)).toBe('Paint the hair | Failed with an error.')
 
   // Work the person stops with its Stop button: nothing
   await $.agent.spawn({ ...spawn, description: 'Draw the mouth', prompt: 'draw the mouth' } as never)
@@ -135,7 +135,7 @@ test('work that needs the person is heard once: its notification comes as the am
   await ask('k1', 'Paste the code.')
   expect(own).toHaveLength(1)
   expect(lead(own[0])).toEqual(['--asks', '--chime'])
-  expect(own[0]?.slice(3)).toEqual(['--title', 'Hide the repo needs you', '--text', 'Paste the code.', '--open', 'claude://code/continue?session=local_ab12-cd34', '--key', 'ask-a1'])
+  expect(own[0]?.slice(3)).toEqual(['--title', 'Hide the repo has a question for you', '--text', 'Paste the code.', '--open', 'claude://code/continue?session=local_ab12-cd34', '--key', 'ask-a1'])
   expect(played).toEqual([])
   // The same ask said again is neither shown nor heard again
   await ask('k2', 'Paste the code.')

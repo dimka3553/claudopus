@@ -4,14 +4,14 @@ const toolHooks = (on: On) => {
 
   on('tool.call', { tool: 'mcp__claudopus__update' }, async ($, e) => {
     const input = e as unknown as { name?: string; repo?: string; state?: string; summary?: string; brief?: string }
-    if (!input.name?.trim()) return { result: 'A subject needs a name.' }
+    if (!input.name?.trim()) return { result: 'A topic needs a name.' }
     const saved = await saveStream($, input.name, { repo: input.repo, state: input.state?.slice(0, 60), summary: input.summary })
     // The subject a piece of work recorded names the subject of its report
     if (e.agentId !== undefined) await change($, e.agentId, one => ({ ...one, subject: saved.name }))
     const path = `${dir}/streams/${slug(saved.name)}.md`
     if (input.brief?.trim()) await $.fs.write(`${dir}/streams/${slug(saved.name)}.md`, `${input.brief.trim()}\n`)
 
-    return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nBrief: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` }
+    return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nNotes: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` }
   })
 
   on('tool.call', { tool: 'mcp__claudopus__recall' }, async ($, e) => {
@@ -36,7 +36,7 @@ const toolHooks = (on: On) => {
     const input = e as unknown as { item?: string; state?: string; was?: string }
     const text = oneLine(input.item ?? '').slice(0, 200)
     if (!text) return { result: 'A to-do needs its words.' }
-    if (e.agentId === undefined) return { result: "Only background work has a to-do in the panel; a chat's own thread has none." }
+    if (e.agentId === undefined) return { result: "Only a background task has a to-do in the panel; the chat has none." }
     const state: Item['state'] | undefined = input.state === 'done' || input.state === 'dropped' || input.state === 'open' || input.state === 'doing' ? input.state : undefined
     const old = slug(input.was?.trim() ? input.was : text)
     let items: Item[] = []
@@ -54,9 +54,9 @@ const toolHooks = (on: On) => {
   // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each
   on('tool.call', { tool: 'mcp__claudopus__waits' }, async ($, e) => {
     const input = e as unknown as { items?: unknown }
-    if (e.agentId === undefined) return { result: "Only background work leaves a result; a chat's own thread has none." }
+    if (e.agentId === undefined) return { result: "Only a background task leaves a result; the chat has none." }
     // A helper's answer is no report: the work it answers to records what waits
-    if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper records nothing here: say what waits in your answer, and the work that started you records it.' }
+    if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper records nothing here: say what waits in your answer, and the task that started you records it.' }
     const items = [...new Set((Array.isArray(input.items) ? input.items : []).filter((one): one is string => typeof one === 'string').map(one => cut(oneLine(one), 200)).filter(Boolean))].slice(0, 12)
     await change($, e.agentId, one => ({ ...one, waits: items.length ? items : undefined }))
     return { result: items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing waits on ${who()}.` }
@@ -65,7 +65,7 @@ const toolHooks = (on: On) => {
   // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
     const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown }
-    if (e.agentId === undefined) return { result: `Only background work asks through the panel; a chat's own thread asks ${who()} in its reply.` }
+    if (e.agentId === undefined) return { result: `Only a background task asks through the panel; the chat asks ${who()} in its reply.` }
     // The question is one line; what it is about goes with it, whole, so the person never answers an ask whose reason has not reached
     // them yet (a report reaches the chat only after the work ends). A question too long for one line is cut at a word on the card and
     // kept whole at the top of its details
@@ -75,7 +75,7 @@ const toolHooks = (on: On) => {
     const whole = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n')
     const details = whole.length > ASK_DETAILS ? cut(whole, ASK_DETAILS) : whole
     // An ask that points at an explanation it does not carry is not shown: the person would see it before that explanation reaches them
-    if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the ask points at an explanation it does not carry, and ${who()} sees an ask before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
+    if (!given1 && POINTS_AWAY.test(asked)) return { result: `Not shown: the question points at an explanation it doesn't carry, and ${who()} sees a question before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` }
     const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000)
     const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/')
     // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and one that starts with a
@@ -102,7 +102,7 @@ const toolHooks = (on: On) => {
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     if (!text) {
       if (card && was) await askGone($, card)
-      return { result: 'Cleared: your card no longer asks for anything.' }
+      return { result: 'Cleared: your card no longer has a question.' }
     }
     // The same ask said again is not told again
     if (card && was?.text !== text) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))
@@ -118,7 +118,7 @@ const toolHooks = (on: On) => {
     const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : ''
     const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
-    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message the moment it is given, and starts you again if you have finished. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
+    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message the moment it is given, and starts you again if you have finished. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides
@@ -126,7 +126,7 @@ const toolHooks = (on: On) => {
     const input = e as unknown as { text?: string; decision?: boolean; task?: string }
     const text = oneLine(input.text ?? '').slice(0, NOTE_CHARS)
     if (!text) return { result: 'A note needs its text.' }
-    if (e.agentId === undefined) return { result: "Only background work keeps a log in the panel; a chat's own thread has none." }
+    if (e.agentId === undefined) return { result: "Only a background task keeps a log in the panel; the chat has none." }
     const kind: Entry['kind'] = input.decision ? 'decision' : 'note'
     await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT) }))
     // A steer the work found to be a new task of its own goes back to the chat, which starts it. The work sends it itself, as a
@@ -138,9 +138,9 @@ const toolHooks = (on: On) => {
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     const words = [...(card?.entries ?? [])].reverse().find(entry => entry.kind === 'steer')?.text ?? ''
     said = words || task
-    const handed = `A message from ${who()} to the work "${card?.title || 'in the background'}" is a new task of its own, not part of that work, and the work has not done it. Start it as its own piece of work: ${task}${words ? `\n${who(true)}'s words: “${words}”` : ''}`
+    const handed = `A message from ${who()} to the task "${card?.title || 'in the background'}" is a new task of its own, not part of that task, and that task hasn't done it. Start it as its own background task: ${task}${words ? `\n${who(true)}'s words: “${words}”` : ''}`
 
-    return { result: `Noted. Hand the task to the chat now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${handed}\nThen carry on with your own work; do not do that task here.` }
+    return { result: `Noted. Hand the task to the chat now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${handed}\nThen continue your own task; don't do that new one here.` }
   })
 
 }

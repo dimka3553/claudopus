@@ -46,13 +46,13 @@ const asksNow = (list: Todo[], agent: string) => {
   return list.some(one => (one.id === agent || one.id === top) && Boolean(one.ask) && !one.ask?.replied)
 }
 const NO_PERSON_WAIT = (name: string) =>
-  `Not run: this waits for ${name}, and a wait with a time limit gives them one. Do not wait for ${name} with a command at all. End your step now: your ask stays on the card for as long as it takes, and ${name}'s answer starts you again the moment they give it. Anything you need to see of what they did (a recording, a file, a page) you look at once their answer has come.`
+  `Not run: this command waits for ${name}, and a wait with a time limit gives them one. Don't wait for ${name} with a command at all. End your step now: your question stays on the card for as long as it takes, and ${name}'s answer starts you again the moment they give it. Anything you need to see of what they did (a recording, a file, a page), look at once their answer has come.`
 const NO_PROGRESS_WAIT =
-  'Not run: this wait would give no word of how it goes. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
+  'Not run: this wait would print nothing to show how it is going. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
 const NO_PROGRESS_SCRIPT =
-  'Not run: this long run would give no word of how far it is. Make its script print, flushed at once, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
+  'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
 const MOVED_BACK = (name: string) =>
-  `This command may run for minutes, so it was started in the background rather than held open: ${name}'s replies reach you while it runs. You are told when it ends; its output is in the file named above. Carry on with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
+  `Claudopus started this command in the background instead of holding it open, because it may run for minutes. ${name}'s replies reach you while it runs. Claudopus will tell you when it ends; its output is in the file named above. Continue with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 
 // The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
 // bin/release, bin/keyring) are let through unread
@@ -137,7 +137,7 @@ const rulesAgain = async ($: EngineInterface, agent: string) => {
   if (!card.rulesDue && card.rulesSent === hashOf(rules)) return ''
   await changeTodos($, list => list.map(one => (one.id === agent ? { ...one, rulesSent: hashOf(rules), rulesDue: undefined } : one)))
   await log($, `work ${agent} handed its rules again${card.rulesDue ? ' after a compaction' : ' as they changed'}`)
-  return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every piece of work follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}`
+  return `${card.rulesDue ? 'Your context was compacted, and the rules you were handed at the start are no longer in it.' : 'The rules every task follows have changed since you started.'} These are the rules now; they replace any earlier copy.\n\n${rules}`
 }
 
 const workHooks = (on: On) => {
@@ -341,8 +341,8 @@ const workHooks = (on: On) => {
               : sender?.parentId === target.id
                 ? `your helper${title(sender)}`
                 : target.parentId === e.agentId
-                  ? 'the work that started you'
-                  : `the work${title(sender)}`
+                  ? 'the task that started you'
+                  : `the task${title(sender)}`
         }
         await changeTodos($, list =>
           list.map(one =>

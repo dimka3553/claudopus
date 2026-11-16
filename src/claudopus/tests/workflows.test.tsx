@@ -64,7 +64,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   // What round 1's check found, with how many; who is at work in round 2, in blue beside the moving dots; round 3 runs if needed
   expect(await pane.find({ type: 'Text', text: /^1 found · to_roman\(True\) is not refused$/ })).toBeDefined()
   expect((await pane.find({ type: 'Text', text: /^Maker fixing what the check found$/ }))?.props.color).toBe('#4E93EF')
-  expect((await pane.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Being done now' && String(one.props.source).includes('#4E93EF'))).toBe(true)
+  expect((await pane.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Working now' && String(one.props.source).includes('#4E93EF'))).toBe(true)
   expect(await pane.find({ type: 'Text', text: /^if needed$/ })).toBeDefined()
   // No boxed Details button and no round count at the bottom: the card's own parts say it
   expect((await pane.findAll({ type: 'Button' })).filter(one => one.props.label === 'Details')).toEqual([])
@@ -93,12 +93,12 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   // Each failed round lists what the checker found, and each round has its own squares
   expect(await tab.find({ type: 'Text', text: /^– to_roman\(True\) returns I$/ })).toBeDefined()
   expect((await tab.findAll({ type: 'Svg' })).map(one => one.props.alt)).toEqual(['round 1: done, failed; round 2: running, waiting', 'round 1: done, failed', 'round 2: running, waiting'])
-  expect(await tab.find({ type: 'Text', text: /^Chat of the maker, round 2$/ })).toBeDefined()
+  expect(await tab.find({ type: 'Text', text: /^Conversation of the maker, round 2$/ })).toBeDefined()
   expect(await tab.find({ type: 'Markdown', text: /Booleans are refused now/ })).toBeDefined()
   expect(JSON.stringify(await tab.findAll({ type: 'Markdown' }))).not.toContain('SECRET')
   // Another agent's chat is a press away
   await pressed(tab, 'flow-pick-a2')
-  expect(await until(async () => tab.find({ type: 'Text', text: /^Chat of the checker, round 1$/ }))).toBeDefined()
+  expect(await until(async () => tab.find({ type: 'Text', text: /^Conversation of the checker, round 1$/ }))).toBeDefined()
   await tab.unmount()
 
   // The notice that it ended ends its card: it leaves the running cards and is under Finished
@@ -113,7 +113,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(await pane.find({ type: 'Text', text: /^not needed$/ })).toBeDefined()
   // A workflow that passed makes the octopus happy for its pause too, then it rests
   const octopus = async () => (await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).find(alt => /^Claudopus/.test(alt))
-  expect(await octopus()).toBe('Claudopus, work finished')
+  expect(await octopus()).toBe('Claudopus, task finished')
   expect((await pane.findAll({ type: 'Button' })).some(b => /Finished/.test(String(b.props.label)))).toBe(false)
   await clock.advance(2_100)
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeUndefined()

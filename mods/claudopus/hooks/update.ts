@@ -233,7 +233,7 @@ export const folderReady = async (io: Pick<LookIo, 'run'>, folder: string): Prom
   const named = (text: string) => text.replace(/[^\w./-]/g, '').slice(0, 40)
   const branch = named((await git(['symbolic-ref', '-q', '--short', 'HEAD'])).stdout.trim())
   if (gitDir.trim() !== commonDir.trim())
-    return { ok: false, what: 'a build of Claudopus that a piece of work is changing', why: 'Update leaves it alone, and it gets the newest version when that work takes it in' }
+    return { ok: false, what: 'a build of Claudopus that a task is changing', why: 'Update leaves it alone; it gets the newest version when that task merges it in' }
   if (!branch) return { ok: false, what: 'a test build of Claudopus', why: 'Update leaves it alone' }
   const upstream = named((await git(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).stdout.trim())
   if (branch !== 'main' || !/^[^/]+\/main$/.test(upstream))

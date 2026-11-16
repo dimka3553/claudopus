@@ -1,10 +1,10 @@
 export const meta = {
   name: 'rounds',
-  description: 'A maker builds it, a separate checker holds it to the bar, round after round until it passes or the cap',
-  whenToUse: 'Work with a bar a checker who did not build it can test',
+  description: 'One agent builds it and a separate agent checks it against the test it has to pass, round after round, until it passes or the most rounds are used',
+  whenToUse: 'Work that has a test a checker who did not build it can run',
   phases: [
     { title: 'Make', detail: 'the maker builds it, or fixes what the checker found', model: 'opus' },
-    { title: 'Check', detail: 'the checker tests it against the bar', model: 'opus' },
+    { title: 'Check', detail: 'the checker tests it against the test it has to pass', model: 'opus' },
   ],
 }
 // args: { task, bar, folder, cap } — the task as the person put it, the bar that says it passes, the folder the work happens in,

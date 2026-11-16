@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -703,19 +703,19 @@ test('work that is ready plays one sound and raises one notification; helpers, a
   await end('a4', 't4')
   await clock.advance(1_000)
   expect(played).toHaveLength(2)
-  expect(notified.at(-1)).toBe('2 pieces of work are ready | Check the ears: ready · Draw the eyes: ready')
+  expect(notified.at(-1)).toBe('2 tasks are done | Check the ears: done · Draw the eyes: done')
   await $.agent.spawn({ ...spawn, description: 'Check the chin', prompt: 'check the chin' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__waits', tool_use_id: 'w2', agentId: 'a5', items: ['Do you want the chin rounder?'] } as never)
   await end('a5', 't5')
   await clock.advance(1_000)
-  expect(notified.at(-1)).toBe('Check the chin | Waits on the person: Do you want the chin rounder?')
+  expect(notified.at(-1)).toBe('Check the chin | Waiting for the person: Do you want the chin rounder?')
 
   // Failed work: a notification that says so, and no sound
   await $.agent.spawn({ ...spawn, description: 'Paint the hair', prompt: 'paint the hair' } as never)
   await end('a6', 't6', '', { reason: 'error' })
   await clock.advance(1_000)
   expect(played).toHaveLength(3)
-  expect(notified.at(-1)).toBe('Paint the hair | Stopped by an error.')
+  expect(notified.at(-1)).toBe('Paint the hair | Failed with an error.')
 
   // Work the person stops with its Stop button: nothing
   await $.agent.spawn({ ...spawn, description: 'Draw the mouth', prompt: 'draw the mouth' } as never)
@@ -801,7 +801,7 @@ test('work that needs the person is heard once: its notification comes as the am
   await ask('k1', 'Paste the code.')
   expect(own).toHaveLength(1)
   expect(lead(own[0])).toEqual(['--asks', '--chime'])
-  expect(own[0]?.slice(3)).toEqual(['--title', 'Hide the repo needs you', '--text', 'Paste the code.', '--open', 'claude://code/continue?session=local_ab12-cd34', '--key', 'ask-a1'])
+  expect(own[0]?.slice(3)).toEqual(['--title', 'Hide the repo has a question for you', '--text', 'Paste the code.', '--open', 'claude://code/continue?session=local_ab12-cd34', '--key', 'ask-a1'])
   expect(played).toEqual([])
   // The same ask said again is neither shown nor heard again
   await ask('k2', 'Paste the code.')

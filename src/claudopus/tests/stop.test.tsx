@@ -14,7 +14,7 @@ test('work the person stopped on its card is not started again by the chat, a me
   // The engine's notice of the stop: the chat is told it was the person's
   const notice = '<task-notification>\n<task-id>a1</task-id>\n<status>killed</status>\n<summary>Agent "Bar above the input box disappeared" was stopped by Claude</summary>\n</task-notification>'
   const told = (await $.prompt.submit({ text: notice, wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }
-  expect((told.context ?? []).join('\n')).toContain('the person stopped this; do not restart it, message it or start the same work again unless the person asks')
+  expect((told.context ?? []).join('\n')).toContain('The person stopped this, not you: do not restart it, message it or start the same task again unless the person asks')
 
   // The chat sends it a message: refused
   const message = await $.tool.call({ tool: 'SendMessage', tool_use_id: 'm1', to: 'a1', message: 'Carry on from where you stood.' } as never)
