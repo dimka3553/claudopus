@@ -178,6 +178,16 @@ export const squaresSvg = (groups: Square[][], height: number) => {
   })
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${shapes.join('')}</svg>`
 }
+// The most squares one drawing holds: the app refuses an Svg over 131,072 characters, and a running square, the longest, takes
+// about 165, so 600 stay under it with room. A longer run draws its last rounds that fit, and says how many came before
+export const SQUARES_MOST = 600
+export const squaresKept = (groups: Square[][]) => {
+  let [n, from] = [0, groups.length]
+  while (from > 0 && n + (groups[from - 1]?.length ?? 0) <= SQUARES_MOST) n += groups[--from]?.length ?? 0
+  // One round alone with more steps than that still draws its last steps
+  if (from === groups.length && groups.length) return { groups: [(groups.at(-1) ?? []).slice(-SQUARES_MOST)], earlier: groups.length - 1 }
+  return { groups: groups.slice(from), earlier: from }
+}
 // The squares for a surface that draws no pictures: one letter each, grouped by round
 export const SQUARE_GLYPH: Record<Square, string> = { done: '■', running: '■', waiting: '□', passed: '■', failed: '■', broke: '□' }
 

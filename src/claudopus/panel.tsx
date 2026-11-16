@@ -756,12 +756,19 @@ const panelHooks = (on: On) => {
     const squaresRow = (f: Flow, rounds: Round[], key: string, first = 1) => {
       const groups = squaresOf(f, rounds)
       if (!groups.length) groups.push(f.phases.length ? f.phases.map(() => 'waiting' as const) : ['waiting'])
-      const said = groups.map((g, i) => `round ${first + i}: ${g.join(', ')}`).join('; ')
-      return 'Svg' in table && e.surface !== 'terminal' ? (
-        <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={squaresSvg(groups, LINE)} alt={said} width={squaresWidth(groups)} height={LINE} isInteractive />
-        </Box>
-      ) : (
+      if ('Svg' in table && e.surface !== 'terminal') {
+        // One drawing holds so many squares: a long run draws its last rounds, after how many came before
+        const kept = squaresKept(groups)
+        const said = kept.groups.map((g, i) => `round ${first + kept.earlier + i}: ${g.join(', ')}`).join('; ')
+        const source = squaresSvg(kept.groups, LINE)
+        return (
+          <Box key={key} flexDirection="row" gap={1} alignItems="center" flexShrink={0}>
+            {kept.earlier ? <Text key={`${key}-earlier`} dimColor>{`${kept.earlier} earlier rounds ·`}</Text> : null}
+            {svgFits(source) ? <table.Svg key={`${key}-svg`} source={source} alt={said} width={squaresWidth(kept.groups)} height={LINE} isInteractive /> : <Text key={`${key}-too-big`} dimColor>{`${groups.length} rounds`}</Text>}
+          </Box>
+        )
+      }
+      return (
         <Box key={key} flexDirection="row" gap={1} flexShrink={0}>
           {groups.map((g, i) => (
             <Box key={`${key}-${i}`} flexDirection="row">

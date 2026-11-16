@@ -308,7 +308,9 @@ export const mostAtOnce = (pieces: Span[][]) => {
 const BREAK = 30 * 60_000
 export const axisOf = (pieces: Piece[], width: number) => {
   const busy = union(pieces.flatMap(p => p.spans).map(([a, b]): Span => [a, b + BREAK])).map(([a, b]): Span => [a, b - BREAK])
-  const gap = busy.length > 1 ? Math.min(14, width * 0.03) : 0
+  // The breaks together take a quarter of the width at most: with weeks of history there are dozens, and at 14 px each they took
+  // nearly all of it, leaving the work a sliver
+  const gap = busy.length > 1 ? Math.min(14, width * 0.03, (width * 0.25) / (busy.length - 1)) : 0
   const room = width - gap * (busy.length - 1)
   const total = busy.reduce((sum, [a, b]) => sum + (b - a), 0) || 1
   let x = 0
@@ -327,39 +329,80 @@ export const axisOf = (pieces: Piece[], width: number) => {
 const BARS = 120
 const gapOf = (parts: { x: number; w: number }[]) => (parts.length > 1 ? (parts[1]?.x ?? 0) - ((parts[0]?.x ?? 0) + (parts[0]?.w ?? 0)) : 0)
 const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-// The timeline as an SVG. A bar under the pointer lights up and its piece of work is written on the axis line in place of the
-// times: CSS :hover, which the desktop draws in its sandboxed frame; `<title>` stays for any surface that shows tooltips
+// The most characters the app takes in one Svg's source: a longer one and it refuses the whole tab ("Svg source longer than
+// 131072 characters"), so every drawing is kept under it, and one that is not is a short line in its place (svgFits)
+export const SVG_MOST = 131_072
+export const svgFits = (source: string) => source.length > 0 && source.length <= SVG_MOST
+// A number as short as it can be read: a tenth of a pixel at most, no trailing ".0"
+const px = (n: number) => String(Math.round(n * 10) / 10)
+// The timeline as an SVG, as detailed as fits in one Svg. With room, each bar under the pointer lights up and its piece of work, model
+// and times are written on the axis line in place of the times (CSS :hover, which the desktop draws in its sandboxed frame). With
+// more bars than that holds, the pointer lights a whole piece of work and writes its name and time; with more still, the same bars
+// are drawn in one shape a model, without the pointer's words. The bars are the same in all three. '' when even that is too much
 export const timelineSvg = (pieces: Piece[], width = 600) => {
   const { lane, count } = lanesOf(pieces)
   const { parts, at } = axisOf(pieces, width)
   // The same height whatever the work: rows grow thinner when more ran at once
   const step = Math.min(11, BARS / Math.max(1, count))
-  const [row, top] = [step * 0.73, 0]
+  const row = step * 0.73
   const tall = BARS + 18
   const base = BARS + 2
   // Each cut-out gap is a short dashed tick on the axis
-  const breaks = parts.slice(1).map(p => `<line x1="${(p.x - gapOf(parts) / 2).toFixed(1)}" x2="${(p.x - gapOf(parts) / 2).toFixed(1)}" y1="${base - 7}" y2="${base - 1}" stroke="#8C8C8C" stroke-width="1" stroke-dasharray="2 2"/>`)
+  const breaks = parts.slice(1).map(p => `<line x1="${px(p.x - gapOf(parts) / 2)}" x2="${px(p.x - gapOf(parts) / 2)}" y1="${base - 7}" y2="${base - 1}" stroke="#8C8C8C" stroke-dasharray="2 2"/>`)
   const first = parts[0]?.from ?? 0
   const last = parts.at(-1)?.to ?? 0
   const isOneDay = dayText(first) === dayText(last)
   const label = (t: number) => (isOneDay ? clockText(t) : `${dayText(t)} ${clockText(t)}`)
-  const font = 'font-size="11" font-family="-apple-system, system-ui, sans-serif"'
   // What fits on the axis line, about 6.2 px a letter
   const most = Math.max(20, Math.floor(width / 6.2))
   const fit = (words: string) => (words.length <= most ? words : `${words.slice(0, most - 1).trimEnd()}…`)
-  const bars = pieces.flatMap(p =>
-    p.bars.map(b => {
-      const x = at(b.from)
-      const w = Math.max(1.5, at(b.to) - x)
-      const y = top + (lane.get(p.id) ?? 0) * step
-      const facts = `${nameOf(b.model)} · ${label(b.from)}–${clockText(b.to)} · ${hours(b.to - b.from)}`
-      // The whole row's height takes the pointer, so a thin bar is easy to land on
-      return `<g class="bar"><rect class="hit" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${Math.max(4, w).toFixed(1)}" height="${step.toFixed(1)}" fill="#000" fill-opacity="0"/><rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${row.toFixed(1)}" fill="${colorOf(b.model)}"/><text class="tip" x="0" y="${base + 13}" ${font} font-weight="600" fill="#8C8C8C">${esc(fit(`${p.title} · ${facts}`))}</text><title>${esc(`${p.title}\n${facts}`)}</title></g>`
-    }),
-  )
-  const text = (x: number, anchor: string, words: string) => `<text x="${x}" y="${base + 13}" ${font} fill="#8C8C8C" text-anchor="${anchor}">${esc(words)}</text>`
-  const style = '<style>.tip{visibility:hidden}.bar:hover .tip{visibility:visible}.bar:hover rect:not(.hit){opacity:0.6}svg:has(.bar:hover) .axis{visibility:hidden}</style>'
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${tall}" viewBox="0 0 ${width} ${tall}">${style}${breaks.join('')}<g class="axis">${parts.length ? text(0, 'start', label(first)) + text(width, 'end', label(last)) : ''}</g>${bars.join('')}</svg>`
+  const tip = (words: string) => `<text class="t" y="${base + 13}">${esc(fit(words))}</text>`
+  // A bar as a path: a few characters where a rect takes sixty
+  const box = (x: number, y: number, w: number, h: number) => `M${px(x)} ${px(y)}h${px(w)}v${px(h)}h-${px(w)}z`
+  const spot = (p: Piece, b: Bar) => {
+    const x = at(b.from)
+    return { x, w: Math.max(1.5, at(b.to) - x), y: (lane.get(p.id) ?? 0) * step }
+  }
+  // The whole row's height takes the pointer, so a thin bar is easy to land on
+  const hit = (p: Piece, bars: Bar[]) => `<path class="h" d="${bars.map(b => spot(p, b)).map(s => box(s.x, s.y, Math.max(4, s.w), step)).join('')}"/>`
+  const byBar = () =>
+    pieces.flatMap(p =>
+      p.bars.map(b => {
+        const s = spot(p, b)
+        return `<g class="b">${hit(p, [b])}<path d="${box(s.x, s.y, s.w, row)}" fill="${colorOf(b.model)}"/>${tip(`${p.title} · ${nameOf(b.model)} · ${label(b.from)}–${clockText(b.to)} · ${hours(b.to - b.from)}`)}</g>`
+      }),
+    )
+  const byPiece = () =>
+    pieces.map(p => {
+      const models = [...new Set(p.bars.map(b => b.model))]
+      const shapes = models.map(model => `<path d="${p.bars.filter(b => b.model === model).map(b => spot(p, b)).map(s => box(s.x, s.y, s.w, row)).join('')}" fill="${colorOf(model)}"/>`)
+      const [a, z] = [p.spans[0]?.[0] ?? 0, p.spans.at(-1)?.[1] ?? 0]
+      return `<g class="b">${hit(p, p.bars)}${shapes.join('')}${tip(`${p.title} · ${models.map(nameOf).join(', ')} · ${label(a)}–${clockText(z)} · ${hours(lengthOf(p.spans))}`)}</g>`
+    })
+  // One shape a model, each bar on its own pixel row, bars that touch at this width joined
+  const byModel = () => {
+    const runs = new Map<string, Map<number, [number, number][]>>()
+    for (const p of pieces)
+      for (const b of p.bars) {
+        const s = spot(p, b)
+        const rows = runs.get(b.model) ?? new Map<number, [number, number][]>()
+        const y = Math.round(s.y * 2) / 2
+        rows.set(y, [...(rows.get(y) ?? []), [s.x, s.x + s.w]])
+        runs.set(b.model, rows)
+      }
+    return [...runs.entries()].map(([model, rows]) => {
+      const d = [...rows.entries()].flatMap(([y, spans]) => union(spans.map(([a, z]): Span => [Math.floor(a * 2) / 2, Math.ceil(z * 2) / 2 + 0.5])).map(([a, z]) => box(a, y, z - a - 0.5, row)))
+      return `<path d="${d.join('')}" fill="${colorOf(model)}"/>`
+    })
+  }
+  const axis = parts.length ? `<text x="0" y="${base + 13}">${esc(label(first))}</text><text x="${width}" y="${base + 13}" text-anchor="end">${esc(label(last))}</text>` : ''
+  const style = '<style>text{font:11px -apple-system,system-ui,sans-serif;fill:#8C8C8C}.h{fill:#000;fill-opacity:0}.t{visibility:hidden;font-weight:600}.b:hover .t{visibility:visible}.b:hover path:not(.h){opacity:.6}svg:has(.b:hover) .a{visibility:hidden}</style>'
+  const whole = (bars: string[]) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${tall}" viewBox="0 0 ${width} ${tall}">${style}${breaks.join('')}<g class="a">${axis}</g>${bars.join('')}</svg>`
+  for (const way of [byBar, byPiece, byModel]) {
+    const svg = whole(way())
+    if (svgFits(svg)) return svg
+  }
+  return ''
 }
 
 type Ui = ElementTable
@@ -553,9 +596,13 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     `up to ${mostAtOnce(s.pieces.map(p => p.spans))} at once`,
     <Box flexDirection="column" gap={1}>
       {table.Svg && surface !== 'terminal' ? (
-        <Box flexShrink={0}>
-          <table.Svg key={`timeline-${view.scope}-${view.range}`} source={svg} alt={`${s.pieces.length} pieces of work on a time axis`} width={width} height={BARS + 18} isInteractive />
-        </Box>
+        svgFits(svg) ? (
+          <Box flexShrink={0}>
+            <table.Svg key={`timeline-${view.scope}-${view.range}`} source={svg} alt={`${s.pieces.length} pieces of work on a time axis`} width={width} height={BARS + 18} isInteractive />
+          </Box>
+        ) : (
+          note(ui, 'timeline-too-big', `${s.pieces.length.toLocaleString('en-US')} pieces of work are more than one drawing can hold here. Today or This chat draws fewer.`)
+        )
       ) : (
         timelineText(ui, s.pieces, Math.max(20, Math.floor((px + 32) / 7.4) - 6))
       )}

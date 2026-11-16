@@ -55,6 +55,7 @@ declare global {
   export import rowsOf = M2.rowsOf
   export import SQUARE_COLOR = M2.SQUARE_COLOR
   export import SQUARE_GLYPH = M2.SQUARE_GLYPH
+  export import squaresKept = M2.squaresKept
   export import squaresOf = M2.squaresOf
   export import squaresSvg = M2.squaresSvg
   export import squaresWidth = M2.squaresWidth
@@ -71,6 +72,7 @@ declare global {
   export import reading = M3.reading
   export import statsView = M3.statsView
   export import SUM_JQ = M3.SUM_JQ
+  export import svgFits = M3.svgFits
   export import statsShown = M3.view
   export import Cache = M3.Cache
   export import FileSum = M3.FileSum
