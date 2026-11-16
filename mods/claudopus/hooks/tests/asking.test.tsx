@@ -868,6 +868,47 @@ test('while the person types into an ask the panel holds its drawing whole, as o
   }
 })
 
+test('while drawings of the panel are slow, as under seven tasks and their commands, one drawn afresh moments ago is given again as it was, buttons and all, until the gap is over, so a click amid a stream of changes names a button still there; a quick drawing and a press are drawn at once', async ($, on) => {
+  const { clock } = world(on)
+  // Each drawing of the panel takes 300 ms, as on 16 Nov with seven tasks at work
+  const slow = { isOn: false, n: 0 }
+  on('session.model', () => {
+    slow.n += 1
+    const until = Date.now() + (slow.isOn ? 300 : 0)
+    while (Date.now() < until);
+    return { value: 'claude-opus-5-5' } as never
+  })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'ears' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(2000)
+  // Quick drawings: every change is drawn at once
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'q0', agentId: 'a2', text: 'Quick step of the ears.' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Quick step of the ears.' }))).toBeDefined()
+  slow.isOn = true
+  await clock.advance(2000)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f0', agentId: 'a2', text: 'Step 0 of the ears.' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Step 0 of the ears.' }))).toBeDefined()
+  const keys = async () => (await list.findAll({ type: 'Button' })).map(b => b.key).join(' ')
+  const before = await keys()
+  // Work writing faster than a drawing reaches the app: each ask for the panel within the gap gets the drawing on screen
+  for (const n of [1, 2]) {
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `f${n}`, agentId: 'a2', text: `Step ${n} of the ears.` } as never)
+    expect(await list.find({ type: 'Text', text: 'Step 0 of the ears.' })).toBeDefined()
+    expect(await keys()).toBe(before)
+  }
+  // The gap over, it is drawn afresh by itself, with the newest line
+  await clock.advance(1500)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Step 2 of the ears.' }))).toBeDefined()
+  // A press of the person's is drawn at once, whatever the gap
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f3', agentId: 'a2', text: 'Step 3 of the ears.' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Find more scans', prompt: 'more' } as never)
+  expect(await list.find({ type: 'Text', text: 'Find more scans' })).toBeUndefined()
+  await pressed(list, 'stats-open')
+  expect(await until(async () => list.find({ type: 'Text', text: 'Find more scans' }))).toBeDefined()
+})
+
 test("while the person types into a card's reply box the list's running times stand still, and move again once they stop", async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)
