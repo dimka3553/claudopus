@@ -12401,18 +12401,10 @@ const panelHooks = (on: On) => {
         : (quiet ?? ran) >= SILENT_AFTER ?[`nothing printed for ${ago(quiet ?? ran)}`, `nothing printed ${ago(quiet ?? ran)}`, (quiet ?? ran) >= SILENT_WARN]
         : ['', '', false]
       const warn = isWarn
-      // its speed and time left only while it prints: a minute old, they are no longer how it goes
-      const isFresh = quiet !== undefined && quiet < SILENT_WARN
-      // the time left as of when it was printed, less the time since once it has been quiet a while, so a quiet run counts down,
-      // never up; a fresh one reads as it was printed, since its output is read only every few seconds
-      const since = (quiet ?? 0) >= 10_000 ? (quiet ?? 0) / 1000 : 0
-      const leftNow = (text: string | undefined) => {
-        const sec = leftSeconds(text)
-        return sec !== undefined && sec - since > 0 ? timeLeftText(sec - since) : undefined
-      }
-      const own = leftNow(job.left)
-      const guess = leftNow(guessLeft(job, ran - (quiet ?? 0)))
-      const left = isFresh ? (own ? [own] : guess ? [`~${guess}`] : []) : []
+      // its speed and time left only while it prints: ten seconds old, they are no longer how it goes
+      const isFresh = quiet !== undefined && quiet < 10_000
+      const guess = guessLeft(job, ran)
+      const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []

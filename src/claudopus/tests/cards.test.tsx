@@ -1069,19 +1069,14 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   // still percent between two looks says nothing of quiet (16 Nov: "nothing printed for 5 seconds, 10 seconds")
   output += '\r 52 1024M   52  532M    0     0  10.2M      0  0:01:40  0:00:52  0:00:48 10.5M'
   wroteAt = now + 1_000
-  await advance(8_000)
-  const moved = (await until(async () => {
-    const all = await texts()
-    return all.includes('52%') ? all : undefined
-  })) ?? []
-  expect(moved).toContain('52%')
-  // and the 48 seconds curl said were left count down from when it said them once it is quiet, never standing still or rising,
-  // with nothing said of the quiet under three minutes
-  await advance(10_000)
+  // (a second at a time, as the panel's every-second look runs once for each advance of the clock)
+  for (let n = 0; n < 8; n++) await advance(1_000)
+  expect(await until(async () => ((await texts()).includes('52%') || undefined))).toBe(true)
+  // and quiet for half a minute after, its percent stands with nothing said of the quiet
+  for (let n = 0; n < 30; n++) await advance(1_000)
   const quieter = await texts()
-  expect(quieter.some(text => /· 3\ds left$/.test(text))).toBe(true)
+  expect(quieter).toContain('52%')
   expect(quieter.some(text => /nothing printed/.test(text))).toBe(false)
-  await advance(12_000)
   // The work's own line, as its scripts are told to print it
   output = 'loading\nprogress: 3/6 steps fitting\nframe 12 done\n'
   wroteAt = now
