@@ -322,7 +322,7 @@ test("a chat's own thread may only read, start agents and talk to them; an agent
   const { files } = world(on)
   await $.session.start(start)
   const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
-  expect(told.context?.join('\n')).toContain('A question answered by reading a few files is answered directly')
+  expect(told.context?.join('\n')).toContain('A question a few reads answer is answered here')
   expect(told.context?.join('\n')).toContain('Anything that changes a file, runs a command or takes more than a few reads')
 
   const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'ls' } as never)
