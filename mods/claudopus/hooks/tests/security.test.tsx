@@ -991,16 +991,25 @@ test('F-021 · an old kept copy put back with the old file is not taken by a cha
   await $.session.start(start)
   await bash('o2', 'ls')
   expect(await until(async () => (logged.some(line => /could not use its key/.test(line)) ? true : undefined))).toBe(true)
-  // A home with no keychain, as a trial chat's own: the keychain is never asked, so macOS puts no "Keychain Not Found" on the
-  // screen, and the panel says so as for one that does not answer
+  // A home with no keychain, as a trial chat's own (no folder of keychains, or one holding only the metadata file): the keychain
+  // is never asked, so macOS puts no "Keychain Not Found" on the screen, and the panel says so as for one that does not answer
   files.delete('keychain:refused')
-  for (const item of ['keychain:known', 'keychain:gate', KEYCHAIN, `${MEMORY}/admin-known.json`]) files.delete(item)
+  files.delete(KEYCHAIN)
+  for (const [i, left] of [[], [`${HOME}/Library/Keychains/metadata.keychain-db`]].entries()) {
+    for (const one of left) files.set(one, '')
+    for (const item of ['keychain:known', 'keychain:gate', `${MEMORY}/admin-known.json`, `${MEMORY}/log.md`]) files.delete(item)
+    await $.session.start(start)
+    await bash(`o3-${i}`, 'ls')
+    expect(await until(async () => (/not in force: the keychain did not answer/.test(files.get(`${MEMORY}/log.md`) ?? '') ? true : undefined))).toBe(true)
+    expect(files.get('keychain:dialog')).toBeUndefined()
+    expect(files.has('keychain:known')).toBe(false)
+  }
+  // A keychain made later is used at once
+  files.set(`${HOME}/Library/Keychains/login.keychain-db`, '')
   files.delete(`${MEMORY}/log.md`)
   await $.session.start(start)
-  await bash('o3', 'ls')
-  expect(await until(async () => (/not in force: the keychain did not answer/.test(files.get(`${MEMORY}/log.md`) ?? '') ? true : undefined))).toBe(true)
-  expect(files.get('keychain:dialog')).toBeUndefined()
-  expect(files.has('keychain:known')).toBe(false)
+  await bash('o4', 'ls')
+  expect(await until(async () => (files.has('keychain:known') ? true : undefined))).toBe(true)
 })
 
 test("F-021 · another chat's Config change is never undone here: not while the keychain does not answer, nor when it lands with a lower count", async ($, on) => {

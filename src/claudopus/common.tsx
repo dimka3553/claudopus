@@ -433,8 +433,12 @@ const hasKeychain = async ($: EngineInterface) => {
   if (isLinux) return true
   const home = (await $.env.get('HOME')) ?? ''
   if (!home.startsWith('/')) return false
-  const found = await $.fs.list(`${home}/Library/Keychains`).catch(() => [])
-  return found.some(one => one.kind === 'file' && /\.keychain(?:-db)?$/.test(one.name))
+  // No folder of keychains at all is a home of its own; a folder that cannot be listed is left to security as before. A keychain
+  // there may be a link (one moved and linked back); metadata.keychain-db alone is no keychain
+  const where = `${home}/Library/Keychains`
+  if (!(await $.fs.stat(where).then(() => true, err => !/ENOENT|ENOTDIR/.test(String(err))))) return false
+  const found = await $.fs.list(where).catch(() => undefined)
+  return !found || found.some(one => one.name !== 'metadata.keychain-db' && /\.keychain(?:-db)?$/.test(one.name))
 }
 // How this computer is named in what the person reads
 const thisMac = () => (isLinux ? 'this machine' : 'this Mac')

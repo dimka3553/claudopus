@@ -460,8 +460,12 @@ const hasKeychain = async ($: EngineInterface) => {
   if (isLinux) return true
   const home = (await $.env.get('HOME')) ?? ''
   if (!home.startsWith('/')) return false
-  const found = await $.fs.list(`${home}/Library/Keychains`).catch(() => [])
-  return found.some(one => one.kind === 'file' && /\.keychain(?:-db)?$/.test(one.name))
+  // No folder of keychains at all is a home of its own; a folder that cannot be listed is left to security as before. A keychain
+  // there may be a link (one moved and linked back); metadata.keychain-db alone is no keychain
+  const where = `${home}/Library/Keychains`
+  if (!(await $.fs.stat(where).then(() => true, err => !/ENOENT|ENOTDIR/.test(String(err))))) return false
+  const found = await $.fs.list(where).catch(() => undefined)
+  return !found || found.some(one => one.name !== 'metadata.keychain-db' && /\.keychain(?:-db)?$/.test(one.name))
 }
 // How this computer is named in what the person reads
 const thisMac = () => (isLinux ? 'this machine' : 'this Mac')
@@ -6933,8 +6937,10 @@ const lookBoxes = async ($: EngineInterface) => {
 
 // A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
 // which sendBox calls as before for set and has, so only delete goes through here
-const boxKeyring = ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
-  isLinux
+const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
+  !(await hasKeychain($))
+    ? { exitCode: -1 }
+    : isLinux
     ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
     : what === 'delete'
       ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))

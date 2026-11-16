@@ -232,8 +232,10 @@ const lookBoxes = async ($: EngineInterface) => {
 
 // A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
 // which sendBox calls as before for set and has, so only delete goes through here
-const boxKeyring = ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
-  isLinux
+const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
+  !(await hasKeychain($))
+    ? { exitCode: -1 }
+    : isLinux
     ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
     : what === 'delete'
       ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
