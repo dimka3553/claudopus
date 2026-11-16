@@ -9736,7 +9736,7 @@ const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string;
   if (/^\s*(\S*\/)?ssh\b/.test(command)) return
   const bgId = (result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
   const isBackground = Boolean(call.run_in_background) && typeof bgId === 'string'
-  const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 400), from, to, at, endAt: now, ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
+  const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 4000), from, to, at, endAt: now, ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
   spans = [...spans.filter(s => s.id !== span.id), span].slice(-SPANS_KEPT)
   if (call.run_in_background) return
   const r = await $.process.run(['sh', '-c', `printf '@@LEFT@@\\n'; ps -axww -o ${PS_COLUMNS}`], { timeoutMs: 5000 }).catch(() => undefined)

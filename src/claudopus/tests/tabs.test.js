@@ -1,0 +1,230 @@
+"use strict";
+// The Stats and About tabs, and the bar of buttons
+test('Stats opens in front from its button beside Results, and adds up this chat\'s work from its records: tokens, work, time saved, cost', async ($, on) => {
+    const { files, opened, tabs } = world(on);
+    const M = 60000;
+    const now = 1700000000000;
+    const chat = `${HOME}/.claude/projects/-repo`;
+    const subs = `${chat}/engine-id/subagents`;
+    files.set(`${chat}/engine-id.jsonl`, '{}');
+    files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [], d: [], turns: [[now - 30 * M, now - 30 * M + 20000]] }));
+    // Two pieces of work that ran side by side for ten minutes
+    for (const [id, from, to, output] of [['w1', now - 30 * M, now - 10 * M, 1000000], ['w2', now - 20 * M, now - 10 * M, 500000]]) {
+        files.set(`${subs}/agent-${id}.jsonl`, '{}');
+        files.set(`${subs}/agent-${id}.meta.json`, JSON.stringify({ description: `Work ${id}`, spawnDepth: 1, finished: true }));
+        files.set(`${subs}/agent-${id}.jsonl.sum`, JSON.stringify({ s: [[from, to]], u: [[`m-${id}`, 'claude-opus-5-5', from + M, 0, 0, 0, 0, 0, 0, output]], d: [[from + M, 'Do it', 'done', '']] }));
+    }
+    await $.session.start(start);
+    const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' });
+    expect((await keyed(pane, 'stats-open'))?.props.label).toBe('Stats');
+    await pressed(pane, 'stats-open');
+    expect(opened).toContain('stats');
+    expect(tabs).toContain('stats: Stats');
+    const stats = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, title: 'Stats', bodyColumns: 80 }, surface: 'desktop' });
+    // At the top, what is counted: this chat, today, each chosen one filled and bold
+    expect((await stats.find({ type: 'Text', text: /^This chat$/ }))?.props.bold).toBe(true);
+    expect((await stats.find({ type: 'Text', text: 'Today' }))?.props.bold).toBe(true);
+    expect((await keyed(stats, 'scope-All chats'))?.props.label).toBe('All chats');
+    // Once read: 1.5M output tokens on Opus 5.5 at $20 a million, two pieces finished, two to-dos, 30 minutes of work in 20
+    expect(await until(async () => stats.find({ type: 'Text', text: 'Saved by running side by side' }))).toBeDefined();
+    expect(await stats.find({ type: 'Text', text: 'Opus 5.5' })).toBeDefined();
+    expect(await stats.find({ type: 'Text', text: '1.5M' })).toBeDefined();
+    expect(await stats.find({ type: 'Text', text: '$30.00' })).toBeDefined();
+    const value = async (name) => {
+        const rows = (await stats.findAll({ type: 'Text' })).map(one => one.text);
+        return rows[rows.indexOf(name) + 1];
+    };
+    // The headline: time saved, cost, work done
+    expect(await value('10m')).toBe('time saved');
+    expect(await value('Tasks done')).toBe('2');
+    expect(await value('To-dos done')).toBe('2');
+    expect(await value('Task time added up')).toBe('30m');
+    expect(await value('On the clock')).toBe('20m');
+    expect(await value('Saved by running side by side')).toBe('10m');
+    // From the person's message to the chat's last response or tool result before the next message: 20 seconds here
+    expect(await value('From your message to the chat’s last step, on average')).toBe('20s');
+    expect(await stats.find({ type: 'Text', text: /^Each of your messages is timed from when the chat takes it up/ })).toBeDefined();
+    // The sums are kept, so the transcripts are read again only when they change
+    expect(JSON.parse(files.get(`${MEMORY}/stats/engine-id.json`) ?? '{}').folder).toBe(chat);
+});
+test('Stats draws whatever the history: the timeline of 240 pieces of work at once, each busy a minute in ten, in one drawing the app takes, and the rest of the tab as ever', async ($, on) => {
+    const { files } = world(on);
+    const M = 60000;
+    const t0 = 1700000000000 - 1000 * M;
+    const chat = `${HOME}/.claude/projects/-repo`;
+    const subs = `${chat}/engine-id/subagents`;
+    files.set(`${chat}/engine-id.jsonl`, '{}');
+    files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [], u: [], d: [] }));
+    // 24,000 bars: on 0.2.139 a drawing of eleven million characters, which the app refuses with the whole tab
+    const spans = Array.from({ length: 100 }, (_, k) => [t0 + k * 10 * M, t0 + k * 10 * M + M]);
+    for (let i = 0; i < 240; i++) {
+        files.set(`${subs}/agent-w${i}.jsonl`, '{}');
+        files.set(`${subs}/agent-w${i}.meta.json`, JSON.stringify({ description: `Work ${i}`, spawnDepth: 1, finished: true }));
+        files.set(`${subs}/agent-w${i}.jsonl.sum`, JSON.stringify({ s: spans, u: [[`m-${i}`, 'claude-opus-5-5', t0 + M, 0, 0, 0, 0, 0, 0, 1000]], d: [] }));
+    }
+    await $.session.start(start);
+    const stats = await $.ui.mount({ ...LIST, requestId: 'stats', props: { ...LIST.props, title: 'Stats', bodyColumns: 60 }, surface: 'desktop' });
+    const allTime = await until(async () => (await stats.findAll({ type: 'Button' })).find(one => one.props.label === 'All time'));
+    await stats.press({ key: allTime?.key ?? '' });
+    // The timeline is drawn, its bars on a coarser grid, in one drawing the app takes
+    const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 tasks on a time axis'));
+    expect(String(timeline?.props.source)).toContain('#8A63F0');
+    expect((await stats.findAll({ type: 'Svg' })).filter(one => String(one.props.source).length > 131072)).toEqual([]);
+    // The rest of the tab is drawn as ever
+    expect(await stats.find({ type: 'Text', text: 'Saved by running side by side' })).toBeDefined();
+    expect(await stats.find({ type: 'Text', text: '240k' })).toBeDefined();
+});
+test('the bar keeps its buttons whole on a row of their own under the header, wrapping in a narrow pane', async ($, on) => {
+    world(on);
+    await $.session.start(start);
+    const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 30 }, surface: 'desktop' });
+    const row = (await pane.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons');
+    expect(row?.props.flexWrap).toBe('wrap');
+    // Wrapped rows are as far apart as the buttons beside each other, so they never touch
+    expect(row?.props.columnGap).toBe(1);
+    expect(row?.props.rowGap).toBe(1);
+    // A terminal's gap would be a whole blank line between the rows, so it has none
+    const term = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 30 }, surface: 'terminal' });
+    expect((await term.findAll({ type: 'Box' })).find(one => one.key === 'head-buttons')?.props.rowGap).toBe(0);
+    expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toEqual(['Stats', 'Memory', 'Config', 'About']);
+    // The chat's size is no longer squeezed beside the buttons
+    expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined();
+});
+test('the header names the version this chat loaded beside Claudopus, and a newer one the Mac has installed, on the same line', async ($, on) => {
+    const { files } = world(on);
+    await $.session.start(start);
+    const version = async (pane) => (await pane.findAll({ type: 'Text' })).find(one => /^v\d/.test(one.text ?? ''));
+    const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' });
+    const name = (await pane.findAll({ type: 'Box' })).find(one => one.key === 'head-name');
+    expect(name?.props.flexDirection).toBe('row');
+    const shown = await version(pane);
+    expect(shown?.text).toBe('v0.1.0');
+    expect(shown?.props.dimColor).toBe(true);
+    // The header keeps its three lines: the name, what runs, this chat's size
+    expect(await pane.find({ type: 'Text', text: /^This chat:/ })).toBeDefined();
+    // The installed version is Claude Code's own record, not the last look's: a copy run from a folder of its code has none, so a
+    // newer version in update.json names nothing (an installed copy's is read from installed_plugins.json, tested in update.test)
+    await pane.unmount();
+    files.set(`${MEMORY}/update.json`, JSON.stringify({ at: 1, version: '0.1.1', result: 'updated' }));
+    const later = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' });
+    expect((await version(later))?.text).toBe('v0.1.0');
+    await later.unmount();
+    // In a narrow pane the name stays whole; only the version shortens
+    const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 24 }, surface: 'desktop' });
+    const whole = (await narrow.findAll({ type: 'Box' })).find(one => one.key === 'head-name');
+    expect(whole?.props.minWidth).toBe(0);
+    expect(await narrow.find({ type: 'Text', text: 'Claudopus' })).toBeDefined();
+    await narrow.unmount();
+    files.set(`${MEMORY}/update.json`, JSON.stringify({ at: 2, version: '0.1.0', result: 'none' }));
+    const same = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' });
+    expect((await version(same))?.text).toBe('v0.1.0');
+});
+test('About says what Claudopus is, its version and the app\'s, and links the site, the code and its licence', async ($, on) => {
+    const { tabs } = world(on);
+    await $.session.start(start);
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' });
+    await pressed(list, 'about-open');
+    expect(await until(async () => tabs.find(tab => tab === 'about: About'))).toBe('about: About');
+    const about = await $.ui.mount({ ...LIST, requestId: 'about', props: { ...LIST.props, title: 'About', bodyColumns: 60 }, surface: 'desktop' });
+    expect(await about.find({ type: 'Text', text: 'Version 0.1.0 · Claude Code 2.1.321' })).toBeDefined();
+    expect(await about.find({ type: 'Text', text: 'What it does' })).toBeDefined();
+    // The principles are not shown there
+    expect(await about.find({ type: 'Text', text: 'My words are the spec.' })).toBeUndefined();
+    const links = (await about.findAll({ type: 'Link' })).map(one => one.props.href);
+    expect(links).toEqual(['https://claudopus.ai', 'https://github.com/dimka3553/claudopus', 'https://github.com/dimka3553/claudopus/blob/main/LICENSE']);
+    expect(await about.find({ type: 'Text', text: /a star on GitHub/ })).toBeDefined();
+});
+// ---- The changelog and the update screen ----
+const CHANGELOG = [
+    '# Changelog',
+    '',
+    '## 0.1.0 · 13 November 2026',
+    '- The panel shows what changed.',
+    '- A second change.',
+    '',
+    '## 0.0.9 · 12 November 2026',
+    '- Pictures open large.',
+    '',
+    '## 0.0.8 · 11 November 2026',
+    '- An old change.',
+    '',
+].join('\n');
+test('About opens the changelog in a tab of its own, every version newest first, the one this chat runs marked', async ($, on) => {
+    const { tabs } = world(on, { changelog: CHANGELOG });
+    await $.session.start(start);
+    const about = await $.ui.mount({ ...LIST, requestId: 'about', props: { ...LIST.props, title: 'About', bodyColumns: 60 }, surface: 'desktop' });
+    expect((await keyed(about, 'about-changelog'))?.props.label).toBe('Changelog');
+    await pressed(about, 'about-changelog');
+    expect(await until(async () => tabs.find(tab => tab === 'changelog: Changelog'))).toBe('changelog: Changelog');
+    const log = await $.ui.mount({ ...LIST, requestId: 'changelog', props: { ...LIST.props, title: 'Changelog', bodyColumns: 60 }, surface: 'desktop' });
+    const texts = (await log.findAll({ type: 'Text' })).map(one => one.text);
+    expect(texts.filter(one => /^v0\./.test(one))).toEqual(['v0.1.0', 'v0.0.9', 'v0.0.8']);
+    expect(texts).toContain('13 November 2026 · this chat');
+    expect(texts).toContain('Pictures open large.');
+});
+test('a chat that moved to a newer version than the one whose changes were seen says so in one quiet note in the header, with What\'s new, until closed', async ($, on) => {
+    const { files } = world(on, { changelog: CHANGELOG });
+    files.set(`${MEMORY}/seen.json`, JSON.stringify({ version: '0.0.8' }));
+    await $.session.start(start);
+    const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' });
+    expect(await until(async () => pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' }))).toBeDefined();
+    expect(await pane.find({ type: 'Text', text: '· from v0.0.8, 2 versions' })).toBeDefined();
+    // The panel stays whole beneath it: its header buttons are there
+    expect((await pane.findAll({ type: 'Button' })).map(b => b.props.label)).toContain('Stats');
+    await pressed(pane, 'update-close');
+    expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0');
+    expect(await until(async () => ((await pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })) ? undefined : true))).toBe(true);
+    // A load of the same version again shows nothing
+    await pane.unmount();
+    await $.session.start(start);
+    const again = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' });
+    expect(await until(async () => (await again.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined();
+    expect(await again.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })).toBeUndefined();
+});
+test('a first install starts the record of changes seen at its own version, and shows no update screen', async ($, on) => {
+    const { files } = world(on, { changelog: CHANGELOG });
+    await $.session.start(start);
+    expect(JSON.parse(files.get(`${MEMORY}/seen.json`) ?? '{}').version).toBe('0.1.0');
+    const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 60 }, surface: 'desktop' });
+    expect(await until(async () => (await pane.findAll({ type: 'Button' })).find(b => b.props.label === 'Stats'))).toBeDefined();
+    expect(await pane.find({ type: 'Text', text: 'Updated to Claudopus 0.1.0' })).toBeUndefined();
+});
+// "Nothing to show yet": the app asks a tab for its drawing as it shows it, and asks again only when told something changed; one
+// empty answer (the chat out of reach that moment) left Stats, About or a result empty for good, as none of them reads anything that
+// changes. A tab open and never asked for since is drawn again until it is
+test('a tab opened but not asked for its drawing is drawn again within seconds, and one asked for costs nothing more', async ($, on) => {
+    const live = [{ id: 'claudopus', isShown: true, isPlaced: true }];
+    const { clock } = world(on, { live });
+    let redraws = 0;
+    on('ui.invalidate', () => ((redraws += 1), { value: undefined }));
+    await $.session.start(start);
+    const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' });
+    await pressed(pane, 'about-open');
+    await clock.advance(500);
+    const before = redraws;
+    // The app's ask for About never came: two seconds on, the mod draws again, and asks the app to
+    await clock.advance(2000);
+    expect(redraws).toBeGreaterThan(before);
+    // Opened again and asked for at once: no redraw of its own follows
+    await pressed(pane, 'about-open');
+    await clock.advance(100);
+    await $.ui.mount({ ...LIST, requestId: 'about', props: { ...LIST.props, title: 'About', bodyColumns: 80 }, surface: 'desktop' });
+    await clock.advance(500);
+    const asked = redraws;
+    await clock.advance(20000);
+    expect(redraws).toBe(asked);
+});
+test('a tab left open as the mod loads, after an update or a reload, is drawn again if the app does not ask for it', async ($, on) => {
+    const live = [{ id: 'claudopus', isShown: false, isPlaced: false }, { id: 'stats', isShown: false, isPlaced: false }];
+    const { clock } = world(on, { live });
+    let redraws = 0;
+    on('ui.invalidate', () => ((redraws += 1), { value: undefined }));
+    await $.session.start(start);
+    await clock.advance(500);
+    const before = redraws;
+    await clock.advance(2000);
+    expect(redraws).toBeGreaterThan(before);
+    // Four times at most, while nothing asks for it: a tab behind the others is never asked for
+    await clock.advance(60000);
+    expect(redraws - before).toBeLessThanOrEqual(4);
+});

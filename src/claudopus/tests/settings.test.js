@@ -1,0 +1,176 @@
+"use strict";
+// Config: the person's own texts, settings, and models
+test('a copy of the principles in the memory folder is the person\'s own: every conversation carries it in place of the shipped ones', async ($, on) => {
+    const { files } = world(on);
+    on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }));
+    const MINE = '# Mine\n\n## Core truths\n\n- Mine come first.\n\n## Checking\n\n1. Look at it.\n';
+    files.set(`${MEMORY}/rules/CLAUDE.md`, MINE);
+    await $.session.start(start);
+    const told = await $.prompt.context({ blocks: [], instructionFiles: [{ path: '/repo/CLAUDE.md', kind: 'project', content: 'REPO RULES' }] });
+    expect(told.instructionFiles?.find(one => one.kind === 'user')).toEqual({ path: `${MEMORY}/rules/CLAUDE.md`, kind: 'user', content: MINE });
+    expect(told.instructionFiles?.some(one => one.content === PRINCIPLES)).toBe(false);
+});
+// The two lines that were the author's own and no longer ship, as a person may keep them in their own copy
+const DELIBERATE = 'My decisions are deliberate.';
+const DONE_MEANS = 'Done means';
+test('a new install with no copy of its own carries the shipped principles, which leave out the author\'s "decisions are deliberate" and "done means" lines', async ($, on) => {
+    const { files } = world(on, { isNew: true, shipped: true });
+    on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }));
+    await $.session.start(start);
+    expect(files.has(`${MEMORY}/rules/CLAUDE.md`)).toBe(false);
+    const told = await $.prompt.context({ blocks: [], instructionFiles: [] });
+    const ours = told.instructionFiles?.find(one => one.kind === 'user')?.content ?? '';
+    expect(ours).toBe(SHIPPED_PRINCIPLES);
+    expect(ours).toContain('# How I work with Claude');
+    expect(ours).toContain('My words are the spec.');
+    expect(ours).not.toContain(DELIBERATE);
+    expect(ours).not.toContain(DONE_MEANS);
+    expect(ours).not.toContain('A concern is raised');
+});
+test('a person\'s own copy that keeps both lines carries both, in their words, in place of the shipped principles', async ($, on) => {
+    const { files } = world(on, { shipped: true });
+    on('prompt.context', (_, e) => ({ blocks: e.blocks, instructionFiles: e.instructionFiles }));
+    const MINE = '# How I work with Claude\n\n## Principles\n\n1. My decisions are deliberate. No risk, legal or ethics commentary unless it blocks the task; then one line, once.\n2. Done means committed and pushed, or deployed.\n';
+    files.set(`${MEMORY}/rules/CLAUDE.md`, MINE);
+    await $.session.start(start);
+    const told = await $.prompt.context({ blocks: [], instructionFiles: [] });
+    const ours = told.instructionFiles?.find(one => one.kind === 'user')?.content ?? '';
+    expect(ours).toBe(MINE);
+    expect(ours).toContain(DELIBERATE);
+    expect(ours).toContain(DONE_MEANS);
+    expect(told.instructionFiles?.some(one => one.content === SHIPPED_PRINCIPLES)).toBe(false);
+    // Nothing the mod does writes over it
+    expect(files.get(`${MEMORY}/rules/CLAUDE.md`)).toBe(MINE);
+});
+test('Config lists each thing a person can set with what is in force, edits a text as their own copy, changes a setting and puts each back', async ($, on) => {
+    const { files, shown, tabs } = world(on);
+    files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam', other: 1 }));
+    await $.session.start(start);
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' });
+    await pressed(list, 'config-open');
+    expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config');
+    const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' });
+    for (const name of ['Principles', "The chat's rules", 'Task rules', 'Your name', 'Background tasks', 'Sound', 'Notifications', 'Most tasks', 'Long searching and reading', 'Heavy tasks'])
+        expect(await config.find({ type: 'Text', text: name })).toBeDefined();
+    // Only what differs from what shipped has a Reset: here the name
+    expect((await config.findAll({ type: 'Button' })).filter(one => one.props.label === 'Reset').length).toBe(1);
+    // Open file makes the person's own copy from the shipped text and opens it in their editor
+    await pressed(config, 'config-text-principles-open');
+    expect(files.get(`${MEMORY}/rules/CLAUDE.md`)).toBe(PRINCIPLES);
+    expect(shown.at(-1)).toEqual(['open', '-t', `${MEMORY}/rules/CLAUDE.md`]);
+    // A copy still the same as what shipped is no change of theirs
+    expect((await config.findAll({ type: 'Text', text: /As shipped\.$/ })).length).toBe(3);
+    // Edit opens the text in the tab; Save makes it the person's own
+    await pressed(config, 'config-text-work-edit');
+    await config.input({ key: 'config-text-work-input', text: 'MY WORK RULES' });
+    expect(files.get(`${MEMORY}/roles/work.md`)).toBe('MY WORK RULES\n');
+    expect(await config.find({ type: 'Input', key: 'config-text-work-input' })).toBeUndefined();
+    // Without the places the shipped rules fill, it is said to lack what an update added
+    expect(await config.find({ type: 'Text', text: /Edited by you, before an update added parts yours lacks/ })).toBeDefined();
+    // Reset moves it aside, and the shipped text is in force again
+    await pressed(config, 'config-text-work-back');
+    expect(files.has(`${MEMORY}/roles/work.md`)).toBe(false);
+    expect([...files.entries()].find(([path]) => /\/roles\/work\.md\.\d{8}-\d{6}\.old$/.test(path))?.[1]).toBe('MY WORK RULES\n');
+    expect((await config.findAll({ type: 'Text', text: /As shipped\.$/ })).length).toBe(3);
+    // A setting is written to config.json, every other key kept; Reset takes the key out
+    await pressed(config, 'config-sound-off');
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1, sound: false });
+    await pressed(config, 'config-sound-back');
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', other: 1 });
+    // Nothing in Config turns on updates that install by themselves, nor keeps an admin password
+    expect(await config.find({ type: 'Text', text: 'Automatic updates' })).toBeUndefined();
+    expect(await config.find({ type: 'Text', text: 'Admin password' })).toBeUndefined();
+    await config.input({ key: 'config-name-input', text: 'Alex' });
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').name).toBe('Alex');
+    await pressed(config, 'config-name-back');
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').name).toBeUndefined();
+});
+test('the model each kind of work runs on comes from Config, and the chat\'s and work\'s rules name it', async ($, on) => {
+    const { files } = world(on, { chatRole: 'CHAT ROLE\n- {models}' });
+    await $.session.start(start);
+    const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' });
+    await config.select({ key: 'config-model-legwork-pick', value: 'opus' });
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ models: { legwork: 'opus' } });
+    // The chat is told at its next message, and the work's rules name the helpers' model
+    const told = (await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer }));
+    expect((told.context ?? []).join('\n')).toContain('Long legwork such as indexing runs on Opus 5.5, `model: "opus"`.');
+    await $.agent.spawn({ ...spawn, prompt: 'index the photos' });
+    expect(prompts[0]).not.toContain('{helpers}');
+    expect(prompts[0]).not.toContain('{checker}');
+    // Picking what shipped takes the key out again
+    await config.select({ key: 'config-model-legwork-pick', value: 'sonnet' });
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({});
+});
+test("Config's Tasks band shows how work is handed out, each with its shipped choice, and a choice is written as lean in config.json", async ($, on) => {
+    const { files } = world(on);
+    await $.session.start(start);
+    const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' });
+    const settings = [
+        ['fable', 'When to use Fable 5.2', 'heavy', 'named'],
+        ['small', 'Small jobs', 'copy', 'full'],
+        ['quick', 'Quick task model', 'opus', 'work'],
+        ['start', 'What a task starts with', 'lean', 'all'],
+        ['second', 'Second check', 'beyond', 'every'],
+        ['checker', 'Checker model', 'same', 'strongest'],
+        ['readers', 'Helpers that only read', 'sonnet', 'own'],
+    ];
+    for (const [key, name, shipped, other] of settings) {
+        expect([name, Boolean(await config.find({ type: 'Text', text: name }))]).toEqual([name, true]);
+        expect([key, (await config.find({ type: 'Select', key: `config-lean-${key}-pick` }))?.props.value]).toEqual([key, shipped]);
+        await config.select({ key: `config-lean-${key}-pick`, value: other });
+        expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ lean: { [key]: other } });
+        expect([key, (await until(async () => ((await config.find({ type: 'Select', key: `config-lean-${key}-pick` }))?.props.value === other ? other : undefined)))]).toEqual([key, other]);
+        // Picking what shipped takes the key out again
+        await config.select({ key: `config-lean-${key}-pick`, value: shipped });
+        expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({});
+    }
+});
+test('Check now in Config only looks: it shows it is checking, then what it found, and a second press meanwhile starts no second look; nothing is fetched or moved', async ($, on) => {
+    const { files, gitRan } = world(on, { release: { version: '0.1.2', commit: 'c'.repeat(40), tree: 'a'.repeat(40) } });
+    let page = JSON.stringify({ version: '0.1.0', tree: 'a'.repeat(40) });
+    let answer;
+    let fetches = 0;
+    on('http.fetch', async () => {
+        fetches += 1;
+        await new Promise(done => (answer = done));
+        return { value: { status: 200, ok: true, headers: {}, text: page } };
+    });
+    const release = () => {
+        const one = answer;
+        answer = undefined;
+        one?.();
+    };
+    await $.session.start(start);
+    const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' });
+    expect(await until(() => config.find({ type: 'Text', text: 'This chat runs v0.1.0' }))).toBeDefined();
+    // Where it loads from, said as it is
+    expect(await until(() => config.find({ type: 'Text', text: /^It loads from Claudopus's released code on this Mac\. Not looked yet\.$/ }))).toBeDefined();
+    await pressed(config, 'config-check');
+    expect(await until(() => config.find({ type: 'Text', text: 'Checking…' }))).toBeDefined();
+    expect((await config.findAll({ type: 'Button' })).some(one => one.props.label === 'Check now')).toBe(false);
+    release();
+    expect(await until(() => config.find({ type: 'Text', text: /^You're on the newest version \(v0\.1\.0\)/ }))).toBeDefined();
+    expect(fetches).toBe(1);
+    // A newer release: Check now says so and the panel offers it; nothing was fetched, moved or installed
+    page = JSON.stringify({ version: '0.1.2', tree: 'a'.repeat(40) });
+    await pressed(config, 'config-check');
+    await until(async () => answer);
+    release();
+    expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is out. You can update from the panel.' }))).toBeDefined();
+    expect(gitRan.filter(one => /^(fetch|merge)/.test(one) || one.includes('fetch --progress'))).toEqual([]);
+    expect(files.get('manifest')).toBeUndefined();
+    // An older page with no fingerprint is no release: said as a failure, in the error colour
+    page = '{"version":"0.1.3"}';
+    await pressed(config, 'config-check');
+    await until(async () => answer);
+    release();
+    const failed = await until(() => config.find({ type: 'Text', text: /^Couldn't check: the version page has nothing to check the new version against/ }));
+    expect(failed?.props.color).toBe('error');
+    // How often: one choice, written as the two keys; Only when I ask is updates false
+    await config.select({ key: 'config-look-pick', value: '24' });
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toMatchObject({ updateEvery: 24 });
+    await config.select({ key: 'config-look-pick', value: '0' });
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toMatchObject({ updates: false });
+    await config.select({ key: 'config-look-pick', value: '1' });
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({});
+});

@@ -425,6 +425,13 @@ test('what a command left running is told by its group and by when it started: o
   const b = { ...span, id: 'b', from: 5100, to: 5150, at: now - 9_000, until: now - 6_000 }
   const both = leftoversOf(ps(['5003 1 5002 S 00:08 1000 sleep 600', '5110 1 5102 S 00:08 1000 sleep 601']), [b, a])
   expect(both.map(l => `${l.top.pid}>${l.span}`).sort()).toEqual(['5003>a', '5110>b'])
+  // Two tasks' commands at once, where the run's shell got its number after the other task's command began (16 Nov): the run goes
+  // to the command that names it, never to a code search beside it; one that no command names, between two tasks, goes to neither
+  const paint = { ...span, id: 'paint', agent: 'muse', from: 75_300, to: 75_420, at: now - 23_000, until: now - 20_000, cmd: `cd /w/scan-textures && export OUT=/d/open PYTHONWARNINGS=ignore; ${'x'.repeat(380)}; nohup ~/.venvs/tex/bin/python -u runall.py --set open --workers 2 --only scan-sonicom-P0065,scan-sonicom-P0066 > $OUT/trial.log 2>&1 & echo $!` }
+  const search = { ...span, id: 'search', agent: 'clipify', from: 75_340, to: 75_430, at: now - 21_000, until: now - 19_000, cmd: 'cd /w/clipify-coupon-ux && grep -rn "faceiq-affiliate-opening" --include="*.ts" . | head -30' }
+  const run = '75360 1 75355 S 00:20 2097152 /u/.venvs/tex/bin/python -u runall.py --set open --workers 2 --only scan-sonicom-P0065,scan-sonicom-P0066'
+  expect(leftoversOf(ps([run]), [paint, search]).map(l => l.span)).toEqual(['paint'])
+  expect(leftoversOf(ps(['75361 1 75356 S 00:20 1000 sleep 600']), [paint, search]).length).toBe(0)
   // A call still open past the wrap holds back what it may have started
   expect(leftoversOf(ps(['20 1 20 S 00:05 1000 /u/bin/python daemon.py']), [{ ...span, from: 99_990, to: 40 }], new Set(), [{ from: 99_995, at: now - 8_000 }]).length).toBe(0)
   expect(leftName('/opt/homebrew/Cellar/python/Python.app/Contents/MacOS/Python fig4.py page 3')).toBe('Run python fig4.py page 3')
