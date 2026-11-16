@@ -7,8 +7,6 @@
 const RECORD_FOR = 180_000
 const RECORD_SWITCH = 'record-panel.on'
 const RECORD_FRESH = 60_000
-// Set only while a recording asked for it: the pull back to a typed box let through (commands.tsx)
-let isPullGuardOff = false
 let recording: { path: string; until: number; lines: string[]; written: number; started: number } | undefined
 let recordLooked = 0
 let typedCount = new Map<string, number>()
@@ -21,7 +19,6 @@ const isRecording = async ($: EngineInterface) => {
     if (at < recording.until) return true
     await recordFlush($)
     recording = undefined
-    isPullGuardOff = false
     return false
   }
   if (!dir || at - recordLooked < 2000) return false
@@ -31,8 +28,6 @@ const isRecording = async ($: EngineInterface) => {
   if (!stat) return false
   // A switch left from long ago, its removal failed or its chat gone, starts nothing: it goes
   if (at - stat.mtimeMs > RECORD_FRESH) return void (await $.process.run(['rm', '-f', on]).catch(() => undefined)), false
-  // A switch that says "unguarded" records with the pull back let through, to compare with and without it
-  isPullGuardOff = /unguarded/.test(await readOr($, on))
   const chat = (await $.session.id().catch(() => '')).slice(0, 8) || 'chat'
   recording = { path: `${dir}/panel-record/${chat}-${new Date(at).toISOString().replace(/[:.]/g, '-')}.jsonl`, until: at + RECORD_FOR, lines: [], written: 0, started: at }
   typedCount = new Map()
@@ -41,7 +36,7 @@ const isRecording = async ($: EngineInterface) => {
   const manifest = await readOr($, `${$.plugin.root}/.claude-plugin/plugin.json`)
   const flushing = () => $.clock.after(2000, () => void (recording ? recordFlush($).then(() => (recording && ((void isRecording($)), flushing()))) : undefined))
   flushing()
-  await recordLine($, { ev: 'start', isPullGuardOff, version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
+  await recordLine($, { ev: 'start', version: /"version": *"([^"]+)"/.exec(manifest)?.[1] ?? '', root: $.plugin.root.split('/').slice(-3).join('/') })
   return true
 }
 // One event, with its time from the start
@@ -92,6 +87,36 @@ const drawingShape = (drawing: unknown) => {
 const recordDrawn = new Map<string, unknown>()
 const lastSign = new Map<string, string>()
 const recorderHooks = (on: On) => {
+  // The bar above the prompt, where the reply box is drawn: each drawing, whether it was the one held, and the boxes in it
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!(await isRecording($))) return next(e)
+    const began = await $.clock.now()
+    const r = await next(e)
+    const isSame = recordDrawn.get('bar') === r
+    recordDrawn.set('bar', r)
+    const shape = drawingShape(r)
+    await recordLine($, { ev: 'render', component: e.component, id: e.requestId, surface: e.surface, offset: e.props.scroll.offset, rows: e.props.scroll.bodyRows, collapsed: e.props.isCollapsed, ms: (await $.clock.now()) - began, held: isSame, typing: isTyping, nodes: shape.nodes, inputs: shape.inputs, sign: shape.sign })
+    return r
+  })
+  on('ui.scroll', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (await isRecording($)) await recordLine($, { ev: 'scroll', id: e.requestId, site: 'bar', origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows })
+    return next(e)
+  })
+  on('ui.input', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (await isRecording($)) {
+      const key = keyShown(e.element) ?? ''
+      typedCount.set(key, (typedCount.get(key) ?? 0) + 1)
+      await recordLine($, { ev: 'input', id: e.requestId, site: 'bar', element: key, kind: e.kind, count: typedCount.get(key) })
+    }
+    return next(e)
+  })
+  on('ui.press', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!(await isRecording($))) return next(e)
+    await recordLine($, { ev: 'press', id: e.requestId, site: 'bar', element: keyShown(e.element) })
+    const r = await next(e)
+    await recordLine($, { ev: 'pressed', site: 'bar', element: keyShown(r.element) })
+    return r
+  })
   on('ui.render', { component: 'Pane', requestId: LIST }, async ($, e, next) => {
     if (!(await isRecording($))) return next(e)
     const id = e.requestId ?? ''
@@ -113,9 +138,19 @@ const recorderHooks = (on: On) => {
     if (await isRecording($)) await recordLine($, { ev: 'scroll', id: e.requestId, origin: e.origin.kind === 'plugin' ? `plugin:${e.origin.name}` : e.origin.kind, by: e.by, to: e.offset, rows: e.bodyRows, content: e.contentRows })
     return next(e)
   })
-  on('ui.focus', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element) })
-    return next(e)
+  // Every site's focus moves, the panel's and the rest (a press that takes the focus out of the panel), and what came of each
+  // (by site kind: the panel's own hook in commands.tsx is the one without a matcher, and the engine allows one)
+  on('ui.focus', { component: 'Pane' }, async ($, e, next) => {
+    if (!(await isRecording($))) return next(e)
+    const r = await next(e)
+    await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element), deny: r.deny !== undefined })
+    return r
+  })
+  on('ui.focus', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (!(await isRecording($))) return next(e)
+    const r = await next(e)
+    await recordLine($, { ev: 'focus', id: e.requestId, origin: e.origin.kind, plugin: e.plugin, element: keyShown(e.element), deny: r.deny !== undefined })
+    return r
   })
   // Typing as a count by box: the value is never read
   on('ui.input', { requestId: LIST }, async ($, e, next) => {
@@ -127,8 +162,12 @@ const recorderHooks = (on: On) => {
     }
     return next(e)
   })
+  // A press, and whether it reached its button: an element the drawing no longer holds runs nothing
   on('ui.press', { requestId: LIST }, async ($, e, next) => {
-    if (await isRecording($)) await recordLine($, { ev: 'press', id: e.requestId, element: keyShown(e.element) })
-    return next(e)
+    if (!(await isRecording($))) return next(e)
+    await recordLine($, { ev: 'press', id: e.requestId, element: keyShown(e.element) })
+    const r = await next(e)
+    await recordLine($, { ev: 'pressed', element: keyShown(r.element) })
+    return r
   })
 }

@@ -85,7 +85,8 @@ const hasDraft = (id: string) => [...drafts].some(([key, value]) => key.startsWi
 // pane afresh at each drawing, the box in it too: a pane drawn every few seconds under the person's typing flickered the box's ring,
 // put older letters over newer ones, and, as Markdown came or went above, threw the panel to its bottom, out of the person's reach
 // (15 Nov, typing an answer while other work ran; measured on the app's own drawing, headless). Each letter typed, or the box taking
-// the focus, holds it for TYPING more; sending, any press, or the focus leaving the boxes lets it go
+// the focus, holds it for TYPING more; sending, any press, or the focus leaving the boxes lets it go. The desktop app's reply box is
+// in the bar above the prompt (repliesInBar), which is held the same way while it is typed in
 const TYPING = 30_000
 let typing = 0
 let isTyping = false
@@ -105,8 +106,8 @@ const drawAgain = ($: EngineInterface) => {
 // The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
 // arrive, so a drawing never puts older letters over the newer ones the box already holds
 const drawnDrafts = new Map<string, string>()
-const draftShown = (id: string, ask: NonNullable<Todo['ask']>) => {
-  const key = draftOf(id, ask)
+const draftShown = (id: string, ask: NonNullable<Todo['ask']>) => draftDrawn(draftOf(id, ask))
+const draftDrawn = (key: string) => {
   if (isTyping && drawnDrafts.has(key)) return drawnDrafts.get(key) ?? ''
   const value = drafts.get(key) ?? ''
   drawnDrafts.set(key, value)
@@ -123,7 +124,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed]])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -260,6 +261,83 @@ const asPressed = (one: Todo): Todo => {
   if (!isAnswered && admins?.length === one.admins?.length) return one
   return { ...one, ask: isAnswered ? undefined : one.ask, admins: admins?.length ? admins : undefined }
 }
+// Where a reply in words is typed. The desktop app keeps moving a pane's window back to a box that holds the cursor inside it, many
+// times a second, and reports each move as the person's own scroll (found live, 15 Nov: stuck at the box while typing, a bounce
+// once the moves were refused). A pane has no part that stays still, so on a surface whose bar above the prompt takes a box
+// (barBoxes: the bar was drawn there with an Input in its table) an ask's reply box is drawn in that bar, a site of its own that the
+// pane's scrolling does not reach, and never in the pane. It is there only once the person asks for it: the card's answers end
+// with "Reply in your own words", which opens the box in the bar for that card, and Close takes it away again (16 Nov: a box
+// always in the bar looked bad, and the person asked for it as one of the options)
+// A bar the person folded shows nothing of the mod's, and one of the app's surveys takes its place: neither takes the box, and the
+// card has its own again, so a reply in words can always be typed somewhere
+const barBoxes = new Set<string>()
+const repliesInBar = (surface: string) => barBoxes.has(surface)
+// When the bar's box last took the cursor or a letter, 0 once the cursor is known to have left it or its reply was sent: the bar
+// holds its drawing that long (band.tsx, barHeld). The app may say nothing when the cursor leaves for the chat's own box, so the
+// hold ends by itself BAR_BOX_HELD after the last sign of it
+let barBoxAt = 0
+const BAR_BOX_HELD = 300_000
+const isBarBox = (element: string | undefined) => /^band-.*-reply-/.test(element ?? '')
+// The card whose reply box is open in the bar, none when it is closed: opened by the card's "Reply in your own words", closed by
+// Close (on the card or in the bar), by the reply sent, by the card answered, or by the bar folding. One box at a time: opened on
+// another card it is that card's, and what was half typed is kept for the card it was typed for. Nothing but the person closes or
+// moves it while the card asks: when the work puts a new question in place of the one it was opened on (replyMark), the box stays
+// as it is, with what is typed in it, and what is sent from it answers the question the work asks then (16 Nov, the person:
+// "it should just allow me to keep typing until I myself either close it or open the new question")
+let replyTo = ''
+let replyMark = ''
+const isReplyOpen = (one: Todo) => Boolean(replyTo && one.id === replyTo && one.ask)
+// The open box's own name and what is typed in it, the same through a new question of its work
+const barBoxKey = (id: string) => `band-${id}-reply-${replies.get(id) ?? 0}-${replyMark}`
+const barDraft = (id: string) => `${id}|${replyMark}`
+// This chat's cards that wait for an answer
+const asksForBar = (cards: Todo[]) => cards.filter(one => !one.parentId && !one.chat && Boolean(asPressed(one).ask) && !isActingOnReply(one))
+const barTarget = (cards: Todo[]) => (replyTo ? asksForBar(cards).find(isReplyOpen) : undefined)
+// The bar's own id on each surface, as its drawing is asked for: where the cursor is put when the box opens
+const barIds = new Map<string, string>()
+// What was typed in the bar's box is its card's: when the work has since put a new question in place of the one the box was
+// opened on, the words are shown under that question too, in the box as it is opened again and in the card's own box when the
+// bar folds. Only the words of the box the person last had open for that card (barLeft), never those of an older question
+const barLeft = new Map<string, string>()
+const carryDraft = ($: EngineInterface, one: Todo, from: string | undefined) => {
+  if (!one.ask || !from) return
+  const to = draftOf(one.id, one.ask)
+  const typed = drafts.get(from)
+  if (from === to || !typed || drafts.get(to)) return
+  drafts.set(to, typed)
+  keepDraft($, to, typed)
+  drafts.delete(from)
+  keepDraft($, from, undefined)
+}
+// A reply sent from the bar's box answers what its card asks as it is sent: the box may have been drawn for an earlier question.
+// On its way from the press itself, as an answer from the card is (answersOnWay)
+const sendFromBar = ($: EngineInterface, id: string, value: string) => {
+  const run = (async () => {
+    const one = (await read($, todos)).find(card => card.id === id)
+    if (one?.ask && value.trim()) await answerAsk($, one, value, true)
+  })()
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+// Opens the bar's reply box for a card, or closes it. Opening it, the cursor is asked into the box: the app gives it only where
+// the bar already holds the keys, so where it does not the person clicks the box
+const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) => {
+  if (replyTo) barLeft.set(replyTo, barDraft(replyTo))
+  if (one) (carryDraft($, one, barLeft.get(one.id)), barLeft.delete(one.id))
+  replyTo = one?.ask ? one.id : ''
+  replyMark = one?.ask ? askMark(one.ask) : ''
+  barBoxAt = 0
+  presses += 1
+  redraw($)
+  const ask = one?.ask
+  const bar = barIds.get(surface)
+  if (!one || !ask || !bar) return
+  void $.ui
+    .focus({ requestId: bar, key: barBoxKey(one.id) })
+    .then(r => recordEvent($, 'focus-call', { deny: r.deny ?? null }))
+    .catch(err => recordEvent($, 'focus-call', { failed: String(err).slice(0, 80) }))
+}
 const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply = false) => {
   // Another chat's ask is answered only in that chat: no file carries an answer to it, from this Mac or another
   if (one.chat) return
@@ -276,6 +354,8 @@ const answerNow = async ($: EngineInterface, one: Todo, choice: string, isReply 
   // Answered in the press's own drawing, before anything is awaited: what was pressed, on its way
   const mark = `${ask.at}:${ask.text}`
   askPressed.set(one.id, mark)
+  // Its reply box in the bar goes with the answer, and is closed when the same work asks again
+  if (replyTo === one.id) ((replyTo = ''), (replyMark = ''), (barBoxAt = 0))
   const line = lineOf(one)
   sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at: Infinity, line, isCard: true, askAt: ask.at })
   if (isReply) freeTimes($)

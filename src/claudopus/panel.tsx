@@ -204,7 +204,8 @@ const panelHooks = (on: On) => {
 
     // What a piece of work needs the person's hands for now, in its colour, with the exact text to copy beside one Copy button, then
     // the same three ways to answer on every ask, on the small card as in Details: the work's own buttons, or Done and Not now when
-    // it gave none, and a box for a reply in the person's own words. The list's times stand still while the person types (holdTimes)
+    // it gave none, and a box for a reply in the person's own words, which the desktop app has in the bar above the prompt and
+    // not on the card (repliesInBar). The list's times stand still while the person types (holdTimes)
     // In the terminal the first ask's reply box holds the keys as the panel takes them: what is typed then is the person's words,
     // never a button's letter, and Tab leaves it for the buttons and their keys
     let askFocused = false
@@ -304,9 +305,23 @@ const panelHooks = (on: On) => {
             {answers.map((choice, n) => (
               <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
+            {/* Where the bar above the prompt holds the reply box, the last answer opens it there for this card, and closes it again */}
+            {'Input' in table && repliesInBar(e.surface) ? (
+              isReplyOpen(one) ? (
+                <Button key={`${key}-inbar-close-${presses}`} label="Close the reply box" onPress={press => openReply($, undefined, press.surface)} />
+              ) : (
+                <Button key={`${key}-inbar-${presses}`} label="Reply in your own words" onPress={press => openReply($, one, press.surface)} />
+              )
+            ) : null}
           </Box>
           )}
-          {'Input' in table && !one.chat ? (
+          {/* Where the bar above the prompt holds the reply box, the card has none: a box typed in here is what the app drags the
+              panel to. Once opened it says where to type: the app puts the cursor there only on the person's own click */}
+          {'Input' in table && !one.chat && repliesInBar(e.surface) ? (
+            isReplyOpen(one) ? (
+              <Text key={`${key}-inbar`} dimColor wrap="wrap">✎ Type it in the box above the chat</Text>
+            ) : null
+          ) : 'Input' in table && !one.chat ? (
             <Box width="100%" flexDirection="column">
               <table.Input
                 key={`${key}-reply-${replies.get(one.id) ?? 0}-${askMark(ask)}`}
