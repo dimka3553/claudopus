@@ -5539,7 +5539,7 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // Marked on its way once written, so a step that began before it never counts as reading it
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) {
-    writtenIn(target, one.id)
+    writtenIn($, target, one.id)
     sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at })
     redraw($)
   } else await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
@@ -5578,7 +5578,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
   const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
   const to = `${who(true)} replied to your ask ("${ask.text}"), in their own words: ${said}\n${named(REPLY_HOLDS)}`
   const told = working ? await tell($, target, to) : undefined
-  if (told && !told.deny) return void (writtenIn(target, one.id), redraw($))
+  if (told && !told.deny) return void (writtenIn($, target, one.id), redraw($))
   await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
 }
 // An answer to work that has ended starts that work again with it, as a message to it: the chat then gets the work's report as
@@ -5638,8 +5638,9 @@ const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
 // The answers, by card and when given, that started their work again: the run each started reads it
 const startedBy = new Set<string>()
 // An answer written into work under way, which reads it at a step of its own: an earlier wake's run no longer covers this card
-const writtenIn = (target: string, card: string) => {
+const writtenIn = ($: EngineInterface, target: string, card: string) => {
   pending.set(target, card)
+  void replyWaiting($, target)
   for (const key of startedBy) if (key.startsWith(`${card}:`)) startedBy.delete(key)
 }
 // Work an answer or the person's message started again is at work from then: its card is back among the running cards, not under
@@ -5707,7 +5708,7 @@ const answeredInChat = async ($: EngineInterface, a: { card: Todo; ask: NonNulla
   await changeTodos($, all => all.map(one => (one.id === a.card.id && one.ask?.at === a.ask.at && one.ask.text === a.ask.text ? { ...one, ask: isHeld ? { ...one.ask, replied: { text: a.words, at: a.at, ...(one.status === 'working' ? {} : { isWaking: true }) } } : undefined } : one)))
   dropDrafts($, a.card.id)
   sentReplies.set(a.card.id, { text: a.words, ask: a.ask.text, to: 'work', at: a.at, line: lineOf(a.card) })
-  writtenIn(to, a.card.id)
+  writtenIn($, to, a.card.id)
   const helper = a.ask.from && a.ask.from !== to ? (await read($, todos)).find(one => one.id === a.ask.from && one.status === 'working') : undefined
   if (helper) await tell($, helper.id, `${who(true)} answered your ask ("${a.ask.text}") in the chat, in their own words: ${a.words}`)
   redraw($)
@@ -5727,6 +5728,24 @@ const replyRead = ($: EngineInterface, agentId: string) => {
   const sent = sentReplies.get(card)
   if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
 }
+// The person's words written into work under way are marked beside the file its wait on helpers reads, so that wait comes back at
+// once and the work reads them; the mark goes at the work's next step, which reads them
+const replyMarked = new Set<string>()
+// (a mark an earlier copy of the mod left, before a reload, is looked for once at each work's first step here)
+const replyLooked = new Set<string>()
+const replyWaiting = async ($: EngineInterface, agentId: string) => {
+  if (!dir) return
+  const at = await $.clock.now()
+  await $.fs.write(`${rollPath(agentId)}.reply`, `${at}\n`).catch(err => log($, `reply mark for ${agentId} not written: ${String(err)}`))
+  replyMarked.add(agentId)
+}
+const replyTaken = async ($: EngineInterface, agentId: string) => {
+  if (!dir) return
+  const isFirst = !replyLooked.has(agentId)
+  replyLooked.add(agentId)
+  if (!replyMarked.delete(agentId) && !(isFirst && (await readOr($, `${rollPath(agentId)}.reply`)).trim())) return
+  await $.fs.write(`${rollPath(agentId)}.reply`, '').catch(() => undefined)
+}
 // Work whose run ended with an answer written in but never read is started again with it
 const replyUnread = async ($: EngineInterface, agentId: string) => {
   const card = pending.get(agentId)
@@ -5745,6 +5764,16 @@ const heldAnswer = (one: Todo, now: number) => {
   const sent = one.chat ? undefined : sentReplies.get(one.id)
   return sent?.isCard && sent.to !== 'lost' && now - sent.at < ANSWER_SHOWN ? sent : undefined
 }
+// A reply written into work while one of its calls is held open is read only when that call ends: the card names it and how long it
+// has run, so a wait is never taken for a reply lost
+const waitsBehind = (one: Todo, at: number, now: number) => {
+  // the call held open by the very work the reply was written into (the helper that asked, or the work), while it is unread
+  const target = [...pending].find(([, card]) => card === one.id)?.[0]
+  const running = target !== undefined && one.status === 'working' ? runningOf(target) : undefined
+  if (!running || running.at > at) return ''
+  const name = running.label ? `“${cut(describedOf(running.label).text || running.label, 50)}”` : running.what.replace(/ running$/, '')
+  return `waiting: it reads it when ${name} ends (running ${took(now - running.at)})`
+}
 // What the card says of the answer last given to its ask, for ANSWER_SHOWN after, until the work writes a newer line or asks again.
 // An answer that could not be left for another Mac says so under the ask, which is back
 const sentLine = (one: Todo, now: number) => {
@@ -5760,7 +5789,7 @@ const sentLine = (one: Todo, now: number) => {
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
   const how = {
     sending: 'on its way to the work',
-    work: 'it reads this at its next step',
+    work: waitsBehind(one, sent.at, now) || 'it reads this at its next step',
     read: 'it has read it',
     chat: 'left in the chat, which carries the work on',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose work reads it at its next step`,
@@ -9828,6 +9857,37 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   for (const text of await scriptsRun($, command)) if (touchesBoxes(text)) return true
   return false
 }
+// A piece of work reads a message only between its calls, so a command it holds open keeps the person's reply from it until the
+// command ends (16 Nov: a reply waited 8 minutes behind a 9-minute wait for the person). One that may run past this long, by the
+// time limit it asks for or the time its words give it, goes to the background instead: the work is told when it ends, and reads a
+// reply at once meanwhile. Not the mod's own waits on helpers (which come back when a reply waits), a password or a key
+const HELD_LONGEST = 2 * 60_000
+const isLongHeld = (call: { tool: string; command?: unknown; description?: unknown; timeout?: unknown; run_in_background?: unknown }) =>
+  call.tool === 'Bash' &&
+  !call.run_in_background &&
+  !/\bbin\/(?:helpers|admin|secret)\b|(?:^|[\s;&|(])\.\/(?:helpers|admin|secret)\b/.test(String(call.command ?? '')) &&
+  // A launcher that leaves its runs going and comes back is followed by what it started while it ran, so it is left as it is
+  !/\b(?:nohup|setsid|disown)\b|(?<![&>|])&(?![&>])/.test(String(call.command ?? '')) &&
+  (Number(call.timeout ?? 0) > HELD_LONGEST || (/^\s*(?:wait|watch|poll)(?:ing)?\b/i.test(String(call.description ?? '')) && (describedOf(String(call.description ?? '')).expect ?? 0) >= HELD_LONGEST))
+// A wait for the person themselves, by the words the work gives its command: there is no time to give them. Their answer to an ask
+// comes as a message the moment they give it and starts the work then, however long it takes, so the work ends its step instead
+const isPersonWait = (call: { tool: string; command?: unknown; description?: unknown }, name: string) => {
+  const them = `you${name ? `|${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` : ''}`
+  return (
+    call.tool === 'Bash' &&
+    !/\bbin\/(?:helpers|admin|secret|release)\b/.test(String(call.command ?? '')) &&
+    new RegExp(String.raw`^\s*(?:wait|watch|poll)(?:ing)?\s+(?:for|until|on)\s+(?:(?:${them})\b(?!')|(?:your|(?:${them})'s)\s+(?:answer|reply|response|press|go-ahead|yes|try|decision|word)s?(?=\s*(?:$|[(.,;:]|(?:to|on|about|before)\b)))`, 'i').test(String(call.description ?? ''))
+  )
+}
+const asksNow = (list: Todo[], agent: string) => {
+  const top = topOf(list, agent)
+  return list.some(one => (one.id === agent || one.id === top) && Boolean(one.ask) && !one.ask?.replied)
+}
+const NO_PERSON_WAIT = (name: string) =>
+  `Not run: this waits for ${name}, and a wait with a time limit gives them one. Do not wait for ${name} with a command at all. End your step now: your ask stays on the card for as long as it takes, and ${name}'s answer starts you again the moment they give it. Anything you need to see of what they did (a recording, a file, a page) you look at once their answer has come.`
+const MOVED_BACK = (name: string) =>
+  `This command may run for minutes, so it was started in the background rather than held open: ${name}'s replies reach you while it runs. You are told when it ends; its output is in the file named above. Carry on with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
+
 // The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
 // bin/release, bin/keyring) are let through unread
 const scriptsRun = async ($: EngineInterface, command: string) => {
@@ -9949,8 +10009,8 @@ const workHooks = (on: On) => {
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
-        if (grants.length && !(e as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
-        runnerEnded(e.tool_use_id, Boolean((e as { run_in_background?: unknown }).run_in_background), await $.clock.now())
+        if (grants.length && !(call as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
+        runnerEnded(e.tool_use_id, Boolean((call as { run_in_background?: unknown }).run_in_background), await $.clock.now())
         // A note of what the person allowed for this call goes as it ends
         await noteCallEnded($, e.tool_use_id).catch(() => undefined)
       }
@@ -9974,6 +10034,11 @@ const workHooks = (on: On) => {
     if (ownFiles) {
       await log($, `refused ${e.tool} writing the memory folder's own files`)
       return { deny: ownFiles }
+    }
+    // (only while it, or the work it helps, has a question of its own open to the person: a wait said for them then is that)
+    if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
+      await log($, `refused work ${e.agentId}'s wait for the person: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+      return { deny: NO_PERSON_WAIT(who()) }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
@@ -10015,7 +10080,10 @@ const workHooks = (on: On) => {
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
-    const next = async (call: typeof e) => {
+    const next = async (asked: typeof e) => {
+      const isMovedBack = Boolean(dir) && !isOff && e.agentId !== undefined && isLongHeld(asked as never)
+      const call = isMovedBack ? ({ ...asked, run_in_background: true } as typeof e) : asked
+      if (isMovedBack) await log($, `work ${e.agentId}'s long command started in the background: ${oneLine(String((asked as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       // A piece of work's command is known by the process numbers handed out while it runs, so what it leaves going is found
       const isSpanned = Boolean(dir) && !isOff && e.agentId !== undefined && call.tool === 'Bash'
       const spanAt = isSpanned ? await $.clock.now() : 0
@@ -10030,7 +10098,8 @@ const workHooks = (on: On) => {
       // (one that failed may still have left something going)
       if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result).catch(err => log($, `left runs not looked for: ${String(err)}`))
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
-      return hideKept($, call, r)
+      const shown = await hideKept($, call, r)
+      return isMovedBack && !shown.deny && !shown.isError ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof shown) : shown
     }
     // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
     // no fresh agent for the same task, until their next message
@@ -10144,6 +10213,7 @@ const workHooks = (on: On) => {
     if (steered) {
       const sent = await next(e)
       if (answer) await answeredInChat($, answer, steered, !sent.deny && !sent.isError)
+      if (words && !sent.deny && !sent.isError) await replyWaiting($, steered)
       // Work that had ended is started again by the message, and may not be running yet to take a row: it gets the line as a
       // message of its own instead, read once it reaches it
       // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
@@ -10220,7 +10290,7 @@ const workHooks = (on: On) => {
   // Work the person moved to another model sends each step from then on to that model; only the model the request names changes
   on('turn.step', async function* ($, e, next) {
     const id = e.agentId
-    if (id !== undefined) replyRead($, id)
+    if (id !== undefined) (replyRead($, id), await replyTaken($, id).catch(() => undefined))
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
@@ -10548,7 +10618,7 @@ const toolHooks = (on: On) => {
     const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : ''
     const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : ''
     const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : ''
-    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message, and starts you again if you have finished. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
+    return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message the moment it is given, and starts you again if you have finished. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if it leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` }
   })
 
   // The work writes its own log, on purpose, in plain words: what it starts and what it decides

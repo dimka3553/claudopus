@@ -1,0 +1,4 @@
+- Your reply reaches work at once even while it runs something long: a command the work gives minutes, by its time limit or a wait it says takes minutes, now runs in the background, so the work reads your reply while it keeps going.
+- Work never waits for your answer with a timer: a command that waits for you is refused, the work stops, its question stays on the card for as long as it takes, and your answer starts it again the moment you give it.
+- When your reply does wait behind a short command, the card says so at once: "waiting: it reads it when “Run the build” ends (running 1m 10s)".
+- Work waiting on its helpers comes back as soon as you reply, instead of after up to two minutes.
