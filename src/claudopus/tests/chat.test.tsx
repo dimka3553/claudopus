@@ -54,13 +54,16 @@ test('a copy of the chat for a small job is told it is a task now, and past its 
   const r = (await $.agent.spawn({ ...spawn, fork: true, subagentType: undefined, description: 'Push it', prompt: 'push it', parentModel: 'claude-opus-5-5' } as never)) as { agentId?: string }
   expect(prompts.at(-1)?.startsWith('You are a copy of the chat')).toBe(true)
   const id = r.agentId ?? ''
+  // It does the job itself: no helper and no other task to do it past its count
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'fa', prompt: 'push it', subagent_type: 'general-purpose', model: 'opus', agentId: id } as never)).deny).toContain('does its small job itself')
+  expect((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'fb', to: 'a7', message: 'push it', agentId: id } as never)).deny).toContain('does its small job itself')
   for (let n = 0; n < 10; n++) expect((await $.tool.call({ tool: 'Bash', tool_use_id: `f${n}`, command: 'git status', agentId: id } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f10', command: 'git push', agentId: id } as never)).deny).toContain('this copy of the chat has taken its 10 steps. Hand what is left to a fresh task')
   // The note gives it the message for the chat, which it sends to the chat; past its steps it may send nothing else
   const handing = await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f11', text: 'Handing the rest on', task: 'push the branch in /repo', agentId: id } as never)
   expect(JSON.stringify(handing.result)).toContain('The copy of this chat that did')
   expect((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'f11b', to: 'main', message: 'Start it as its own background task: push the branch in /repo', agentId: id } as never)).deny).toBeUndefined()
-  expect((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'f11c', to: 'a7', message: 'do it', agentId: id } as never)).deny).toContain('taken its 10 steps')
+  expect((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'f11c', to: 'a7', message: 'do it', agentId: id } as never)).deny).toBeDefined()
   // A release past its steps is refused before its allow box is shown
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f11d', command: 'cd /repo && /plug/claudopus/bin/release', agentId: id } as never)).deny).toContain('taken its 10 steps')
   expect((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'f12', message: 'done', agentId: id } as never)).deny).toBeUndefined()
@@ -393,7 +396,9 @@ test("a chat's own thread may only read, run a single command in the background,
   expect(told.context?.join('\n')).toContain('For anything that changes a file, runs a command or takes more than a few reads')
 
   // A single command it runs itself, always in the background; reading a file, more than one command, or a runner is not that
+  files.set('git:branch', 'fix-nose')
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'git push' } as never)).deny).toBeUndefined()
+  files.delete('git:branch')
   expect(files.get(`${MEMORY}/log.md`)).toContain("the chat's own command started in the background (bg-t1)")
   // As it ends, its notice carries how it ended and its last three lines, read from its output file
   files.set('/tmp/tasks/bg-t1.output', 'Enumerating objects: 5\nWriting objects: 100%\nTo github.com:sam/nose.git\n   1a2b3c..4d5e6f  main -> main\n')
@@ -431,6 +436,14 @@ test("a chat's own thread may only read, run a single command in the background,
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1f${i}`, command } as never)).deny).toContain('Start a fresh agent')
   for (const [i, command] of ['git status', 'git log --oneline -5', 'gh pr checks 12', 'git branch -a', 'git remote -v'].entries())
     expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command } as never)).deny).toBeUndefined()
+  // A push only of the branch it is on, never from main and never to it by another spelling, nor anything git is set to run
+  files.set('git:branch', 'fix-nose')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1h', command: 'git push -u origin fix-nose' } as never)).deny).toBeUndefined()
+  for (const [i, command] of ["git -c core.fsmonitor='touch x' status", 'git -c remote.origin.push=HEAD:main push origin', 'git push origin HEAD:heads/main', 'git push origin HEAD:{main,x}', "git push origin HEAD:$'main'", 'git push origin HEAD:${X:-main}', 'git push --all', 'git push --mirror', 'git push --force', 'git push --delete origin old', 'git fetch origin x:main', 'git push origin main', 'git --config-env=core.pager=X log'].entries())
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1i${i}`, command } as never)).deny ?? 'ran').not.toBe('ran')
+  files.set('git:branch', 'main')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1j', command: 'git push' } as never)).deny).toContain('Start a fresh agent')
+  files.delete('git:branch')
   const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1d', command: '/plug/claudopus/bin/release' } as never)
   expect(refused.deny).toContain('Start a fresh agent')
   expect(refused.deny).toContain('changes no file')

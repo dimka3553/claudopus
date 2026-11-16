@@ -246,6 +246,11 @@ const workHooks = (on: On) => {
     // A copy of the chat for a small job that has taken its steps hands what is left to a fresh task, and may only do that and end
     if (dir && !isOff && e.agentId !== undefined && !isForkEnding(e as never)) {
       const card = (await read($, todos)).find(one => one.id === e.agentId)
+      // A copy does its small job itself: it starts no helper and sets no other task to work, whose steps it would not count
+      if (card?.isFork && !card.parentId && (e.tool === 'Agent' || (e.tool === 'SendMessage' && String((e as { to?: unknown }).to ?? '') !== 'main'))) {
+        await log($, `refused copy ${e.agentId}'s ${e.tool} to other work`)
+        return { deny: FORK_ALONE() }
+      }
       if (card?.isFork && !card.parentId && (card.steps ?? 0) >= FORK_STEPS) {
         await log($, `refused a step of copy ${e.agentId} past its ${FORK_STEPS} steps`)
         return { deny: FORK_PAST() }
@@ -270,7 +275,9 @@ const workHooks = (on: On) => {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
     }
-    const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
+    // The branch a push would go from, which is never main
+    const pushFrom = /^\s*git\s+push\b/.test(chatCommand) ? await $.process.run(['git', '-C', cwd || '.', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeoutMs: 10_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '') : ''
+    const isChatCommand = Boolean(chatCommand) && isChatRunnable(chatCommand, pushFrom) && !(await scriptsRun($, chatCommand)).some(text => RUNNER_NAMED.test(text))
     const isRefusedHere = isChatHere && !isChatCommand && !OWN.includes(e.tool) && !OWN_SERVERS.some(prefix => e.tool.startsWith(prefix)) && !READS.includes(e.tool)
     if (e.tool === 'Bash' && !isRefusedHere) {
       const gated = await gateAdmin($, e, raw as never)

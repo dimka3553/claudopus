@@ -25,7 +25,7 @@ const KINDS = {
   },
   check: {
     description: 'A second agent that did not build the work, and looks for what is wrong with it before the person sees it.',
-    tools: [...READ_TOOLS.filter(one => one !== 'SubagentHandback'), 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'SubagentHandback'],
+    tools: [...READ_TOOLS.filter(one => one !== 'SubagentHandback'), 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'SubagentHandback'],
     prompt: `${AGENT_HEAD}\nYou check work someone else built: look for what is wrong with it, from the change itself (the diff) and the pictures you are given, which you look at. You fix nothing. Report each fault you find with where it is and why it is wrong, most serious first, and say plainly what you did not check.`,
   },
 } as const
@@ -34,8 +34,7 @@ const KIND_OF = (type: string): Kind | undefined => {
   const name = /^claudopus:(\w+)$/.exec(type)?.[1]
   return name && name in KINDS ? (name as Kind) : undefined
 }
-// Registered as the session starts, and again as the settings change nothing about them: a failure is logged, and the chat's rules
-// still name `general-purpose` for what needs everything
+// Registered as the session starts; a failure is logged, and the chat's rules still name `general-purpose` for what needs everything
 const registerKinds = async ($: EngineInterface) => {
   for (const [name, kind] of Object.entries(KINDS))
     await $.agent
@@ -85,21 +84,26 @@ const isOneCommand = (command: string) => {
 const CHAT_GIT = ['push', 'fetch', 'status', 'log', 'diff', 'show', 'branch', 'remote', 'rev-parse', 'ls-remote', 'describe', 'shortlog', 'blame']
 const CHAT_GH = ['view', 'list', 'status', 'checks', 'diff']
 const CHAT_LOOKS = ['ls', 'pwd', 'date', 'uptime', 'whoami', 'hostname', 'df', 'sw_vers', 'uname', 'which']
-const isChatRunnable = (command: string) => {
+const isChatRunnable = (command: string, branch = '') => {
   if (!isOneCommand(command) || RUNNER_NAMED.test(command) || /claudopus\/p\W?stes|\bpastes\b/.test(command)) return false
+  // nothing the shell fills in or spreads out: no variables, braces, globs, escapes, home or history
+  if (/[$\\{}*?[\]~!]/.test(command)) return false
   const words = shellWords(command)[0] ?? []
-  // nothing set or wrapped before it: the command's own words only
-  if (/^\w+=/.test(words[0] ?? '')) return false
   const head = words[0] ?? ''
+  const rest = words.slice(2)
   if (head === 'git') {
-    let i = 1
-    while (i < words.length && words[i]!.startsWith('-')) i += /^-[Cc]$/.test(words[i]!) ? 2 : 1
-    const verb = words[i] ?? ''
-    // a branch made, moved or removed, a remote changed: a task's. git branch only lists; git remote only shows
-    const rest = words.slice(i + 1)
+    // the verb straight after git: no -c, -C or --config-env before it, which set what git runs
+    const verb = words[1] ?? ''
+    if (!CHAT_GIT.includes(verb) || rest.some(one => /^--(?:output|exec|upload-pack|receive-pack|config-env|push-option|ext-diff|textconv)\b|^-o$/.test(one))) return false
+    // git branch only lists; git remote only shows
     if (verb === 'branch' && rest.some(one => !/^(?:-a|-r|-v|-vv|--all|--remotes|--list|--show-current|--merged|--no-merged|--contains)$/.test(one))) return false
     if (verb === 'remote' && !(rest.length === 0 || (rest.length === 1 && rest[0] === '-v') || (['get-url', 'show'].includes(rest[0] ?? '') && rest.length === 2))) return false
-    return CHAT_GIT.includes(verb) && !words.includes('--no-verify') && !words.some(one => /^--(?:output|exec|upload-pack|receive-pack)\b|^-o$/.test(one))
+    // a push or fetch of plain names only: no refspec, no force, delete, all or mirror, and never from main itself
+    if (verb === 'push' || verb === 'fetch') {
+      if (rest.some(one => one.includes(':') || /^\+/.test(one) || /^-/.test(one) && !/^(?:-u|--set-upstream|-q|--quiet|--prune|-p|--tags)$/.test(one))) return false
+      if (verb === 'push' && (!branch || /^(?:main|master|HEAD)$/.test(branch) || rest.some(one => /^(?:main|master|HEAD|@)$/.test(one) || /^--tags$/.test(one)))) return false
+    }
+    return true
   }
   if (head === 'gh') return ['pr', 'run', 'issue', 'release', 'repo', 'workflow'].includes(words[1] ?? '') && CHAT_GH.includes(words[2] ?? '') && !words.some(one => /^--(?:web|output)\b|^-w$/.test(one))
   return CHAT_LOOKS.includes(head)
@@ -157,9 +161,10 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
 const FORK_STEPS = 10
 // What a copy is told as it starts: it is a task now, with the rules every task follows, and how long it may go
 const FORK_HEAD = () =>
-  named(`You are a copy of the chat, started for one small job: you are now a background task, not the chat. The chat's rule that it runs no commands does not apply to you; the rules for every task below do. Do the job in at most about ${FORK_STEPS} steps. If it needs more, hand what is left to a fresh task with the \`note\` tool and its \`task\` (the chat starts it), and end with your report.`)
+  named(`You are a copy of the chat, started for one small job: you are now a background task, not the chat. The chat's rules for what it may run do not apply to you; the rules for every task below do. You start no helpers and message no other task. Do the job in at most about ${FORK_STEPS} steps. If it needs more, hand what is left to a fresh task with the \`note\` tool and its \`task\` (the chat starts it), and end with your report.`)
 const FORK_PAST = () =>
   named(`Not run: this copy of the chat has taken its ${FORK_STEPS} steps. Hand what is left to a fresh task now: call the \`note\` tool with \`task\` set to what is left, in one line with the folder and what done looks like, send the message it gives you to the chat, then end with your report of what you did and what you handed on.`)
+const FORK_ALONE = () => named('Not run: a copy of the chat does its small job itself, with no helper and no other task. If the job needs more, hand what is left to a fresh task with the `note` tool and its `task`, send the message it gives you to the chat, and end with your report.')
 // The tools a copy past its steps may still call: the ones that hand on what is left and end it
 const FORK_ENDING = ['mcp__claudopus__note', 'mcp__claudopus__todo', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'SubagentHandback', 'ToolSearch']
 // and SendMessage to the chat alone, which the note's hand-on goes through
@@ -182,7 +187,7 @@ const isRepeatOnly = (text: string) => {
 // `.release` released by Claudopus itself, with no model, after the same allow box on the card a release always waits for; any other
 // step by a small fresh task given the folder, the branch and the step. The work is started again only when the step fails in a way
 // that needs what it knows
-const RELEASE_STEP = /^\s*(?:release|run (?:the )?release(?: runner)?)\s*\.?\s*$|\bbin\/release\b/i
+const RELEASE_STEP = /^\s*(?:release|run (?:the )?release(?: runner)?|(?:cd \S+ && )?\S*bin\/release)\s*\.?\s*$/i
 // How often a release Claudopus runs is looked at, and the longest it is waited for
 const STEP_LOOK = 10_000
 const STEP_LONGEST = 90 * 60_000

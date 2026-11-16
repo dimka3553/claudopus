@@ -143,11 +143,12 @@ const toolHooks = (on: On) => {
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     const words = [...(card?.entries ?? [])].reverse().find(entry => entry.kind === 'steer')?.text ?? ''
     said = words || task
-    const handed = card?.isFork
-      ? `The copy of this chat that did "${card.title || 'a small job'}" took its steps and hands on what is left. Start it as its own background task: ${task}`
+    const isHandingOn = Boolean(card?.isFork && (card.steps ?? 0) >= FORK_STEPS)
+    const handed = isHandingOn
+      ? `The copy of this chat that did "${card?.title || 'a small job'}" took its steps and hands on what is left. Start it as its own background task: ${task}`
       : `A message from ${who()} to the task "${card?.title || 'in the background'}" is a new task of its own, not part of that task, and that task hasn't done it. Start it as its own background task: ${task}${words ? `\n${who(true)}'s words: “${words}”` : ''}`
 
-    return { result: `Noted. Hand the task to the chat now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${handed}\nThen continue your own task; don't do that new one here.` }
+    return { result: `Noted. Hand the task to the chat now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${handed}\n${isHandingOn ? 'Then end with your report.' : "Then continue your own task; don't do that new one here."}` }
   })
 
 }
