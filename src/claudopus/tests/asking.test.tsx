@@ -779,12 +779,13 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   await press(list, 'Give a response instead')
   const words = await until(async () => (await fieldsIn(bar, said))[0])
   const kept = keychain.length
-  await bar.input({ key: words?.key ?? '', text: 'It is already in the .env of the other repo, use it from there' })
-  expect(await until(async () => files.get(`${MEMORY}/boxes/${said}.reply`))).toBe('The person answered in the Claudopus panel instead of giving GITHUB_TOKEN, in their own words: It is already in the .env of the other repo, use it from there\n')
+  await bar.input({ key: words?.key ?? '', text: 'It is already in /Users/sam/Documents/GitHub/3d-sandbox/.env.local as AI_GATEWAY_API_KEY, in the faceiq-labs branch too' })
+  expect(await until(async () => files.get(`${MEMORY}/boxes/${said}.reply`))).toBe('The person answered in the Claudopus panel instead of giving GITHUB_TOKEN, in their own words: It is already in /Users/sam/Documents/GitHub/3d-sandbox/.env.local as AI_GATEWAY_API_KEY, in the faceiq-labs branch too\n')
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${said}.json`) ? undefined : true))).toBe(true)
   expect(keychain.length).toBe(kept)
   expect(await until(async () => list.find({ type: 'Text', text: 'You gave a response instead · it went to the command that asked, and nothing was saved' }))).toBeDefined()
-  // Words that look like the key itself are held, sent nowhere, until the person keeps them as the key or sends them anyway
+  // Words that look like the key itself are held, sent nowhere, until the person keeps them as the key (the key's word alone, never
+  // the words around it) or sends them anyway; a path, a setting's name and a branch's, above, are no key
   const slip = '2a1e2d3c-4b5a-4987-a654-3210fedcba98'
   await ask(slip)
   await press(list, 'Give a response instead')
@@ -794,7 +795,7 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   expect(files.has(`${MEMORY}/boxes/${slip}.reply`)).toBe(false)
   expect(logged.some(line => line.includes('A1b2C3'))).toBe(false)
   await press(bar, 'Keep it as the key')
-  expect(await until(async () => keychain.find(one => one.includes(slip)))).toContain('-w "here: ghp_A1b2C3d4E5f6G7h8I9j0"')
+  expect(await until(async () => keychain.find(one => one.includes(slip)))).toContain('-w "ghp_A1b2C3d4E5f6G7h8I9j0"')
   expect(files.has(`${MEMORY}/boxes/${slip}.reply`)).toBe(false)
   // and an admin password box keeps its own field
   const admin = '3a1e2d3c-4b5a-4987-a654-3210fedcba98'

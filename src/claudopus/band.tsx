@@ -83,7 +83,8 @@ const bandHooks = (on: On) => {
       if (!canBox) ((replyTo = ''), (replyMark = ''), (boxOpen = undefined), barHeld.delete(e.surface))
       barBoxAt = 0
       // Only a card that asks is drawn differently for it
-      if (asksForBar(cards).length && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
+      // and a key box, whose buttons or field are drawn by it too
+      if ((asksForBar(cards).length || boxes.some(one => !one.key)) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
     const working = cards.filter(one => !one.parentId && one.status === 'working')

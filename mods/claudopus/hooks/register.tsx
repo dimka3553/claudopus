@@ -6859,6 +6859,9 @@ const lookBoxes = async ($: EngineInterface) => {
   for (const entry of entries) {
     // A mark left after its request went (a chat that marked it as the runner ended) goes too
     const marked = entry.name.replace(/\.told$/, '')
+    // and a response its runner never took, once that runner has had its moment to take it
+    const answered = entry.name.replace(/\.reply$/, '')
+    if (entry.name.endsWith('.reply') && BOX_ID.test(answered) && !entries.some(other => other.name === `${answered}.json`) && now - (boxRepliedAt.get(answered) ?? 0) > BOX_REPLY_TAKEN) (boxRepliedAt.delete(answered), await $.process.run(['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined))
     if (entry.name.endsWith('.told') && BOX_ID.test(marked) && !entries.some(other => other.name === `${marked}.json`)) await $.process.run(['rm', '-f', `${boxesDir()}/${entry.name}`]).catch(() => undefined)
     const id = entry.name.replace(/\.json$/, '')
     if (!entry.name.endsWith('.json') || !BOX_ID.test(id) || boxSent.has(id)) continue
@@ -6874,7 +6877,7 @@ const lookBoxes = async ($: EngineInterface) => {
       // A runner killed outright leaves its request: it goes once it is stale, with its mark
       // and a value typed into it meanwhile leaves the keychain with it
       else if (typeof one.at === 'number' && (now - one.at >= BOX_OLD || one.at - now > BOX_SKEW)) {
-        await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`]).catch(() => undefined)
+        await $.process.run(['rm', '-f', `${boxesDir()}/${id}.json`, `${boxesDir()}/${id}.told`, `${boxesDir()}/${id}.reply`]).catch(() => undefined)
         await boxKeyring($, 'delete', id)
       }
     } catch {
@@ -6991,19 +6994,29 @@ let boxOpen: { id: string; mode: BoxMode } | undefined
 const boxModes = new Map<string, BoxMode>()
 // A response that looked like a key itself, held a moment so the person decides: sent anyway, kept as the key, or neither
 const boxHeldReply = new Map<string, string>()
+// When a response was left for its runner, which takes it within a second or two: until BOX_REPLY_TAKEN after, it is never removed
+const boxRepliedAt = new Map<string, number>()
+const BOX_REPLY_TAKEN = 60_000
 // The name a key box asks for, none for the box that asks a key's name
 const boxNameOf = (one: Asked) => one.text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1]
 const isNameBox = (one: Asked) => one.text.startsWith('Name of the key to save')
-// Words that look like a key rather than about one: a word that starts as the common keys and tokens do, or a long run of
-// letters and digits that is no path, address or hyphenated name
-const KEY_START = /^(?:sk|pk|rk|ghp|gho|ghu|ghs|ghr|github_pat|glpat|xox[abprs]|hf|npm|vck|AKIA|ASIA|AIza|ya29|eyJ)[-_.]?[A-Za-z0-9_-]{12,}/
-const looksLikeKey = (text: string) =>
-  text.split(/\s+/).some(word => {
-    const bare = word.replace(/^["'`(<]+|["'`)>.,;:!?]+$/g, '')
-    if (KEY_START.test(bare)) return true
-    if (bare.length < 20 || /[/\\~@]|:\/\//.test(bare) || /^[a-z0-9]+(?:[-_][a-z0-9]+){2,}$/i.test(bare)) return false
-    return /[A-Za-z]/.test(bare) && (bare.match(/\d/g)?.length ?? 0) >= 3
-  })
+// The words of a response that look like a key rather than about one: a word that starts as the distinctive keys and tokens do, a
+// short prefix (sk-, npm_) with digits after it, a key shaped as a UUID, a password inside an address, or a long run of letters and
+// digits that is no path, address or hyphenated name. Ordinary words, paths and names of settings pass
+const KEY_DISTINCT = /^(?:ghp_|gho_|ghu_|ghs_|ghr_|github_pat_|glpat-|xox[abprs]-|AKIA|ASIA|AIza|ya29\.|eyJ)[A-Za-z0-9_.-]{10,}/
+const KEY_SHORT = /^(?:sk|pk|rk|hf|npm|vck)[-_](?=(?:[^\d]*\d){2})[A-Za-z0-9_-]{12,}$/
+const KEY_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const KEY_IN_ADDRESS = /^[a-z][a-z0-9+.-]*:\/\/[^/\s:@]+:[^/\s@]+@/i
+const keyWords = (text: string) =>
+  text
+    .split(/\s+/)
+    .map(word => word.replace(/^["'`(<]+|["'`)>.,;:!?]+$/g, ''))
+    .filter(bare => {
+      if (KEY_DISTINCT.test(bare) || KEY_SHORT.test(bare) || KEY_UUID.test(bare) || KEY_IN_ADDRESS.test(bare)) return true
+      if (bare.length < 20 || /^(?:\/|~|\.\.?\/)/.test(bare) || /\.[A-Za-z]{1,8}$/.test(bare) || /:\/\/|@/.test(bare) || /^[a-z0-9]+(?:[-_][a-z0-9]+){2,}$/i.test(bare)) return false
+      return (/[A-Za-z]/.test(bare) && (bare.match(/\d/g)?.length ?? 0) >= 3) || (bare.length >= 32 && /[a-z]/.test(bare) && /[A-Z]/.test(bare))
+    })
+const looksLikeKey = (text: string) => keyWords(text).length > 0
 const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. A response goes to Claude as words, into the chat. Keep it as the key to put it only in ${where}, or send it as a response anyway.`
 // Opens a key box's field in the bar above the prompt, for the key or a response, or closes it. One box in the bar at a time:
 // an ask's reply box open there closes (openReply does the same the other way). The cursor is asked into the field
@@ -7044,6 +7057,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
     .write(`${boxesDir()}/${id}.reply`, `${who(true)} answered in the Claudopus panel instead of ${asked}, in their own words: ${said}\n`)
     .then(() => true)
     .catch(() => false)
+  if (isWritten) boxRepliedAt.set(id, await $.clock.now())
   if (!isWritten) {
     boxSaid.set(id, "Your response couldn't be left for the command that asked. Try again.")
     boxPresses += 1
@@ -7066,18 +7080,29 @@ const submitBox = ($: EngineInterface, id: string, mode: BoxMode, value: string)
   const run = mode === 'reply' ? sendBoxReply($, id, value) : sendBox($, id, value)
   void run.catch(() => log($, `box ${id} not sent`))
 }
+// The word of a held response that looked like the key goes to the keychain, never the words around it; with more than one such
+// word nobody can tell which is the key, so the key's field opens for it to be pasted alone
+const keepHeldAsKey = ($: EngineInterface, id: string, surface: string) => {
+  const words = keyWords(boxHeldReply.get(id) ?? '')
+  boxHeldReply.delete(id)
+  if (words.length === 1) return void sendBox($, id, words[0] ?? '').catch(() => log($, `box ${id} not sent`))
+  if (repliesInBar(surface)) openBox($, id, 'key', surface)
+  else (boxModes.set(id, 'key'), (boxPresses += 1))
+  boxSaid.set(id, 'More than one word looked like a key: paste just the key.')
+  drawAgain($)
+}
 // Under a response held for looking like a key: keep it as the key, or send it as words anyway
 const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string) =>
   boxHeldReply.has(id) ? (
     <ui.Box key={`${where}-${id}-held`} flexDirection="row" gap={1} flexWrap="wrap">
-      <ui.Button key={`${where}-${id}-askey-${boxPresses}`} label="Keep it as the key" onPress={() => void (sendBox($, id, boxHeldReply.get(id) ?? ''), boxHeldReply.delete(id))} />
+      <ui.Button key={`${where}-${id}-askey-${boxPresses}`} label="Keep it as the key" onPress={press => keepHeldAsKey($, id, press.surface)} />
       <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send it as a response" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
     </ui.Box>
   ) : null
 // The row in the bar above the prompt for the key box opened there: what goes where, the field, and Close
 const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
   const name = boxNameOf(one)
-  const head = mode === 'reply' ? `↳ Your response instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name} · only into ${keptWhere()}` : `↳ The key's name`
+  const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`
   return (
     <ui.Box key="band-key" flexDirection="column" flexShrink={0}>
       <ui.Box flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
@@ -11458,7 +11483,8 @@ const bandHooks = (on: On) => {
       if (!canBox) ((replyTo = ''), (replyMark = ''), (boxOpen = undefined), barHeld.delete(e.surface))
       barBoxAt = 0
       // Only a card that asks is drawn differently for it
-      if (asksForBar(cards).length && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
+      // and a key box, whose buttons or field are drawn by it too
+      if ((asksForBar(cards).length || boxes.some(one => !one.key)) && flipAt - barFlipAt >= 1000) ((barFlipAt = flipAt), drawAgain($))
     }
     if (e.props.hasSurvey) return next(e)
     const working = cards.filter(one => !one.parentId && one.status === 'working')
