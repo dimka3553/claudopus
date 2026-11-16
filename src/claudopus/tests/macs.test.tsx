@@ -217,7 +217,7 @@ test("Details of work in a chat the app runs on another Mac shows what that chat
   expect(texts).toContain('“Can you improve the video?”')
   expect(texts).toContain('Have it checked')
   expect(texts).toContain('Rendering again for a second look.')
-  expect(texts).toContain('Its chat is kept by the chat "Video" on m4, which runs it. Stop it or move it to another model there.')
+  expect(texts).toContain('This task runs in the chat "Video" on m4. Stop it or change its model there.')
   await pressed(tab, `their-chat-${id}`)
   expect(await until(async () => shown.find(argv => argv[1]?.startsWith('claude://')))).toEqual(['open', 'claude://code/session_01Video'])
   await tab.unmount()
@@ -456,7 +456,7 @@ test("the other Mac's asks and finishes are told here as a notification once, op
   const later = NOW + 15_000
   files.set('ssh:fetch', `${later / 1000}\n---claudopus-live---\n${chat(later)}\n`)
   await clock.advance(30_000)
-  const asked = () => own.filter(one => one.includes('--asks') && one.includes('Send the invoices needs you'))
+  const asked = () => own.filter(one => one.includes('--asks') && one.includes('Send the invoices has a question for you'))
   expect(await until(async () => (asked().length ? true : undefined))).toBe(true)
   await clock.advance(20_000)
   expect(asked()).toHaveLength(1)

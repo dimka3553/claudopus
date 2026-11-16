@@ -25,15 +25,15 @@ const LINES_EACH = 2
 
 // What a step sends back, in the words the work reads
 const HELPER_ALONE =
-  'That step started one helper and nothing else. It runs in the background and its result comes to you when it ends, so carry on now with what needs nothing from it. Next time send with it, in the same step, every call that needs nothing from it: other helpers, your own part, the second look, notes.'
+  'That step started one helper and nothing else. The helper runs in the background and its result comes to you when it ends, so continue now with what needs nothing from it. Next time, send in the same step every call that needs nothing from the helper: other helpers, your own part, the second look, notes.'
 const LOOKUP_RUN = (n: number) =>
-  `The last ${n} steps each held one lookup. Send the lookups you already know you need together in one step. Reading or searching across many files that you need only the conclusion of goes to a helper, which keeps your context small; one file you know, you read yourself.`
+  `The last ${n} steps each held one lookup. Send the lookups you already know you need together in one step. When you need only the conclusion of reading or searching across many files, send that to a helper, which keeps your context small. Read a single file you know yourself.`
 const SERIAL_RUNS = (what: string) =>
-  `Two long runs of one kind (${what}) went one after the other, each alone in its step. When they do not need each other, run them side by side: each in its own throwaway chat, worktree, terminal session or background command, or each as a helper, all started in one step.`
+  `Two long commands of one kind (${what}) ran one after the other, each alone in its step. When they don't depend on each other, run them side by side: each in its own throwaway chat, worktree, terminal session or background command, or each as a helper, all started in one step.`
 const BOOK_ALONE =
-  'That step held only to-do and note calls. They cost a turn of their own: send them in the same step as your next work call.'
+  'That step held only to-do and note calls. They cost a turn of their own: send them in the same step as your next call.'
 const LOOK_NOW =
-  'You committed. The second look, the pictures and the docs need nothing more than this: start them now, as helpers in the same step as your next work, not after the rest is done.'
+  'You committed. The second look, the pictures and the docs need nothing more than this: start them now, as helpers in the same step as your next calls, not after the rest is done.'
 
 // Per agent: its single lookups in a row, the last long run's kind, and how many of each line it was told
 const stepsSeen = new Map<string, { lookups: number; lastRun?: string; told: Record<string, number>; checkerAt?: number; steps: number; singles: number }>()
@@ -92,12 +92,12 @@ const stepLines = (agent: string, calls: { tool: string; input: unknown; tookMs:
 // How often a piece of work with helpers running is looked at, and how long a helper may show nothing new before it is named
 const LOOK_IN_EVERY = 60_000
 const HELPER_QUIET = 5 * 60_000
-// What the work is told of a helper that has shown nothing new
+// What Claude is told of a helper that has shown nothing new
 const QUIET_HELPER = (title: string, id: string, mins: number, running: string) =>
-  `Your helper "${title}" (${id}) has shown nothing new for ${mins} minutes${running ? `; ${running}` : ''}. Look at what it is doing now: send it a short question with SendMessage, which it reads at its next step; if it is stuck, stop it with TaskStop and start a narrower one in its place. If it works through in order what could be split, start helpers for the other parts beside it.`
+  `Your helper "${title}" (${id}) has shown nothing new for ${mins} minutes${running ? `; ${running}` : ''}. Look at what it is doing now: send it a short question with SendMessage, which it sees after its current step; if it is stuck, stop it with TaskStop and start a narrower one in its place. If it does one at a time what could be split up, start helpers for the other parts beside it.`
 // What it is told of a helper that keeps taking single steps in order
 const SERIAL_HELPER = (title: string, id: string, steps: number) =>
-  `Your helper "${title}" (${id}) has taken ${steps} steps, nearly all of one call each: it works through in order what could be split. If its parts do not need each other, start helpers for the rest beside it, or tell it with SendMessage to send its calls together.`
+  `Your helper "${title}" (${id}) has taken ${steps} steps, nearly all of one call each: it does one at a time what could be split up. If its parts don't depend on each other, start helpers for the rest beside it, or tell it with SendMessage to send its calls together.`
 // A helper this many steps in, with this share of single-call steps, is working in order
 const SERIAL_STEPS = 20
 const SERIAL_SHARE = 0.85
@@ -158,7 +158,7 @@ const lookedInLine = (one: Todo, at: number) => {
   const l = one.lookedIn
   // Helpers at work are rows on its tree already; only one gone quiet is said, as the work was told of it
   if (!l || one.status !== 'working' || !l.running || !l.quiet) return ''
-  return `${l.quiet === 1 ? '1 helper' : `${l.quiet} helpers`} quiet for ${HELPER_QUIET / 60_000}+ min, the work was told`
+  return `${l.quiet === 1 ? '1 helper' : `${l.quiet} helpers`} quiet for ${HELPER_QUIET / 60_000}+ min, Claudopus told Claude`
 }
 
 const stepHooks = (on: On) => {
@@ -196,16 +196,16 @@ const helperRoll = (list: Todo[], id: string, at: number) =>
     .filter(one => one.status === 'working' || at - one.endedAt < HELPERS_WAIT * 2)
     .map(one => {
       const last = Math.max(one.startedAt, one.newAt ?? 0)
-      const state = one.status === 'working' ? `running ${took(at - one.startedAt)}, ${one.steps ?? 0} steps, last new ${took(at - last)} ago${one.running ? `, now ${one.running.what} for ${took(at - one.running.at)}` : ''}${at - last >= HELPER_QUIET ? ' (quiet: check it, nudge it with SendMessage, or stop it with TaskStop and start a narrower one)' : ''}` : `ended (${one.status})`
+      const state = one.status === 'working' ? `running ${took(at - one.startedAt)}, ${one.steps ?? 0} steps${one.running ? `, now ${one.running.what} for ${took(at - one.running.at)}` : ''}${at - last >= HELPER_QUIET ? ' (nothing new for 5+ minutes: check it, message it with SendMessage, or stop it with TaskStop and start a narrower one)' : ''}` : `ended (${one.status})`
       return `- "${titleOf(one)}" (${one.id}): ${state}`
     })
     .join('\n')
 // The command the work waits for its helpers with: a Bash call of its own, so no hook waits
 const waitCommand = ($: EngineInterface, agent: string) => `'${$.plugin.root}/bin/helpers' '${rollPath(agent)}'`
-const WAIT_HOW = (command: string) => `When nothing is left that needs nothing from them, wait for them with this Bash command (timeout 600000): ${command} . It comes back as soon as one ends, or after about two minutes with how each is doing.`
+const WAIT_HOW = (command: string) => `When you have nothing else to do, wait for them with this Bash command (timeout 600000): ${command} . It comes back as soon as one ends, or after about two minutes with how each is doing.`
 const HELD_AT_END = (n: number, command: string) =>
-  `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Do not finish yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Carry on with what needs nothing from ${n === 1 ? 'it' : 'them'}, or wait with this Bash command (timeout 600000): ${command} ; stop one you no longer need with TaskStop.`
-const HELPERS_STARTED = (command: string) => `Your helpers run in the background: each call came back at once and each result comes to you as a message when it ends. Carry on now with your own part. ${WAIT_HOW(command)}`
+  `You have ${n === 1 ? 'a helper' : `${n} helpers`} still running in the background. Do not finish yet: ${n === 1 ? 'its result' : 'their results'} would reach the chat instead of you. Continue with what needs nothing from ${n === 1 ? 'it' : 'them'}, or wait with this Bash command (timeout 600000): ${command} ; stop one you no longer need with TaskStop.`
+const HELPERS_STARTED = (command: string) => `Your helpers run in the background: each call came back at once and each result comes to you as a message when it ends. Continue now with your own part. ${WAIT_HOW(command)}`
 
 // The file each piece of work with helpers waits on: its first line the helpers it has running and those of them gone quiet, then
 // how each is doing

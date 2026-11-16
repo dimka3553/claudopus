@@ -80,7 +80,7 @@ test('a launcher that starts 8 drawings and exits leaves 8 runs under its card, 
   procs.list = []
   await advance(20_000)
   expect(await until(async () => ((await leftTexts($)).every(text => !text.includes('fig4.py page')) || undefined))).toBe(true)
-  expect((await leftTexts($)).some(text => /8 runs ended/.test(text))).toBe(true)
+  expect((await leftTexts($)).some(text => /8 commands ended/.test(text))).toBe(true)
 })
 
 test('a shell loop that sends scripts off with & leaves its runs under the card', SLOW, async ($, on) => {

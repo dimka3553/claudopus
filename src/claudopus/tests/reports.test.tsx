@@ -71,7 +71,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   await until(async () => opened.includes(id) || undefined)
   const one = await $.ui.mount({ ...LIST, requestId: id, props: { ...LIST.props, title: 'Weekly revenue', bodyColumns: 80 }, surface: 'desktop' } as never)
   const heads = (await one.findAll({ type: 'Text' })).filter(text => text.props.bold).map(text => text.text)
-  expect(heads).toEqual(['Weekly revenue', 'Waiting on you', 'Finding', 'Pictures', 'In full', 'Carry on'])
+  expect(heads).toEqual(['Weekly revenue', 'Waiting on you', 'Finding', 'Pictures', 'In full', 'Continue'])
   expect((await one.find({ type: 'Markdown', text: /Revenue rose 12%/ }))?.props.text).toBe(`${report}\n`)
   // Its picture is shown in the pane, never handed to another app: where it cannot be drawn, its path is given as text
   expect(await keyed(one, 'report-page')).toBeUndefined()
@@ -82,7 +82,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
   expect(await one.find({ type: 'Text', text: 'Post it in the channel too?' })).toBeDefined()
   await pressed(one, 'report-say-0-Yes')
   await until(async () => submitted.length > 0 || undefined)
-  expect(submitted[0]).toContain('From the Claudopus panel: The person pressed "Yes" in answer to what the result "Weekly revenue"')
+  expect(submitted[0]).toContain('From the Claudopus panel: The person pressed "Yes" to answer the question in the result "Weekly revenue"')
   expect(submitted[0]).not.toMatch(/\b(me|my)\b/)
   expect(submitted[0]).toContain('Shall I send it to the team?')
   await until(async () => (JSON.parse(files.get(metaPath ?? '') ?? '{}').waiting?.[0]?.answer ? true : undefined))
@@ -100,7 +100,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
 
   // The chat is told of the reports with each message, and reads one itself to answer from it
   const next = await $.prompt.submit({ text: 'what was revenue again', wait: false, origin: composer })
-  expect(next.context?.join('\n')).toContain('Results kept')
+  expect(next.context?.join('\n')).toContain('Results saved')
   expect(next.context?.join('\n')).toContain(`${folder}/report.md`)
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'r1', file_path: `${folder}/report.md` } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'r2', command: `cat ${folder}/report.md` } as never)).deny).toContain('Start a fresh agent')
@@ -186,8 +186,8 @@ test('an older report waits by its one question, a report that only ends with a 
   expect(await list.find({ type: 'Text', text: /^Waiting on you$/ })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^2$/ })).toBeDefined()
   const told = (await $.prompt.submit({ text: 'what waits', wait: false, origin: composer })).context?.join('\n') ?? ''
-  expect(told).toContain('waits on: Ship the old one?')
-  expect(told).toContain('waits on: Make it public?')
+  expect(told).toContain('waiting on: Ship the old one?')
+  expect(told).toContain('waiting on: Make it public?')
   expect(told).not.toContain('Delete the folder?')
   expect(told).not.toContain('Shall I go on?')
 })

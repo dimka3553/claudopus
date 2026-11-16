@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -862,7 +862,7 @@ test('work that answered while only its own background work held it, then stoppe
   // way to stop it
   await clock.advance(20_000)
   expect(await drawn(pane)).toEqual(['mark'])
-  expect((await pane.find({ type: 'Text', text: /^It left something running in the background, / }))?.props.color).toBe('#E5A50A')
+  expect((await pane.find({ type: 'Text', text: /^Claude left something running in the background, / }))?.props.color).toBe('#E5A50A')
   expect(await pane.find({ type: 'Button', text: 'Stop it' })).toBeDefined()
   // What it left running wakes it for a turn of words alone: it stays as it ended, not announced again, its report kept
   const otto = () => [...files.keys()].filter(key => /\/reports\/[^/]+-name-the-octopus\/report\.md$/.test(key))
@@ -870,7 +870,7 @@ test('work that answered while only its own background work held it, then stoppe
   await clock.advance(11_000)
   await $.turn.complete({ answer: 'The watch exited.', durationMs: 1, isAborted: false, turnId: 't4w', reason: 'answer', agentId: 'a4' } as never)
   // Not announced again: no second pause, though the card still says what it left running
-  expect(await pane.find({ type: 'Text', text: /^It left something running/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Claude left something running/ })).toBeDefined()
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(10)
   expect(otto().length).toBe(reportsBefore)
@@ -976,15 +976,15 @@ test('work that answers a question while a copy of its own still runs, with that
   agents.a1 = 'waiting'
   await $.turn.complete({ answer: 'Sending the 14.5 GB now; it takes about four hours.', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
   expect(await drawn(pane)).toEqual(['working'])
-  const wait = () => pane.find({ type: 'Text', text: /^Still at work: it waits for its background command to finish/ })
-  expect((await wait())?.text).toBe('Still at work: it waits for its background command to finish')
+  const wait = () => pane.find({ type: 'Text', text: /^Still working: Claude is waiting for a background command to finish/ })
+  expect((await wait())?.text).toBe('Still working: Claude is waiting for a background command to finish')
   // The copy itself is a row on its tree: what it is in its own words, and how long it has run
   const job = async () => (await pane.find({ type: 'Text', text: /^Command · Send the four/ })) ?? (await pane.findAll({ type: 'Button' })).find(b => /^Command · Send the four/.test(String(b.props.label)))
   expect(await job()).toBeDefined()
   // Nothing new past the twelve minutes that flag other work (STUCK_AFTER) is a long copy, not stuck work. Only a minute past it:
   // each second the clock moves runs the panel's every-second look, so forty minutes here took 5 to 20 s on GitHub's runner
   await clock.advance(13 * 60_000)
-  expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^No progress for / })).toBeUndefined()
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(0)
   expect(await pane.find({ type: 'Text', text: '13m 00s' })).toBeDefined()
 
@@ -1041,9 +1041,9 @@ test('work that reports with everything it set out to do done, leaving a server 
   agents.a1 = 'waiting'
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
-  expect(await pane.find({ type: 'Text', text: /^Still at work/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Still working/ })).toBeUndefined()
   await clock.advance(20_000)
-  expect(await pane.find({ type: 'Text', text: /^It left something running in the background, / })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Claude left something running in the background, / })).toBeDefined()
   await pane.unmount()
 })
 
@@ -1122,7 +1122,7 @@ test('work that reports with nothing of its own running finishes, though the eng
   await $.turn.complete({ answer: report, durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a1' } as never)
   // It has finished: not at work, its clock stopped
   expect(await drawn(pane)).toEqual(['happy'])
-  expect(await pane.find({ type: 'Text', text: /^Still at work/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Still working/ })).toBeUndefined()
   expect((await pane.findAll({ type: 'Button' })).some(b => b.key === 'stop-a1')).toBe(false)
   expect(await line()).toMatch(/^Finished · /)
   // and once its moment is over it leaves the list, as finished work does, never counting on
@@ -1234,7 +1234,7 @@ test('stopped and failed work is not brought up nor green: it pauses in its plac
   expect(await order()).toEqual(others([]))
   expect(await green()).toBe(0)
   expect((await list.find({ type: 'Text', text: 'Stopped by you' }))?.props.dimColor).toBe(true)
-  const failed = await list.find({ type: 'Text', text: '✕ Stopped by an error' })
+  const failed = await list.find({ type: 'Text', text: '✕ Failed with an error' })
   expect(failed?.props.color).toBe('error')
   expect((await list.findAll({ type: 'Box' })).some(b => b.props.backgroundColor === 'error')).toBe(true)
   await clock.advance(2_100)
@@ -1270,7 +1270,7 @@ test('scrolled down, a finish at the top is pointed at in green above the prompt
   // With an ask waiting, the amber line says both
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't9', reason: 'answer', agentId: 'a9' } as never)
-  expect((await until(async () => band.find({ type: 'Text', text: /just finished/ })))?.text).toBe('↑ 1 waits for you at the top of the panel · 1 just finished')
+  expect((await until(async () => band.find({ type: 'Text', text: /just finished/ })))?.text).toBe('↑ 1 is waiting for you at the top of the panel · 1 just finished')
   await band.unmount()
   await down.unmount()
 })
@@ -1294,6 +1294,6 @@ test('a finished card that left something running stays at the top after its mom
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w3', reason: 'answer', agentId: 'a3' } as never)
   expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4'])
   await clock.advance(20_000)
-  expect(await list.find({ type: 'Text', text: /^It left something running in the background, / })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Claude left something running in the background, / })).toBeDefined()
   expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4'])
 })

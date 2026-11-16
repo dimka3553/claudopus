@@ -1,0 +1,3 @@
+- Plainer words everywhere: a background job is now called a task, and every line says who does what. "The work is told you stopped it" now reads "Claudopus tells Claude you stopped it".
+- The panel, cards, questions, permission prompts, chat notices, README, guide, site and past changelog entries use the same words: question, instructions, topic, command, "nothing printed for 45s".
+- Chats and Claude are told to write to you the same way, so their replies and results use these words too.

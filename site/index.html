@@ -360,10 +360,10 @@ figure .note{margin-top:var(--s4)}
     <h2>What changes when you install it.</h2>
     <div class="pairs block">
       <div class="pair heads" aria-hidden="true"><p class="was">Without it</p><p class="now">With Claudopus</p></div>
-      <div class="pair"><p class="was"><span class="vh">Without it: </span>Your next ask waits until Claude is done.</p><p class="now"><span class="vh">With Claudopus: </span>Your next ask starts right away.</p></div>
-      <div class="pair"><p class="was"><span class="vh">Without it: </span>You open more chats and lose track of them.</p><p class="now"><span class="vh">With Claudopus: </span>One panel beside the chat shows every job.</p></div>
+      <div class="pair"><p class="was"><span class="vh">Without it: </span>Your next message waits until Claude is done.</p><p class="now"><span class="vh">With Claudopus: </span>Your next message starts right away.</p></div>
+      <div class="pair"><p class="was"><span class="vh">Without it: </span>You open more chats and lose track of them.</p><p class="now"><span class="vh">With Claudopus: </span>One panel beside the chat shows every task.</p></div>
       <div class="pair"><p class="was"><span class="vh">Without it: </span>A long chat forgets what you said at the start.</p><p class="now"><span class="vh">With Claudopus: </span>Your words are saved, so Claude can look them up.</p></div>
-      <div class="pair"><p class="was"><span class="vh">Without it: </span>The result you wanted is buried far up the chat.</p><p class="now"><span class="vh">With Claudopus: </span>Every result is kept in a list.</p></div>
+      <div class="pair"><p class="was"><span class="vh">Without it: </span>The result you wanted is buried far up the chat.</p><p class="now"><span class="vh">With Claudopus: </span>Every result is saved in a list.</p></div>
     </div>
   </div>
 </section>
@@ -374,11 +374,11 @@ figure .note{margin-top:var(--s4)}
   <div class="body">
     <div class="get">
       <div class="gets">
-        <h2>A panel beside the chat shows every job.</h2>
-        <div><h3>See where each job stands.</h3><p>Every job is a card with its to-do list and a line saying what it is doing now.</p></div>
-        <div><h3>Change a job while it runs.</h3><p>Say something about a running job, and your message goes to that job.</p></div>
-        <div><h3>Know when a job is done.</h3><p>A short chime and a notification tell you, so you can be somewhere else.</p></div>
-        <div><h3>Find every result later.</h3><p>Finished jobs stay in a list with their results, and you can open it any time.</p></div>
+        <h2>A panel beside the chat shows every task.</h2>
+        <div><h3>See how far each task has got.</h3><p>Every task is a card with its to-do list and a line saying what Claude is doing now.</p></div>
+        <div><h3>Change a task while it runs.</h3><p>Send a message about a running task, and the chat passes it to that task.</p></div>
+        <div><h3>Know when a task is done.</h3><p>A short chime and a notification tell you, so you can be somewhere else.</p></div>
+        <div><h3>Find every result later.</h3><p>Finished tasks stay in a list with their results, and you can open it any time.</p></div>
       </div>
       <figure>
         <div class="panel screen notch big" id="panel" aria-hidden="true">
@@ -410,7 +410,7 @@ figure .note{margin-top:var(--s4)}
             </div>
           </div>
         </div>
-        <figcaption class="note">The panel, redrawn for this page. The jobs and their numbers are made up.</figcaption>
+        <figcaption class="note">The panel, redrawn for this page. The tasks and their numbers are made up.</figcaption>
       </figure>
     </div>
   </div>
@@ -459,10 +459,10 @@ figure .note{margin-top:var(--s4)}
       <h3>What you see afterwards</h3>
       <ol class="steps">
         <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="1"><rect x="1" y="0" width="1" height="1"/><rect x="0" y="1" width="2" height="1"/><rect x="1" y="2" width="1" height="1"/><rect x="1" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>Claudopus is on in every chat you open from then on, in every folder.</span></li>
-        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="2"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>You send a message. The chat answers in one line, starts the job in the background, and is free for your next message.</span></li>
-        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="3"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>The panel opens beside the chat by itself the first time work starts in that chat. If you close it, it closes in every chat, and <code>/claudopus</code> opens it again.</span></li>
-        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="4"><rect x="0" y="0" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><span>While work runs, a bar above the prompt shows memory, processor, graphics, battery, disk and network, with Claude's own part in purple.</span></li>
-        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="5"><rect x="0" y="0" width="3" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>When a job finishes, the chat passes on its result, and the panel lists it under Finished.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="2"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="0" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>You send a message. The chat answers in one line, starts a task in the background, and is free for your next message.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="3"><rect x="0" y="0" width="3" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>The panel opens beside the chat by itself the first time a task starts in that chat. If you close it, it closes in every chat. Type <code>/claudopus</code> to open it again.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="4"><rect x="0" y="0" width="1" height="1"/><rect x="2" y="0" width="1" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="2" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="2" y="4" width="1" height="1"/></svg><span>While tasks run, a bar above the prompt shows memory, processor, graphics, battery, disk and network, with Claude's own share in purple.</span></li>
+        <li><svg class="px" viewBox="0 0 3 5" width="12" height="20" role="img" aria-label="5"><rect x="0" y="0" width="3" height="1"/><rect x="0" y="1" width="1" height="1"/><rect x="0" y="2" width="3" height="1"/><rect x="2" y="3" width="1" height="1"/><rect x="0" y="4" width="3" height="1"/></svg><span>When a task finishes, the chat passes on its result, and the panel lists it under Finished.</span></li>
       </ol>
     </div>
     </div>
@@ -479,13 +479,13 @@ figure .note{margin-top:var(--s4)}
       </div>
       <div class="notch big">
         <h3>It can ask for your Mac's password</h3>
-        <p>When a job needs an admin command, its card shows the exact command and runs it only after you press Allow. The password is never kept: each admin command asks for it, in macOS's own box on this Mac, otherwise in a box at the top of the panel, and it is never put in a chat, a file or a log.</p>
+        <p>When a task needs an admin command, its card shows the exact command, and Claudopus runs it only after you press Allow. Claudopus never saves the password. Each admin command asks for it, in macOS's own box on this Mac, or otherwise in a box at the top of the panel. It is never put in a chat, a file or a log.</p>
       </div>
       <div class="notch big">
         <h3>It needs</h3>
         <ul class="cells">
           <li>Claude Code in the terminal or the desktop app; it is tested with 2.1.325, and older versions may not draw everything.</li>
-          <li>Access to the model the chat picks for each job: Opus for most, Sonnet for long legwork, Fable only for heavy work.</li>
+          <li>Access to the model the chat picks for each task: Opus for most, Sonnet for long searching and reading, Fable only for heavy tasks.</li>
           <li>The panel's Stats tab reads Claude's records with <code>jq</code>, which macOS 15 and later include.</li>
         </ul>
       </div>
@@ -494,7 +494,7 @@ figure .note{margin-top:var(--s4)}
         <ul class="cells">
           <li class="is-done">It runs on macOS and on Linux.</li>
           <li class="is-done">It has been seen working in the macOS desktop app, and in a terminal on Linux.</li>
-          <li class="is-plain">On Linux, passwords and keys are kept in files only you can read, notifications need a desktop, and small copies of pictures need ImageMagick.</li>
+          <li class="is-plain">On Linux, passwords and keys are saved in files only you can read, notifications need a desktop, and small copies of pictures need ImageMagick.</li>
           <li class="is-plain">VS Code has not been tried yet.</li>
           <li class="is-trouble">It does not work on Windows under WSL, because plugins do not load there.</li>
           <li class="is-trouble">It does not work where your organization's admins block mods.</li>
@@ -524,16 +524,16 @@ figure .note{margin-top:var(--s4)}
       <figure>
         <div class="tree screen notch big">
           <b>~/.claude/claudopus</b>
-          <div>index.md<span>your subjects, one line each</span></div>
-          <div>streams/<span>one brief per subject</span></div>
+          <div>index.md<span>your topics, one line each</span></div>
+          <div>streams/<span>instructions for each topic</span></div>
           <div>words/<span>your messages, word for word</span></div>
-          <div>reports/<span>what finished work left for you</span></div>
+          <div>reports/<span>what finished tasks left for you</span></div>
           <div>asks/<span>what you asked and what was done</span></div>
           <div>finished/<span>the Finished list of each chat</span></div>
           <div>servers.json<span>the local servers it last saw</span></div>
           <div>log.md<span>its own log</span></div>
         </div>
-        <figcaption class="note">Everything Claudopus keeps is in this one folder, as plain files. Delete the folder to start over.</figcaption>
+        <figcaption class="note">Everything Claudopus saves is in this one folder, as plain files. Delete the folder to start over.</figcaption>
       </figure>
     </div>
   </div>

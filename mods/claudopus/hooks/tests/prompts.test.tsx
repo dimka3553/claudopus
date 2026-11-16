@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -697,10 +697,10 @@ test("a chat stopped on the app's own prompt shows it amber at the top of its pa
   expect(await button(list, 'prompt-no-this-')).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Answer Yes or No in the box at the bottom of this chat.' })).toBeUndefined()
   // It says which work asks, that it asks permission, the command whole, and what a yes and a no each do
-  expect(await list.find({ type: 'Text', text: 'Asks your permission' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Needs your permission' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'rm -rf build' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Yes: the command runs on its Mac.' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'No: it does not happen, and the work is told you said no.' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: "No: it doesn't run, and Claudopus tells Claude you said no." })).toBeDefined()
   // Amber, above the work's own card
   const texts = (await list.findAll({ type: 'Text' })).map(one => one.text)
   expect(texts.indexOf('Run a command: Clear the build folder')).toBeLessThan(texts.lastIndexOf('Clean the build'))
@@ -809,24 +809,24 @@ test('a message the chat passes to running work names that work and the message;
   await $.agent.spawn({ ...spawn, description: 'Fix the panel cards', prompt: 'fix the cards' } as never)
   void $.classic.PermissionRequest({ tool_name: 'SendMessage', tool_input: { to: 'a1', message: 'Make the buttons bigger too' } } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  await until(async () => list.find({ type: 'Text', text: 'Pass a message to the work “Fix the panel cards”' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the work “Fix the panel cards”')
+  await until(async () => list.find({ type: 'Text', text: 'Pass a message to the task “Fix the panel cards”' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the task “Fix the panel cards”')
   expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Make the buttons bigger too')
-  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Yes: that work gets the message and acts on it.')
-  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('No: it is not sent, and it stops to wait for what you say next.')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Yes: that task gets the message and acts on it.')
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain("No: it isn't sent, and the chat waits for what you say next.")
   // No tool's own name anywhere on it
   expect((await list.findAll({ type: 'Text' })).some(one => String(one.text).includes('SendMessage'))).toBe(false)
   // The person says no
   files.set('refuse', 'SendMessage')
   await $.tool.call({ tool: 'SendMessage', to: 'a1', message: 'Make the buttons bigger too' } as never)
   wake()
-  await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('You said no · it did not happen, and it waits for what you say next')
-  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the work “Fix the panel cards”')
+  await until(async () => list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain("You said no · it didn't run, and Claude is waiting for what you say next")
+  expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('Pass a message to the task “Fix the panel cards”')
   await clock.advance(61_000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" })) ? undefined : true))).toBe(true)
   // Allowed, a message says it was sent
   files.delete('refuse')
   void $.classic.PermissionRequest({ tool_name: 'SendMessage', tool_input: { to: 'a1', message: 'One more thing' } } as never)
-  await until(async () => list.find({ type: 'Text', text: 'Pass a message to the work “Fix the panel cards”' }))
+  await until(async () => list.find({ type: 'Text', text: 'Pass a message to the task “Fix the panel cards”' }))
   await $.tool.call({ tool: 'SendMessage', to: 'a1', message: 'One more thing' } as never)
   wake()
   await until(async () => list.find({ type: 'Text', text: 'You allowed it · it was sent' })); expect((await list.findAll({ type: 'Text' })).map(t => t.text)).toContain('You allowed it · it was sent')
@@ -882,7 +882,7 @@ test("No on a prompt's card refuses the call: the chat's own turn stops, and wor
   await list.press({ key: String((await button(list, 'prompt-no-this-'))?.key) })
   wake()
   expect(((await own) as { decision?: unknown }).decision).toEqual({ behavior: 'deny', message: expect.stringContaining('said no'), interrupt: true })
-  expect(await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" }))).toBeDefined()
   const work = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'git clean -fd', description: 'Clean the tree' }, agent_id: 'a1' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Run a command: Clean the tree' }))).toBeDefined()
   expect(await until(async () => button(list, 'prompt-no-this-'))).toBeDefined()
@@ -890,8 +890,8 @@ test("No on a prompt's card refuses the call: the chat's own turn stops, and wor
   wake()
   const decision = ((await work) as { decision?: { interrupt?: unknown; message?: string } }).decision
   expect(decision?.interrupt).toBeUndefined()
-  expect(decision?.message).toContain('carry on without it')
-  expect(await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and the work was told' }))).toBeDefined()
+  expect(decision?.message).toContain('continue without it')
+  expect(await until(async () => list.find({ type: 'Text', text: "You said no · it didn't run, and Claudopus told Claude" }))).toBeDefined()
   await list.unmount()
 })
 
@@ -945,10 +945,10 @@ test("a No pressed after Claude Code's box said yes does not stand: the card say
   expect(await until(async () => button(list, 'prompt-no-this-'))).toBeDefined()
   await list.press({ key: String((await button(list, 'prompt-no-this-'))?.key) })
   wake()
-  expect(await until(async () => list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" }))).toBeDefined()
   // The box had allowed it first: the call runs and ends well
   await $.tool.call({ tool: 'WebFetch', url: 'https://example.com/a' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'You allowed it · it ran and is done' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'You said no · it did not happen, and it waits for what you say next' })).toBeUndefined()
+  expect(await list.find({ type: 'Text', text: "You said no · it didn't run, and Claude is waiting for what you say next" })).toBeUndefined()
   await list.unmount()
 })

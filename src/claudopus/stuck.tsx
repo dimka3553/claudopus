@@ -17,7 +17,7 @@ const seenLines = new Map<string, Set<string>>()
 
 // What a running call is, in a few words, for its row
 const runningWhat = (tool: string) =>
-  tool === 'Bash' ? 'one command running' : tool === 'Grep' || tool === 'Glob' ? 'one search running' : tool === 'Agent' ? 'its helper running' : `${tool.replace(/^mcp__.*__/, '')} running`
+  tool === 'Bash' ? 'a command running' : tool === 'Grep' || tool === 'Glob' ? 'a search running' : tool === 'Agent' ? 'a helper running' : `${tool.replace(/^mcp__.*__/, '')} running`
 
 // A result as lines: its text where it has some, else its parts each on a line of their own
 const resultLines = (result: unknown): string[] => {
@@ -110,9 +110,9 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
   const isLong = (kid: Todo) => Boolean(kid.running && at - kid.running.at >= RUNNING_SHOWN)
   const helpers = underOf(list, one.id).filter(kid => kid.status === 'working')
   const tail = helpers.length
-    ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper keeps' : helpers.length === 2 ? 'Both helpers keep' : `All ${helpers.length} helpers keep`} waiting.` : ''
-    : isLong(one) ? ` One call has run ${took(at - (one.running?.at ?? at))}.` : ''
-  return `Nothing new for ${mins} min.${tail}`
+    ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper is still' : helpers.length === 2 ? 'Both helpers are still' : `All ${helpers.length} helpers are still`} waiting.` : ''
+    : isLong(one) ? ` One command has been running for ${took(at - (one.running?.at ?? at))}.` : ''
+  return `No progress for ${mins} min.${tail}`
 }
 
 // A row's running call, with its time, once it has run RUNNING_SHOWN
@@ -151,7 +151,7 @@ const endedWord = (run: Pick<EndedRun, 'how' | 'code'>) => (run.how === 'failed'
 // The closing row under a card: how many helpers and runs have ended, then how many of the runs did not finish well, in words
 const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
   const n = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`
-  const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'run')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'run')} ended`
+  const head = helpers && runs.length ? `${n(helpers, 'helper')} and ${n(runs.length, 'command')} ended` : helpers ? `${n(helpers, 'helper')} ended` : `${n(runs.length, 'command')} ended`
   const bad = (['failed', 'killed', 'timed out'] as const).flatMap(how => {
     const count = runs.filter(r => r.how === how).length
     return count ? [`${count} ${how}`] : []
@@ -197,9 +197,9 @@ const waitLine = (one: Todo, at: number, isShort = false) => {
   const first = commands.at(-1)
   if (one.status !== 'working' || !one.waitsSince || one.answeredAt || !first) return ''
   const more = commands.length > 1 ? ` and ${commands.length - 1} more` : ''
-  if (isShort) return `Still at work: it waits for its background command${more} to finish`
-  return `Still at work: it waits for its background command${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
+  if (isShort) return `Still working: Claude is waiting for a background command${more} to finish`
+  return `Still working: Claude is waiting for a background command${more} to finish, running ${took(at - first.at)}${first.what ? `: ${cut(first.what, 90)}` : ''}`
 }
 
 // What finished work left running says on its card
-const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `It left something running in the background, ${took(at - one.leftSince)}` : '')
+const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'working' ? `Claude left something running in the background, ${took(at - one.leftSince)}` : '')

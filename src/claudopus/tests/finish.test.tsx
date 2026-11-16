@@ -196,7 +196,7 @@ test('work that answered while only its own background work held it, then stoppe
   // way to stop it
   await clock.advance(20_000)
   expect(await drawn(pane)).toEqual(['mark'])
-  expect((await pane.find({ type: 'Text', text: /^It left something running in the background, / }))?.props.color).toBe('#E5A50A')
+  expect((await pane.find({ type: 'Text', text: /^Claude left something running in the background, / }))?.props.color).toBe('#E5A50A')
   expect(await pane.find({ type: 'Button', text: 'Stop it' })).toBeDefined()
   // What it left running wakes it for a turn of words alone: it stays as it ended, not announced again, its report kept
   const otto = () => [...files.keys()].filter(key => /\/reports\/[^/]+-name-the-octopus\/report\.md$/.test(key))
@@ -204,7 +204,7 @@ test('work that answered while only its own background work held it, then stoppe
   await clock.advance(11_000)
   await $.turn.complete({ answer: 'The watch exited.', durationMs: 1, isAborted: false, turnId: 't4w', reason: 'answer', agentId: 'a4' } as never)
   // Not announced again: no second pause, though the card still says what it left running
-  expect(await pane.find({ type: 'Text', text: /^It left something running/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Claude left something running/ })).toBeDefined()
   expect(await drawn(pane)).toEqual(['mark'])
   await clock.advance(10)
   expect(otto().length).toBe(reportsBefore)
@@ -310,15 +310,15 @@ test('work that answers a question while a copy of its own still runs, with that
   agents.a1 = 'waiting'
   await $.turn.complete({ answer: 'Sending the 14.5 GB now; it takes about four hours.', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
   expect(await drawn(pane)).toEqual(['working'])
-  const wait = () => pane.find({ type: 'Text', text: /^Still at work: it waits for its background command to finish/ })
-  expect((await wait())?.text).toBe('Still at work: it waits for its background command to finish')
+  const wait = () => pane.find({ type: 'Text', text: /^Still working: Claude is waiting for a background command to finish/ })
+  expect((await wait())?.text).toBe('Still working: Claude is waiting for a background command to finish')
   // The copy itself is a row on its tree: what it is in its own words, and how long it has run
   const job = async () => (await pane.find({ type: 'Text', text: /^Command · Send the four/ })) ?? (await pane.findAll({ type: 'Button' })).find(b => /^Command · Send the four/.test(String(b.props.label)))
   expect(await job()).toBeDefined()
   // Nothing new past the twelve minutes that flag other work (STUCK_AFTER) is a long copy, not stuck work. Only a minute past it:
   // each second the clock moves runs the panel's every-second look, so forty minutes here took 5 to 20 s on GitHub's runner
   await clock.advance(13 * 60_000)
-  expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^No progress for / })).toBeUndefined()
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(0)
   expect(await pane.find({ type: 'Text', text: '13m 00s' })).toBeDefined()
 
@@ -375,9 +375,9 @@ test('work that reports with everything it set out to do done, leaving a server 
   agents.a1 = 'waiting'
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w1', reason: 'answer', agentId: 'a1' } as never)
   expect((await pane.find({ type: 'Text', text: '✓ Finished' }))?.props.color).toBe('success')
-  expect(await pane.find({ type: 'Text', text: /^Still at work/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Still working/ })).toBeUndefined()
   await clock.advance(20_000)
-  expect(await pane.find({ type: 'Text', text: /^It left something running in the background, / })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^Claude left something running in the background, / })).toBeDefined()
   await pane.unmount()
 })
 
@@ -456,7 +456,7 @@ test('work that reports with nothing of its own running finishes, though the eng
   await $.turn.complete({ answer: report, durationMs: 1, isAborted: false, turnId: 'w2', reason: 'answer', agentId: 'a1' } as never)
   // It has finished: not at work, its clock stopped
   expect(await drawn(pane)).toEqual(['happy'])
-  expect(await pane.find({ type: 'Text', text: /^Still at work/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^Still working/ })).toBeUndefined()
   expect((await pane.findAll({ type: 'Button' })).some(b => b.key === 'stop-a1')).toBe(false)
   expect(await line()).toMatch(/^Finished · /)
   // and once its moment is over it leaves the list, as finished work does, never counting on
@@ -568,7 +568,7 @@ test('stopped and failed work is not brought up nor green: it pauses in its plac
   expect(await order()).toEqual(others([]))
   expect(await green()).toBe(0)
   expect((await list.find({ type: 'Text', text: 'Stopped by you' }))?.props.dimColor).toBe(true)
-  const failed = await list.find({ type: 'Text', text: '✕ Stopped by an error' })
+  const failed = await list.find({ type: 'Text', text: '✕ Failed with an error' })
   expect(failed?.props.color).toBe('error')
   expect((await list.findAll({ type: 'Box' })).some(b => b.props.backgroundColor === 'error')).toBe(true)
   await clock.advance(2_100)
@@ -604,7 +604,7 @@ test('scrolled down, a finish at the top is pointed at in green above the prompt
   // With an ask waiting, the amber line says both
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't9', reason: 'answer', agentId: 'a9' } as never)
-  expect((await until(async () => band.find({ type: 'Text', text: /just finished/ })))?.text).toBe('↑ 1 waits for you at the top of the panel · 1 just finished')
+  expect((await until(async () => band.find({ type: 'Text', text: /just finished/ })))?.text).toBe('↑ 1 is waiting for you at the top of the panel · 1 just finished')
   await band.unmount()
   await down.unmount()
 })
@@ -628,6 +628,6 @@ test('a finished card that left something running stays at the top after its mom
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'w3', reason: 'answer', agentId: 'a3' } as never)
   expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4'])
   await clock.advance(20_000)
-  expect(await list.find({ type: 'Text', text: /^It left something running in the background, / })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Claude left something running in the background, / })).toBeDefined()
   expect(await order()).toEqual(['Piece 3', 'Piece 1', 'Piece 2', 'Piece 4'])
 })

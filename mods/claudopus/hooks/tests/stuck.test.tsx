@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -680,7 +680,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
     await pane.unmount()
     return r
   }
-  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^Nothing new for / }))
+  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^No progress for / }))
 
   // The work waits on its helpers, and they each wait on a start signal only it could give: nothing comes back to any of them
   await bash('a1', 'git log', 'p1')
@@ -690,11 +690,11 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   expect(await stuck()).toBeUndefined()
   await clock.advance(2 * 60_000)
   expect((await stuck())?.props.color).toBe('#E5A50A')
-  expect((await stuck())?.text).toMatch(/^Nothing new for 1[23] min\.$/)
-  expect(logged.filter(line => line.includes('"One merger for all pushes" has had nothing new'))).toHaveLength(1)
+  expect((await stuck())?.text).toMatch(/^No progress for 1[23] min\.$/)
+  expect(logged.filter(line => line.includes('"One merger for all pushes" hasn\'t made progress'))).toHaveLength(1)
   // Looked at again, nothing more is said
   await clock.advance(60_000)
-  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(1)
 
   // Something new comes back: the flag goes at the next look
   void keep(bash('h1', 'hold release', 'b3'))
@@ -709,7 +709,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   letPoll?.('released Thing 0.1.7')
   await clock.advance(13 * 60_000)
   expect(await stuck()).toBeDefined()
-  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(2)
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(2)
   await settle()
 })
 
@@ -758,7 +758,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   await clock.advance(25_000)
   const look = async () => {
     const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-    const r = await pane.find({ type: 'Text', text: /^Nothing new for / })
+    const r = await pane.find({ type: 'Text', text: /^No progress for / })
     await pane.unmount()
     return r
   }
@@ -770,7 +770,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   await $.turn.complete({ answer: `The build is watched. ${'Every check passes and it is pushed. '.repeat(15)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
   await clock.advance(13 * 60_000)
   expect(await look()).toBeUndefined()
-  expect(logged.filter(line => line.includes('has had nothing new'))).toEqual([])
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toEqual([])
   await settle()
 })
 
@@ -781,8 +781,8 @@ test('work asking the person something waits on them and is never flagged', SLOW
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] } as never)
   await clock.advance(30 * 60_000)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
-  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(0)
+  expect(await pane.find({ type: 'Text', text: /^No progress for / })).toBeUndefined()
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(0)
   await pane.unmount()
 })
 

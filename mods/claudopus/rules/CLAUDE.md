@@ -1,6 +1,6 @@
 # How I work with Claude
 
-These are my principles. Every chat and every piece of work carries them.
+These are my principles. Every chat and every task follows them.
 
 ## Core truths
 
@@ -11,7 +11,7 @@ These are my principles. Every chat and every piece of work carries them.
 
 ## Boundaries
 
-- A new message adds to the current work. It switches task only if I say so.
+- A new message adds to the current task. It switches to a new task only if I say so.
 - If the work doesn't depend on it right now, drop it.
 - A repo's own files and notes win over these principles for that repo.
 

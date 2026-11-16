@@ -123,7 +123,7 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
           await log($, `Claudopus looked for a new version from Config: ${got.page?.version ?? got.why}`)
           if (!got.page) return { text: `Couldn't check: ${got.why}. Try again later.`, isError: true }
           await knowSource($, true)
-          return loaded && isNewer(got.page.version, loaded) ? { text: `v${got.page.version} is out: the panel offers it.`, isError: false } : { text: `You're on the newest version (v${got.page.version}).`, isError: false }
+          return loaded && isNewer(got.page.version, loaded) ? { text: `v${got.page.version} is out. You can update from the panel.`, isError: false } : { text: `You're on the newest version (v${got.page.version}).`, isError: false }
         }
       } finally {
         isUpdating = false
@@ -431,7 +431,7 @@ const NOTICE_EDGE = '#80808070'
 const STEPS = ['Download', 'Install'] as const
 // Why Update could not update this chat, where Update's own words differ from FAILS'
 const ONE_PRESS_FAILS: Partial<Record<Fail, string>> = {
-  'newer-out': 'a newer version came out while it was updating',
+  'newer-out': 'a newer version came out while Claudopus was updating',
   gone: 'the new version is no longer there',
 }
 const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loaded: string) => {
@@ -512,7 +512,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
   }
   if (n.kind === 'downloaded') {
-    const replaces = `Checked against the release. Install replaces v${loaded}; new chats start on v${v}.`
+    const replaces = `Claudopus checked it against the release. Install replaces v${loaded}, and new chats start on v${v}.`
     return box(
       'downloaded',
       [title(`Claudopus ${v} downloaded`), line('replaces', replaces), track(1)],
@@ -531,7 +531,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
       ? `New chats keep v${loaded}.`
       : n.fail === 'kept-copy'
         ? `This chat still runs v${loaded}.`
-        : `Nothing was changed: this chat still runs v${loaded}.`
+        : `Nothing changed: this chat still runs v${loaded}.`
   return box(
     'failed',
     [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${why.replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],

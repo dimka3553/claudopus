@@ -359,7 +359,7 @@ test("Details of another chat's work on this Mac is as deep as this chat's own: 
   expect(texts).toContain('Fetching the mod')
   // The chat's name, and no line in place of its chat
   expect(texts.some(t => t?.startsWith('From the chat "M4 setup"'))).toBe(true)
-  expect(texts.some(t => t?.startsWith('Its chat is kept by'))).toBe(false)
+  expect(texts.some(t => t?.startsWith('This task runs in the chat'))).toBe(false)
   // The helper opens its own Details, of that chat too
   const helperKey = (await tab.findAll({ type: 'Button' })).find(b => String(b.props.label).startsWith("Check the M4's plugin"))?.key ?? ''
   await pressed(tab, helperKey.replace(/-\d+$/, ''))

@@ -14,7 +14,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
     await pane.unmount()
     return r
   }
-  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^Nothing new for / }))
+  const stuck = () => look(pane => pane.find({ type: 'Text', text: /^No progress for / }))
 
   // The work waits on its helpers, and they each wait on a start signal only it could give: nothing comes back to any of them
   await bash('a1', 'git log', 'p1')
@@ -24,11 +24,11 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   expect(await stuck()).toBeUndefined()
   await clock.advance(2 * 60_000)
   expect((await stuck())?.props.color).toBe('#E5A50A')
-  expect((await stuck())?.text).toMatch(/^Nothing new for 1[23] min\.$/)
-  expect(logged.filter(line => line.includes('"One merger for all pushes" has had nothing new'))).toHaveLength(1)
+  expect((await stuck())?.text).toMatch(/^No progress for 1[23] min\.$/)
+  expect(logged.filter(line => line.includes('"One merger for all pushes" hasn\'t made progress'))).toHaveLength(1)
   // Looked at again, nothing more is said
   await clock.advance(60_000)
-  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(1)
 
   // Something new comes back: the flag goes at the next look
   void keep(bash('h1', 'hold release', 'b3'))
@@ -43,7 +43,7 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   letPoll?.('released Thing 0.1.7')
   await clock.advance(13 * 60_000)
   expect(await stuck()).toBeDefined()
-  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(2)
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(2)
   await settle()
 })
 
@@ -92,7 +92,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   await clock.advance(25_000)
   const look = async () => {
     const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-    const r = await pane.find({ type: 'Text', text: /^Nothing new for / })
+    const r = await pane.find({ type: 'Text', text: /^No progress for / })
     await pane.unmount()
     return r
   }
@@ -104,7 +104,7 @@ test('work sent a message after a long rest, and work only held by what it left 
   await $.turn.complete({ answer: `The build is watched. ${'Every check passes and it is pushed. '.repeat(15)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' } as never)
   await clock.advance(13 * 60_000)
   expect(await look()).toBeUndefined()
-  expect(logged.filter(line => line.includes('has had nothing new'))).toEqual([])
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toEqual([])
   await settle()
 })
 
@@ -115,8 +115,8 @@ test('work asking the person something waits on them and is never flagged', SLOW
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] } as never)
   await clock.advance(30 * 60_000)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await pane.find({ type: 'Text', text: /^Nothing new for / })).toBeUndefined()
-  expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(0)
+  expect(await pane.find({ type: 'Text', text: /^No progress for / })).toBeUndefined()
+  expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(0)
   await pane.unmount()
 })
 

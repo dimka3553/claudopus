@@ -138,7 +138,7 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is out: the panel offers it.' }))).toBeDefined()
+  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is out. You can update from the panel.' }))).toBeDefined()
   expect(gitRan.filter(one => /^(fetch|merge)/.test(one) || one.includes('fetch --progress'))).toEqual([])
   expect(files.get('manifest')).toBeUndefined()
   // An older page with no fingerprint is no release: said as a failure, in the error colour

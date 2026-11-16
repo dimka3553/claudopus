@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -672,10 +672,10 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
 
   const first = await $.prompt.submit({ text: 'fix the upload page', wait: false, origin: composer })
   expect(first.context?.join('\n')).toContain('CHAT ROLE')
-  expect(first.context?.join('\n')).toContain('Subjects so far')
+  expect(first.context?.join('\n')).toContain('Topics so far')
   expect(first.context?.join('\n')).toContain(`This chat's saved words: ${MEMORY}/words/engine-id.md`)
   expect(first.context?.join('\n')).toContain('start a fresh agent')
-  expect(first.context?.join('\n')).toContain('Only a message that steers what listed work is already doing')
+  expect(first.context?.join('\n')).toContain('Only a message about what a listed task is already doing')
   expect(first.context?.join('\n')).toContain('A fault, a question or a new ask gets its own agent')
 
   // One sent while the chat is mid-turn is its own piece of work too
@@ -694,7 +694,7 @@ test('work never starts as a copy of the chat: a fork or an agent with no model 
 
   const r = await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   expect(r.context?.join('\n')).not.toContain('fork')
-  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a1', prompt: 'fix the nose', subagent_type: 'fork' } as never)).deny).toContain('never started as a copy')
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a1', prompt: 'fix the nose', subagent_type: 'fork' } as never)).deny).toContain('never starts a task as a copy')
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a2', prompt: 'fix the nose', subagent_type: 'general-purpose' } as never)).deny).toContain('the model named')
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a3', prompt: 'fix the nose', subagent_type: 'general-purpose', model: 'opus' } as never)).deny).toBeUndefined()
   expect(files.get(`${MEMORY}/log.md`)).toContain('refused an Agent call that copies the chat')
@@ -760,7 +760,7 @@ test('every start is held to a current model: an older id, a parent on an older 
   await go({ model: 'sonnet', workflow: { runId: 'wf_1', agentIndex: 2 }, description: 'Verify the fix' })
   expect(asked.at(-1)).toBe('claude-opus-5-5')
   // A copy of an agent on an older model cannot be moved, so it is refused with why
-  expect((await go({ fork: true, parentModel: 'claude-opus-4-8', parentAgentId: 'a0' })).deny).toContain('No work runs on Opus 4.8. Start a fresh agent')
+  expect((await go({ fork: true, parentModel: 'claude-opus-4-8', parentAgentId: 'a0' })).deny).toContain("Claudopus doesn't run tasks on Opus 4.8. Start a fresh agent")
   expect((await go({ fork: true, parentAgentId: 'a0' })).deny).toBeUndefined()
   expect(files.get(`${MEMORY}/log.md`)).toContain('a workflow agent asked to run on Sonnet 4.5 starts on Sonnet 5.5')
 })
@@ -988,7 +988,7 @@ test("a chat's own thread may only read, start agents and talk to them; an agent
   const { files } = world(on)
   await $.session.start(start)
   const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
-  expect(told.context?.join('\n')).toContain('A question a few reads answer is answered here')
+  expect(told.context?.join('\n')).toContain('Answer a question that a few reads settle here')
   expect(told.context?.join('\n')).toContain('Anything that changes a file, runs a command or takes more than a few reads')
 
   const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'ls' } as never)
@@ -1045,7 +1045,7 @@ test('config.json names the person the work is for; without a name the texts say
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   expect(prompts[0]).toContain('started from a chat for Sam, the person you work for.')
-  expect(prompts[0]).toContain('Sam follows this work in a panel')
+  expect(prompts[0]).toContain('Sam follows this task in a panel')
   expect(prompts[0]).toContain("Sam's messages word for word")
   expect(prompts[0]).not.toMatch(/the person(?! you work for)/i)
 })
@@ -1056,7 +1056,7 @@ test('without a name in config.json the work is told of the person', async ($, o
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   expect(prompts[0]).toContain('started from a chat for the person you work for.')
-  expect(prompts[0]).toContain('The person follows this work in a panel')
+  expect(prompts[0]).toContain('The person follows this task in a panel')
 })
 
 test('the update tool records a subject and rewrites its brief', async ($, on) => {
@@ -1093,7 +1093,7 @@ test('a compaction is told what to keep, and the chat gets its role again after 
   await $.prompt.submit({ text: 'one', wait: false, origin: composer })
 
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'one', toolUses: [] }] as never })
-  expect(compacts[0]).toContain('Keep every ask')
+  expect(compacts[0]).toContain('Keep every request')
   expect(compacts[0]).toContain('each background agent')
 
   const after = await $.prompt.submit({ text: 'two', wait: false, origin: composer })

@@ -100,7 +100,7 @@ const tabHooks = (on: On) => {
     const { Box, Text } = uiOf($, e)
     const kept = await read($, reports)
     const r = kept.find(one => paneOf(one) === e.requestId)
-    if (!r) return <Text dimColor>This result is no longer kept.</Text>
+    if (!r) return <Text dimColor>This result has been deleted.</Text>
     if (!reportText.has(r.id)) reportText.set(r.id, await readOr($, `${reportPath(r)}/report.md`))
     const at = Math.min(Math.max(0, pictureAt.get(paneOf(r)) ?? 0), Math.max(0, r.files.length - 1))
     const file = r.files[at] ?? ''
@@ -171,7 +171,7 @@ const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
   const { Box, Text } = uiOf($, e)
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
-      <Text bold>This tab could not be drawn</Text>
+      <Text bold>Claudopus couldn't draw this tab</Text>
       <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
       <Text dimColor wrap="wrap">{isAgain ? 'Trying again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
     </Box>

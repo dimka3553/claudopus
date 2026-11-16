@@ -9,7 +9,7 @@ async function writeOwnText($: EngineInterface, memory: string, path: string, te
   if (path === 'rules/CLAUDE.md') return $.fs.write(`${memory}/rules/CLAUDE.md`, text)
   if (path === 'roles/chat.md') return $.fs.write(`${memory}/roles/chat.md`, text)
   if (path === 'roles/work.md') return $.fs.write(`${memory}/roles/work.md`, text)
-  throw new Error(`${path} is not one of the texts the mod ships`)
+  throw new Error(`${path} is not one of the texts Claudopus ships`)
 }
 // The text in force: the person's own copy when it holds anything, the shipped one otherwise
 async function inForce($: EngineInterface, root: string, memory: string, path: string) {
@@ -40,7 +40,7 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
     }
   })()
   // A file that does not parse is someone's edit under way: it is left as it is
-  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('config.json does not parse')
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('config.json is not valid JSON')
   if (key === 'models' && role) {
     const models = { ...((config.models as Record<string, unknown>) ?? {}) }
     if (value === undefined) delete models[role]
@@ -71,7 +71,7 @@ async function putBack($: EngineInterface, memory: string, path: string) {
   const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
   await personWrote($, memory, path, null)
   const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  return r.exitCode === 0 ? '' : r.stderr || 'not put back'
+  return r.exitCode === 0 ? '' : r.stderr || 'could not be undone'
 }
 
 // Save: what the person wrote in the tab becomes their own copy
@@ -115,7 +115,7 @@ async function hideKept($: EngineInterface, e: ToolCallInput, r: ToolCallResult)
     const swapped = JSON.parse(hidden) as { result: typeof r.result; context: typeof r.context }
     return { ...r, result: swapped.result, context: swapped.context } as ToolCallResult
   } catch {
-    return { deny: `${e.tool} ran, and what it answered was withheld: it could not be checked for kept keys.` }
+    return { deny: `${e.tool} ran, but Claudopus withheld its output because it couldn't check it for saved keys.` }
   }
 }
 // Config: each thing the person can set, what is in force, and a way to change it or put it back to what shipped
@@ -166,7 +166,7 @@ const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
         JSON.parse(text || '{}')
         return ''
       } catch {
-        return `${dir}/config.json does not read as JSON, so every setting is as shipped. Fix it or remove it.`
+        return `${dir}/config.json is not valid JSON, so Claudopus uses the default for every setting. Fix it or delete it.`
       }
     })),
 })

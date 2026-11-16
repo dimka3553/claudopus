@@ -218,7 +218,7 @@ const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui
       <ui.Text dimColor wrap="wrap">{text}</ui.Text>
     </ui.Box>
   )
-  if (!stat || stat.kind !== 'file') return said('This picture is no longer kept.')
+  if (!stat || stat.kind !== 'file') return said('This picture is no longer available.')
   if (e.surface === 'terminal') {
     // The terminal draws no picture: a row that opens it where the person is, and what that came to
     return (

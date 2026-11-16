@@ -31,7 +31,7 @@ test("the pictures a work made are in its chat where it made them: drawn small w
     const svgs = (await tab.findAll({ type: 'Svg' })).filter(one => String(one.props.alt).startsWith('Picture:'))
     expect(svgs.map(one => String(one.props.source).slice(0, 4))).toEqual(surface === 'terminal' ? [] : ['<svg'])
     // One it sent that is gone is named, with nothing to press; one a command or a read only looked at, made before the work, is no picture of it
-    expect((await tab.find({ type: 'Text', text: /^Picture: gone\.png/ }))?.text).toBe('Picture: gone.png · no longer kept')
+    expect((await tab.find({ type: 'Text', text: /^Picture: gone\.png/ }))?.text).toBe('Picture: gone.png · no longer available')
     expect(labels.some(label => label.includes('before.png'))).toBe(false)
     // Pressed, it opens whole in a window of its own, the panel left as it was; each press opens it again
     shown.length = 0

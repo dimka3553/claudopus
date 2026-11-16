@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -759,7 +759,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   const listed = await call('todo', { item: 'Compare the head with your scan', was: 'compare with scan' })
   expect(String(listed.result)).toBe('[x] Fit the nostril again\n[dropped] Try the other model\n[ ] Compare the head with your scan')
   // A chat's own thread has no to-do of its own
-  expect(String((await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 't', text: 'x' } as never)).result)).toContain('Only background work')
+  expect(String((await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 't', text: 'x' } as never)).result)).toContain('Only a background task')
 
   // The newer line replaced the older; a dropped to-do is not counted
   expect(await pane.find({ type: 'Text', text: /^I am fitting/ })).toBeUndefined()
@@ -781,7 +781,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   expect(await tab.findAll({ type: 'Svg' })).toHaveLength(1)
   expect((await tab.find({ type: 'Text', text: /^To-dos$/ }))?.props.bold).toBe(true)
-  expect((await tab.find({ type: 'Text', text: /^Its chat$/ }))?.props.bold).toBe(true)
+  expect((await tab.find({ type: 'Text', text: /^Conversation$/ }))?.props.bold).toBe(true)
   expect((await tab.find({ type: 'Text', text: /of \d+ done$/ }))?.text).toBe('1 of 7 done')
   expect((await tab.find({ type: 'Text', text: /^Compare/ }))?.props.dimColor).toBe(false)
   expect((await tab.find({ type: 'Text', text: /^Check the left ear/ }))?.props.dimColor).toBe(true)
@@ -817,7 +817,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   await helperTab.unmount()
   // and the work's own Details lists it under Helpers
   expect((await tab.find({ type: 'Text', text: /^Helpers$/ }))?.props.bold).toBe(true)
-  expect((await tab.find({ type: 'Text', text: /at work · / }))?.text).toBe('1 at work · 1 in all')
+  expect((await tab.find({ type: 'Text', text: /helper working$/ }))?.text).toBe('1 helper working')
 
   // Work that ends its turn to wait for its helper goes on working
   await clock.advance(120_000)
@@ -855,7 +855,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   await pressed(pane, 'open-a1')
   const ended = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   expect((await ended.find({ type: 'Text', text: /^Finished · \d+m/ }))?.text).toBe('Finished · 2m 00s')
-  expect((await ended.find({ type: 'Text', text: /^Its chat$/ }))?.props.bold).toBe(true)
+  expect((await ended.find({ type: 'Text', text: /^Conversation$/ }))?.props.bold).toBe(true)
   await ended.unmount()
   expect(files.get(`${MEMORY}/finished/engine-id.json`) ?? '').toBe('')
   await clock.advance(20_000)
@@ -996,7 +996,7 @@ test('a steer is sent as written and the work is told it is one, the work is rem
   const noted = await step('mcp__claudopus__note', { text: 'Your chart of the ears is a new task; I go on with the nose.', task: 'Make a chart of the ears' })
   // The work hands it to the chat itself, as its own message: the mod submits nothing that would show as the person's
   expect(String(noted.result)).toContain('call SendMessage (load it with ToolSearch if needed) with to "main"')
-  expect(String(noted.result)).toContain('Start it as its own piece of work: Make a chart of the ears')
+  expect(String(noted.result)).toContain('Start it as its own background task: Make a chart of the ears')
   expect(String(noted.result)).toContain('Also make me a chart of the ears.')
   expect(String(noted.result)).toContain('do not do that task here')
   await clock.advance(10)
@@ -1024,9 +1024,9 @@ test("only the person's words sent on by the chat are their steer: a helper's re
 
   // A helper replies to the work that started it, and that work writes to its helper
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'There are two nostrils.', agentId: 'a3' } as never)
-  expect(appended.at(-1)).toBe('a1: The message sent to you just now that begins "There are two nostrils." is from your helper "Count nostrils", not from the person: that one is not theirs. Take it as your helper "Count nostrils"\'s and carry on; a message that carries the person\'s own words stays theirs.')
+  expect(appended.at(-1)).toBe('a1: The message sent to you just now that begins "There are two nostrils." is from your helper "Count nostrils", not from the person: that one is not theirs. Take it as your helper "Count nostrils"\'s and continue; a message that carries the person\'s own words stays theirs.')
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's2', to: 'a3', message: 'Count them again.', agentId: 'a1' } as never)
-  expect(appended.at(-1)).toContain('a3: The message sent to you just now that begins "Count them again." is from the work that started you, not from the person')
+  expect(appended.at(-1)).toContain('a3: The message sent to you just now that begins "Count them again." is from the task that started you, not from the person')
   // One piece of work writes to another
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a2', message: 'The nose is done, check the ears against it.', agentId: 'a1' } as never)
   expect(appended.at(-1)).toContain('is from the work "Fix the nose", not from the person')
@@ -1103,7 +1103,7 @@ test('work that ends in an error is kept as failed, time lying ended is not coun
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   await clock.advance(120_000)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'error', agentId: 'a1' } as never)
-  expect((await tab.find({ type: 'Text', text: /^An error/ }))?.text).toBe('An error stopped it before it finished · 2m 00s')
+  expect((await tab.find({ type: 'Text', text: /^Failed with/ }))?.text).toBe('Failed with an error · 2m 00s')
 
   // An hour later it is sent a message and works again: the hour is not counted
   await clock.advance(3_600_000)
@@ -1129,7 +1129,7 @@ test('a chat the app has not kept is said so, with the answer the work gave', as
   await pressed(pane, 'open-a1')
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   await $.turn.complete({ answer: 'The nostril is closed.', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' } as never)
-  expect((await tab.find({ type: 'Text', text: /not kept/ }))?.text).toBe('The app has not kept the chat of this work.')
+  expect((await tab.find({ type: 'Text', text: /save this task/ }))?.text).toBe("The app didn't save this task's conversation.")
   expect((await tab.find({ type: 'Markdown' }))?.props.text).toBe('The nostril is closed.')
   await tab.unmount()
   await pane.unmount()
@@ -1262,7 +1262,7 @@ test('work a safety flag would move to an older model is ended with a report tha
   expect(stepped).toEqual(['claude-opus-5-5'])
   expect(flagged.find(c => c.kind === 'tool')?.name).toBe('SubagentHandback')
   expect(JSON.parse(flagged.find(c => c.kind === 'input')?.json ?? '{}').message).toContain('Start what is left again on the current model, leaving out what was flagged')
-  expect(await line()).toContain('ended after a safety flag, not carried on on Opus 4.8')
+  expect(await line()).toContain("ended after a safety flag, so it doesn't continue on Opus 4.8")
   // Where the handback does not end it, a step after is a plain last answer, and still nothing runs on the older model
   const again = await step(2, 'claude-opus-4-8')
   expect(stepped).toEqual(['claude-opus-5-5'])
@@ -1316,7 +1316,7 @@ test('work that answers from an older model all the same says so on its card', a
   for await (const _ of $.turn.step({ turnId: 'turn-2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect((await keyed(pane, 'model-a1'))?.props.label).toBe('Opus 4.8')
-  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')).toContain('not a model work should run on')
+  expect((await pane.findAll({ type: 'Text' })).map(one => String(one.props.children ?? one.text ?? '')).join('\n')).toContain("Claudopus doesn't run tasks on this model")
 })
 
 test('the model a running work is on is pressed and another chosen: its next step runs on it, its card says so at once, and its chat and the work are told', async ($, on) => {
@@ -1409,7 +1409,7 @@ test("Details opens as a tab of its own, named after the work, in front; pressed
   await tab.unmount()
   // A tab for work no longer kept says so
   const gone = await $.ui.mount({ ...LIST, requestId: 'work-zz', surface: 'desktop' } as never)
-  expect((await gone.find({ type: 'Text' }))?.text).toBe('This work is no longer kept.')
+  expect((await gone.find({ type: 'Text' }))?.text).toBe('This task is no longer available.')
   await gone.unmount()
   await pane.unmount()
 })
@@ -1424,10 +1424,10 @@ test("a Details tab draws at once, before a long chat is read, and fills in once
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   expect((await tab.find({ type: 'Text', text: /^Fix the nose$/ }))?.props.bold).toBe(true)
-  expect((await tab.find({ type: 'Text', text: /^Reading its chat/ }))?.text).toBe('Reading its chat…')
+  expect((await tab.find({ type: 'Text', text: /^Reading the conversation/ }))?.text).toBe('Reading the conversation…')
   give()
   expect((await until(async () => (await tab.find({ type: 'Markdown' }))?.props.text))).toBe('The nostril is closed.')
-  expect(await tab.find({ type: 'Text', text: /^Reading its chat/ })).toBeUndefined()
+  expect(await tab.find({ type: 'Text', text: /^Reading the conversation/ })).toBeUndefined()
   await tab.unmount()
 })
 
@@ -1610,7 +1610,7 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   // has a line down from its dot, its last one turns to it in a curve past the line of the level above, and the closing row has a ring
   const drawn = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   const svgs = (await drawn.findAll({ type: 'Svg' })).map(svg => ({ source: String(svg.props.source), alt: svg.props.alt })).filter(svg => svg.source.includes('stroke-opacity'))
-  expect(svgs.map(svg => svg.alt)).toEqual(['At work', 'At work', 'Ended'])
+  expect(svgs.map(svg => svg.alt)).toEqual(['Working', 'Working', 'Ended'])
   expect(svgs[0]?.source).toContain('d="M9 0V20M9 10H22M27 15V20"')
   expect(svgs[1]?.source).toContain('d="M9 0V20M27 0V5Q27 10 32 10H40"')
   expect(svgs[1]?.source).toContain('<circle cx="45" cy="10" r="3.5" fill="#8A63F0"/>')
@@ -1620,7 +1620,7 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   expect(svgs[2]?.source).toContain('d="M9 0V5Q9 10 14 10H22"')
   expect(svgs[2]?.source).toContain('fill="none" stroke="#808080" stroke-width="1.5"/></svg>')
   // No row names a model, and none has the three dots: only the card itself does
-  expect((await drawn.findAll({ type: 'Svg' })).filter(svg => svg.props.alt === 'Being done now')).toHaveLength(1)
+  expect((await drawn.findAll({ type: 'Svg' })).filter(svg => svg.props.alt === 'Working now')).toHaveLength(1)
   await drawn.unmount()
   // In the narrowest pane a name keeps the room a mark at the row's end once took, so this one is still whole
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 20 }, surface: 'desktop' } as never)
@@ -1629,7 +1629,7 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
 
   // The work's Details lists every helper, ended or not, as the same tree
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
-  expect((await tab.find({ type: 'Text', text: / in all$/ }))?.text).toBe('2 at work · 4 in all')
+  expect((await tab.find({ type: 'Text', text: / helpers? working$/ }))?.text).toBe('2 of 4 helpers working')
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
   // One at work has a dot at the end of its line, a ring growing out of it (cells the terminal repaints), one that finished a tick
   expect((await tab.findAll({ type: 'Raster' })).filter(one => String(one.key).endsWith('-ring')).length).toBe(2)
@@ -1660,19 +1660,19 @@ test('what a piece of work and its helpers have running is in its Details too, e
   expect(picked.sort()).toEqual([...[1, 2, 3, 4, 5].map(n => `Download weights ${n}`), 'Serve the site'])
   const shown = await texts(tab)
   expect(shown.some(text => /more (running|jobs)/.test(text))).toBe(false)
-  expect((await tab.find({ type: 'Text', text: /^Helpers and jobs$/ }))?.props.bold).toBe(true)
-  expect(shown).toContain('6 jobs running · 1 helper at work')
+  expect((await tab.find({ type: 'Text', text: /^Helpers and commands$/ }))?.props.bold).toBe(true)
+  expect(shown).toContain('6 commands running · 1 helper working')
   await tab.unmount()
   // The card on the list still folds the helper's jobs past JOBS_SHOWN into one row
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   expect((await texts(list)).filter(text => /Download weights/.test(text))).toHaveLength(3)
-  expect((await texts(list)).some(text => /^2 more jobs/.test(text))).toBe(true)
+  expect((await texts(list)).some(text => /^2 more commands/.test(text))).toBe(true)
   await list.unmount()
   // The helper's own Details, with no helpers of its own, shows what it has running
   const helperTab = await $.ui.mount({ ...LIST, requestId: 'work-a2', props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   const its = await texts(helperTab)
   expect((await helperTab.find({ type: 'Text', text: /^Running$/ }))?.props.bold).toBe(true)
-  expect(its).toContain('5 jobs running')
+  expect(its).toContain('5 commands running')
   expect(its.filter(text => /Download weights/.test(text))).toHaveLength(5)
   expect(its.some(text => /Serve the site/.test(text))).toBe(false)
   await helperTab.unmount()
@@ -1690,7 +1690,7 @@ test('long work keeps only its newest ended helpers, and none of work that was f
   }
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'terminal' } as never)
   // 104 ended, the oldest four forgotten; the one at work is never forgotten
-  expect((await tab.find({ type: 'Text', text: / in all$/ }))?.text).toBe('1 at work · 101 in all')
+  expect((await tab.find({ type: 'Text', text: / helpers? working$/ }))?.text).toBe('1 of 101 helpers working')
   const names = (await tab.findAll({ type: 'Button' })).map(one => String(one.props.label))
   expect(names.includes('Measure 5')).toBe(false)
   expect(names.includes('Measure 6')).toBe(true)
@@ -1739,7 +1739,7 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   // Quiet for long, in words
   wroteAt = now - 15 * 60_000
   await advance(20_000)
-  expect(await until(async () => ((await texts()).some(text => / · silent for 1[5-9]m/.test(text)) || undefined))).toBe(true)
+  expect(await until(async () => ((await texts()).some(text => / · nothing printed for 1[5-9]m/.test(text)) || undefined))).toBe(true)
   // A raw line in plain words, with its log time and state code left out, then its sign of life; 16 Nov the row read
   // "35 MB · [run 11:27:50] waiting for the machine to start (Running)"
   output = 'starting\n[run 11:27:50] waiting for the machine to start (Running)\n'
@@ -1758,15 +1758,15 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   // Silent past ten seconds it says so, plainly, and Stop on its row ends its process and tells the work it was stuck
   wroteAt = now - 25_000
   await advance(20_000)
-  expect(await until(async () => (await texts()).find(text => /^7 tries · silent for 4\ds$/.test(text)))).toBeDefined()
+  expect(await until(async () => (await texts()).find(text => /^7 tries · nothing printed for 4\ds$/.test(text)))).toBeDefined()
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
-  const stop = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop run' && String(b.key ?? '').startsWith('stop-list-job-'))
+  const stop = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop' && String(b.key ?? '').startsWith('stop-list-job-'))
   expect(stop).toBeDefined()
   await list.press({ key: stop?.key ?? '' })
   await list.unmount()
   expect(await until(async () => killed.includes('48213') || undefined)).toBe(true)
   isAlive = false
-  expect(await until(async () => appended.find(line => /^a1: .*stopped your run "Fetch the CT scans" from the panel\. Do not start it again unless/.test(line)))).toBeDefined()
+  expect(await until(async () => appended.find(line => /^a1: .*stopped your command "Fetch the CT scans" from the panel\. Don't start it again unless/.test(line)))).toBeDefined()
   await advance(5_000)
   expect(await until(async () => ((await texts()).every(text => !/^Fetch the CT scans/.test(text)) || undefined))).toBe(true)
 })
@@ -1783,7 +1783,7 @@ test('a run whose output cannot be found says so after a minute, so a blank row 
   const shown = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
   // Its name, its kind already said in the work's own words
   expect(shown.some(text => /^Fetch the CT scans/.test(text))).toBe(true)
-  expect(shown.some(text => /^silent for 1m [01]0s$/.test(text))).toBe(true)
+  expect(shown.some(text => /^nothing printed for 1m [01]0s$/.test(text))).toBe(true)
   await list.unmount()
 })
 
@@ -1853,7 +1853,7 @@ test('every run under a card says how it stands: a command held open shows its p
   expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
-  expect(shown.some(text => /^silent for 5m 00s$/.test(text))).toBe(true)
+  expect(shown.some(text => /^nothing printed for 5m 00s$/.test(text))).toBe(true)
   expect(shown.some(text => /updated/.test(text))).toBe(false)
   // The watch, its last event and when it came
   expect(shown.some(text => /^Watch · Azure jobs finishing/.test(text))).toBe(true)
@@ -1917,13 +1917,13 @@ test('only runs really running are listed: a watch the engine killed at its time
   for (let n = 0; n < 39; n++) await advance(MIN)
   const shown = (await until(async () => {
     const all = await texts()
-    return all.some(text => /^4 runs ended/.test(text)) ? all : undefined
+    return all.some(text => /^4 commands ended/.test(text)) ? all : undefined
   })) ?? []
   // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
   expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
   expect(shown.some(text => /screening pass ×2|Run the fetch|Run the tidy/.test(text))).toBe(false)
   // The closing row counts them and says, in words, how many did not finish well
-  expect(shown).toContain('4 runs ended · 1 failed, 2 timed out')
+  expect(shown).toContain('4 commands ended · 1 failed, 2 timed out')
   // The wait still running stays, within its time
   expect(shown).toContain('Wait for the details screening to finish')
   expect(shown).toContain('49m 00s of ~55m')
@@ -1935,7 +1935,7 @@ test('only runs really running are listed: a watch the engine killed at its time
   const pane = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
   const details = (await pane.findAll({ type: 'Text' })).map(one => one.text)
   await pane.unmount()
-  expect(details).toContain('Runs ended')
+  expect(details).toContain('Commands ended')
   expect(details.filter(text => text === 'Wait for first screening pass').length).toBe(2)
   expect(details.filter(text => /^timed out after (29|30)m \d\ds · /.test(text)).length).toBe(2)
   expect(details.some(text => /^failed \(exit code 1\) after \dm \d\ds · /.test(text))).toBe(true)
