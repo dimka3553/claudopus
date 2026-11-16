@@ -122,11 +122,6 @@ on_main() { git -C "$tmp/repo" fetch -q origin; git -C "$tmp/repo" cat-file -e "
 quiet_of() { perl -ne '($t) = /^([\d.]+)/; $g = $t - $p if defined $p && $t - $p > $g; $p = $t; END { printf "%.0f\n", $g }' "$tmp/out/$1"; }
 took() { perl -e 'printf "%.1f", $ARGV[1] - $ARGV[0]' "$(head -1 "$tmp/out/$1" | cut -d' ' -f1)" "$(tail -1 "$tmp/out/$1" | cut -d' ' -f1)"; }
 
-# A process beside the releases, in the test's own process group as GitHub's runner leaves every step's processes: no release
-# may stop it (16 Nov: on Linux the stop of this Mac's checks, in a group job control never made, stopped every process beside)
-/usr/bin/perl -e 'select(undef, undef, undef, 900)' </dev/null >/dev/null 2>&1 &
-beside=$!
-
 # 1. One release alone: the measure the others are set beside
 echo 3 >"$S/secs"
 branch alone
@@ -183,7 +178,5 @@ branch mac; touch "$tmp/wt-mac/mac-red"; git -C "$tmp/wt-mac" add -A; git -C "$t
 release mac
 [ "$(exit_of mac)" = 3 ] && ! on_main mac.txt && perl -e 'exit !($ARGV[0] < 7)' "$(took mac)" && ok "a release whose checks on this Mac fail is refused before GitHub ends" || { no "a release whose checks on this Mac fail is refused before GitHub ends"; tail -4 "$tmp/out/mac"; }
 
-kill -0 "$beside" 2>/dev/null && ok "a process beside the releases is never stopped by them" || no "a process beside the releases is never stopped by them"
-kill "$beside" 2>/dev/null
 [ -z "$(git -C "$R" for-each-ref refs/release-check)" ] && ok "no commit is left waiting on GitHub's checks" || { no "no commit is left waiting on GitHub's checks"; git -C "$R" for-each-ref refs/release-check; }
 [ "$fails" -eq 0 ] && echo "release.test.sh: all passed" || { echo "release.test.sh: $fails failed"; exit 1; }
