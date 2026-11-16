@@ -5539,9 +5539,47 @@ let isPressMissed = false
 const holdForPress = async ($: EngineInterface) => {
   const at = (pressFrom = await $.clock.now())
   pressFresh = freshness
-  $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), isPressMissed && ((isPressMissed = false), drawAgain($)))))
+  // A hold that ends with no press reaching the mod while a drawing was held back (a click on a button already gone) gives the buttons new keys: the app keeps a
+  // focused button in view and scrolls back to it at every drawing, which threw the panel down and back as the person clicked on
+  $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), isPressMissed && ((isPressMissed = false), (presses += 1), drawAgain($)))))
 }
 const isPressHeld = (at: number) => pressFrom > 0 && at - pressFrom < PRESS_HOLD && pressFresh === freshness
+// A pane drawn afresh is given again, as it was, until FRESH_GAP has passed (or four times what its drawing took, when longer), and
+// then drawn afresh once. The engine retires a drawing's buttons the moment a newer drawing of that pane is made, and a newer ask for
+// one drops the reply of the drawing still under way: with seven tasks, their helpers and commands, the panel was asked for about
+// five times a second and each drawing took 300 ms, so no drawing reached the app for half a minute while every one retired the
+// buttons on screen, and every click named a button already gone (16 Nov, 0.2.153: Close pressed twenty times, all "not handled").
+// Given again, a drawing is the same tree, keeps its buttons, and is answered at once. A press of the person's is drawn at once
+const FRESH_GAP = 1000
+const SLOW_DRAW = 100
+const freshDrawn = new Map<string, { at: number; ms: number; fresh: number }>()
+const freshDue = new Set<string>()
+// The panes being drawn afresh just now: an ask that comes meanwhile gets the drawing before, and the pane is asked for again the
+// moment the fresh one is made, since the engine drops the reply of a drawing a newer ask overtook
+const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean }>()
+let pressedAt = 0
+const isFreshTooSoon = ($: EngineInterface, key: string, at: number) => {
+  const going = freshUnderWay.get(key)
+  if (going && going.fresh === freshness) return (going.isOvertaken = true)
+  const last = freshDrawn.get(key)
+  // The mod's own calls for a drawing (an ask, a box, a press, a picture: freshness) come at once
+  if (!last || pressedAt >= last.at || last.fresh !== freshness) return false
+  // Only while drawings are slow, as under a load that drops them: a quick one reaches the app before the next is asked for
+  if (last.ms < SLOW_DRAW) return false
+  const gap = Math.max(FRESH_GAP, last.ms * 4)
+  if (at - last.at >= gap) return false
+  // (asked for without counting as a call of the mod's own, which would draw afresh at once and skip the gap)
+  if (!freshDue.has(key)) (freshDue.add(key), $.clock.after(gap - (at - last.at) + 20, () => void (freshDue.delete(key), drawFresh($))))
+  return true
+}
+// Around each drawing made afresh: one asked for while it was made is made again the moment it is done
+const freshBegins = (key: string) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false }), freshness)
+const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
+  const isOvertaken = freshUnderWay.get(key)?.isOvertaken
+  freshUnderWay.delete(key)
+  if (made) freshDrawn.set(key, made)
+  if (isOvertaken) void drawFresh($)
+}
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 // Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
@@ -5560,8 +5598,9 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   if (isNew) return void ((list.side = side), drawAgain($), (list.side = sideSign()))
   // Counted from the panel's last drawing afresh or the last of these, so a Details tab or the band drawn without the panel moves on
   // every CALM too, not each second
-  if (!isMoving || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
+  if (!(isMoving || outputMoved) || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
   calmAt = now
+  outputMoved = false
   await writeHeldOthers($)
   recordEvent($, 'redraw-calm')
   $.ui.invalidate('ui.render')
@@ -6913,6 +6952,9 @@ const boxHead = (text: string) => {
 const boxTries = new Map<string, number>()
 // The boxes something is typed in, unsent, so an ask's reply box does not take the keys from them
 const boxTyped = new Set<string>()
+// What is typed in the bar's key box while it is open, only so its Send button can send it: never written anywhere, and gone once
+// it is sent, closed or the box moves
+const barKeyTyped = new Map<string, string>()
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map<string, string>()
 // Sent from here: the box goes at once, before the runner removes its request
@@ -6991,7 +7033,7 @@ const lookBoxes = async ($: EngineInterface) => {
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
-  for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id))
+  for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), barKeyTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
   drawAgain($)
@@ -7057,6 +7099,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
   boxSent.add(id)
+  barKeyTyped.delete(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   if (boxOpen?.id === id) ((boxOpen = undefined), (barBoxAt = 0))
@@ -7110,6 +7153,7 @@ const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. A resp
 const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surface: string) => {
   if (id && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
   boxOpen = id ? { id, mode } : undefined
+  barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
   barBoxAt = 0
   boxPresses += 1
@@ -7162,6 +7206,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
 // What is typed in a key's field goes by its mode: the key to the keychain, a response to the command that asked
 const submitBox = ($: EngineInterface, id: string, mode: BoxMode, value: string) => {
   boxTyped.delete(id)
+  barKeyTyped.delete(id)
   freeTimes($)
   barBoxAt = 0
   const run = mode === 'reply' ? sendBoxReply($, id, value) : sendBox($, id, value)
@@ -7186,7 +7231,7 @@ const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string)
       <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send it as a response" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
     </ui.Box>
   ) : null
-// The row in the bar above the prompt for the key box opened there: what goes where, the field, and Close
+// The row in the bar above the prompt for the key box opened there: what goes where, the field, Send, the big one, and Close, small
 const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
   const name = boxNameOf(one)
   const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`
@@ -7203,13 +7248,14 @@ const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
               placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
               submitLabel="send"
               autoFocus
-              onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
+              onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
               onSubmit={value => submitBox($, one.id, mode, value)}
             />
           </ui.Box>
         ) : null}
-        <ui.Box flexShrink={0}>
-          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" onPress={press => openBox($, undefined, mode, press.surface)} />
+        <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+          <ui.Button key={`band-key-send-${boxPresses}`} label="Send" variant="primary" onPress={() => void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, barKeyTyped.get(one.id) ?? ''))} />
+          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" plain dimColor onPress={press => openBox($, undefined, mode, press.surface)} />
         </ui.Box>
       </ui.Box>
       {boxSaid.get(one.id) ? <ui.Text key="band-key-said" color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
@@ -8461,8 +8507,9 @@ const promptHooks = (on: On) => {
 // What every kind of the mod's agents is told before its task, in place of the engine's own agent prompt
 const AGENT_HEAD =
   'You are an agent of Claude Code, working in the background on a task you are given. Use the tools you have to do it fully: no more than it asks, and not half done. Read files you know you need yourself; send calls that need nothing from each other together. Paths you give are absolute. When you are done, give your report: what was done, what you found, and what is not done or not checked, short, with the file paths that matter. Use no emojis.'
-// The panel's tools, which work keeps its card with, and the handback its report goes through
-const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall']
+// The panel's tools, which work keeps its card with, and the handback its report goes through. Each kind told to call `wake_me`
+// rather than wait has it: a task and a quick task to be started again, a helper to be told to hand back what it waits for instead
+const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall', 'mcp__claudopus__wake_me']
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback']
 // ToolSearch loads the ones among these the engine holds back until asked (Monitor, SendMessage, TaskStop and the like)
 const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit', 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback', ...PANEL_TOOLS]
@@ -9793,8 +9840,12 @@ const lookJobs = async ($: EngineInterface) => {
   if (psText !== undefined) void endWaiters($, await read($, todos), now).catch(err => log($, `waits not stopped: ${String(err)}`))
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
-  if (isChanged) void drawFresh($)
+  // A command that ended leaves its row at once; new output alone waits for the panel's next calm drawing (calmLook, every CALM while
+  // work runs): drawn afresh at each output, seven tasks' commands drew the panel without a pause and no click held (16 Nov)
+  if (ended.length) void drawFresh($)
+  else if (isChanged) outputMoved = true
 }
+let outputMoved = false
 
 // The memory a followed process and all it started hold, as the processes were last listed
 const memSeen = (pid?: string) => {
@@ -10984,12 +11035,28 @@ const NO_PROGRESS_WAIT =
   'Not run: this wait would print nothing to show how it is going. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
 const NO_PROGRESS_SCRIPT =
   'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
+// The note the engine adds when work ends its step without its report, and what such a step says instead while the work's own
+// detached command runs or it waits to be woken: what it said before was no report (a report goes on to the engine's press)
+const HANDBACK_PRESS = '[handback-send-enforce]'
+const LEFT_AT_WORK = 'My own work is still going; I am started again when it is done, and give my report then.'
+const isPressedForReport = async ($: EngineInterface, id: string) => {
+  const talk = await $.session.messages({ as: 'api', agentId: id }).catch(() => [])
+  if (!Array.isArray(talk)) return false
+  const textOf = (m: unknown) => {
+    const content = (m as { content?: unknown } | undefined)?.content
+    return typeof content === 'string' ? content : Array.isArray(content) ? content.map(b => (b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' ? String((b as { text?: unknown }).text ?? '') : '')).join('\n') : ''
+  }
+  const last = talk.at(-1) as { role?: unknown } | undefined
+  if (last?.role !== 'user' || !textOf(last).includes(HANDBACK_PRESS)) return false
+  const said = [...talk].reverse().find(m => (m as { role?: unknown }).role === 'assistant')
+  return textOf(said).trim().length < REPORT_LEAST
+}
 // What a command that only waits is told instead, by what it waits for
-const NO_WAIT = (kind: WaitKind) =>
+const NO_WAIT = (kind: WaitKind, isHelper = false) =>
   `Not run: this command only waits${kind === 'helpers' ? ' for your helpers' : kind === 'time' ? ' for time to pass' : ''}, and nothing you start may only wait. ${
     kind === 'helpers'
       ? 'Each helper\'s result comes to you as a message, even after you end your step: carry on with what needs nothing from them, or end your step now.'
-      : 'Your own commands, in the background or detached, wake you the moment they end, and each helper\'s result comes to you as a message: carry on with what needs nothing from them, or end your step now. For a file, a page or a time that nothing of yours makes, call the `wake_me` tool and end your step: Claudopus wakes you when it is there. To try something again that failed, run it again yourself.'
+      : 'Your own commands, in the background or detached, wake you the moment they end, and each helper\'s result comes to you as a message: carry on with what needs nothing from them, or end your step now. ' + (isHelper ? 'For a file, a page or a time that nothing of yours makes, hand back what you found and what you wait for: the task that started you asks Claudopus to wake it.' : 'For a file, a page or a time that nothing of yours makes, call the `wake_me` tool and end your step: Claudopus wakes you when it is there.') + ' To try something again that failed, run it again yourself.'
   }`
 const NO_FOLLOW =
   'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20); you are woken the moment your command ends.'
@@ -11156,7 +11223,7 @@ const workHooks = (on: On) => {
       const waits = waitingOf(command, await scriptsRun($, command), { isWatch: e.tool === 'Monitor' })
       if (waits) {
         await log($, `refused ${card?.parentId ? 'helper' : 'work'} ${e.agentId}'s command that only waits (${waits})`)
-        return { deny: NO_WAIT(waits) }
+        return { deny: NO_WAIT(waits, Boolean(card?.parentId)) }
       }
       // A tail that follows a log never ends of itself and tells the work nothing as it runs: it only outlives what it watches
       // (a Monitor watch is told each line as it comes, so it says something; a Bash call's output is read only as it ends)
@@ -11466,6 +11533,15 @@ const workHooks = (on: On) => {
     // where the app sent it, and its card says so
     // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
+    // The engine presses work that ends its step without its report, while it sees nothing of the work's own at work: a command
+    // the work started detached, or what it asked Claudopus to wake it for, it does not see (16 Nov: 30 presses in 25 minutes ended a
+    // task early). That press is answered here with no model, so the work ends its step and is started again when that is done
+    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen) && (await isPressedForReport($, id))) {
+      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : 'it waits to be woken'}: let it end its step`)
+      yield { kind: 'text', index: 0, text: LEFT_AT_WORK }
+      yield { kind: 'stop', stopReason: 'end_turn', usage: null }
+      return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
+    }
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
@@ -12160,11 +12236,12 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
     </ui.Box>
   ) : null
 // The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
-// to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
+// to, the box, Send, the big one, and Close, small, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
 // panel's scrolling. The box is the card's own: the same answer, and the same box through a new question of its work, until the
 // person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
 const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
   const draft = barDraft(one.id)
+  const send = (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
   return (
     <ui.Box key="band-reply" flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
       <ui.Box flexShrink={1} minWidth={0}>
@@ -12179,12 +12256,13 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
             submitLabel="send"
             autoFocus
             onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
-            onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))}
+            onSubmit={send}
           />
         </ui.Box>
       ) : null}
-      <ui.Box flexShrink={0}>
-        <ui.Button key={`band-reply-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
+      <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+        <ui.Button key={`band-reply-send-${presses}`} label="Send" variant="primary" onPress={() => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? ''))} />
+        <ui.Button key={`band-reply-close-${presses}`} label="Close" plain dimColor onPress={press => openReply($, undefined, press.surface)} />
       </ui.Box>
     </ui.Box>
   )
@@ -12435,14 +12513,24 @@ const panelHooks = (on: On) => {
     const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}|${e.props.scroll.offset > 0 ? 1 : 0}`
     const heldAt = await $.clock.now()
     if (paneId === LIST) drawnNow = heldAt
+    // Drawn afresh moments ago: given again as it was, at once, and drawn afresh when the gap is over (FRESH_GAP). Never while the
+    // person types, whose box keeps its own drawing below
+    const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
+    const recent = lastShown.get(shownKey)
+    // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
+    // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh). Given before anything is read, so it is
+    // answered at once: given after the pane's reads, it came too late under load and a newer ask dropped it
+    if (recent && paneId === LIST && isPressHeld(heldAt)) return ((listHeldAt = heldAt), (isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
+    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
+    // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
+    freshBegins(shownKey)
+    // (how long it takes by the wall clock: the engine's clock in a test stands still while a drawing is made)
+    const madeFrom = Date.now()
+    let isMade = false
+    try {
     const shape = await paneShape($, paneId)
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
-    // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
-    // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh)
-    const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
-    const shown = paneId === LIST && isPressHeld(heldAt) ? lastShown.get(shownKey) : undefined
-    if (shown) return ((listHeldAt = heldAt), (isPressMissed = true), shown as Awaited<ReturnType<typeof next>>)
     // While the mod is behind (lookHold), the pane is given as it was, so the drawing adds nothing to what holds Claude's helper
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && (isBehind() || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
@@ -14156,10 +14244,18 @@ const panelHooks = (on: On) => {
       </Box>
     )
     })()
+    // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
+    // ones the engine holds, and this one is made again once the click is over (holdForPress)
+    if (recent && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
-    lastShown.set(heldKey.replace(/\|[01]\|([01])$/, '|$1'), drawing)
+    lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
+    isMade = true
     return drawing
+    } finally {
+      // (a drawing given again from heldDrawings, or one that threw, counts as none made)
+      freshEnds($, shownKey, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined)
+    }
     } finally {
       if (paneId === LIST) listDrawing -= 1
     }
@@ -14177,7 +14273,7 @@ const tabHooks = (on: On) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
-    if (e.plugin === 'claudopus') ((pressFrom = 0), freeTimes($), (freshness += 1), await engage($))
+    if (e.plugin === 'claudopus') ((pressFrom = 0), (pressedAt = await $.clock.now()), freeTimes($), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>
