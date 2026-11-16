@@ -5460,9 +5460,9 @@ let isPressMissed = false
 const holdForPress = async ($: EngineInterface) => {
   const at = (pressFrom = await $.clock.now())
   pressFresh = freshness
-  // A hold that ends with no press reaching the mod (a click on a button already gone) gives the buttons new keys: the app keeps a
+  // A hold that ends with no press reaching the mod while a drawing was held back (a click on a button already gone) gives the buttons new keys: the app keeps a
   // focused button in view and scrolls back to it at every drawing, which threw the panel down and back as the person clicked on
-  $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), (presses += 1), (isPressMissed = false), drawAgain($))))
+  $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), isPressMissed && ((isPressMissed = false), (presses += 1), drawAgain($)))))
 }
 const isPressHeld = (at: number) => pressFrom > 0 && at - pressFrom < PRESS_HOLD && pressFresh === freshness
 // A pane drawn afresh is given again, as it was, until FRESH_GAP has passed (or four times what its drawing took, when longer), and
@@ -5489,7 +5489,8 @@ const isFreshTooSoon = ($: EngineInterface, key: string, at: number) => {
   if (last.ms < SLOW_DRAW) return false
   const gap = Math.max(FRESH_GAP, last.ms * 4)
   if (at - last.at >= gap) return false
-  if (!freshDue.has(key)) (freshDue.add(key), $.clock.after(gap - (at - last.at) + 20, () => void (freshDue.delete(key), drawAgain($))))
+  // (asked for without counting as a call of the mod's own, which would draw afresh at once and skip the gap)
+  if (!freshDue.has(key)) (freshDue.add(key), $.clock.after(gap - (at - last.at) + 20, () => void (freshDue.delete(key), drawFresh($))))
   return true
 }
 // Around each drawing made afresh: one asked for while it was made is made again the moment it is done
@@ -5498,7 +5499,7 @@ const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: num
   const isOvertaken = freshUnderWay.get(key)?.isOvertaken
   freshUnderWay.delete(key)
   if (made) freshDrawn.set(key, made)
-  if (isOvertaken) drawAgain($)
+  if (isOvertaken) void drawFresh($)
 }
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
@@ -14082,6 +14083,9 @@ const panelHooks = (on: On) => {
       </Box>
     )
     })()
+    // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
+    // ones the engine holds, and this one is made again once the click is over (holdForPress)
+    if (recent && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
     lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })

@@ -1788,6 +1788,9 @@ const panelHooks = (on: On) => {
       </Box>
     )
     })()
+    // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
+    // ones the engine holds, and this one is made again once the click is over (holdForPress)
+    if (recent && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
     lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
