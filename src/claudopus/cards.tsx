@@ -250,7 +250,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
   if (!due.length) return
   const home = (await $.env.get('HOME')) ?? ''
   const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
-  const finished = new Map<string, { at: number; answer: string }>()
+  const finished = new Map<string, { at: number; answer: string; isReport: boolean }>()
   for (const one of due) {
     unheardLooked.set(one.id, now)
     const meta = parsedOr<{ finished?: boolean }>(await readOr($, `${folder}/agent-${one.id}.meta.json`), {})
@@ -262,19 +262,21 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
     const size = stat?.size ?? 0
     const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
     let answer = ''
+    let isHandback = false
     for (const row of tail.reverse()) {
       const o = parsedOr<{ type?: string; message?: { content?: unknown } }>(row, {})
       if (o.type !== 'assistant' || !Array.isArray(o.message?.content)) continue
       const blocks = o.message.content as { type?: string; name?: string; text?: string; input?: { message?: unknown } }[]
+      isHandback = blocks.some(b => b.type === 'tool_use' && b.name === 'SubagentHandback')
       answer = blocks.map(b => (b.type === 'tool_use' && b.name === 'SubagentHandback' && typeof b.input?.message === 'string' ? b.input.message : b.type === 'text' ? (b.text ?? '') : '')).join('').trim()
       if (answer) break
     }
-    finished.set(one.id, { at, answer: answer.slice(0, ANSWER_CHARS) })
+    finished.set(one.id, { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST })
   }
   if (!finished.size) return
   // The deepest first: a card with a helper still at work, or one that ends now, or with something it asked to be started again for,
   // waits; one whose helper ends now is passed that helper's result below, which starts it again, as passOnHelper does when heard.
-  // Work the chat started ends now, so the chat is told and its report kept; a helper keeps the time it really ended
+  // Work the chat started ends now, so the chat is told and a report it gave is kept; a helper keeps the time it really ended
   let endedNow: string[] = []
   await changeTodos($, all => {
     const gone = new Set<string>()
@@ -286,9 +288,10 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
         if (!f || one.status !== 'working' || one.wakeWhen || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
         gone.add(one.id)
         isMoved = true
-        const isTop = !one.parentId || one.parentId === HELPER
+        // (its words count as a report only when it handed one back or wrote one as long, as at a heard end)
+        const isTop = !one.parentId
         const answer = f.answer || one.answer
-        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && answer.trim() ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
+        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && f.isReport ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
       })
     }
     endedNow = [...gone]
@@ -298,7 +301,7 @@ const endUnheard = async ($: EngineInterface, live: { id: string }[], now: numbe
   await log($, `work that ended while the mod was out ended on its card: ${endedNow.join(', ')}`)
   for (const one of endedNow) {
     const card = (await read($, todos)).find(todo => todo.id === one)
-    if (card?.parentId && card.parentId !== HELPER) await passOnHelper($, one, card.answer, 'done').catch(err => log($, `helper ${one}'s result not passed on: ${String(err)}`))
+    if (card?.parentId && card.parentId !== HELPER) await passOnHelper($, one, card.answer, 'done', true).catch(err => log($, `helper ${one}'s result not passed on: ${String(err)}`))
   }
   redraw($)
 }
