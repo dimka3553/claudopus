@@ -2,6 +2,13 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.148 · 16 November 2026
+- When a task's own command ends (finished, failed or stopped), Claudopus wakes the task at once, even if it had ended its step, so it carries on right away instead of waiting.
+- A command that only waits for one of the task's own commands to end is refused, with one sentence saying the task will be woken when it ends; so is a `tail -f` that would follow a log forever.
+- A task waiting for its helpers is let go the moment one finishes, and its row shows how many helpers are still working.
+- A tail or grep left watching commands that have all ended is stopped, and the task is told why.
+- Once a command has ended, the card's line says so in place of what the task wrote while it ran, until the task writes again.
+
 ## 0.2.147 · 16 November 2026
 - Plainer words everywhere: a background job is now called a task, and every line says who does what. "The work is told you stopped it" now reads "Claudopus tells Claude you stopped it".
 - The panel, cards, questions, permission prompts, chat notices, README, guide, site and past changelog entries use the same words: question, instructions, topic, command, "nothing printed for 45s".

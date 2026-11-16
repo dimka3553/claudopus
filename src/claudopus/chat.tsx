@@ -415,6 +415,7 @@ const chatHooks = (on: On) => {
       if (isHandedBack) (ownsNothing(await read($, todos), id) ? leftNothing.add(id) : leftNothing.delete(id))
       handedBack.delete(id)
       if (isHandedBack) endedByHandback.add(id)
+      if (isHandedBack) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now } : one)))
       // Work nothing holds any more has nothing of its own left running in the background
       if (!isHeld) await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list))
       await changeTodos($, list => {
@@ -447,6 +448,8 @@ const chatHooks = (on: On) => {
       // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
       // held on its own background work leaves it once it ends (keepStoppedReports)
       const card = (await read($, todos)).find(one => one.id === id)
+      // A helper that has ended lets the work waiting on it go at once, not at the next look round
+      if (card?.parentId && card.status !== 'working') await writeRolls($, true).catch(err => log($, `helpers not written: ${String(err)}`))
       const report = (e.answer ?? '').trim() || answer
       if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
