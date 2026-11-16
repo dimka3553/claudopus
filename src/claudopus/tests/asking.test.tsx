@@ -370,7 +370,7 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   const { files, resumed, clock, wake, asked } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'four fixes', wait: false, origin: composer })
-  for (const description of ['Fix the nose', 'Fix the ear', 'Fix the chin', 'Fix the brow', 'Fix the jaw']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
+  for (const description of ['Fix the nose', 'Fix the ear', 'Fix the chin', 'Fix the brow']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   // The worktrees: one released by its runner, one with no .release
   files.set('/repo/wt/.release', 'mods/claudopus/bin/release')
@@ -420,21 +420,6 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   const box = await until(async () => ((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).find(one => /-reply-/.test(one.key ?? '') && String(one.key).includes('a4')))
   await list.input({ key: box?.key ?? '', text: 'Release it after lunch' })
   expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('Release it after lunch')))).toBeDefined()
-  // Allowed, Claudopus runs the release itself, and while it runs the card says what it waits for as its log says it, in one line kept
-  // fresh, never a card that only says it started (16 Nov: a release in line for half an hour showed nothing)
-  await ask('a5', 'release', '/repo/wt')
-  await press('a5', 'Release it')
-  const once = await until(async () => (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a5-.*once/.test(String(b.key ?? ''))))
-  await list.press({ key: once?.key ?? '' })
-  const logFile = (await until(async () => [...files.keys()].find(path => path.startsWith(`${MEMORY}/releases/step-a5-`)))) ?? ''
-  const releasing = async () => (await list.findAll({ type: 'Text' })).map(one => one.text ?? '').filter(text => text.includes('Releasing: '))
-  files.set(logFile, "progress: 12/600 s waiting for the release of fix-ear ahead of this one (GitHub's checks), eta 10 min\n")
-  expect(await until(async () => (await clock.advance(10_000), (await releasing()).find(text => text.includes("waiting for the release of fix-ear ahead of this one (GitHub's checks)"))))).toBeDefined()
-  files.set(logFile, `${files.get(logFile)}progress: 300/600 s GitHub's checks: check (linux) running; this Mac's checks passed, eta 5 min\n`)
-  expect(await until(async () => (await clock.advance(10_000), (await releasing()).find(text => text.includes("GitHub's checks: check (linux) running; this Mac's checks passed"))))).toBeDefined()
-  expect((await releasing()).length).toBe(1)
-  files.set(logFile, `${files.get(logFile)}released 0.2.170: fix-nose as abc1234 after 420 s\nclaudopus-exit 0\n`)
-  expect(await until(async () => (await clock.advance(10_000), (await list.findAll({ type: 'Text' })).find(one => (one.text ?? '').includes('Released: released 0.2.170'))))).toBeDefined()
   await list.unmount()
 })
 

@@ -2,4 +2,4 @@
 - A release ahead that fails no longer holds up the ones behind it: they are made again without it, by themselves.
 - A failure main already has no longer stops every release after it: a release is refused only for a failure it brings, and says which.
 - Every shell test in a branch is checked before the release, a new one among them, so a test only the branch has can no longer break main once it lands.
-- A release says what it waits for at least every 10 seconds, and its card shows it while it runs. Claudopus no longer stops a release waiting its turn as a command that only waits.
+- A release says what it waits for at least every 10 seconds. Claudopus no longer stops a release waiting its turn as a command that only waits.
