@@ -220,7 +220,7 @@ const workHooks = (on: On) => {
     if (dir && !isOff && e.agentId !== undefined && (e.tool === 'Bash' || e.tool === 'Monitor')) {
       const command = String((e as { command?: unknown }).command ?? '')
       const card = (await read($, todos)).find(one => one.id === e.agentId)
-      const waits = waitingOf(command, await scriptsRun($, command))
+      const waits = waitingOf(command, await scriptsRun($, command), { isWatch: e.tool === 'Monitor' })
       if (waits) {
         await log($, `refused ${card?.parentId ? 'helper' : 'work'} ${e.agentId}'s command that only waits (${waits})`)
         return { deny: NO_WAIT(waits) }

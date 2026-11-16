@@ -282,6 +282,7 @@ const lookJobs = async ($: EngineInterface) => {
   // (not waited for: a work's chat may take its time to take a line, and the look goes on meanwhile)
   void tellSilent($, list, now).catch(err => log($, `silent runs not told: ${String(err)}`))
   void endWatchers($, await read($, todos), now).catch(err => log($, `watchers not stopped: ${String(err)}`))
+  if (psText !== undefined) void endWaiters($, await read($, todos), now).catch(err => log($, `waits not stopped: ${String(err)}`))
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
   if (isChanged) void drawFresh($)
@@ -433,6 +434,49 @@ const endWatchers = async ($: EngineInterface, list: Todo[], now: number) => {
       }
       await log($, `run ${job.id} of work ${one.id} stopped: it only watched runs that have ended`)
     }
+  }
+}
+// A command of a work's or a helper's whose processes, at two looks in a row, do nothing but pass time or follow something (only a
+// sleep, a log followed, a tool made to wait at the end of its tree), however its words were written: it only waits, so it is
+// stopped and its work told what wakes it instead. What the words let through is caught here as it runs (a function, a nested
+// shell, a sleep given by a variable). Not a Monitor watch, whose lines the work is told, nor a server
+const WAITER_STOPPED = (what: string) =>
+  `Claudopus stopped your command "${what}": all it did was wait, and nothing you start may only wait. Your own commands wake you the moment they end, and each helper's result comes to you as a message: carry on, or end your step. For a file, a page or a time that nothing of yours makes, a task calls \`wake_me\`; a helper hands back what it waits for.`
+const waiterSeen = new Map<string, number>()
+const WAITER_LOOKS = 12_000
+const endWaiters = async ($: EngineInterface, list: Todo[], now: number) => {
+  const runs = list.flatMap(one => {
+    if (one.chat || one.status !== 'working') return []
+    const bgs = (one.bg ?? []).filter(b => !b.isWatch && !SERVER_CMD.test(b.cmd ?? '') && describedOf(b.what).kind !== 'server')
+    const shells = bgs.length ? shellsOf(jobProcs, bgs.map(b => ({ id: b.id, cmd: b.cmd ?? '', at: b.at }))) : new Map<string, string | true | null>()
+    return [
+      ...bgs.flatMap(b => (typeof shells.get(b.id) === 'string' ? [{ owner: one, id: b.id, pid: shells.get(b.id) as string }] : [])),
+      ...(one.detached ?? []).filter(d => d.pid && !SERVER_CMD.test(d.cmd) && describedOf(d.what).kind !== 'server').map(d => ({ owner: one, id: d.id, pid: d.pid ?? '' })),
+      ...(one.running?.cmd && now - one.running.at >= ROW_SHOWN ? ((pid => (pid ? [{ owner: one, id: `call-${one.id}`, pid }] : []))(heldShellOf(jobProcs, one.running.cmd, one.running.at))) : []),
+    ]
+  })
+  for (const id of waiterSeen.keys()) if (!runs.some(run => run.id === id)) waiterSeen.delete(id)
+  for (const run of runs) {
+    if (!isWaiterTree(jobProcs, run.pid)) {
+      waiterSeen.delete(run.id)
+      continue
+    }
+    const since = waiterSeen.get(run.id)
+    if (since === undefined) {
+      waiterSeen.set(run.id, now)
+      continue
+    }
+    if (now - since < WAITER_LOOKS || stoppingJobs.has(run.id)) continue
+    const job = jobsOf(run.owner, now).find(j => j.id === run.id) ?? jobsOf({ ...run.owner, bg: run.owner.bg?.filter(b => b.id === run.id), detached: run.owner.detached?.filter(d => d.id === run.id) }, now).find(j => j.id === run.id)
+    if (!job) continue
+    waiterSeen.delete(run.id)
+    stoppingJobs.add(job.id)
+    try {
+      await stopping($, run.owner.id, job, WAITER_STOPPED(job.label))
+    } finally {
+      stoppingJobs.delete(job.id)
+    }
+    await log($, `run ${job.id} of ${run.owner.parentId ? 'helper' : 'work'} ${run.owner.id} stopped: all it did was wait`)
   }
 }
 // (`said`: what the work is told instead of the person's stop, nothing when empty)

@@ -160,6 +160,10 @@ const WAKE_LONGEST = 60
 const WAKE_MOST = 360
 const WAKE_LOOK = 15_000
 let wakesLookedAt = 0
+const wakeTries = new Map<string, number>()
+// Whether a page answers without an error, following where it sends: looked at side by side, each in at most 5 s
+const pageAnswers = async ($: EngineInterface, url: string) =>
+  /^2\d\d$/.test(((await $.process.run(['curl', '-s', '-L', '-o', '/dev/null', '-m', '5', '-w', '%{http_code}', url], { timeoutMs: 8000 }).catch(() => undefined))?.stdout ?? '').trim())
 const WAKE_FOUND = (what: string) => `From Claudopus: what you asked to be started again for is there: ${what}. Carry on from it.`
 const WAKE_TIME = (what: string) => `From Claudopus: the time you asked for has come: ${what}. Carry on.`
 const WAKE_MISSED = (what: string, minutes: number) => `From Claudopus: ${what} was still not there after ${minutes} min of looking. Find out why before you look again.`
@@ -170,7 +174,8 @@ const lookWakes = async ($: EngineInterface) => {
   const now = await $.clock.now()
   if (now - wakesLookedAt < WAKE_LOOK) return
   wakesLookedAt = now
-  const due = (await read($, todos)).filter(one => one.wakeWhen && one.status !== 'stopped' && one.status !== 'failed' && !isHeld(one))
+  // (work the engine lists as ended once its step ends is still due: what it asked for starts it again, unless it gave its report)
+  const due = (await read($, todos)).filter(one => one.wakeWhen && (one.status === 'working' || one.status === 'done') && one.handedBackAt === undefined && !endedByHandback.has(one.id) && !isHeld(one))
   // (nothing asked for, nothing drawn: the panel stays still under the pointer)
   if (!due.length) return
   let isChanged = false
@@ -184,22 +189,28 @@ const lookWakes = async ($: EngineInterface) => {
         ? now >= w.until
         : path
           ? w.text
-            ? (await readOr($, path)).includes(w.text)
+            ? (await $.process.run(['grep', '-qF', '--', w.text, path], { timeoutMs: 5000 }).catch(() => undefined))?.exitCode === 0
             : await $.fs.exists(path).catch(() => false)
-          : ((await $.process.run(['curl', '-s', '-o', '/dev/null', '-m', '5', '-w', '%{http_code}', w.url ?? ''], { timeoutMs: 8000 }).catch(() => undefined))?.stdout.trim() ?? '').match(/^[123]\d\d$/) !== null
+          : await pageAnswers($, w.url ?? '')
     const isMissed = !found && now >= w.until
     if (!found && !isMissed) continue
-    await changeTodos($, list => list.map(card => (card.id === one.id && card.wakeWhen?.at === w.at ? { ...card, wakeWhen: undefined } : card)))
-    isChanged = true
     const text = isMissed ? WAKE_MISSED(w.what, Math.round((w.until - w.at) / 60_000)) : isTimeOnly ? WAKE_TIME(w.what) : WAKE_FOUND(w.what)
     // At a step of its own it reads the line at its next step; with its step ended it is started again by the message
-    if ((await $.agent.list().catch(() => [])).find(agent => agent.id === one.id)?.status === 'running') {
-      await tell($, one.id, text)
-      continue
-    }
-    const r = (await isReplaced($)) ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' } : await sendOwn($, { to: { agentId: one.id }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
-    if (!r.isDelivered) await log($, `work ${one.id} not started again for ${w.what}: ${r.reason}`)
-    else (await wakeCard($, one.id), await log($, `work ${one.id} started again: ${isMissed ? 'not there' : 'there'}: ${w.what}`))
+    const isAtStep = (await $.agent.list().catch(() => [])).find(agent => agent.id === one.id)?.status === 'running'
+    const r = isAtStep
+      ? await tell($, one.id, text).then(() => ({ isDelivered: true as const, reason: '' }))
+      : (await isReplaced($))
+        ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
+        : await sendOwn($, { to: { agentId: one.id }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
+    // Not reached: looked at again at the next look, three times at most, before it is let go
+    const tries = (wakeTries.get(one.id) ?? 0) + 1
+    if (!r.isDelivered && tries < 3) (wakeTries.set(one.id, tries), await log($, `work ${one.id} not started again for ${w.what}, tried again next look: ${r.reason}`))
+    if (!r.isDelivered && tries < 3) continue
+    wakeTries.delete(one.id)
+    await changeTodos($, list => list.map(card => (card.id === one.id && card.wakeWhen?.at === w.at ? { ...card, wakeWhen: undefined } : card)))
+    isChanged = true
+    if (r.isDelivered && !isAtStep) await wakeCard($, one.id)
+    await log($, `work ${one.id} ${r.isDelivered ? 'started again' : 'not started again'}: ${isMissed ? 'not there' : 'there'}: ${w.what}`)
   }
   if (isChanged) redraw($)
 }
@@ -241,7 +252,7 @@ const HELD_AT_END = (n: number) =>
 const HELPERS_STARTED = 'Your helpers run in the background: each call came back at once, and each result comes to you as a message when it ends, even after you end your step. Continue now with your own part, and when nothing else is left, end your step: never wait for them with a command.'
 // What the work that started a helper is told as Claudopus passes on its result
 const HELPER_ENDED = (title: string, how: Todo['status'], report: string) =>
-  `From Claudopus: your helper "${title}" ${how === 'failed' ? 'failed' : how === 'stopped' ? 'was stopped' : 'has finished'} while your step had ended, so its result came to the chat and Claudopus passes it on to you here.${report ? ` Its result:\n\n${report}` : ' It gave no result.'}`
+  `From Claudopus: your helper "${title}" ${how === 'failed' ? 'failed' : how === 'stopped' ? 'was stopped' : 'has finished'} while your step had ended, so Claudopus passes its result on to you here (if you already have it, carry on).${report ? ` Its result:\n\n${report}` : ' It gave no result.'}`
 // What the chat is told, so a helper's result that reached it, or a notice that the task ended without its report, needs nothing
 const HELPER_PASSED = (helper: string, work: string) =>
   `From Claudopus: the result of the helper "${helper}" reached this chat because the task "${work}" had ended its step to let it work. Claudopus has passed it on to that task and started it again: there is nothing for you to do with it, and nothing to tell {name}.`
@@ -253,16 +264,20 @@ const passOnHelper = async ($: EngineInterface, helperId: string, report: string
   const list = await read($, todos)
   const helper = list.find(one => one.id === helperId)
   const parent = helper?.parentId ? list.find(one => one.id === helper.parentId) : undefined
-  if (!helper || !parent || isHeld(parent) || parent.status === 'stopped' || parent.status === 'failed' || parent.handedBackAt !== undefined || endedByHandback.has(parent.id)) return
-  // A work at a step of its own has the result from the engine itself
-  if ((await $.agent.list().catch(() => [])).find(one => one.id === parent.id)?.status === 'running') return
+  // (nor work being stopped: a helper stopped with it says nothing worth starting it again for)
+  if (!helper || !parent || isHeld(parent) || pressed.has(parent.id) || stoppedHere.has(parent.id) || parent.status === 'stopped' || parent.status === 'failed' || parent.handedBackAt !== undefined || endedByHandback.has(parent.id)) return
+  // A work at a step of its own has the result from the engine itself. One the engine still holds for a command of its own may have
+  // it too: it is passed on all the same, as a result lost costs more than one read twice, but the chat had none of it to be told of
+  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === parent.id)?.status
+  if (listed === 'running') return
+  // The chat is told first, so it never passes on a result it is about to hear is handled
+  if (listed !== 'waiting') await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_PASSED(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a helper's result passed on: ${String(err)}`))
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: parent.id }, text: HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (!r.isDelivered) return void (await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`))
   await wakeCard($, parent.id)
   await log($, `helper ${helperId}'s result passed on to ${parent.id}, which had ended its step`)
-  await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_PASSED(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a helper's result passed on: ${String(err)}`))
 }
 
 // What a piece of work, or a helper, starts with the Agent tool runs in the background: the call comes back at once and the

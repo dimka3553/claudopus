@@ -143,6 +143,33 @@ test('xargs -P sending its output nowhere is a run that says it runs and gives n
   expect(await until(async () => ((await leftTexts($)).some(text => text.includes('8.8 GB')) || undefined))).toBe(true)
 })
 
+test('a command that only waits is stopped as it runs, whatever its words: at two looks in a row its processes do nothing but sleep, and its work is told what wakes it instead; one at work beside a sleep runs on', SLOW, async ($, on) => {
+  const procs = { list: [] as string[], logs: {} as Record<string, string> }
+  const { advance, killed, appended } = leftWorld(on, procs)
+  await leftStart($)
+  // Words the check before it runs reads as work: a function of its own, defined in a script it runs
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'w1', agentId: 'a1', command: 'cd /w && nohup bash ./poll.sh > poll.log 2>&1 & echo $!', description: 'Run the poll for the sheets' } as never)
+  procs.list.push(psLine(48213, 1, 48213, 'bash ./poll.sh'), psLine(48300, 48213, 48213, 'sleep 8'))
+  await advance(20_000)
+  expect(killed).toEqual([])
+  // Still only sleeping a look later (a new sleep each time): stopped, and the work told why
+  procs.list = [psLine(48213, 1, 48213, 'bash ./poll.sh'), psLine(48311, 48213, 48213, 'sleep 8')]
+  await advance(20_000)
+  await advance(20_000)
+  expect(await until(async () => killed.includes('48213') || undefined)).toBe(true)
+  expect(await until(async () => appended.find(one => /^a1: Claudopus stopped your command "Run the poll for the sheets": all it did was wait/.test(one)))).toBeDefined()
+  // A retry of real work, caught between tries and then at its work, runs on
+  killed.length = 0
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'w2', agentId: 'a1', command: 'cd /w && nohup bash ./copy.sh > copy.log 2>&1 & echo $!', description: 'Run the copy again until it goes through' } as never)
+  procs.list = [psLine(48213, 1, 48213, 'bash ./copy.sh'), psLine(48320, 48213, 48213, 'sleep 3')]
+  await advance(20_000)
+  procs.list = [psLine(48213, 1, 48213, 'bash ./copy.sh'), psLine(48330, 48213, 48213, 'rclone copy /a remote:')]
+  await advance(20_000)
+  procs.list = [psLine(48213, 1, 48213, 'bash ./copy.sh'), psLine(48340, 48213, 48213, 'rclone copy /a remote:')]
+  await advance(40_000)
+  expect(killed).toEqual([])
+})
+
 test('a Python pool left running is one run with its workers\' memory added up', SLOW, async ($, on) => {
   const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs: {} as Record<string, string> }
   const { advance } = leftWorld(on, procs)

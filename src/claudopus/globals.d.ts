@@ -247,6 +247,7 @@ declare global {
   export import reportsOf = M10.reportsOf
   export import SILENT_AFTER = M10.SILENT_AFTER
   export import SILENT_WARN = M10.SILENT_WARN
+  export import isWaiterTree = M10.isWaiterTree
   export import waitingOf = M10.waitingOf
   export import watcherOf = M10.watcherOf
   export import OpenCall = M10.OpenCall

@@ -772,9 +772,9 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   expect(stopped).toEqual(expect.arrayContaining(['a1', 'a4']))
 })
 
-test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work or the helper again once it is there, or once the longest look runs out; the card says so in place of a command that would wait", SLOW, async ($, on) => {
+test("what nothing of the work's own makes, a file, a line in it, a page or a time, Claudopus looks for when asked and starts the work again once it is there, or once the longest look runs out, though the engine lists it as ended; the card says so in place of a command that would wait; a helper hands back instead", SLOW, async ($, on) => {
   const agents: Record<string, string> = {}
-  const { clock, files, resumed, appended } = world(on, { agents })
+  const { clock, files, resumed } = world(on, { agents })
   await $.session.start(start)
   await $.prompt.submit({ text: 'wait for the deploy', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Check the deploy', prompt: 'check' } as never)
@@ -790,27 +790,24 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
     return texts
   }
   expect(await until(async () => (await lines()).find(text => text === 'Claudopus starts Claude again when this is there: the deploy marker'))).toBeDefined()
-  // A helper's own: a line in a file, looked for on its own card
-  await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w2', agentId: 'a2', what: 'the build to finish', file: '/w/build.log', text: 'BUILD DONE' } as never)
-  files.set('/w/build.log', 'step 1\n')
-  await clock.advance(20_000)
+  // A helper that ended its step would have ended: it hands back what it waits for, and its task asks
+  expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w2', agentId: 'a2', what: 'the build to finish', file: '/w/build.log', text: 'BUILD DONE' } as never)) as { result?: string }).result).toContain('hand back your result now')
+  await clock.advance(40_000)
   expect(resumed.filter(one => /^a[12]: /.test(one))).toEqual([])
-  // There: the work its step had ended is started again; the helper at a step of its own reads it in its chat
+  // There: the work its step had ended, which the engine lists as ended, is started again
   files.set('/w/deployed.flag', '')
-  files.set('/w/build.log', 'step 1\nBUILD DONE\n')
-  await clock.advance(20_000)
+  await clock.advance(40_000)
   expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: what you asked to be started again for is there: the deploy marker. Carry on from it.'))).toBeDefined()
-  expect(await until(async () => appended.find(one => one === 'a2: From Claudopus: what you asked to be started again for is there: the build to finish. Carry on from it.'))).toBeDefined()
   expect(await until(async () => !(await lines()).some(text => text.startsWith('Claudopus starts Claude again')) || undefined)).toBe(true)
   // A time only, and a file that never comes: started when the time comes, or told it never came
   agents.a1 = 'completed'
   await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w3', agentId: 'a1', what: 'a look at the queue again', minutes: 2 } as never)
   await clock.advance(60_000)
   expect(resumed.filter(one => one.includes('a look at the queue again'))).toEqual([])
-  await clock.advance(80_000)
+  await clock.advance(100_000)
   expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: the time you asked for has come: a look at the queue again. Carry on.'))).toBeDefined()
   await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w4', agentId: 'a1', what: 'the results file', file: '/w/never.json', minutes: 1 } as never)
-  await clock.advance(80_000)
+  await clock.advance(100_000)
   expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: the results file was still not there after 1 min of looking. Find out why before you look again.'))).toBeDefined()
   // Nothing to look for is said back, and the chat has no card to be started from
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w5', agentId: 'a1', what: 'something' } as never)) as { result?: string }).result).toContain('Name a file, a page, or the minutes')

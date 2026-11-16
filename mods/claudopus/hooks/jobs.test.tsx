@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, PLAIN_MOST } from './jobs'
+import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
 import type { WaitKind } from './jobs'
 import type { Job } from './jobs'
 
@@ -148,6 +148,32 @@ test('a command whose only job is to wait is known whatever shape it takes, by w
     ["bash -c 'until [ -f x ]; do sleep 3; done'", [], 'loop'],
     ['until [ -f x ]; do :; done', [], 'loop'],
     ['while true; do if [ -f /x/a ]; then break; fi; sleep 4; done', [], 'loop'],
+    // and the shapes a second look found getting through: flags joined to -c, a function, a brace range, a for that exits, sleeps
+    // written other ways, a zsh repeat, Perl and Ruby, a follow by another program, waiting tools, a script written and run at once
+    ["bash -lc 'until [ -f /x ]; do sleep 5; done'", [], 'loop'],
+    ['waitfor() { while [ ! -f "$1" ]; do sleep 5; done; }; waitfor /tmp/x', [], 'loop'],
+    ['for i in {1..600}; do curl -sf localhost:3000 && break; sleep 0.5; done', [], 'loop'],
+    ['for i in $(seq 60); do curl -sf localhost:3000 && exit 0; sleep 2; done', [], 'loop'],
+    ['for i in $(seq 1 3000); do sleep 0.1; done', [], 'loop'],
+    ['sleep 4; sleep 4; sleep 4; sleep 4', [], 'time'],
+    ['sleep $((60*5))', [], 'time'],
+    ['T=600; sleep $T', [], 'time'],
+    ['/bin/sleep 600', [], 'time'],
+    ['env sleep 600', [], 'time'],
+    ['(sleep 600)', [], 'time'],
+    ['ssh -t host sleep 600', [], 'time'],
+    ['node -e "setTimeout(()=>{}, 600000)"', [], 'time'],
+    ["python3 <<'PY'\nimport time\ntime.sleep(600)\nPY", [], 'time'],
+    ['repeat 60 { [[ -f /x ]] && break; sleep 5 }', [], 'loop'],
+    ["perl -e 'sleep 5 until -e \"/x\"'", [], 'loop'],
+    ["ruby -e 'sleep 5 until File.exist?(\"/x\")'", [], 'time'],
+    ['docker logs -f web 2>&1 | grep -m1 "ready"', [], 'tool'],
+    ["tail -f /x/run.log | awk '/done/{exit}'", [], 'tool'],
+    ['kubectl rollout status deploy/web --timeout=10m', [], 'tool'],
+    ['npx wait-on http://localhost:3000', [], 'tool'],
+    ['curl --retry 60 --retry-delay 10 --retry-all-errors http://localhost:3000', [], 'tool'],
+    ['wait %1', [], 'process'],
+    ["cat > /tmp/w.py <<'EOF'\nimport os, time\nwhile not os.path.exists('/x/done'):\n    time.sleep(5)\nEOF\npython3 /tmp/w.py", [], 'loop'],
     // A short script of its own that only polls
     ['python wait_for.py', ['import os, time\nwhile not os.path.exists("/x/done"):\n    time.sleep(5)\nprint("there")\n'], 'loop'],
     // Work: a script, a throttled batch, a retry of real work, reading a list, words quoted for show, jobs of its own run side by side
@@ -165,12 +191,46 @@ test('a command whose only job is to wait is known whatever shape it takes, by w
     ["python3 -c \"import time\nfor i in range(12):\n    print(f'progress: {i+1}/12', flush=True); time.sleep(1)\n\"", [], undefined],
     ['for i in 1 2 3; do curl -X POST https://x/api -d @a.json; sleep 1; done', [], undefined],
     ['tail -20 /w/run.log', [], undefined],
+    // Work the first version refused: retries of real work, scripts that page, retry or simulate with a short sleep, a sleep inside
+    // real work, the word watch or wait or a helpers file named as an argument
+    ['for i in 1 2 3; do curl -fsSL -o /tmp/f.zip https://x/f.zip && break; sleep 5; done', [], undefined],
+    ['until curl -sf -X POST https://api/deploy -d @b.json; do sleep 5; done', [], undefined],
+    ['for i in 1 2 3; do python3 -c "import train; train.run()" && break; sleep 10; done', [], undefined],
+    ["for i in 1 2 3; do node -e \"require('./build').run()\" && break; sleep 10; done", [], undefined],
+    ["python3 -c \"import requests,time\nurl='https://api/x'\nwhile url:\n    r=requests.get(url).json(); print(r); url=r.get('next'); time.sleep(1)\"", [], undefined],
+    ["python3 -c \"import time\nfor i in range(5):\n    try:\n        run(); break\n    except Exception:\n        time.sleep(2**i)\"", [], undefined],
+    ['npm run dev > /tmp/dev.log 2>&1 & sleep 8 && curl -s localhost:3000', [], undefined],
+    ['docker compose up -d && sleep 10 && docker compose ps', [], undefined],
+    ['rec a.wav & P=$!; sleep 30; kill $P', [], undefined],
+    ['grep -rn watch src/', [], undefined],
+    ['npm run watch --', [], undefined],
+    ['cat src/bin/helpers.ts', [], undefined],
+    ['./run.sh wait 5', [], undefined],
   ]
   for (const [cmd, scripts, kind] of cases) expect([cmd, waitingOf(cmd, scripts)]).toEqual([cmd, kind])
+  // A loop that never ends is a watch: let through as a Monitor watch, whose every line its work is told, and nowhere else
+  const gpu = 'while true; do nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader; sleep 10; done'
+  expect([waitingOf(gpu, [], { isWatch: true }), waitingOf(gpu)]).toEqual([undefined, 'loop'])
   // Read only so far and never by a pattern that tries every split: a long or unclosed command takes no time
   const at = Date.now()
   for (const cmd of ['for do sleep 1 '.repeat(3000), '"'.repeat(30000), '<<E\n'.repeat(5000), '$( '.repeat(7000)]) waitingOf(cmd)
   expect(Date.now() - at).toBeLessThan(200)
+})
+
+test("a command's processes only wait when every one at the end of its tree passes time or follows something, whatever its words", async () => {
+  const at = 1_700_000_000_000
+  const ps = (lines: string[]) => procsOf(lines.join('\n'), at)
+  const shell = '100 1 S 00:30 /bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval \'waitfor /x\''
+  // A function, a nested shell or a sleep by a variable: its shell waits on a sleep, or a log followed
+  expect(isWaiterTree(ps([shell, '101 100 S 00:02 sleep 5']), '100')).toBe(true)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 bash -lc until', '102 101 S 00:01 /bin/sleep 3']), '100')).toBe(true)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 tail -f /x/run.log', '102 100 S 00:20 grep -m1 done']), '100')).toBe(true)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 docker logs -f web']), '100')).toBe(true)
+  // Work at the end of the tree, or beside a sleep, is work; so is a shell with nothing under it, as what it runs is not seen
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 python train.py']), '100')).toBe(false)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 rclone copy /a remote:', '102 100 S 00:01 sleep 1']), '100')).toBe(false)
+  expect(isWaiterTree(ps([shell]), '100')).toBe(false)
+  expect(isWaiterTree(ps([shell, '101 100 S 00:02 sleep 5']), '999')).toBe(false)
 })
 
 test('a command made only of tail, grep and their kind only watches; one that follows a file never ends of itself; one that does anything more is no watcher', async () => {
