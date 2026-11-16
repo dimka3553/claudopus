@@ -4,7 +4,14 @@ VERSION_FILE=mods/claudopus/.claude-plugin/plugin.json
 DERIVED="mods/claudopus/hooks/register.tsx mods/claudopus/hooks/tests/*.test.tsx src/claudopus/globals.d.ts src/claudopus/tests/globals.d.ts site/version.json site/changelog.html"
 BUILD="node src/claudopus/build.mjs"
 ENGINE=${CLAUDE_CODE_EXECPATH:-claude}
-CHECK="node src/claudopus/build.mjs --check && sh mods/claudopus/notifier/check.sh && bash mods/claudopus/bin/admin.test.sh && bash mods/claudopus/bin/keep.test.sh && bash mods/claudopus/bin/linux.test.sh && '$ENGINE' plugin test mods/claudopus && '$ENGINE' plugin validate --strict mods/claudopus && '$ENGINE' plugin validate --strict ."
+# The shell tests run beside the mod's tests (most of their time is waiting), each one's output shown only when it fails
+CHECK="node src/claudopus/build.mjs --check && sh mods/claudopus/notifier/check.sh || exit 1
+o=\$(mktemp -d)
+for t in admin keep linux; do { bash mods/claudopus/bin/\$t.test.sh >\"\$o/\$t\" 2>&1; echo \$? >\"\$o/\$t.rc\"; } & done
+'$ENGINE' plugin test mods/claudopus && '$ENGINE' plugin validate --strict mods/claudopus && '$ENGINE' plugin validate --strict .; r=\$?
+wait
+for t in admin keep linux; do [ \"\$(cat \"\$o/\$t.rc\")\" = 0 ] || { cat \"\$o/\$t\"; echo \"\$t.test.sh failed\"; r=1; }; done
+rm -rf \"\$o\"; exit \$r"
 # main moves only once these GitHub checks (.github/workflows/check.yml) passed on the very commit it is to become
 GITHUB_CHECKS="check (ubuntu-latest), check (macos-latest)"
 # Every version is made a GitHub release marked latest, with its changelog entry, so the repo page and its badge name it

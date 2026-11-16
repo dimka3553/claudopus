@@ -50,13 +50,18 @@ jobs:
       - name: ImageMagick, which stands in for macOS's sips on Linux
         if: runner.os == 'Linux'
         run: command -v convert || { sudo apt-get update -qq && sudo apt-get install -y -qq imagemagick; }
-      - name: The admin runner's gate holds (a keychain of its own on a Mac, bin/keyring's files on Linux)
-        run: bash mods/claudopus/bin/admin.test.sh
-      - name: The keeper goes on with a chat's work
-        run: bash mods/claudopus/bin/keep.test.sh
-      - name: What stands in on Linux for a Mac's own tools works
-        run: bash mods/claudopus/bin/linux.test.sh
-      # Every test, as the release runs them: Claude Code's own test kit, from its public npm package, pinned to a version that
-      # passes them all. The release runs them again with the desktop app's engine
-      - name: The mod's tests pass
-        run: npx --yes @anthropic-ai/claude-code@2.1.325 plugin test mods/claudopus
+      # Every test, as the release runs them, the shell tests beside the mod's, as most of their time is waiting: the admin runner's
+      # gate holds (a keychain of its own on a Mac, bin/keyring's files on Linux), the keeper goes on with a chat's work, and what
+      # stands in on Linux for a Mac's own tools works. The mod's tests run in Claude Code's own test kit, from its public npm
+      # package, pinned to a version that passes them all. The release runs them again with the desktop app's engine
+      - name: The shell tests and the mod's tests pass
+        run: |
+          o=$(mktemp -d); r=0
+          for t in admin keep linux; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
+          npx --yes @anthropic-ai/claude-code@2.1.325 plugin test mods/claudopus || r=1
+          wait
+          for t in admin keep linux; do
+            echo "::group::$t.test.sh"; cat "$o/$t"; echo "::endgroup::"
+            [ "$(cat "$o/$t.rc")" = 0 ] || { echo "::error::$t.test.sh failed"; r=1; }
+          done
+          exit $r

@@ -19,7 +19,7 @@
 # must be signed in, which is checked before anything is pushed), GITHUB_CHECKS (names of GitHub's jobs, by commas, that must pass
 # on the very commit main is to become, run by main's own CHECKS_WORKFLOW (check.yml), which takes a `sha` input to check out and
 # is named "Release check <sha>": main moves only once every job of that run passed; red, a named one missing, or still running
-# after 40 minutes, and nothing reaches main). `release.local` in the repo's git folder, never committed, can set the same for this Mac only, such as AFTER.
+# after 40 minutes, and nothing reaches main; CHECK runs here while GitHub checks, and both must pass). `release.local` in the repo's git folder, never committed, can set the same for this Mac only, such as AFTER.
 # The settings are read in a shell of their own and only as values, main's own committed `.release` (never the branch's) and this Mac's
 # release.local, so nothing a branch writes there runs here, before the lock or after it.
 # Inside Claude Code it releases only what the person allowed with a press on the work's card in the Claudopus panel: the hook that
@@ -259,8 +259,13 @@ for try in 1 2 3 4 5; do
   stray=$(git ls-files --others --exclude-standard)
   [ -n "$stray" ] && die "the build left files the repo does not track: $(echo $stray | cut -c1-300). Nothing pushed." 3
   git add -u
-  if [ -n "$CHECK" ]; then out=$(bash -c "$CHECK" 2>&1) || { echo "$out" | tail -25 >&2; die "the checks failed on $MAIN with $branch; nothing pushed" 3; }; fi
-  [ -n "$(git ls-files --others --exclude-standard)" ] && die "the checks left files the repo does not track; nothing pushed" 3
+  # The checks here run on the very tree committed below; with GITHUB_CHECKS, while GitHub checks that commit, so neither waits
+  # for the other. Main moves only once both passed
+  local_checks() {
+    if [ -n "$CHECK" ]; then out=$(bash -c "$CHECK" 2>&1) || { echo "$out" | tail -25 >&2; die "the checks failed on $MAIN with $branch; nothing pushed" 3; }; fi
+    [ -n "$(git ls-files --others --exclude-standard)" ] && die "the checks left files the repo does not track; nothing pushed" 3
+    return 0
+  }
   # The GitHub release's notes and gh's sign-in are made sure of before the push, so a release that cannot make its GitHub
   # release pushes nothing
   notes="$tmp.notes"
@@ -291,6 +296,7 @@ for try in 1 2 3 4 5; do
     # Runs made before this dispatch are never taken (a minute's leeway for GitHub's clock)
     since=$(date -u -r $(( $(date +%s) - 60 )) +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$(( $(date +%s) - 60 ))" +%Y-%m-%dT%H:%M:%SZ)
     out=$(ghq api -X POST "repos/$repo/actions/workflows/$workflow/dispatches" -f "ref=refs/heads/$MAIN" -f "inputs[sha]=$candidate" 2>&1) || { echo "$out" | tail -5 >&2; die "GitHub would not start $workflow on $MAIN for $(git rev-parse --short HEAD); nothing pushed to $MAIN" 3; }
+    local_checks
     every=${RELEASE_CHECK_EVERY:-15}; case $every in '' | *[!0-9]* | 0) every=15 ;; esac; [ "$every" -gt 60 ] && every=60
     t=0; verdict=; run=
     say "waiting for GitHub's checks ($workflow as on $MAIN) on $(git rev-parse --short HEAD): ${GITHUB_CHECKS}"
@@ -338,6 +344,8 @@ for try in 1 2 3 4 5; do
       red:*) drop_candidate; die "GitHub's checks failed on $MAIN with $branch, so nothing was pushed to $MAIN: ${verdict#red: }" 3 ;;
       *) drop_candidate; die "GitHub's checks did not end in time (${verdict#wait: }); nothing pushed to $MAIN" 3 ;;
     esac
+  else
+    local_checks
   fi
   # What goes to main and is tagged is the commit the checks passed on, never whatever the checkout holds after the wait
   [ -n "${candidate:-}" ] || candidate=$(git rev-parse HEAD)
