@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, PLAIN_MOST } from './jobs'
+import { leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, ownWaitOf, PLAIN_MOST } from './jobs'
 import type { Job } from './jobs'
 
 test("a run's raw line becomes a few plain words or nothing: no paths, file names, times, codes, states, settings, sizes, programs or secrets; 16 Nov a row read \"35 MB · [run 11:27:50] waiting for the machine to start (Running)\"", async () => {
@@ -122,6 +122,32 @@ test('a command that only polls is a wait that says what for; one that does real
   expect(waitOf("until ! pgrep -f 'src/sfm.py run/s2' >/dev/null; do sleep 10; done; date")).toMatchObject({ what: 'src/sfm.py run/s2 to end', pattern: 'src/sfm.py run/s2' })
   expect(waitOf("until ! pgrep -f 'src/sfm.py run/s2' >/dev/null; do sleep 10; done; date; ../../turn.sh python src/dense.py run/s2 run/d4 > run/d4.log 2>&1")).toBeUndefined()
   expect(waitOf('python run_all.py')).toBeUndefined()
+})
+
+test('a command that only waits on a run of the same work that still goes is known, by its process, its log or its pattern; one that does more, or waits on something else, is not', async () => {
+  const upload = { id: 'u', what: 'Upload both evidence zips', cmd: 'nohup /opt/homebrew/bin/rclone copy /d "evidence:x" -P > /s/drive/upload.log 2>&1 &', pid: '6909', log: '/s/drive/upload.log' }
+  const build = { id: 'b', what: 'Build the app', cmd: 'npm run build', output: '/t/tasks/bk1.output' }
+  const runs = [upload, build]
+  const cases: [string, string | undefined][] = [
+    // The waits of 16 Nov, as they ran
+    ['for i in $(seq 1 55); do kill -0 6909 2>/dev/null || break; echo "progress: $i/55 tries waiting for the upload"; sleep 10; done; kill -0 6909 2>/dev/null && echo STILL_RUNNING || echo ENDED; grep -E "ERROR|Copied|INFO" /s/drive/upload.log | tail -5', 'u'],
+    ['n=0; until grep -q Transferred /s/drive/upload.log; do n=$((n+1)); echo "progress: $n tries"; sleep 10; done', 'u'],
+    ["until ! pgrep -f 'rclone copy' >/dev/null; do sleep 10; done; date", 'u'],
+    ['while kill -0 6909; do sleep 5; done', 'u'],
+    ['sleep 300; tail -5 /s/drive/upload.log', 'u'],
+    ['tail -f /t/tasks/bk1.output | grep -m1 built', 'b'],
+    ['wait 6909', 'u'],
+    // Not only a wait: it starts what comes next
+    ['while kill -0 6909; do sleep 5; done; rclone lsl evidence:x', undefined],
+    // A wait on something no run of its own is
+    ['until curl -s localhost:3000 >/dev/null; do sleep 2; done', undefined],
+    ['while kill -0 4242; do sleep 5; done', undefined],
+    // A look once, with no wait in it
+    ['tail -5 /s/drive/upload.log', undefined],
+    ['kill -0 6909 && echo RUNNING', undefined],
+  ]
+  for (const [cmd, id] of cases) expect([cmd, ownWaitOf(cmd, runs)?.id]).toEqual([cmd, id])
+  expect(ownWaitOf('while kill -0 6909; do sleep 5; done', [])).toBeUndefined()
 })
 
 test('six alike waits are one row that says six; different jobs stay apart', async () => {

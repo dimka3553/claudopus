@@ -18,7 +18,8 @@ import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import { leftoversOf, memOf, leftName, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
-import type { OpenCall, Proc, Span } from './jobs'
+import { ownWaitOf } from './jobs'
+import type { OpenCall, OwnRun, Proc, Span } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
 import { batteryShown, batterySvg, FOOTPRINT_EVERY, gbText, isBatteryLow, isMemoryHigh, keptOf, leftText, meterOf, nextKept, pctText, rateText, USAGE_AMBER, USAGE_EVERY, USAGE_LINUX, USAGE_PURPLE, usageMac, usageSvg } from './usage'
@@ -9064,6 +9065,15 @@ const lookJobs = async ($: EngineInterface) => {
     const runsOf = (one: Todo) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' as const }))
     await changeTodos($, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined, ...keepEnded(one, runsOf(one)) } : one)))
     void drawFresh($)
+    // The engine wakes work only for what it sent to the background itself: the work is woken here the moment a run it left
+    // detached ends, so it carries on at once and never waits on it (not work the person stopped, which nothing of the mod wakes)
+    for (const one of list) {
+      if (one.status !== 'working' || (one.byYou && !one.byYou.isLifted)) continue
+      for (const d of (one.detached ?? []).filter(d => gone.includes(d.id))) {
+        void tell($, one.id, RUN_ENDED(runWords(d.what, d.cmd), d.log))
+        await log($, `work ${one.id} told its run ${d.id} has ended`)
+      }
+    }
   }
   // Each background command's shell, found by its words among the engine's shells: paused when any of its processes is, and gone
   // when no shell has been found for it twice in a row while others were (so a way of running the engine has not changed), as one the engine never said ended (only once a minute has passed)
@@ -9310,6 +9320,8 @@ const stopping = async ($: EngineInterface, owner: string, job: Job) => {
 
 // A run of a piece of work that has given no word for a minute is named to that work once, in its own chat: a run is never to be
 // stuck or silent, so it stops it or makes it report. Not a server or a watch, which speak only when there is something to say
+const RUN_ENDED = (what: string, log: string) =>
+  `Your run "${what}" has ended. Look at how it ended${log ? ` in its log, ${log},` : ''} and carry on with the next step now.`
 const RUN_SILENT_TOLD = 60_000
 const silentTold = new Set<string>()
 const RUN_SILENT = (what: string, silent: string) =>
@@ -9331,6 +9343,18 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   // (a run that speaks again may be named again when it next goes silent)
   for (const id of silentTold) if (jobLog.get(id)?.wroteAt && now - (jobLog.get(id)?.wroteAt ?? 0) < RUN_SILENT_TOLD) silentTold.delete(id)
 }
+
+// The runs a card has going, as a wait on one names it: a background command by the file its output goes to, one left detached by
+// its process and log
+const ownRunsOf = (one: Todo | undefined): OwnRun[] => [
+  ...(one?.bg ?? []).filter(b => !b.isWatch).map(b => ({ id: b.id, what: b.what, cmd: b.cmd ?? '', output: jobFiles.get(b.id) || `${b.id}.output` })),
+  ...(one?.detached ?? []).map(d => ({ id: d.id, what: d.what, cmd: d.cmd, ...(d.pid ? { pid: d.pid } : {}), ...(d.log ? { log: d.log } : {}) })),
+]
+// A run in its own words, without the time it was given when it began
+const runWords = (what: string, cmd = '') => labelOf(what, cmd).replace(/\s*\((?:about|under|over|around|up to|~)?\s*[\d.,\-– ]+\s*(?:s|sec|seconds?|m|mins?|minutes?|h|hours?)\)\s*$/i, '').trim()
+
+// How a run ended, said after its words
+const RUN_ENDED_AS: Record<EndedRun['how'], string> = { finished: 'has finished', failed: 'failed', killed: 'was stopped', stopped: 'was stopped', 'timed out': 'ran out of time', ended: 'has ended' }
 
 // A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
 // it goes on; on this Mac only, as the window is this Mac's
@@ -10123,6 +10147,8 @@ const NO_PROGRESS_WAIT =
   'Not run: this wait would give no word of how it goes. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
 const NO_PROGRESS_SCRIPT =
   'Not run: this long run would give no word of how far it is. Make its script print, flushed at once, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
+const NO_OWN_WAIT = (what: string) =>
+  `Not run: this only waits for your own run "${what}", and you are woken the moment it ends, so carry on with what needs nothing from it or end your step now.`
 const MOVED_BACK = (name: string) =>
   `This command may run for minutes, so it was started in the background rather than held open: ${name}'s replies reach you while it runs. You are told when it ends; its output is in the file named above. Carry on with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 
@@ -10277,6 +10303,15 @@ const workHooks = (on: On) => {
     if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
       await log($, `refused work ${e.agentId}'s wait for the person: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       return { deny: NO_PERSON_WAIT(who()) }
+    }
+    // A run of its own ending wakes the work (the engine tells it of a background command, the mod of one left detached), so a
+    // command that only waits for or polls one is not started: it would hold the next step back until its loop came round
+    if (dir && !isOff && e.agentId !== undefined && (e.tool === 'Bash' || e.tool === 'Monitor')) {
+      const waited = ownWaitOf(String((e as { command?: unknown }).command ?? ''), ownRunsOf((await read($, todos)).find(one => one.id === e.agentId)))
+      if (waited) {
+        await log($, `refused work ${e.agentId}'s wait on its own run ${waited.id}`)
+        return { deny: NO_OWN_WAIT(runWords(waited.what, waited.cmd)) }
+      }
     }
     // Every run says how it goes at least every 10 seconds: a long wait or script of the work's own that would say nothing is not
     // started, and the work is told in one sentence how to make it report
@@ -11592,7 +11627,13 @@ const panelHooks = (on: On) => {
       )
     }
     // Where a piece of work is: the line it last wrote about itself
-    const now = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')?.text ?? ''
+    // While it works, a run of its own that ended after that line is said in its place, so a line written while the run went ("about
+    // 40% done") never stands beside a row that has ended (16 Nov), until the work writes again
+    const now = (one: Todo) => {
+      const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
+      const run = one.status === 'working' ? [...(one.endedRuns ?? [])].filter(r => r.endedAt > (entry?.at ?? 0)).sort((a, b) => a.endedAt - b.endedAt).at(-1) : undefined
+      return run ? `${runWords(run.what)} ${RUN_ENDED_AS[run.how]}` : (entry?.text ?? '')
+    }
 
     const table = uiOf($, e)
     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are

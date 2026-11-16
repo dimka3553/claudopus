@@ -51,6 +51,8 @@ const NO_PROGRESS_WAIT =
   'Not run: this wait would give no word of how it goes. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
 const NO_PROGRESS_SCRIPT =
   'Not run: this long run would give no word of how far it is. Make its script print, flushed at once, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
+const NO_OWN_WAIT = (what: string) =>
+  `Not run: this only waits for your own run "${what}", and you are woken the moment it ends, so carry on with what needs nothing from it or end your step now.`
 const MOVED_BACK = (name: string) =>
   `This command may run for minutes, so it was started in the background rather than held open: ${name}'s replies reach you while it runs. You are told when it ends; its output is in the file named above. Carry on with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 
@@ -205,6 +207,15 @@ const workHooks = (on: On) => {
     if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
       await log($, `refused work ${e.agentId}'s wait for the person: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       return { deny: NO_PERSON_WAIT(who()) }
+    }
+    // A run of its own ending wakes the work (the engine tells it of a background command, the mod of one left detached), so a
+    // command that only waits for or polls one is not started: it would hold the next step back until its loop came round
+    if (dir && !isOff && e.agentId !== undefined && (e.tool === 'Bash' || e.tool === 'Monitor')) {
+      const waited = ownWaitOf(String((e as { command?: unknown }).command ?? ''), ownRunsOf((await read($, todos)).find(one => one.id === e.agentId)))
+      if (waited) {
+        await log($, `refused work ${e.agentId}'s wait on its own run ${waited.id}`)
+        return { deny: NO_OWN_WAIT(runWords(waited.what, waited.cmd)) }
+      }
     }
     // Every run says how it goes at least every 10 seconds: a long wait or script of the work's own that would say nothing is not
     // started, and the work is told in one sentence how to make it report

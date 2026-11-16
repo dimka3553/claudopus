@@ -179,6 +179,15 @@ const lookJobs = async ($: EngineInterface) => {
     const runsOf = (one: Todo) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' as const }))
     await changeTodos($, cards => cards.map(one => (one.detached?.some(d => gone.includes(d.id)) ? { ...one, detached: one.detached.filter(d => !gone.includes(d.id)).length ? one.detached.filter(d => !gone.includes(d.id)) : undefined, ...keepEnded(one, runsOf(one)) } : one)))
     void drawFresh($)
+    // The engine wakes work only for what it sent to the background itself: the work is woken here the moment a run it left
+    // detached ends, so it carries on at once and never waits on it (not work the person stopped, which nothing of the mod wakes)
+    for (const one of list) {
+      if (one.status !== 'working' || (one.byYou && !one.byYou.isLifted)) continue
+      for (const d of (one.detached ?? []).filter(d => gone.includes(d.id))) {
+        void tell($, one.id, RUN_ENDED(runWords(d.what, d.cmd), d.log))
+        await log($, `work ${one.id} told its run ${d.id} has ended`)
+      }
+    }
   }
   // Each background command's shell, found by its words among the engine's shells: paused when any of its processes is, and gone
   // when no shell has been found for it twice in a row while others were (so a way of running the engine has not changed), as one the engine never said ended (only once a minute has passed)
@@ -425,6 +434,8 @@ const stopping = async ($: EngineInterface, owner: string, job: Job) => {
 
 // A run of a piece of work that has given no word for a minute is named to that work once, in its own chat: a run is never to be
 // stuck or silent, so it stops it or makes it report. Not a server or a watch, which speak only when there is something to say
+const RUN_ENDED = (what: string, log: string) =>
+  `Your run "${what}" has ended. Look at how it ended${log ? ` in its log, ${log},` : ''} and carry on with the next step now.`
 const RUN_SILENT_TOLD = 60_000
 const silentTold = new Set<string>()
 const RUN_SILENT = (what: string, silent: string) =>
@@ -446,6 +457,18 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   // (a run that speaks again may be named again when it next goes silent)
   for (const id of silentTold) if (jobLog.get(id)?.wroteAt && now - (jobLog.get(id)?.wroteAt ?? 0) < RUN_SILENT_TOLD) silentTold.delete(id)
 }
+
+// The runs a card has going, as a wait on one names it: a background command by the file its output goes to, one left detached by
+// its process and log
+const ownRunsOf = (one: Todo | undefined): OwnRun[] => [
+  ...(one?.bg ?? []).filter(b => !b.isWatch).map(b => ({ id: b.id, what: b.what, cmd: b.cmd ?? '', output: jobFiles.get(b.id) || `${b.id}.output` })),
+  ...(one?.detached ?? []).map(d => ({ id: d.id, what: d.what, cmd: d.cmd, ...(d.pid ? { pid: d.pid } : {}), ...(d.log ? { log: d.log } : {}) })),
+]
+// A run in its own words, without the time it was given when it began
+const runWords = (what: string, cmd = '') => labelOf(what, cmd).replace(/\s*\((?:about|under|over|around|up to|~)?\s*[\d.,\-– ]+\s*(?:s|sec|seconds?|m|mins?|minutes?|h|hours?)\)\s*$/i, '').trim()
+
+// How a run ended, said after its words
+const RUN_ENDED_AS: Record<EndedRun['how'], string> = { finished: 'has finished', failed: 'failed', killed: 'was stopped', stopped: 'was stopped', 'timed out': 'ran out of time', ended: 'has ended' }
 
 // A press on a run's row opens a Terminal window that shows its output as it is, from its start (the last thousand lines) and as
 // it goes on; on this Mac only, as the window is this Mac's

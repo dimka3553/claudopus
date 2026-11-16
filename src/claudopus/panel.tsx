@@ -192,7 +192,13 @@ const panelHooks = (on: On) => {
       )
     }
     // Where a piece of work is: the line it last wrote about itself
-    const now = (one: Todo) => [...one.entries].reverse().find(entry => entry.kind !== 'steer')?.text ?? ''
+    // While it works, a run of its own that ended after that line is said in its place, so a line written while the run went ("about
+    // 40% done") never stands beside a row that has ended (16 Nov), until the work writes again
+    const now = (one: Todo) => {
+      const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
+      const run = one.status === 'working' ? [...(one.endedRuns ?? [])].filter(r => r.endedAt > (entry?.at ?? 0)).sort((a, b) => a.endedAt - b.endedAt).at(-1) : undefined
+      return run ? `${runWords(run.what)} ${RUN_ENDED_AS[run.how]}` : (entry?.text ?? '')
+    }
 
     const table = uiOf($, e)
     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are

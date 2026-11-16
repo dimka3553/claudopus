@@ -586,6 +586,44 @@ export const waitOf = (cmd: string): Wait | undefined => {
   return { what: cond.replace(/\s+/g, ' ').trim().slice(0, 80) }
 }
 
+// A run of a work's own that still goes, as its card keeps it: its words, its command, its process where known, the log it writes
+// and the file its output goes to
+export type OwnRun = { id: string; what: string; cmd: string; pid?: string; log?: string; output?: string }
+// The steps a command that only waits is made of: looking, counting, printing and sleeping (each step as split below)
+const LOOKS = /^(?:(?:for|while|until|if|elif|fi|done|do|then|else|break|continue|sleep|wait|kill\s+-0|kill\s+-s\s+0|pgrep|ps|seq|test|\[\[?|\]\]?|:|true|false|exit|date|tail|head|grep|egrep|rg|ls|cat|echo|printf|cut|wc|stat|du|sort|uniq|awk|sed|jq|cd|pwd|tr)(?:\s|$)|[A-Za-z_]\w*=\S*$|[A-Za-z_]\w*[-+*/%<>]=?\w+$|\d+$|\(+$)/
+// A command whose only job is to wait for, or look again and again at, a run of the same work that still goes: the run it waits
+// on. A finished run already wakes the work that started it, so such a wait only holds the next step back until its loop comes
+// round (16 Nov: an upload left detached was waited on by five waits in a row, the card saying 40% done while it read 100%)
+export const ownWaitOf = (cmd: string, runs: OwnRun[]): OwnRun | undefined => {
+  if (!runs.length) return undefined
+  const text = cmd.replace(/^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&]+)\s*(?:&&|;)\s*/, '')
+  // It waits: a loop that sleeps between its tries, the shell's own wait on a process, a tail that follows, or a sleep before a look
+  const isLoop = /\b(?:for|while|until)\b[\s\S]*?\bdo\b[\s\S]*?\bsleep\s+[\d.]+[\s\S]*?\bdone\b/.test(text)
+  const isWait = /(?:^|[;&|]\s*)wait\s+\$?\w+/.test(text) || /\btail\s+(?:-\w+\s+)*-\w*[fF]\b/.test(text) || /^\s*sleep\s+[\d.]+\s*(?:;|&&)/.test(text)
+  if (!isLoop && !isWait) return undefined
+  // and does nothing else
+  const steps = unquoted(text)
+    .split(/\s*(?:;|&&|\|\|?|\n|\$\(\(?|\)\)?|`)\s*/)
+    .map(step => step.trim().replace(/^(?:(?:do|then|else|!)\s+)+/, '').replace(/\s*\d?>+\s*\S+/g, '').trim())
+    .filter(Boolean)
+  if (!steps.every(step => LOOKS.test(step))) return undefined
+  const nameOfFile = (path: string) => path.split('/').filter(Boolean).at(-1) ?? ''
+  const words = new Set((cmd.match(/[^\s"'=;&|<>()`]+/g) ?? []).map(nameOfFile).filter(name => /\.\w+$/.test(name)))
+  const pids = new Set([...cmd.matchAll(/\b(?:kill\s+(?:-0|-s\s+0)|ps\s+(?:-\w+\s+)*-p|wait|lsof\s+-p|pgrep\s+-P)\s+(\d+)/g)].map(m => m[1] ?? ''))
+  const patterns = [...cmd.matchAll(/\bpgrep\s+(?:-\w+\s+)*("[^"]+"|'[^']+'|[^\s;&|)]+)/g)].map(m => (m[1] ?? '').replace(/^["']|["']$/g, '')).filter(p => p.length >= 3)
+  return runs.find(run => {
+    if (run.pid && pids.has(run.pid)) return true
+    if ([run.log, run.output].some(file => file && words.has(nameOfFile(file)))) return true
+    return patterns.some(pattern => {
+      try {
+        return new RegExp(pattern).test(run.cmd)
+      } catch {
+        return run.cmd.includes(pattern)
+      }
+    })
+  })
+}
+
 // Jobs alike (the same kind, words and command, or the same wait) are one row that says how many they are, from the first one's
 // start; the newest one's output stands for them
 export const foldJobs = (jobs: Job[]): Job[] => {
