@@ -358,6 +358,8 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
   // What fits on the axis line, about 6.2 px a letter
   const most = Math.max(20, Math.floor(width / 6.2))
   const fit = (words: string) => (words.length <= most ? words : `${words.slice(0, most - 1).trimEnd()}…`)
+  // An end on another day than its start says its day
+  const until = (a: number, z: number) => (dayText(a) === dayText(z) ? clockText(z) : `${dayText(z)} ${clockText(z)}`)
   const tip = (words: string) => `<text class="t" y="${base + 13}">${esc(fit(words))}</text>`
   // A bar as a path: a few characters where a rect takes sixty
   const box = (x: number, y: number, w: number, h: number) => `M${px(x)} ${px(y)}h${px(w)}v${px(h)}h-${px(w)}z`
@@ -382,7 +384,7 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
     capped(pieces, p =>
       p.bars.map(b => {
         const s = spot(p, b)
-        return `<g class="b">${hit(p, [b])}<path d="${box(s.x, s.y, s.w, row)}" fill="${colorOf(b.model)}"/>${tip(`${p.title} · ${nameOf(b.model)} · ${label(b.from)}–${clockText(b.to)} · ${hours(b.to - b.from)}`)}</g>`
+        return `<g class="b">${hit(p, [b])}<path d="${box(s.x, s.y, s.w, row)}" fill="${colorOf(b.model)}"/>${tip(`${p.title} · ${nameOf(b.model)} · ${label(b.from)}–${until(b.from, b.to)} · ${hours(b.to - b.from)}`)}</g>`
       }),
     )
   const byPiece = () =>
@@ -390,34 +392,49 @@ export const timelineSvg = (pieces: Piece[], width = 600) => {
       const models = [...new Set(p.bars.map(b => b.model))]
       const shapes = models.map(model => `<path d="${p.bars.filter(b => b.model === model).map(b => spot(p, b)).map(s => box(s.x, s.y, s.w, row)).join('')}" fill="${colorOf(model)}"/>`)
       const [a, z] = [p.spans[0]?.[0] ?? 0, p.spans.at(-1)?.[1] ?? 0]
-      return [`<g class="b">${hit(p, p.bars)}${shapes.join('')}${tip(`${p.title} · ${models.map(nameOf).join(', ')} · ${label(a)}–${clockText(z)} · ${hours(lengthOf(p.spans))}`)}</g>`]
+      return [`<g class="b">${hit(p, p.bars)}${shapes.join('')}${tip(`${p.title} · ${[...new Set(models.map(nameOf))].join(', ')} · ${label(a)}–${until(a, z)} · ${hours(lengthOf(p.spans))}`)}</g>`]
     })
-  // One shape a model, on a grid of `q` pixels: each bar's ends and its row moved to the grid, bars that touch on it joined. A row
-  // then holds at most a run every two steps of the grid, and there are at most BARS / q rows, so a coarse enough grid always fits
+  // One shape a model, on a grid of `q` pixels: each cell of a row is the colour of the model that ran longest in it, cells of one
+  // model side by side joined. A row then holds at most width / q runs, and there are at most BARS / q rows, so a coarse enough grid
+  // always fits; no model is drawn over another
   const byModel = (q: number) => () => {
     const tall1 = Math.max(row, q * 0.73)
-    const runs = new Map<string, Map<number, Span[]>>()
+    const cols = Math.max(1, Math.ceil(width / q))
+    const cells = new Map<number, Map<number, Map<string, number>>>()
     for (const p of pieces)
       for (const b of p.bars) {
         const s = spot(p, b)
-        const rows = runs.get(b.model) ?? new Map<number, Span[]>()
         const y = Math.floor(s.y / q) * q
-        const spans = rows.get(y) ?? []
-        spans.push([Math.floor(s.x / q) * q, Math.max(Math.floor(s.x / q) * q + q, Math.ceil((s.x + s.w) / q) * q)])
-        rows.set(y, spans)
-        runs.set(b.model, rows)
+        const rowCells = cells.get(y) ?? new Map<number, Map<string, number>>()
+        cells.set(y, rowCells)
+        const [from, to] = [Math.max(0, s.x), Math.min(width, s.x + s.w)]
+        for (let c = Math.floor(from / q); c < Math.min(cols, Math.ceil(to / q)); c++) {
+          const share = Math.min(to, (c + 1) * q) - Math.max(from, c * q)
+          const cell = rowCells.get(c) ?? new Map<string, number>()
+          cell.set(b.model, (cell.get(b.model) ?? 0) + Math.max(share, 0.001))
+          rowCells.set(c, cell)
+        }
       }
-    return capped([...runs.entries()], ([model, rows]) => {
-      // A row starts at its first bar; each next bar is a step along from where the last one began
-      const d = [...rows.entries()].map(([y, spans]) => {
-        let x = 0
-        return union(spans.map(([a, z]): Span => [a, z + 0.01]))
-          .map(([a, z], i) => {
-            const part = `${i ? `m${px(a - x)} 0` : `M${px(a)} ${px(y)}`}h${px(Math.max(1.5, z - 0.01 - a))}v${px(tall1)}h-${px(Math.max(1.5, z - 0.01 - a))}z`
-            x = a
-            return part
-          })
-          .join('')
+    // Each model's runs, row by row: [row, first cell, cells]
+    const runs = new Map<string, [number, number, number][]>()
+    for (const [y, rowCells] of [...cells.entries()].sort((m, n) => m[0] - n[0])) {
+      let open: { model: string; from: number; n: number } | undefined
+      const close = () => open && runs.set(open.model, [...(runs.get(open.model) ?? []), [y, open.from, open.n]])
+      for (const c of [...rowCells.keys()].sort((m, n) => m - n)) {
+        const model = [...(rowCells.get(c) ?? new Map<string, number>()).entries()].sort((m, n) => n[1] - m[1])[0]?.[0] ?? ''
+        if (open && open.model === model && open.from + open.n === c) open.n += 1
+        else (close(), (open = { model, from: c, n: 1 }))
+      }
+      close()
+    }
+    return capped([...runs.entries()], ([model, list]) => {
+      // A row starts at its first run; each next run is a step along from where the last one began (a closed shape returns there)
+      let [y0, x0] = [-1, 0]
+      const d = list.map(([y, from, n]) => {
+        const [x, w] = [from * q, Math.min(n * q, width - from * q)]
+        const part = `${y === y0 ? `m${px(x - x0)} 0` : `M${px(x)} ${px(y)}`}h${px(w)}v${px(tall1)}h-${px(w)}z`
+        ;[y0, x0] = [y, x]
+        return part
       })
       return [`<path d="${d.join('')}" fill="${colorOf(model)}"/>`]
     })

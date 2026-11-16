@@ -55,6 +55,7 @@ declare global {
   export import rowsOf = M2.rowsOf
   export import SQUARE_COLOR = M2.SQUARE_COLOR
   export import SQUARE_GLYPH = M2.SQUARE_GLYPH
+  export import squaresBefore = M2.squaresBefore
   export import squaresKept = M2.squaresKept
   export import squaresOf = M2.squaresOf
   export import squaresSvg = M2.squaresSvg

@@ -763,7 +763,7 @@ const panelHooks = (on: On) => {
         const source = squaresSvg(kept.groups, LINE)
         return (
           <Box key={key} flexDirection="row" gap={1} alignItems="center" flexShrink={0}>
-            {kept.earlier ? <Text key={`${key}-earlier`} dimColor>{`${kept.earlier} earlier rounds ·`}</Text> : null}
+            {squaresBefore(kept) ? <Text key={`${key}-earlier`} dimColor>{`${squaresBefore(kept)} ·`}</Text> : null}
             {svgFits(source) ? <table.Svg key={`${key}-svg`} source={source} alt={said} width={squaresWidth(kept.groups)} height={LINE} isInteractive /> : <Text key={`${key}-too-big`} dimColor>{`${groups.length} rounds`}</Text>}
           </Box>
         )

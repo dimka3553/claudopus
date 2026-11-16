@@ -110,13 +110,29 @@ test('the timeline is one drawing the app takes whatever the history: each bar i
   expect(svg.length).toBeGreaterThan(0)
   expect(svg.length).toBeLessThanOrEqual(SVG_MOST)
   expect(svg.split('class="b"').length - 1).toBe(usual.reduce((n, p) => n + p.bars.length, 0))
-  // Far more: a piece's bars light up together with its name, then the bars alone, each model in its colour, never past the limit
+  // Far more: a piece's bars light up together with its name, then the bars alone, never past the limit
   for (const [n, days, width, groups] of [[355, 60, 412, 355], [1500, 90, 412, 0], [5000, 365, 412, 0], [5000, 365, 1400, 0], [60, 1, 200, 'bars']] as const) {
     const pieces = many(n, days)
     const source = timelineSvg(pieces, width)
     expect(svgFits(source)).toBe(true)
-    for (const model of models) expect(source).toContain(colorOf(model))
+    // Each model in its colour; drawn on a grid, each cell is the model that ran most in it
+    if (groups !== 0) for (const model of models) expect(source).toContain(colorOf(model))
     if (typeof groups === 'number') expect(source.split('class="b"').length - 1).toBe(groups)
+    // Bars drawn one shape a model never lie over each other, so no model hides another
+    if (groups === 0) {
+      const taken = new Set<string>()
+      for (const [, d] of source.matchAll(/<path d="([^"]+)" fill="#/g)) {
+        let [x, y] = [0, 0]
+        for (const [, move, a, b, w] of (d ?? '').matchAll(/([Mm])(-?[\d.]+) (-?[\d.]+)h([\d.]+)/g)) {
+          ;[x, y] = move === 'M' ? [Number(a), Number(b)] : [x + Number(a), y]
+          for (let c = Math.round(x * 2); c < Math.round((x + Number(w)) * 2); c++) {
+            expect(taken.has(`${y}:${c}`)).toBe(false)
+            taken.add(`${y}:${c}`)
+          }
+        }
+      }
+      expect(taken.size).toBeGreaterThan(0)
+    }
   }
   expect(svgFits('x'.repeat(SVG_MOST + 1))).toBe(false)
 })

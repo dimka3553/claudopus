@@ -184,10 +184,14 @@ export const SQUARES_MOST = 600
 export const squaresKept = (groups: Square[][]) => {
   let [n, from] = [0, groups.length]
   while (from > 0 && n + (groups[from - 1]?.length ?? 0) <= SQUARES_MOST) n += groups[--from]?.length ?? 0
-  // One round alone with more steps than that still draws its last steps
-  if (from === groups.length && groups.length) return { groups: [(groups.at(-1) ?? []).slice(-SQUARES_MOST)], earlier: groups.length - 1 }
-  return { groups: groups.slice(from), earlier: from }
+  // One round alone with more steps than that still draws its last steps, and says how many of its steps came before
+  const last = groups.at(-1) ?? []
+  if (from === groups.length && groups.length) return { groups: [last.slice(-SQUARES_MOST)], earlier: groups.length - 1, steps: last.length - SQUARES_MOST }
+  return { groups: groups.slice(from), earlier: from, steps: 0 }
 }
+// What came before the squares drawn, in words: '' when nothing did
+export const squaresBefore = (kept: { earlier: number; steps: number }) =>
+  [kept.earlier ? `${kept.earlier} earlier round${kept.earlier === 1 ? '' : 's'}` : '', kept.steps ? `${kept.steps} earlier step${kept.steps === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ')
 // The squares for a surface that draws no pictures: one letter each, grouped by round
 export const SQUARE_GLYPH: Record<Square, string> = { done: '■', running: '■', waiting: '□', passed: '■', failed: '■', broke: '□' }
 
