@@ -641,7 +641,7 @@ const recorderHooks = (on: On) => {
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'A question answered by reading a few files is answered directly: read them yourself with Read, Grep and Glob. Anything that changes a file, runs a command or takes more than a few reads goes to an agent: answer this message in one line and start a fresh agent for it in the same turn: Agent, subagent_type "general-purpose", the model the rule names, and a brief as the prompt (their words as they said them, what it is about in two or three lines, the folder, the subject by name with its brief and any result by path, what done looks like). Only a message that steers what listed work is already doing (a change to what it builds, an answer it waits for, a stop) goes to that work instead, with SendMessage, in their words. A fault, a question or a new ask gets its own agent even when it is about the same area, code or card as running work, so it never waits behind it; when in doubt, its own agent. A question a few reads answer is still answered directly.'
+  'A question a few reads answer is answered here with Read, Grep and Glob. Anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "general-purpose", the model the rule names, the brief as the prompt. Only a message that steers what listed work is already doing (a change, an answer it waits for, a stop) goes to it with SendMessage, in their words. A fault, a question or a new ask gets its own agent, even about the same code or card as running work.'
 const REFUSED =
   'This chat\'s own thread only reads (Read, Grep, Glob); it changes no file and runs no command. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and a brief as the prompt.'
 const NO_COPY = () =>
@@ -839,7 +839,7 @@ const KEEP =
 const KEEP_AGENTS = 'Keep the name or id of each background agent with its subject and where it stands.'
 // What every piece of background work is told as it starts: it keeps its own to-do in the panel true
 const PANEL_RULE =
-  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work. With the `todo` tool (mcp__claudopus__todo), list each thing you set out to do, mark the one you are on as doing, tick it when it is done, and mark it dropped when the direction changes. With the `note` tool (mcp__claudopus__note), say in one short line where the work stands now, and say it again whenever that has changed. A message from {name} changes the to-dos first. These lines are shown to {name}, so speak to them as "you", in the first person, and write for someone who does not read code: the purpose, with no file names, commands or code. When a step needs {name}\'s own hands or go-ahead now (a code to paste, a box to fill, a key to press, an approval), say so at once with the `ask` tool (mcp__claudopus__ask): what to do in `text`, what it is about in full in `details` (an ask reaches {name} before your report does, so it carries its own explanation and never points at one), the exact text to copy in `copy`, buttons to answer with in `choices`, the full paths of any pictures it is about in `pictures`, a command only {name} can run, never one you can run yourself, in `command` with its folder in `cwd` (open no terminal for it yourself); clear it with empty `text` once you have seen it done. If a panel tool answers that no hook answered it, the panel did not get it: carry on without the panel for notes and to-dos, but for an ask end your turn at once with a report whose first line is the ask, so the chat puts it to {name}.'
+  '{Name} follows this work in a panel beside the chat, as a card with its to-dos. Keep it true as you work: with the `todo` tool (mcp__claudopus__todo) list what you set out to do, mark the one you are on, tick what is done and drop what the direction left behind; with the `note` tool (mcp__claudopus__note) say in one short line where the work stands whenever that changes. A message from {name} changes the to-dos first. Write these for someone who does not read code: the purpose, to {name} as "you", no file names, commands or code. When a step needs {name}\'s own hands or go-ahead, say so at once with the `ask` tool (mcp__claudopus__ask). If a panel tool answers that no hook answered it, the panel did not get it: carry on without it for notes and to-dos, but for an ask end your turn at once with a report whose first line is the ask.'
 // What every conversation of a chat the app runs on another Mac over ssh carries after the principles, the chat's, its work's and
 // their helpers' alike: the person cannot see this Mac, so nothing waits on their hands here
 const AFAR_RULE =
@@ -8285,7 +8285,7 @@ const chatHooks = (on: On) => {
 
     await $.tool.register({
       name: 'update',
-      description: 'Records a subject of work in the memory index: creates it, or changes the fields given. `brief` rewrites its one-page brief.',
+      description: 'Records a subject of work in the memory index: creates it, or changes the fields given. `brief` replaces its whole one-page brief: read it first and keep what other work wrote.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -8308,7 +8308,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'todo',
       description:
-        named('For background work: keeps the to-dos under your piece of work in the panel {name} reads beside the chat. Adds `item`, or changes one already listed: `state` marks it as the one you are doing now, ticks it done or marks it dropped; `was` gives its earlier wording when you reword it. List each thing you set out to do, mark the one you are on as doing, and change the list first when {name} steers.'),
+        named('For background work: keeps the to-dos on your card in the panel {name} reads beside the chat. Adds `item`, or changes one already listed: `state` marks the one you are doing, ticks it done or drops it; `was` gives its earlier wording when you reword it.'),
       inputSchema: {
         type: 'object',
         properties: {
@@ -8323,7 +8323,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'note',
       description:
-        named('For background work: says where your work stands now, on its card in the panel {name} reads beside the chat. It replaces the line before it. Write it when you start, and again whenever what is true has changed: what is done so far and what you are doing, in one short plain sentence of at most 20 words, in the first person, speaking to {name} as "you", with no file names, commands or code.'),
+        named('For background work: says where your work stands now on its card, replacing the line before; write it when you start and whenever that changes: what is done and what you are doing, in one plain sentence of at most 20 words, first person, to {name} as "you", no file names, commands or code.'),
       inputSchema: {
         type: 'object',
         properties: {
@@ -8337,18 +8337,18 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and shows the ask in the chat as a notice, where {name} can answer it too. `text` says what to do, in one plain line; `details` is what the ask is about, in full, enough to decide on (what changes, what it costs, what is not done), shown with it on the card and in the chat: {name} sees your ask before your report, which reaches them only after you finish, so an ask never points at an explanation it does not carry; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need (without them the card offers Done and Not now); {name} can always reply in their own words instead; `pictures` are the picture files the ask is about, such as the options to pick from; `command` is a command only {name} can run, never one you can run yourself: given whole, with its folder in `cwd` or full paths, it is shown with a Copy button and, in a chat on this Mac, a button that opens a terminal with it typed when they press it: open none yourself. The ask stays until {name} answers, even after you finish. An answer clears it and arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Ask again if the answer leaves something waiting. Call it again with empty `text` only once you have seen it done.",
+        "For background work: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts the ask at the top of the panel on your card and in the chat as a notice; {name} answers with a button or in their own words. {name} sees it before your report, so it carries everything needed to decide and never points at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile carry on with what does not depend on it, or end your step saying what you wait for. Ask again if the answer leaves something waiting; call it with empty `text` only once you have seen it done. Open no terminal for a command yourself.",
       ),
       inputSchema: {
         type: 'object',
         properties: {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
-          details: { type: 'string', description: 'What the ask is about, in full: everything needed to decide it, shown with it on the card and in the chat. Short plain lines and "- " lists, no tables or bold, and a blank line after a list: the card is narrow and the chat shows it as plain text. Never "as explained in the chat" or "in my report": they see the ask first' },
-          copy: { type: 'string', description: 'Only text they must paste somewhere else, such as a one-time code or a link; leave it out when they only read or press something' },
-          choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now (Done and Not now when left out); the one pressed comes back to you as a message' },
-          command: { type: 'string', description: 'A command only they can run, never one you can run yourself, one line, whole: shown with a Copy button, and on this Mac a button that opens a terminal with it typed, never run' },
-          cwd: { type: 'string', description: 'The folder the command runs in, a full path; the command is shown starting there. Needed when the command has a relative path' },
-          pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the picture files the ask is about, such as the options to pick from; drawn small on the card, each opening large on a press, and shown with the ask in the chat' },
+          details: { type: 'string', description: 'What it is about, in full: what changes, what it costs, what is not done. Short plain lines and "- " lists with a blank line after, no tables or bold: the card is narrow and the chat shows plain text' },
+          copy: { type: 'string', description: 'Only text they must paste elsewhere, such as a one-time code or a link' },
+          choices: { type: 'array', items: { type: 'string' }, description: 'Buttons to answer with, such as Approve and Not now (Done and Not now when left out)' },
+          command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
+          cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },
+          pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the ask is about, shown with it on the card and in the chat' },
         },
         required: ['text'],
       },
