@@ -900,7 +900,8 @@ test('work that ended before the mod kept it is read back from the chat\'s own r
 })
 
 test('helpers hang inside their work\'s card as a tree, one slim row each that opens its Details; ended ones fold into one row laid out the same, and Details lists every one', async ($, on) => {
-  const { clock, opened } = world(on)
+  let isRunOver = false
+  const { clock, opened } = world(on, { jobs: { output: file => (isRunOver && /bg-r-a\d\.output$/.test(file) ? 'all good\n\n[exited with code 0]\n' : ''), wroteAt: () => 0 } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
@@ -962,7 +963,21 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   await narrow.unmount()
 
   // The work's Details lists every helper, ended or not, as the same tree
+  // (two at work have a command that ended, said under their rows: one with helpers of its own, one the last under its parent)
+  for (const agentId of ['a2', 'a4']) await $.tool.call({ tool: 'Bash', tool_use_id: `r-${agentId}`, agentId, command: 'python3 tidy.py', description: 'Run the tidy up', run_in_background: true } as never)
+  isRunOver = true
+  await clock.advance(60_000)
+  // The tree's lines join from each row to the next, whether a row has one line or more under its name: every line that leaves a
+  // row's foot starts at the next row's head, and the last leaves none (16 Nov the lines stopped at each second line)
+  const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  const ends = (source: string, y: 0 | 20) => [...source.matchAll(/M(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)V(\d+(?:\.\d+)?)/g)].filter(m => Number(y === 0 ? m[2] : m[3]) === y).map(m => Number(m[1])).sort((a, b) => a - b)
+  const pieces = (await details.findAll({ type: 'Svg' })).map(svg => String(svg.props.source)).filter(source => source.includes('stroke-opacity'))
+  await details.unmount()
+  expect(pieces.length).toBe(4 + 2)
+  pieces.forEach((source, n) => expect(ends(source, 20)).toEqual(n + 1 < pieces.length ? ends(pieces[n + 1] ?? '', 0) : []))
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
+  // in a terminal too: beside the line under the helper with its own, the line on to the next and the one down to its own
+  expect((await tab.findAll({ type: 'Text' })).map(one => one.text).filter(text => /^[│ ]+$/.test(text) && text.includes('│'))).toEqual(['│ │  ', '│      '])
   expect((await tab.find({ type: 'Text', text: / helpers? working$/ }))?.text).toBe('2 of 4 helpers working')
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
   // One at work has a dot at the end of its line, a ring growing out of it (cells the terminal repaints), one that finished a tick

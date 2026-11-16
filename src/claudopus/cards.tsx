@@ -129,6 +129,8 @@ const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[]
     return [{ one: b.one, ...(b.job ? { job: b.job } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
   })
 // The lines that join a row to the tree, as text. Each level is two letters wide; a row's own helpers hang from the second
+// and as text carried down past a row, as wide as its lines and mark, for each line of its own under it
+const railText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}${t.hasKids ? '│ ' : '  '} `
 const twigText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`
 // The same lines drawn thin, for a surface that draws, as tall as one line of text: the last row under a parent turns to it in a
 // curve, the line ends in a dot in the colour of how the row stands (a ring for the row of those that ended), and a row's own
@@ -162,11 +164,16 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'c
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`
 }
 
-// The same tree's lines carried down past a row, for a second line of its own: the levels above that go on, and its own line when
-// rows under the same parent follow
+// The same tree's lines carried down past a row, for each line of its own under it: the levels above that go on, its own line when
+// rows under the same parent follow, and the line from its dot down to its own rows when it has them, so a row of two or more
+// lines joins as one of one does
 const railSvg = (t: Twig, line: number) => {
   const x = (level: number) => level * TWIG_STEP + 9
-  const paths = [...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])), ...(t.isLast ? [] : [`M${x(t.rails.length)} 0V${line}`])]
+  const paths = [
+    ...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])),
+    ...(t.isLast ? [] : [`M${x(t.rails.length)} 0V${line}`]),
+    ...(t.hasKids ? [`M${x(t.rails.length + 1)} 0V${line}`] : []),
+  ]
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('') || 'M0 0'}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/></svg>`
 }
 

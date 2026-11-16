@@ -1,0 +1,1 @@
+- The lines of a helpers tree now join without a gap past a row with a second line under its title, past nested helpers under such a row, and to the last row's corner, in the panel and in a terminal.

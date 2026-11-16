@@ -1363,6 +1363,8 @@ const twigsOf = (branches: Branch[], isMore = false, depth = 1, rails: boolean[]
     return [{ one: b.one, ...(b.job ? { job: b.job } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])]
   })
 // The lines that join a row to the tree, as text. Each level is two letters wide; a row's own helpers hang from the second
+// and as text carried down past a row, as wide as its lines and mark, for each line of its own under it
+const railText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}${t.hasKids ? '│ ' : '  '} `
 const twigText = (t: Twig) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`
 // The same lines drawn thin, for a surface that draws, as tall as one line of text: the last row under a parent turns to it in a
 // curve, the line ends in a dot in the colour of how the row stands (a ring for the row of those that ended), and a row's own
@@ -1396,11 +1398,16 @@ const twigSvg = (t: Twig, line: number, dot: string, isMoving = false, shape: 'c
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`
 }
 
-// The same tree's lines carried down past a row, for a second line of its own: the levels above that go on, and its own line when
-// rows under the same parent follow
+// The same tree's lines carried down past a row, for each line of its own under it: the levels above that go on, its own line when
+// rows under the same parent follow, and the line from its dot down to its own rows when it has them, so a row of two or more
+// lines joins as one of one does
 const railSvg = (t: Twig, line: number) => {
   const x = (level: number) => level * TWIG_STEP + 9
-  const paths = [...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])), ...(t.isLast ? [] : [`M${x(t.rails.length)} 0V${line}`])]
+  const paths = [
+    ...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])),
+    ...(t.isLast ? [] : [`M${x(t.rails.length)} 0V${line}`]),
+    ...(t.hasKids ? [`M${x(t.rails.length + 1)} 0V${line}`] : []),
+  ]
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('') || 'M0 0'}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/></svg>`
 }
 
@@ -12814,18 +12821,28 @@ const panelHooks = (on: On) => {
           <Text color={JOB_COLOR[job.kind]}>{JOB_GLYPH[job.kind]}</Text>
         </Box>
       )
-    // Under its name, the tree's lines carried down past it, as wide as its own lines and mark, so its second line starts under its
-    // name. The app drops a picture with no words for it, and the line then started at the card's edge, left of the tree
-    const jobRails = (t: Twig, key: string) =>
+    // Under a row's name, the tree's lines carried down past it, as wide as its own lines and mark, so each line under it starts
+    // under its name and the tree's lines run on unbroken beside it (16 Nov they stopped at every second line). The app drops a
+    // picture with no words for it, and the line then started at the card's edge, left of the tree
+    const twigRails = (t: Twig, key: string) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
           <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt={t.isLast ? 'Last row' : 'More rows below'} width={twigWidth(t)} height={LINE} />
         </Box>
       ) : (
         <Box key={key} flexShrink={0}>
-          <Text dimColor>{`${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}   `}</Text>
+          <Text dimColor>{railText(t)}</Text>
         </Box>
       )
+    // One line under a row, one line high, beside the tree's lines carried down, starting where the row's name does
+    const twigUnder = (t: Twig, key: string, body: JSX.Element, inset: number | string = lead) => (
+      <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
+        {twigRails(t, `${key}-rails`)}
+        <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={inset}>
+          {body}
+        </Box>
+      </Box>
+    )
     // How it stands, its second line, so a glance tells whether it moves and how far it is: how much of how much, its percent,
     // speed and time left as the run printed them, or worked out from its percent where it says none; then paused, a wait's target,
     // a watch's last event, nothing printed since it began, or quiet for minutes (in amber). A run that prints says nothing of when:
@@ -12945,7 +12962,7 @@ const panelHooks = (on: On) => {
         <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
           {head}
           <Box key={`stand-${key}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
-            {jobRails(t, `rails-${key}`)}
+            {twigRails(t, `rails-${key}`)}
             {/* (on a desktop by the step a plain Button pads a run's name with, where its name is one, so the two start in one column) */}
             <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={canOpenJob(job) ? lead : 0}>
               {pctAt >= 0 && job.pct ? (
@@ -13307,20 +13324,24 @@ const panelHooks = (on: On) => {
     // Under a helper at work, the step it is on and where it says it is; under a job, the last lines its output ends with, as a
     // terminal shows them. Both sit where the row's name starts; one that ended has nothing under it
     const underTwig = (t: Twig) => {
-      const pad = t.depth * 2 + 4
       if (t.job) {
         // (its row says it in plain words, so the last line is here as it was printed too)
         const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).slice(-OUTPUT_LINES)
         if (!tail.length) return null
         return (
-          <Box key={`tail-${t.job.id}`} flexDirection="row" paddingLeft={pad} flexShrink={0}>
-            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={OUTPUT_FILL}>
-              {tail.map((line, n) => (
-                <Text key={`tail-${t.job?.id}-${n}`} dimColor wrap="truncate-end">
-                  {line}
-                </Text>
-              ))}
-            </Box>
+          <Box key={`tail-${t.job.id}`} flexDirection="column" flexShrink={0}>
+            {tail.map((line, n) =>
+              twigUnder(
+                t,
+                `tail-${t.job?.id}-${n}`,
+                <Box flexGrow={1} flexShrink={1} minWidth={0} backgroundColor={OUTPUT_FILL}>
+                  <Text dimColor wrap="truncate-end">
+                    {line}
+                  </Text>
+                </Box>,
+                canOpenJob(t.job) ? lead : 0,
+              ),
+            )}
           </Box>
         )
       }
@@ -13331,12 +13352,16 @@ const panelHooks = (on: On) => {
       const lines = [doing >= 0 ? `Step ${doing + 1} of ${kept.length} · ${kept[doing]?.text ?? ''}` : '', now(kid)].filter(Boolean)
       if (!lines.length) return null
       return (
-        <Box key={`under-${kid.id}`} flexDirection="column" paddingLeft={pad} flexShrink={0}>
-          {lines.map((line, n) => (
-            <Text key={`under-${kid.id}-${n}`} dimColor wrap="truncate-end">
-              {line}
-            </Text>
-          ))}
+        <Box key={`under-${kid.id}`} flexDirection="column" flexShrink={0}>
+          {lines.map((line, n) =>
+            twigUnder(
+              t,
+              `under-${kid.id}-${n}`,
+              <Text dimColor wrap="truncate-end">
+                {line}
+              </Text>,
+            ),
+          )}
         </Box>
       )
     }
