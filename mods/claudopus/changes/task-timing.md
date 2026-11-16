@@ -1,0 +1,4 @@
+- Work that stopped mid-step with no report (the app restarted, the Mac slept, its run was cut off) is started again by Claudopus itself as soon as it is seen stuck, and the chat is told, instead of sitting until someone notices.
+- A lookup, and a small fix the work has proved itself, no longer waits for a second agent's check; the report says it was not checked by another. The second check starts as soon as what it checks exists, while tests and the release go on.
+- While working, work runs only the tests of the area it changed; every test runs once, in the release.
+- The chat answers what it can from what it knows or a few reads, and starts work at once for anything that needs more.

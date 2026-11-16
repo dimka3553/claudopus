@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n- If it can run in parallel, it runs in parallel. No ask waits behind other work.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n- Titles, notes, to-dos, asks and results name what is being done, never the model doing it.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong, on a model at least as strong as the one that built it.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Search with rg, and use rg -a for packed app files.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n- If it can run in parallel, it runs in parallel. No ask waits behind other work.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n- Titles, notes, to-dos, asks and results name what is being done, never the model doing it.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong, on a model at least as strong as the one that built it. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Search with rg, and use rg -a for packed app files.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -53,7 +53,7 @@ const prompts: string[] = []
 // own, or uncommitted changes the move would overwrite
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
@@ -534,7 +534,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The model an agent's own type starts it on, by its task's few words, as Explore starts on Haiku
     return { model: options.startedOn?.[e.description ?? ''] ?? options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
   })
-  on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status })) as never }))
+  on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status, ...(options.parents?.[id] ? { parentId: options.parents[id] } : {}) })) as never }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('prompt.submit', (_, e) => {
     if (e.origin.kind !== 'composer') submitted.push(e.text)
@@ -665,7 +665,8 @@ const otherChat = (at: number, chat = 'chat-b', title = 'Billing page') =>
 // Work that stops moving: its card says so, the chat is told once, a long step shows on its row, and the log stays plain text
 
 test('work and its helpers that get nothing new back for 12 minutes are flagged on the card and told to the chat once; news clears it, and a wait that only prints a new number is no news', SLOW, async ($, on) => {
-  const { keep, settle, clock, held, logged } = world(on)
+  // The engine runs all three, each in its call: they are only flagged, never started again
+  const { keep, settle, clock, held, logged, resumed } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'one merger for all pushes', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'One merger for all pushes', prompt: 'one merger' } as never)
@@ -708,6 +709,29 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   await clock.advance(13 * 60_000)
   expect(await stuck()).toBeDefined()
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(2)
+  expect(resumed.filter(line => line.includes('stopped mid-step'))).toEqual([])
+  await settle()
+})
+
+test('stuck work the engine no longer runs had stopped mid-step: the mod starts it again at once and tells the chat; work that waits on a helper the engine runs is only flagged', SLOW, async ($, on) => {
+  const agents: Record<string, string> = { a1: 'idle', a2: 'idle', a3: 'running' }
+  const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose', a3: 'general-purpose' }
+  const { settle, clock, logged, resumed } = world(on, { agents, kinds, parents: { a3: 'a2' } })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Fit the video', prompt: 'fit' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Draw the lids', prompt: 'lids' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Render the lids', prompt: 'render', parentAgentId: 'a2' } as never)
+  for (const id of ['a1', 'a2', 'a3']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
+  await clock.advance(13 * 60_000)
+  expect(resumed.filter(line => line.includes('stopped mid-step'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes('"Fit the video" had stopped mid-step') && line.includes('started it again'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes('"Fit the video" has had nothing new'))).toEqual([])
+  expect(logged.filter(line => line.includes('"Draw the lids" has had nothing new'))).toHaveLength(1)
+  // Stuck again, it is not started a second time: the chat is only told
+  await $.tool.call({ tool: 'Bash', tool_use_id: 's-a1-again', agentId: 'a1', command: 'git status' } as never)
+  await clock.advance(13 * 60_000)
+  expect(resumed.filter(line => line.includes('stopped mid-step'))).toHaveLength(1)
+  expect(resumed.every(line => !line.includes('stopped mid-step') || line.startsWith('a1: From Claudopus, not'))).toBe(true)
   await settle()
 })
 

@@ -1,7 +1,8 @@
 // Work that stops moving: its card says so, the chat is told once, a long step shows on its row, and the log stays plain text
 
 test('work and its helpers that get nothing new back for 12 minutes are flagged on the card and told to the chat once; news clears it, and a wait that only prints a new number is no news', SLOW, async ($, on) => {
-  const { keep, settle, clock, held, logged } = world(on)
+  // The engine runs all three, each in its call: they are only flagged, never started again
+  const { keep, settle, clock, held, logged, resumed } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'one merger for all pushes', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'One merger for all pushes', prompt: 'one merger' } as never)
@@ -44,6 +45,29 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
   await clock.advance(13 * 60_000)
   expect(await stuck()).toBeDefined()
   expect(logged.filter(line => line.includes('has had nothing new'))).toHaveLength(2)
+  expect(resumed.filter(line => line.includes('stopped mid-step'))).toEqual([])
+  await settle()
+})
+
+test('stuck work the engine no longer runs had stopped mid-step: the mod starts it again at once and tells the chat; work that waits on a helper the engine runs is only flagged', SLOW, async ($, on) => {
+  const agents: Record<string, string> = { a1: 'idle', a2: 'idle', a3: 'running' }
+  const kinds: Record<string, string> = { a1: 'general-purpose', a2: 'general-purpose', a3: 'general-purpose' }
+  const { settle, clock, logged, resumed } = world(on, { agents, kinds, parents: { a3: 'a2' } })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Fit the video', prompt: 'fit' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Draw the lids', prompt: 'lids' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Render the lids', prompt: 'render', parentAgentId: 'a2' } as never)
+  for (const id of ['a1', 'a2', 'a3']) await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' } as never)
+  await clock.advance(13 * 60_000)
+  expect(resumed.filter(line => line.includes('stopped mid-step'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes('"Fit the video" had stopped mid-step') && line.includes('started it again'))).toHaveLength(1)
+  expect(logged.filter(line => line.includes('"Fit the video" has had nothing new'))).toEqual([])
+  expect(logged.filter(line => line.includes('"Draw the lids" has had nothing new'))).toHaveLength(1)
+  // Stuck again, it is not started a second time: the chat is only told
+  await $.tool.call({ tool: 'Bash', tool_use_id: 's-a1-again', agentId: 'a1', command: 'git status' } as never)
+  await clock.advance(13 * 60_000)
+  expect(resumed.filter(line => line.includes('stopped mid-step'))).toHaveLength(1)
+  expect(resumed.every(line => !line.includes('stopped mid-step') || line.startsWith('a1: From Claudopus, not'))).toBe(true)
   await settle()
 })
 
