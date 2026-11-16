@@ -8535,6 +8535,7 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
     const summary = /<summary>([^<]+)<\/summary>/.exec(body)?.[1] ?? ''
     const raw = file ? (await readOr($, file)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n') : ''
     // with every kept key hidden, as in any tool's answer; withheld when that could not be checked
+    if (raw) await knowKept($, true)
     const hidden = raw ? await hiddenJson($, JSON.stringify(raw)) : JSON.stringify('')
     const lines = hidden === undefined ? ["(withheld: Claudopus couldn't check them for saved keys)"] : [String(JSON.parse(hidden))]
     const isLate = (await $.clock.now()) - run.at >= CHAT_COMMAND_MS

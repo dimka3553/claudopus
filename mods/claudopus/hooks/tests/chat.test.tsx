@@ -728,7 +728,13 @@ test('a copy of the chat for a small job is told it is a task now, and past its 
   const id = r.agentId ?? ''
   for (let n = 0; n < 10; n++) expect((await $.tool.call({ tool: 'Bash', tool_use_id: `f${n}`, command: 'git status', agentId: id } as never)).deny).toBeUndefined()
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f10', command: 'git push', agentId: id } as never)).deny).toContain('this copy of the chat has taken its 10 steps. Hand what is left to a fresh task')
-  expect((await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f11', text: 'Handing the rest on', task: 'push the branch in /repo', agentId: id } as never)).deny).toBeUndefined()
+  // The note gives it the message for the chat, which it sends to the chat; past its steps it may send nothing else
+  const handing = await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f11', text: 'Handing the rest on', task: 'push the branch in /repo', agentId: id } as never)
+  expect(JSON.stringify(handing.result)).toContain('The copy of this chat that did')
+  expect((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'f11b', to: 'main', message: 'Start it as its own background task: push the branch in /repo', agentId: id } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'SendMessage', tool_use_id: 'f11c', to: 'a7', message: 'do it', agentId: id } as never)).deny).toContain('taken its 10 steps')
+  // A release past its steps is refused before its allow box is shown
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f11d', command: 'cd /repo && /plug/claudopus/bin/release', agentId: id } as never)).deny).toContain('taken its 10 steps')
   expect((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'f12', message: 'done', agentId: id } as never)).deny).toBeUndefined()
   expect(files.get(`${MEMORY}/log.md`)).toContain(`refused a step of copy ${id} past its 10 steps`)
   // A fresh task is not held to a copy's steps
@@ -1069,6 +1075,13 @@ test("a chat's own thread may only read, run a single command in the background,
   expect(endedText).toContain('Writing objects: 100%\nTo github.com:sam/nose.git\n   1a2b3c..4d5e6f  main -> main')
   expect(endedText).not.toContain('Enumerating objects')
   expect(endedText).toContain('ended (Background command "git push" completed (exit code 0))')
+  // A kept key in those lines is hidden, as in any tool's answer
+  files.set('keychain:API_KEY', 'sk-live-123456')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1k', command: 'git status' } as never)).deny).toBeUndefined()
+  files.set('/tmp/tasks/bg-t1k.output', 'On branch main\ntoken sk-live-123456\n')
+  const keyed = ((await $.prompt.submit({ text: notice('bg-t1k', 'completed', 'Background command "git status" completed (exit code 0)'), wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[] }).context?.join('\n') ?? ''
+  expect(keyed).toContain('token [hidden API_KEY]')
+  expect(keyed).not.toContain('sk-live-123456')
   // The engine's notice that a task whose report already came has stopped is left out; one that also says something else is not
   const REPEAT = 'Agent "Fix the nose" completed. Its report was already delivered to you as a message, so it is not repeated here.'
   const repeat = (await $.prompt.submit({ text: notice('a9', 'completed', REPEAT), wait: false, origin: { kind: 'task-notification' } } as never)) as { drop?: string }
@@ -1082,6 +1095,14 @@ test("a chat's own thread may only read, run a single command in the background,
   }
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1b', command: 'git add -A && git commit -m x' } as never)).deny).toContain('only a single command')
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1c', command: 'git log > /tmp/x' } as never)).deny).toContain('only a single command')
+  // A command run inside it, even inside double quotes, is more than one command; a shell handed one is a task's
+  for (const [i, command] of ['echo "$(git add -A)"', 'git log "`rm -rf x`"', 'git log <(ls)'].entries())
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1e${i}`, command } as never)).deny).toContain('only a single command')
+  // Only a look or a push: one that changes or reads files, a script, a pull, a branch or remote changed, a paste or a shell is a task's
+  for (const [i, command] of ['rm -rf build', 'git pull', 'git checkout .', 'git branch -D old', 'git remote add x y', './deploy.sh', 'cp -r ~/.claude/claudopus/p?stes /tmp/p', 'npm install', 'GIT_DIR=x git status', "bash -c 'git add -A'"].entries())
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1f${i}`, command } as never)).deny).toContain('Start a fresh agent')
+  for (const [i, command] of ['git status', 'git log --oneline -5', 'gh pr checks 12', 'git branch -a', 'git remote -v'].entries())
+    expect((await $.tool.call({ tool: 'Bash', tool_use_id: `t1g${i}`, command } as never)).deny).toBeUndefined()
   const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1d', command: '/plug/claudopus/bin/release' } as never)
   expect(refused.deny).toContain('Start a fresh agent')
   expect(refused.deny).toContain('changes no file')
