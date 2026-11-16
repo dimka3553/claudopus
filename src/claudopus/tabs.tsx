@@ -6,6 +6,10 @@ const tabHooks = (on: On) => {
   // since the panel was last drawn, and the tabs as the engine lists them, so a press that did nothing shows whether it arrived at all
   on('ui.press', async ($, e, next) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
+    // In every other chat a press that reached its button is one line too, written beside the press and never waited for. The engine
+    // runs this hook only for a button it still holds; a press on a button a newer drawing replaced is dropped before it, and is in
+    // the app's own log instead ("ui_press not handled"), so the two logs together say what share of the person's clicks land
+    else if (e.plugin === 'claudopus') void log($, `press landed: ${keyShown(e.element) ?? ''} in ${keyShown(e.requestId) ?? ''} (${e.surface})`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
     if (e.plugin === 'claudopus') ((pressFrom = 0), (pressedAt = await $.clock.now()), freeTimes($), (freshness += 1), await engage($))
