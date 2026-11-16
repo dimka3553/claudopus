@@ -293,7 +293,7 @@ esac
 EOF
 chmod +x "$r/gh/gh"
 # (main of this test's own repo is pushed past the guard the release put in, as the test runs with CLAUDECODE set)
-(cd "$r/work" && git fetch -q origin && git checkout -q -B main origin/main && printf 'CHECK="test -s %s && test ! -e %s && { test ! -e %s || touch stray; } && { test ! -e %s || git commit -q --allow-empty -m moved; }"\nGITHUB_CHECKS="check (ubuntu-latest), check (macos-latest)"\n' "$r/asked" "$r/local-red" "$r/local-stray" "$r/local-move" >.release && git commit -q -am "checks on GitHub" && RELEASE_PUSH=1 git push -q origin main && git checkout -q -b gh-checks && echo four >file && git commit -q -am four) || { echo "NOT OK - the repo for GitHub's checks was not set up"; failed=1; }
+(cd "$r/work" && git fetch -q origin && git checkout -q -B main origin/main && printf 'CHECK="test -s %s && test ! -e %s && { test ! -e %s || touch stray; } && { test ! -e %s || git commit -q --allow-empty -m moved; } && { test ! -e %s || sleep 47.25; }"\nGITHUB_CHECKS="check (ubuntu-latest), check (macos-latest)"\n' "$r/asked" "$r/local-red" "$r/local-stray" "$r/local-move" "$r/local-slow" >.release && git commit -q -am "checks on GitHub" && RELEASE_PUSH=1 git push -q origin main && git checkout -q -b gh-checks && echo four >file && git commit -q -am four) || { echo "NOT OK - the repo for GitHub's checks was not set up"; failed=1; }
 checks() { printf "$@" >"$r/checks"; rm -f "$r/checks.later" "$r/asks" "$r/asked" "$r/runs.extra"; }
 gh_release() { release_grant "rel-$1" release-grant gh-checks; (cd "$r/work" && RELEASE_CHECK_EVERY=1 RELEASE_CHECK_WAIT=${WAIT:-4} "$here/release"); }
 main_was=$(git -C "$r/origin.git" rev-parse main)
@@ -333,6 +333,13 @@ WAIT=60 expect "this Mac's own check fails while GitHub's run: refused at once" 
 rm -f "$r/local-red"
 n=$((n + 1)); [ -s "$r/asked" ] && [ $((SECONDS - started)) -lt 30 ] && echo "ok $n - GitHub was asked first, and the refusal did not wait for it" || { echo "NOT OK $n - GitHub asked: $(cat "$r/asked" 2>/dev/null), after $((SECONDS - started)) s"; failed=1; }
 unmoved "this Mac's own check failing"; no_candidate "this Mac's own check failing"
+# A red check on GitHub while this Mac's checks still run: refused at once, and nothing of those checks is left running
+checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tfailure\tu2\n'
+touch "$r/local-slow"
+started=$SECONDS
+expect "GitHub red while this Mac's checks run: refused" 3 'check (macos-latest) (failure) u2' -- gh_release local-slow
+rm -f "$r/local-slow"
+n=$((n + 1)); [ $((SECONDS - started)) -lt 30 ] && ! pgrep -f 'sleep 47.25' >/dev/null && echo "ok $n - it did not wait for this Mac's checks, and stopped them" || { echo "NOT OK $n - after $((SECONDS - started)) s, still running: $(pgrep -fl 'sleep 47.25')"; failed=1; pkill -f 'sleep 47.25'; }
 for what in stray move; do
   checks 'check (ubuntu-latest)\tcompleted\tsuccess\tu1\ncheck (macos-latest)\tcompleted\tsuccess\tu2\n'
   touch "$r/local-$what"

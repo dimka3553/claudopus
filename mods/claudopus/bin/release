@@ -174,7 +174,7 @@ tmp="$(mktemp -d "${TMPDIR:-/tmp}/claudopus-release.XXXXXX")/release"
 cref=
 drop_candidate() { [ -n "$cref" ] && git -C "$top" push -q "$REMOTE" --delete "$cref" >/dev/null 2>&1; cref=; return 0; }
 lpid=
-cleanup() { [ -n "$lpid" ] && kill -TERM -- "-$lpid" 2>/dev/null; drop_candidate; git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err" "$tmp.check" "$tmp.check.rc"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
+cleanup() { [ -n "$lpid" ] && kill -KILL -- "-$lpid" 2>/dev/null; drop_candidate; git -C "$top" worktree remove --force "$tmp" >/dev/null 2>&1; rm -rf "$tmp" "$tmp.notes" "$tmp.notes.err" "$tmp.check" "$tmp.check.rc"; rmdir "$(dirname "$tmp")" 2>/dev/null; rm -rf "$lock"; }
 trap cleanup EXIT
 trap 'exit 1' INT TERM HUP
 
@@ -261,15 +261,30 @@ for try in 1 2 3 4 5; do
   [ -n "$stray" ] && die "the build left files the repo does not track: $(echo $stray | cut -c1-300). Nothing pushed." 3
   git add -u
   # The checks here run on the very commit made below; with GITHUB_CHECKS, while GitHub checks that commit, so neither waits for
-  # the other (in a process group of their own, so a red check on GitHub or a moved main stops them at once). Main moves only once
-  # both passed, and only if the checks left HEAD, the tree and the index as committed and no file the repo does not track
+  # the other. They run in a process group of their own, made before they start (job control sets it from this side too), so a red
+  # check on GitHub, a moved main or the end of this release stops every one of them, and their group stops itself once this
+  # release is gone, however it ended. Main moves only once both passed, and only if the checks left HEAD, the tree and the index as
+  # committed and no file the repo does not track
   start_checks() {
     lpid=; rm -f "$tmp.check" "$tmp.check.rc"
     [ -n "$CHECK" ] || return 0
-    /usr/bin/perl -e 'setpgrp(0, 0); exec @ARGV' bash -c 'bash -c "$1" >"$2" 2>&1; echo $? >"$2.rc"' sh "$CHECK" "$tmp.check" &
+    set -m
+    bash -c 'bash -c "$1" >"$2" 2>&1 & c=$!
+      while kill -0 $c 2>/dev/null; do kill -0 "$3" 2>/dev/null || kill -KILL 0; sleep 1; done
+      wait $c; echo $? >"$2.rc"' sh "$CHECK" "$tmp.check" "$$" &
     lpid=$!
+    set +m
   }
-  stop_checks() { [ -n "${lpid:-}" ] && { kill -TERM -- "-$lpid" 2>/dev/null; wait "$lpid" 2>/dev/null; }; lpid=; return 0; }
+  # Stops the checks' whole group and returns only once none of it is left (TERM, then KILL after five seconds)
+  stop_checks() {
+    [ -n "${lpid:-}" ] || return 0
+    local n=0
+    while kill -0 -- "-$lpid" 2>/dev/null; do
+      if [ $n -lt 25 ]; then kill -TERM -- "-$lpid" 2>/dev/null; else kill -KILL -- "-$lpid" 2>/dev/null; fi
+      sleep 0.2; n=$((n + 1))
+    done
+    wait "$lpid" 2>/dev/null; lpid=; return 0
+  }
   end_checks() {
     if [ -n "${lpid:-}" ]; then
       say "waiting for this Mac's checks"
