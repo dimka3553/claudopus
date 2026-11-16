@@ -1,0 +1,5 @@
+- What chats and work are told is about a third shorter, with each rule said once where it is needed, so every message and every piece of work costs fewer tokens.
+- Chats no longer send a card's answer to its work a second time, and a repeated report is not relayed again.
+- A fault that keeps coming back starts work that is told the earlier attempts, so it questions the approach.
+- Work is told plainly never to wait with sleep or a polling loop, and to keep what other work wrote in a subject's brief.
+- The shipped principles no longer carry one person's habits.

@@ -110,7 +110,7 @@ const chatHooks = (on: On) => {
 
     await $.tool.register({
       name: 'update',
-      description: 'Records a subject of work in the memory index: creates it, or changes the fields given. `brief` rewrites its one-page brief.',
+      description: 'Records a subject of work in the memory index: creates it, or changes the fields given. `brief` replaces its whole one-page brief: read it first and keep what other work wrote.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -133,7 +133,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'todo',
       description:
-        named('For background work: keeps the to-dos under your piece of work in the panel {name} reads beside the chat. Adds `item`, or changes one already listed: `state` marks it as the one you are doing now, ticks it done or marks it dropped; `was` gives its earlier wording when you reword it. List each thing you set out to do, mark the one you are on as doing, and change the list first when {name} steers.'),
+        named('For background work: keeps the to-dos on your card in the panel {name} reads beside the chat. Adds `item`, or changes one already listed: `state` marks the one you are doing, ticks it done or drops it; `was` gives its earlier wording when you reword it.'),
       inputSchema: {
         type: 'object',
         properties: {
@@ -148,7 +148,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'note',
       description:
-        named('For background work: says where your work stands now, on its card in the panel {name} reads beside the chat. It replaces the line before it. Write it when you start, and again whenever what is true has changed: what is done so far and what you are doing, in one short plain sentence of at most 20 words, in the first person, speaking to {name} as "you", with no file names, commands or code.'),
+        named('For background work: says where your work stands now on its card, replacing the line before; write it when you start and whenever that changes: what is done and what you are doing, in one plain sentence of at most 20 words, first person, to {name} as "you", no file names, commands or code.'),
       inputSchema: {
         type: 'object',
         properties: {
@@ -162,18 +162,18 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background work: when a step needs {name}'s own hands now (a code to paste, a box to fill, a key or a button to press), says so on your card, which stands out at the top of the panel with the ask in view and a Copy button for the exact text, and shows the ask in the chat as a notice, where {name} can answer it too. `text` says what to do, in one plain line; `details` is what the ask is about, in full, enough to decide on (what changes, what it costs, what is not done), shown with it on the card and in the chat: {name} sees your ask before your report, which reaches them only after you finish, so an ask never points at an explanation it does not carry; `copy` is only for text {name} must paste somewhere else (a one-time code, a token name, a link to open), never the instructions themselves; `choices` are buttons {name} answers with, such as Approve and Not now, for a go-ahead you need (without them the card offers Done and Not now); {name} can always reply in their own words instead; `pictures` are the picture files the ask is about, such as the options to pick from; `command` is a command only {name} can run, never one you can run yourself: given whole, with its folder in `cwd` or full paths, it is shown with a Copy button and, in a chat on this Mac, a button that opens a terminal with it typed when they press it: open none yourself. The ask stays until {name} answers, even after you finish. An answer clears it and arrives as a message at your next step; carry on meanwhile with what does not depend on it, or end saying what you wait for, and the answer comes back through the chat. Ask again if the answer leaves something waiting. Call it again with empty `text` only once you have seen it done.",
+        "For background work: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts the ask at the top of the panel on your card and in the chat as a notice; {name} answers with a button or in their own words. {name} sees it before your report, so it carries everything needed to decide and never points at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile carry on with what does not depend on it, or end your step saying what you wait for. Ask again if the answer leaves something waiting; call it with empty `text` only once you have seen it done. Open no terminal for a command yourself.",
       ),
       inputSchema: {
         type: 'object',
         properties: {
           text: { type: 'string', description: 'What to do, in one plain line, speaking to them as "you"; empty once it is done' },
-          details: { type: 'string', description: 'What the ask is about, in full: everything needed to decide it, shown with it on the card and in the chat. Short plain lines and "- " lists, no tables or bold, and a blank line after a list: the card is narrow and the chat shows it as plain text. Never "as explained in the chat" or "in my report": they see the ask first' },
-          copy: { type: 'string', description: 'Only text they must paste somewhere else, such as a one-time code or a link; leave it out when they only read or press something' },
-          choices: { type: 'array', items: { type: 'string' }, description: 'Answers to press, such as Approve and Not now (Done and Not now when left out); the one pressed comes back to you as a message' },
-          command: { type: 'string', description: 'A command only they can run, never one you can run yourself, one line, whole: shown with a Copy button, and on this Mac a button that opens a terminal with it typed, never run' },
-          cwd: { type: 'string', description: 'The folder the command runs in, a full path; the command is shown starting there. Needed when the command has a relative path' },
-          pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the picture files the ask is about, such as the options to pick from; drawn small on the card, each opening large on a press, and shown with the ask in the chat' },
+          details: { type: 'string', description: 'What it is about, in full: what changes, what it costs, what is not done. Short plain lines and "- " lists with a blank line after, no tables or bold: the card is narrow and the chat shows plain text' },
+          copy: { type: 'string', description: 'Only text they must paste elsewhere, such as a one-time code or a link' },
+          choices: { type: 'array', items: { type: 'string' }, description: 'Buttons to answer with, such as Approve and Not now (Done and Not now when left out)' },
+          command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
+          cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },
+          pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the ask is about, shown with it on the card and in the chat' },
         },
         required: ['text'],
       },
