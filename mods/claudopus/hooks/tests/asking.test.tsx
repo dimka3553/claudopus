@@ -21,6 +21,8 @@ function test(name: string, options: TestBody | { timeoutMs?: number }, body?: T
   else kitTest(name, { ...SLOW, ...options }, body as TestBody)
 }
 const MEMORY = `${HOME}/.claude/claudopus`
+// This Mac's keychain, there unless a test takes it away as a home of a trial chat's own has none
+const KEYCHAIN = `${HOME}/Library/Keychains/login.keychain-db`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
 const PANE = {
@@ -40,6 +42,8 @@ const LIST = {
   requestId: 'claudopus',
   props: { title: 'Claudopus', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
 } as const
+// The most the engine's fs.read gives whole
+const FS_READ_MOST = 4_194_304
 declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
@@ -55,6 +59,7 @@ type Release = { version: string; commit: string; tree: string; got?: string; ma
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
 const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
+  files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
   const titles: string[] = []
@@ -86,6 +91,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   // and the kind of agent each spawn was asked to start as
   const types: (string | undefined)[] = []
   const registered: string[] = []
+  // and the tools each kind is given, by its name
+  const kindTools: Record<string, string[]> = {}
   const played: string[] = []
   const notified: string[] = []
   // What was handed to osascript
@@ -108,7 +115,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const wake = () => void sleepers.splice(0).forEach(one => one())
   // What each Bash call that ran the admin runner found waiting for it: the grants, as bin/admin would read them
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
-  mock.env(on, { HOME, ...options.env })
+  // The kit's clock moves only as a test moves it: the mod's look at how late its timer comes is left out, unless a test asks for it
+  mock.env(on, { HOME, CLAUDOPUS_TIMING: 'test', ...options.env })
   const clock = mock.clock(on, { now: 1_700_000_000_000 })
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
@@ -136,6 +144,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: files.get('manifest') ?? '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
+    // As the engine: no file over 4 MB is given whole
+    if (text.length > FS_READ_MOST) throw new Error(`${e.path} refused: the file is over the ${FS_READ_MOST}-byte limit`)
     return { value: text }
   })
   on('fs.write', (_, e) => {
@@ -162,6 +172,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { value: { content: [{ type: 'text', text }], isError: false } }
   })
   on('session.id', () => ({ value: 'engine-id' }))
+  // The mod's pause in a long step (breathe): answered after the test's own timers have had their turn, as the engine answers from
+  // outside the helper
+  on('session.turns', async () => (await new Promise(done => setTimeout(() => done(undefined), 0)), { value: 1 }))
   // A chat drawn on the desktop app, as most are; `headless` none, as a -p run
   // `narrow`: a terminal under 144 columns, as a phone over ssh, which draws only a tab opened as the person asked: here, one opened
   // while the test's press is still being answered (isPressing). The engine counts only what the press's own hook opens, which the kit
@@ -210,6 +223,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const [tool, ...rest] = e.argv
     const ok = (stdout = '', exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // The admin gate's wait between two looks at what was pressed: it lasts until the test lets it go with wake(), as a second passing
+    // The end or the first line of a file, as tail and head give them
+    if (tool === 'tail' && rest[0] === '-c') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').slice(-Number(rest[1]))) : ok('', 1)
+    if (tool === 'head' && rest[0] === '-n') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').split('\n').slice(0, Number(rest[1])).join('\n') + '\n') : ok('', 1)
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
@@ -218,6 +234,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The admin gate's seals: one for each message, under the key the keychain holds as keychain:gate; "make" makes a key where
     // there is none and "new" always, as the Mac's own shell does
     if (tool === '/bin/sh' && String(rest[1]).includes('claudopus-admin-gate')) {
+      // Where the home holds no keychain, macOS asks on the person's screen for one to keep the key in
+      if (!files.has(KEYCHAIN)) files.set('keychain:dialog', 'the gate')
       const [, , , said, ...messages] = rest
       // The kept copy of the settings and texts has its key apart, as keychain:known
       const item = String(said).startsWith('known-') ? 'keychain:known' : 'keychain:gate'
@@ -257,6 +275,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'osascript') osa.push([...e.argv])
     // What was handed to this Mac's keychain on security's stdin
+    if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
@@ -541,7 +560,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { model: options.startedOn?.[e.description ?? ''] ?? options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
   })
   // The kinds of agent the mod registers, by name
-  on('agent.register', (_, e) => (registered.push(String((e as { name?: string }).name)), { value: undefined }) as never)
+  on('agent.register', (_, e) => (registered.push(String((e as { name?: string }).name)), (kindTools[String((e as { name?: string }).name)] = (e as { tools?: string[] }).tools ?? []), { value: undefined }) as never)
   on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status, ...(options.parents?.[id] ? { parentId: options.parents[id] } : {}) })) as never }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('prompt.submit', (_, e) => {
@@ -570,7 +589,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -864,6 +883,47 @@ test('while the person types into an ask the panel holds its drawing whole, as o
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${surface}`, agentId: 'a1', text: 'Which source next?', choices: ['Kaggle', 'TCIA', 'Not now'] } as never)
     await Promise.all([list.unmount(), ears.unmount()])
   }
+})
+
+test('while drawings of the panel are slow, as under seven tasks and their commands, one drawn afresh moments ago is given again as it was, buttons and all, until the gap is over, so a click amid a stream of changes names a button still there; a quick drawing and a press are drawn at once', async ($, on) => {
+  const { clock } = world(on)
+  // Each drawing of the panel takes 300 ms, as on 16 Nov with seven tasks at work
+  const slow = { isOn: false, n: 0 }
+  on('session.model', () => {
+    slow.n += 1
+    const until = Date.now() + (slow.isOn ? 300 : 0)
+    while (Date.now() < until);
+    return { value: 'claude-opus-5-5' } as never
+  })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'ears' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  await clock.advance(2000)
+  // Quick drawings: every change is drawn at once
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'q0', agentId: 'a2', text: 'Quick step of the ears.' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Quick step of the ears.' }))).toBeDefined()
+  slow.isOn = true
+  await clock.advance(2000)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f0', agentId: 'a2', text: 'Step 0 of the ears.' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Step 0 of the ears.' }))).toBeDefined()
+  const keys = async () => (await list.findAll({ type: 'Button' })).map(b => b.key).join(' ')
+  const before = await keys()
+  // Work writing faster than a drawing reaches the app: each ask for the panel within the gap gets the drawing on screen
+  for (const n of [1, 2]) {
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `f${n}`, agentId: 'a2', text: `Step ${n} of the ears.` } as never)
+    expect(await list.find({ type: 'Text', text: 'Step 0 of the ears.' })).toBeDefined()
+    expect(await keys()).toBe(before)
+  }
+  // The gap over, it is drawn afresh by itself, with the newest line
+  await clock.advance(1500)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Step 2 of the ears.' }))).toBeDefined()
+  // A press of the person's is drawn at once, whatever the gap
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f3', agentId: 'a2', text: 'Step 3 of the ears.' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Find more scans', prompt: 'more' } as never)
+  expect(await list.find({ type: 'Text', text: 'Find more scans' })).toBeUndefined()
+  await pressed(list, 'stats-open')
+  expect(await until(async () => list.find({ type: 'Text', text: 'Find more scans' }))).toBeDefined()
 })
 
 test("while the person types into a card's reply box the list's running times stand still, and move again once they stop", async ($, on) => {
@@ -1507,7 +1567,10 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   await press(list, 'Give a response instead')
   const words = await until(async () => (await fieldsIn(bar, said))[0])
   const kept = keychain.length
-  await bar.input({ key: words?.key ?? '', text: 'It is already in /Users/sam/Documents/GitHub/3d-sandbox/.env.local as AI_GATEWAY_API_KEY, in the faceiq-labs branch too' })
+  // Sent with the row's Send, the big button first, Close the small one after it
+  expect((await bar.findAll({ type: 'Button' })).filter(b => ['Send', 'Close'].includes(String(b.props.label))).map(b => [b.props.label, b.props.variant ?? null, b.props.plain ?? null])).toEqual([['Send', 'primary', null], ['Close', null, true]])
+  await bar.input({ key: words?.key ?? '', text: 'It is already in /Users/sam/Documents/GitHub/3d-sandbox/.env.local as AI_GATEWAY_API_KEY, in the faceiq-labs branch too', kind: 'change' } as never)
+  await press(bar, 'Send')
   expect(await until(async () => files.get(`${MEMORY}/boxes/${said}.reply`))).toBe('The person answered in the Claudopus panel instead of giving GITHUB_TOKEN, in their own words: It is already in /Users/sam/Documents/GitHub/3d-sandbox/.env.local as AI_GATEWAY_API_KEY, in the faceiq-labs branch too\n')
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${said}.json`) ? undefined : true))).toBe(true)
   expect(keychain.length).toBe(kept)
@@ -2048,7 +2111,10 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(bar)).length === 1 ? true : undefined))).toBe(true)
   expect(await says(bar, /^↳ Your reply to “Check the ears”$/)).toBe(true)
-  expect((await labelled(bar, 'Close')).length).toBe(1)
+  // Send is the big button, first, and Close the small one after it (16 Nov, the person: "the send button is big but the cancel
+  // button is small")
+  const shape = async () => (await bar.findAll({ type: 'Button' })).filter(b => ['Send', 'Close'].includes(String(b.props.label))).map(b => [b.props.label, b.props.variant ?? null, b.props.plain ?? null])
+  expect(await shape()).toEqual([['Send', 'primary', null], ['Close', null, true]])
   expect((await boxesIn(list)).length + (await boxesIn(details)).length).toBe(0)
   expect(await says(list, /^✎ Type it in the box above the chat$/)).toBe(true)
   expect((await labelled(list, CLOSE)).length).toBe(1)
@@ -2103,8 +2169,10 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
   expect(await until(async () => ((await says(bar, /^↳ Your reply to “Check the ears”$/)) ? true : undefined))).toBe(true)
   expect((await boxesIn(bar))[0]?.props.value).toBe('The left, but ke')
-  // Sent from the bar: it reaches the work in the person's own words, and the box goes with the ask, on to no other card
-  await bar.input({ key: (await boxesIn(bar))[0]?.key ?? '', text: 'The left, but keep the scan' })
+  // Sent from the bar with its Send button: it reaches the work in the person's own words, and the box goes with the ask, on to no
+  // other card
+  await bar.input({ key: (await boxesIn(bar))[0]?.key ?? '', text: 'The left, but keep the scan', kind: 'change' } as never)
+  await bar.press({ key: (await labelled(bar, 'Send'))[0]?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('in their own words: The left, but keep the scan')))).toBeDefined()
   expect(await until(async () => ((await boxesIn(bar)).length === 0 ? true : undefined))).toBe(true)
   expect((await labelled(list, OPEN)).length).toBe(1)

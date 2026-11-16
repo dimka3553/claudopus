@@ -21,6 +21,8 @@ function test(name: string, options: TestBody | { timeoutMs?: number }, body?: T
   else kitTest(name, { ...SLOW, ...options }, body as TestBody)
 }
 const MEMORY = `${HOME}/.claude/claudopus`
+// This Mac's keychain, there unless a test takes it away as a home of a trial chat's own has none
+const KEYCHAIN = `${HOME}/Library/Keychains/login.keychain-db`
 const composer = { kind: 'composer' } as const
 const start = { cwd: '/repo', surface: 'desktop', isInteractive: true } as const
 const PANE = {
@@ -40,6 +42,8 @@ const LIST = {
   requestId: 'claudopus',
   props: { title: 'Claudopus', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 20 }, view: {} },
 } as const
+// The most the engine's fs.read gives whole
+const FS_READ_MOST = 4_194_304
 declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
@@ -55,6 +59,7 @@ type Release = { version: string; commit: string; tree: string; got?: string; ma
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
 const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
+  files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
   if (!options.isNew) files.set(`${MEMORY}/index.md`, '# Streams\n\nname | repo | session | state | summary\n\n')
   const titles: string[] = []
@@ -86,6 +91,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   // and the kind of agent each spawn was asked to start as
   const types: (string | undefined)[] = []
   const registered: string[] = []
+  // and the tools each kind is given, by its name
+  const kindTools: Record<string, string[]> = {}
   const played: string[] = []
   const notified: string[] = []
   // What was handed to osascript
@@ -108,7 +115,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const wake = () => void sleepers.splice(0).forEach(one => one())
   // What each Bash call that ran the admin runner found waiting for it: the grants, as bin/admin would read them
   const admins: { command: string; grants: { host: string; command: string; seal: string; at: number; id: string }[] }[] = []
-  mock.env(on, { HOME, ...options.env })
+  // The kit's clock moves only as a test moves it: the mod's look at how late its timer comes is left out, unless a test asks for it
+  mock.env(on, { HOME, CLAUDOPUS_TIMING: 'test', ...options.env })
   const clock = mock.clock(on, { now: 1_700_000_000_000 })
   // What the engine draws where the mod draws nothing
   on('ui.render', ($, e) => {
@@ -136,6 +144,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (e.path.endsWith('.claude-plugin/plugin.json')) return { value: files.get('manifest') ?? '{ "name": "claudopus", "version": "0.1.0" }' }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT ${e.path}`)
+    // As the engine: no file over 4 MB is given whole
+    if (text.length > FS_READ_MOST) throw new Error(`${e.path} refused: the file is over the ${FS_READ_MOST}-byte limit`)
     return { value: text }
   })
   on('fs.write', (_, e) => {
@@ -162,6 +172,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { value: { content: [{ type: 'text', text }], isError: false } }
   })
   on('session.id', () => ({ value: 'engine-id' }))
+  // The mod's pause in a long step (breathe): answered after the test's own timers have had their turn, as the engine answers from
+  // outside the helper
+  on('session.turns', async () => (await new Promise(done => setTimeout(() => done(undefined), 0)), { value: 1 }))
   // A chat drawn on the desktop app, as most are; `headless` none, as a -p run
   // `narrow`: a terminal under 144 columns, as a phone over ssh, which draws only a tab opened as the person asked: here, one opened
   // while the test's press is still being answered (isPressing). The engine counts only what the press's own hook opens, which the kit
@@ -210,6 +223,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     const [tool, ...rest] = e.argv
     const ok = (stdout = '', exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // The admin gate's wait between two looks at what was pressed: it lasts until the test lets it go with wake(), as a second passing
+    // The end or the first line of a file, as tail and head give them
+    if (tool === 'tail' && rest[0] === '-c') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').slice(-Number(rest[1]))) : ok('', 1)
+    if (tool === 'head' && rest[0] === '-n') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').split('\n').slice(0, Number(rest[1])).join('\n') + '\n') : ok('', 1)
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
@@ -218,6 +234,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The admin gate's seals: one for each message, under the key the keychain holds as keychain:gate; "make" makes a key where
     // there is none and "new" always, as the Mac's own shell does
     if (tool === '/bin/sh' && String(rest[1]).includes('claudopus-admin-gate')) {
+      // Where the home holds no keychain, macOS asks on the person's screen for one to keep the key in
+      if (!files.has(KEYCHAIN)) files.set('keychain:dialog', 'the gate')
       const [, , , said, ...messages] = rest
       // The kept copy of the settings and texts has its key apart, as keychain:known
       const item = String(said).startsWith('known-') ? 'keychain:known' : 'keychain:gate'
@@ -257,6 +275,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (sipsSaid !== undefined) return { value: { exitCode: 0, stdout: sipsSaid, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (tool === 'osascript') osa.push([...e.argv])
     // What was handed to this Mac's keychain on security's stdin
+    if (tool === '/usr/bin/security' && !files.has(KEYCHAIN)) files.set('keychain:dialog', String(rest[0]))
     if (tool === '/usr/bin/security') return (keychain.push(String(e.init?.stdin ?? '')), { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
     // Claudopus.app, and Claudopus Asks for --asks, answer as the apps on this Mac are set: 0 shown, 2 turned off in System Settings
     if (tool?.endsWith('bin/notify')) {
@@ -541,7 +560,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { model: options.startedOn?.[e.description ?? ''] ?? options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
   })
   // The kinds of agent the mod registers, by name
-  on('agent.register', (_, e) => (registered.push(String((e as { name?: string }).name)), { value: undefined }) as never)
+  on('agent.register', (_, e) => (registered.push(String((e as { name?: string }).name)), (kindTools[String((e as { name?: string }).name)] = (e as { tools?: string[] }).tools ?? []), { value: undefined }) as never)
   on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status, ...(options.parents?.[id] ? { parentId: options.parents[id] } : {}) })) as never }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('prompt.submit', (_, e) => {
@@ -570,7 +589,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -1523,6 +1542,52 @@ test('work the engine runs is listed even when the mod never saw it start, and w
   await pane.unmount()
 })
 
+test('a helper, and the work waiting on it, that ended while the mod was out are ended on their cards from their saved record, the work passed its result first, never drawn at work or warned about as stuck (16 Nov a second look that ended unheard was drawn at work for 47 minutes)', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const { clock, files, resumed, appended } = world(on, { agents })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Second look', prompt: 'go', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Picture', prompt: 'go', parentAgentId: 'a1' } as never)
+  // The work ends its step to wait on its helper: it is still at work
+  await $.turn.complete({ answer: 'Waiting on the second look.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await pane.find({ type: 'Text', text: /^Working on/ }))?.text).toBe('Working on 1 thing')
+  // The helper hands back its report while the mod is out: no end is heard, and the engine no longer lists either of them
+  const folder = `${HOME}/.claude/projects/-repo/engine-id/subagents`
+  const handback = (text: string) => JSON.stringify({ timestamp: '2026-11-16T13:25:13Z', type: 'assistant', message: { content: [{ type: 'tool_use', name: 'SubagentHandback', input: { message: text } }] } })
+  files.set(`${folder}/agent-a2.meta.json`, JSON.stringify({ description: 'Second look', spawnDepth: 2, parentAgentId: 'a1', finished: true }))
+  files.set(`${folder}/agent-a2.jsonl`, handback('Nothing wrong found.'))
+  files.set(`${folder}/agent-a1.meta.json`, JSON.stringify({ description: 'Fix the nose', spawnDepth: 1, finished: true }))
+  const saved = () => {
+    const kept = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}') as Record<'cards' | 'helpers' | 'ended', { id: string; status: string; answer: string }[] | undefined>
+    return [...(kept.cards ?? []), ...(kept.helpers ?? []), ...(kept.ended ?? [])]
+  }
+  // The helper ends on its card with its report, and the work that waited on it is passed that report and started again, not ended
+  await clock.advance(70_000)
+  expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: your helper "Second look" has finished') && one.endsWith('Nothing wrong found.')))).toBeDefined()
+  expect(saved().find(one => one.id === 'a2')).toMatchObject({ status: 'done', answer: 'Nothing wrong found.' })
+  expect(saved().find(one => one.id === 'a1')?.status).toBe('working')
+  // Started again, it runs (its record no longer says finished); its other helper's unheard end reaches it at its next step
+  agents.a1 = 'running'
+  files.set(`${folder}/agent-a1.meta.json`, JSON.stringify({ description: 'Fix the nose', spawnDepth: 1 }))
+  files.set(`${folder}/agent-a3.meta.json`, JSON.stringify({ description: 'Picture', spawnDepth: 2, parentAgentId: 'a1', finished: true }))
+  files.set(`${folder}/agent-a3.jsonl`, handback('The picture is drawn.'))
+  await clock.advance(2 * 60_000)
+  expect(await until(async () => appended.find(one => one.startsWith('a1: From Claudopus: your helper "Picture" has finished') && one.endsWith('The picture is drawn.')))).toBeDefined()
+  // then hands back its own report while the mod is out once more: its card ends with that report
+  expect(saved().find(one => one.id === 'a1')?.status).toBe('working')
+  delete agents.a1
+  files.set(`${folder}/agent-a1.meta.json`, JSON.stringify({ description: 'Fix the nose', spawnDepth: 1, finished: true }))
+  files.set(`${folder}/agent-a1.jsonl`, handback('The fix is released.'))
+  await clock.advance(31 * 60_000)
+  expect((await until(() => pane.find({ type: 'Text', text: /^Nothing/ })))?.text).toBe('Nothing is running')
+  expect(await pane.find({ type: 'Text', text: /No progress|quiet/ })).toBeUndefined()
+  expect(saved().filter(one => one.status === 'working').map(one => one.id)).toEqual([])
+  expect(saved().find(one => one.id === 'a1')?.answer).toBe('The fix is released.')
+  await pane.unmount()
+})
+
 test('work the chat started that was running before the mod loaded, as after a rename, is a card of its own, not a helper', async ($, on) => {
   const agents: Record<string, string> = { w5: 'running' }
   const kinds: Record<string, string> = { w5: 'general-purpose' }
@@ -1842,7 +1907,8 @@ test('a run whose output cannot be found says so after three minutes, so a blank
 
 test('a run of a work\'s own wakes it the moment it ends: any command that only waits, the work\'s or its helper\'s, is refused in one sentence, the work is told it ended, and its card no longer says how far it was (16 Nov an upload read 100% beside "about 40% done"; a helper polled for a file its own script wrote)', SLOW, async ($, on) => {
   let isAlive = true
-  const { clock, appended, resumed, stopped } = world(on, { jobs: { output: () => 'progress: 8/8 GB uploading\n', wroteAt: () => 1_700_000_000_000, alive: () => isAlive } })
+  const talk: unknown[] = []
+  const { clock, appended, resumed, stopped, stepped } = world(on, { talk, jobs: { output: () => 'progress: 8/8 GB uploading\n', wroteAt: () => 1_700_000_000_000, alive: () => isAlive } })
   on('session.cwd', () => ({ value: '/repo' }) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'upload the zips', wait: false, origin: composer })
@@ -1890,6 +1956,18 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
   // Work that ended its step with a run still going is started again the moment it ends, with a message
   isAlive = true
   await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', agentId: 'a1', command: 'cd /w && nohup curl -T rest.zip https://example.com/up > rest.log 2>&1 & echo $!', description: 'Upload the rest (about 10 min)' } as never)
+  // The engine, which cannot see that run, presses it for its report as it ends its step: the press is answered with no model, and
+  // its step ends (16 Nov: 30 presses in 25 minutes ended a task early). A report in words before the press still goes on to it
+  const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
+  const press = async (said: string) => {
+    talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: said }] }, PRESS)
+    const before = stepped.length
+    const texts: string[] = []
+    for await (const chunk of $.turn.step({ turnId: 't1', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') texts.push((chunk as { text: string }).text)
+    return [stepped.length - before, texts]
+  }
+  expect(await press('The rest uploads; I am woken when it ends.')).toEqual([0, ['My own work is still going; I am started again when it is done, and give my report then.']])
+  expect(await press(`Both uploads are done. ${'Every file arrived whole. '.repeat(30)}`)).toEqual([1, ['Looking at the nose.']])
   await $.turn.complete({ answer: 'The rest uploads; I am woken when it ends.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(20_000)
   expect(resumed.some(one => one.startsWith('a1: '))).toBe(false)
@@ -1904,7 +1982,12 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
     `n=0; while pgrep -f "sets.py" >/dev/null; do n=$((n+1)); echo "progress: $n tries waiting for sheets"; sleep 8; [ $n -gt 60 ] && break; done; ls -la ~/sets | head; cat ${O}/bg253ddbk.output`,
     'until curl -s localhost:3000 >/dev/null; do echo "progress: 1 tries"; sleep 2; done',
     'sleep 300; cat out.log',
-  ]) expect([command, ((await $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a2', command, description: 'Wait for the sheets', run_in_background: true } as never)) as { deny?: string }).deny?.slice(0, 32)]).toEqual([command, 'Not run: this command only waits'])
+  ]) {
+    const deny = ((await $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a2', command, description: 'Wait for the sheets', run_in_background: true } as never)) as { deny?: string }).deny ?? ''
+    expect([command, deny.slice(0, 32)]).toEqual([command, 'Not run: this command only waits'])
+    // a helper, which is not started again, is told to hand back what it waits for, never to call wake_me (a reader and a check have no such tool)
+    if (command.startsWith('sleep')) expect([deny.includes('hand back what you found and what you wait for'), deny.includes('wake_me')]).toEqual([true, false])
+  }
   // and the wait the old rules gave for helpers, said for what it waits on
   expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'h2', agentId: 'a1', command: "'/x/mods/claudopus/bin/helpers' '/x/helpers/a1.txt'", description: 'Wait for the three builders' } as never)) as { deny?: string }).deny).toMatch(/^Not run: this command only waits for your helpers, .*even after you end your step/)
   // A helper's real work runs
@@ -2045,7 +2128,9 @@ test('only runs really running are listed: a watch the engine killed at its time
   })) ?? []
   // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
   expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
-  expect(shown.some(text => /screening pass ×2|Run the fetch|Run the tidy/.test(text))).toBe(false)
+  expect(shown.some(text => /^(Wait for first screening pass ×2|Run the fetch of the list|Run the tidy up)\b(?! (failed|has finished))/.test(text))).toBe(false)
+  // (the card's own line names the two that ended since its last line, with how each ended)
+  expect(shown).toContain('Run the tidy up has finished and Run the fetch of the list failed')
   // The closing row counts them and says, in words, how many did not finish well
   expect(shown).toContain('4 commands ended · 1 failed, 2 timed out')
   // The wait still running stays, within its time

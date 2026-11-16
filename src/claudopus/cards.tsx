@@ -184,6 +184,7 @@ const sync = async ($: EngineInterface) => {
   const isUnseen = live.some(
     one => (!known.has(one.id) || known.get(one.id) === HELPER) && !helpersChecked.has(one.id) && (one.status === 'running' || one.status === 'pending') && !one.parentId && one.type !== 'fork',
   )
+  if (isUnseen) during('read the chat for its tasks')
   const rows = isUnseen ? await $.session.messages().catch(() => []) : []
   const ownCalls = new Set(
     (Array.isArray(rows) ? rows : []).flatMap(row => (row.toolUses ?? []).filter(use => use.tool === 'Agent').map(use => String(use.input?.description ?? ''))).filter(Boolean),
@@ -226,9 +227,84 @@ const sync = async ($: EngineInterface) => {
     for (const card of cards.values()) if (listed && card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
+  if (listed) await endUnheard($, live, now).catch(err => log($, `work that ended unheard not looked for: ${String(err)}`))
   await keepStoppedReports($, now)
   await lookEnds($)
   await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
+}
+
+// Work, or a helper, that ended while the mod was unloaded is never heard to end, and the engine drops it from its list a while
+// later: its card would be drawn at work, and warned about as stuck, for good (16 Nov a second look that handed back its report at
+// 17:25, while the mod was out from 17:24 to 17:26, was drawn at work for 47 minutes and held its task open). A card at work that
+// the engine no longer lists at all and whose saved record says it finished has ended: helpers first, then work with no helper at
+// work left and nothing it asked to be started again for. Looked at once a minute for each
+const UNHEARD_LOOK = 60_000
+const UNHEARD_QUIET = 60_000
+const unheardLooked = new Map<string, number>()
+const endUnheard = async ($: EngineInterface, live: { id: string }[], now: number) => {
+  const { id } = await read($, me)
+  if (!id || !dir) return
+  const isUnlisted = (one: Todo) =>
+    one.status === 'working' && !one.chat && !live.some(agent => agent.id === one.id) && !cutPending.has(one.id) && !isHeld(one) && now - Math.max(one.startedAt, one.newAt ?? 0) >= UNHEARD_QUIET
+  const list = await read($, todos)
+  const due = list.filter(one => isUnlisted(one) && now - (unheardLooked.get(one.id) ?? -Infinity) >= UNHEARD_LOOK)
+  if (!due.length) return
+  const home = (await $.env.get('HOME')) ?? ''
+  const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
+  const finished = new Map<string, { at: number; answer: string; isReport: boolean }>()
+  for (const one of due) {
+    unheardLooked.set(one.id, now)
+    const meta = parsedOr<{ finished?: boolean }>(await readOr($, `${folder}/agent-${one.id}.meta.json`), {})
+    if (meta.finished !== true) continue
+    const path = `${folder}/agent-${one.id}.jsonl`
+    const stat = await $.fs.stat(path).catch(() => undefined)
+    const at = stat?.mtimeMs || now
+    // Its report: what it handed back, or its last words, from the end of its record
+    const size = stat?.size ?? 0
+    const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
+    let answer = ''
+    let isHandback = false
+    for (const row of tail.reverse()) {
+      const o = parsedOr<{ type?: string; message?: { content?: unknown } }>(row, {})
+      if (o.type !== 'assistant' || !Array.isArray(o.message?.content)) continue
+      const blocks = o.message.content as { type?: string; name?: string; text?: string; input?: { message?: unknown } }[]
+      isHandback = blocks.some(b => b.type === 'tool_use' && b.name === 'SubagentHandback')
+      answer = blocks.map(b => (b.type === 'tool_use' && b.name === 'SubagentHandback' && typeof b.input?.message === 'string' ? b.input.message : b.type === 'text' ? (b.text ?? '') : '')).join('').trim()
+      if (answer) break
+    }
+    finished.set(one.id, { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST })
+  }
+  if (!finished.size) return
+  // The deepest first: a card with a helper still at work, or one that ends now, or with something it asked to be started again for,
+  // waits; one whose helper ends now is passed that helper's result below, which starts it again, as passOnHelper does when heard.
+  // Work the chat started ends now, so the chat is told and a report it gave is kept; a helper keeps the time it really ended
+  let endedNow: string[] = []
+  await changeTodos($, all => {
+    const gone = new Set<string>()
+    let list = all
+    for (let isMoved = true; isMoved; ) {
+      isMoved = false
+      list = list.map(one => {
+        const f = finished.get(one.id)
+        if (!f || one.status !== 'working' || one.wakeWhen || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
+        gone.add(one.id)
+        isMoved = true
+        // (its words count as a report only when it handed one back or wrote one as long, as at a heard end)
+        const isTop = !one.parentId
+        const answer = f.answer || one.answer
+        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && f.isReport ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
+      })
+    }
+    endedNow = [...gone]
+    return gone.size ? list : all
+  })
+  if (!endedNow.length) return
+  await log($, `work that ended while the mod was out ended on its card: ${endedNow.join(', ')}`)
+  for (const one of endedNow) {
+    const card = (await read($, todos)).find(todo => todo.id === one)
+    if (card?.parentId && card.parentId !== HELPER) await passOnHelper($, one, card.answer, 'done', true).catch(err => log($, `helper ${one}'s result not passed on: ${String(err)}`))
+  }
+  redraw($)
 }
 
 // Changes the to-do a piece of work belongs to; work the mod never saw start is looked up first, and a helper of unknown work changes nothing
@@ -397,6 +473,7 @@ const recoverEnded = async ($: EngineInterface) => {
     .slice(0, KEPT)
     .filter(({ one }) => !list.some(card => card.id === one && !isBare(card)) && !live.some(agent => agent.id === one && WORKING.includes(agent.status)))
   if (!fresh.length) return
+  during('read back ended work')
   const found: Todo[] = []
   for (const { one: agentId, meta } of fresh) {
     try {
@@ -419,6 +496,7 @@ const recoverEnded = async ($: EngineInterface) => {
       let items: Item[] = []
       const entries: Entry[] = []
       for (const row of text.split('\n')) {
+        await breathe($)
         const o = (() => {
           try {
             return JSON.parse(row) as { timestamp?: string; type?: string; message?: { model?: string; usage?: Record<string, number>; content?: unknown } }

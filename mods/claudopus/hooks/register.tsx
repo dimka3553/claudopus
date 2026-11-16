@@ -187,6 +187,73 @@ const everyLoad = ($: EngineInterface, ms: number, fn: () => unknown) => {
   const timer = $.clock.every(ms, () => void isReplaced($).then(left => (left ? timer.cancel() : fn())))
   return timer
 }
+// ---- Never holding Claude's helper ----
+// Claude's engine runs every add-on's hooks on one shared helper and asks it each second whether it is there. With no answer for five
+// seconds it starts the helper again and switches off the add-on whose code was running, until /reload-plugins: Claudopus went off
+// three times in one afternoon (16 Nov). The helper answers between two of the mod's steps, so the mod keeps each step short and,
+// when it falls behind, does less until it has caught up
+// How often the mod looks at how late its own timer comes, and how late counts as behind: then fresh drawings and the looks that can
+// wait are left out for BEHIND_FOR
+const HOLD_LOOK = 250
+const LATE = 400
+const BEHIND_FOR = 10_000
+// and a drawing is given as it was for this long at most, however long the mod stays behind
+const BEHIND_HELD = 30_000
+// A hold this long is written in the log with the steps begun meanwhile, so a switch-off can be traced to the step that caused it
+const HOLD_SAID = 1500
+let holdAt = 0
+// Looks left while behind: each late one starts the count again
+let behindLooks = 0
+let longestHold = 0
+const isBehind = () => behindLooks > 0
+// The heavier steps the mod began lately, by name, so a long hold names them: those begun from a second before the last look on time
+const begun: { at: number; name: string }[] = []
+const during = (name: string) => void (begun.push({ at: Date.now(), name }), begun.length > 40 && begun.splice(0, begun.length - 40))
+// The test kit's clock moves only when a test moves it, so there the gaps in real time are the test's own: its world says so
+let isTimed = true
+// Each look: the helper was held for as long as the timer came late
+const lookHold = ($: EngineInterface) => {
+  const now = Date.now()
+  const late = holdAt && isTimed ? now - holdAt - HOLD_LOOK : 0
+  holdAt = now
+  if (late < LATE) {
+    // Caught up: drawn again, with what was left out meanwhile
+    if (behindLooks > 0 && (behindLooks -= 1) === 0) $.ui.invalidate('ui.render')
+    return
+  }
+  behindLooks = BEHIND_FOR / HOLD_LOOK
+  longestHold = Math.max(longestHold, late)
+  if (late < HOLD_SAID) return
+  const steps = [...new Set(begun.filter(one => one.at >= now - late - HOLD_LOOK - 1000).map(one => one.name))]
+  void log($, `Claude's helper was held ${late} ms${steps.length ? `; steps begun then: ${steps.join(', ')}` : ''}`)
+}
+// A step that goes through much at once hands the helper back every BREATH ms, so the engine's question is answered meanwhile
+const BREATH = 40
+let breathAt = 0
+const breathe = async ($: EngineInterface) => {
+  if (Date.now() - breathAt < BREATH) return
+  // Any call to the engine will do: it is answered from outside the helper, which answers the engine's question meanwhile (one the
+  // mod makes nowhere else, so the test world can answer it as late as the engine does)
+  await $.session.turns()
+  breathAt = Date.now()
+}
+// The engine gives no file over 4 MB whole (fs.read refuses it), and a whole one is worked through at once: what grows without end
+// (a log, a command's output) is read from its end
+const TAIL_BYTES = 200_000
+const fileEnd = async ($: EngineInterface, path: string, bytes = TAIL_BYTES) => {
+  const r = await $.process.run(['tail', '-c', String(bytes), path], { timeoutMs: 10_000 }).catch(() => undefined)
+  return r?.exitCode === 0 ? r.stdout : ''
+}
+// and is added to at its end, never read and written back whole: a file over 4 MB read as nothing would be written back as only the
+// new text
+const appendTo = async ($: EngineInterface, path: string, text: string) => {
+  const r = await $.process.run(['sh', '-c', 'printf %s "$2" >> "$1"', 'sh', path, text]).catch(() => undefined)
+  if (r?.exitCode === 0) return
+  const was = await $.fs.read(path).then(String, (err: unknown) => (/ENOENT|no such file/i.test(String(err)) ? '' : undefined))
+  if (was === undefined) throw new Error(`${path} not added to: it could not be read`)
+  await $.fs.write(path, `${was}${text}`)
+}
+
 // and one that fires once, unless a newer load took charge before it does
 const afterLoad = ($: EngineInterface, ms: number, fn: () => unknown) => $.clock.after(ms, () => void isReplaced($).then(left => (left ? undefined : fn())))
 
@@ -384,9 +451,9 @@ const tidyLog = async ($: EngineInterface) => {
   if (text.includes('\u0000')) await $.fs.write(`${dir}/log.md`, text.replaceAll('\u0000', '')).catch(() => undefined)
 }
 // A chat's saved words, words/<chat id>.md: the person's messages and Claude's answers, added to the end
-const appendWords = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/words/${chatId}.md`, `${await readOr($, `${dir}/words/${chatId}.md`)}${text}`)
+const appendWords = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/words/${chatId}.md`, text)
 // A chat's asks and answers, asks/<chat id>.md, added to the end
-const appendAsks = async ($: EngineInterface, chatId: string, text: string) => $.fs.write(`${dir}/asks/${chatId}.md`, `${await readOr($, `${dir}/asks/${chatId}.md`)}${text}`)
+const appendAsks = async ($: EngineInterface, chatId: string, text: string) => appendTo($, `${dir}/asks/${chatId}.md`, text)
 
 type Ui = ElementTable
 // A colour with a see-through part, #RRGGBBAA, and how much of it shows (0 to 255)
@@ -452,6 +519,20 @@ const knowSystem = async ($: EngineInterface) => {
   const data = (await $.env.get('XDG_DATA_HOME')) ?? ''
   keyringRoot = `${(await $.env.get('HOME')) ?? ''}/.local/share/claudopus/keyring`
   keyringOldRoot = data.startsWith('/') ? `${data}/claudopus/keyring` : ''
+}
+// Whether this Mac's home folder holds a keychain. One without (a test's or a trial chat's home of its own) makes security ask on
+// the person's screen for a keychain to keep an item in ("Keychain Not Found"), so nothing is asked of the keychain there: what
+// would use it fails as a keychain that does not answer. Looked at each time, so one made later is used. Linux keeps files instead
+const hasKeychain = async ($: EngineInterface) => {
+  if (isLinux) return true
+  const home = (await $.env.get('HOME')) ?? ''
+  if (!home.startsWith('/')) return false
+  // No folder of keychains at all is a home of its own; a folder that cannot be listed is left to security as before. A keychain
+  // there may be a link (one moved and linked back); metadata.keychain-db alone is no keychain
+  const where = `${home}/Library/Keychains`
+  if (!(await $.fs.stat(where).then(() => true, err => !/ENOENT|ENOTDIR/.test(String(err))))) return false
+  const found = await $.fs.list(where).catch(() => undefined)
+  return !found || found.some(one => one.name !== 'metadata.keychain-db' && /\.keychain(?:-db)?$/.test(one.name))
 }
 // How this computer is named in what the person reads
 const thisMac = () => (isLinux ? 'this machine' : 'this Mac')
@@ -1418,6 +1499,7 @@ const sync = async ($: EngineInterface) => {
   const isUnseen = live.some(
     one => (!known.has(one.id) || known.get(one.id) === HELPER) && !helpersChecked.has(one.id) && (one.status === 'running' || one.status === 'pending') && !one.parentId && one.type !== 'fork',
   )
+  if (isUnseen) during('read the chat for its tasks')
   const rows = isUnseen ? await $.session.messages().catch(() => []) : []
   const ownCalls = new Set(
     (Array.isArray(rows) ? rows : []).flatMap(row => (row.toolUses ?? []).filter(use => use.tool === 'Agent').map(use => String(use.input?.description ?? ''))).filter(Boolean),
@@ -1460,9 +1542,84 @@ const sync = async ($: EngineInterface) => {
     for (const card of cards.values()) if (listed && card.leftSince && !live.some(one => one.id === card.id)) ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }))
     return isChanged ? capped([...cards.values()]) : list
   })
+  if (listed) await endUnheard($, live, now).catch(err => log($, `work that ended unheard not looked for: ${String(err)}`))
   await keepStoppedReports($, now)
   await lookEnds($)
   await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`))
+}
+
+// Work, or a helper, that ended while the mod was unloaded is never heard to end, and the engine drops it from its list a while
+// later: its card would be drawn at work, and warned about as stuck, for good (16 Nov a second look that handed back its report at
+// 17:25, while the mod was out from 17:24 to 17:26, was drawn at work for 47 minutes and held its task open). A card at work that
+// the engine no longer lists at all and whose saved record says it finished has ended: helpers first, then work with no helper at
+// work left and nothing it asked to be started again for. Looked at once a minute for each
+const UNHEARD_LOOK = 60_000
+const UNHEARD_QUIET = 60_000
+const unheardLooked = new Map<string, number>()
+const endUnheard = async ($: EngineInterface, live: { id: string }[], now: number) => {
+  const { id } = await read($, me)
+  if (!id || !dir) return
+  const isUnlisted = (one: Todo) =>
+    one.status === 'working' && !one.chat && !live.some(agent => agent.id === one.id) && !cutPending.has(one.id) && !isHeld(one) && now - Math.max(one.startedAt, one.newAt ?? 0) >= UNHEARD_QUIET
+  const list = await read($, todos)
+  const due = list.filter(one => isUnlisted(one) && now - (unheardLooked.get(one.id) ?? -Infinity) >= UNHEARD_LOOK)
+  if (!due.length) return
+  const home = (await $.env.get('HOME')) ?? ''
+  const folder = `${home}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${id}/subagents`
+  const finished = new Map<string, { at: number; answer: string; isReport: boolean }>()
+  for (const one of due) {
+    unheardLooked.set(one.id, now)
+    const meta = parsedOr<{ finished?: boolean }>(await readOr($, `${folder}/agent-${one.id}.meta.json`), {})
+    if (meta.finished !== true) continue
+    const path = `${folder}/agent-${one.id}.jsonl`
+    const stat = await $.fs.stat(path).catch(() => undefined)
+    const at = stat?.mtimeMs || now
+    // Its report: what it handed back, or its last words, from the end of its record
+    const size = stat?.size ?? 0
+    const tail = (size > 0 && size < 2_000_000 ? await readOr($, path) : ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n')
+    let answer = ''
+    let isHandback = false
+    for (const row of tail.reverse()) {
+      const o = parsedOr<{ type?: string; message?: { content?: unknown } }>(row, {})
+      if (o.type !== 'assistant' || !Array.isArray(o.message?.content)) continue
+      const blocks = o.message.content as { type?: string; name?: string; text?: string; input?: { message?: unknown } }[]
+      isHandback = blocks.some(b => b.type === 'tool_use' && b.name === 'SubagentHandback')
+      answer = blocks.map(b => (b.type === 'tool_use' && b.name === 'SubagentHandback' && typeof b.input?.message === 'string' ? b.input.message : b.type === 'text' ? (b.text ?? '') : '')).join('').trim()
+      if (answer) break
+    }
+    finished.set(one.id, { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST })
+  }
+  if (!finished.size) return
+  // The deepest first: a card with a helper still at work, or one that ends now, or with something it asked to be started again for,
+  // waits; one whose helper ends now is passed that helper's result below, which starts it again, as passOnHelper does when heard.
+  // Work the chat started ends now, so the chat is told and a report it gave is kept; a helper keeps the time it really ended
+  let endedNow: string[] = []
+  await changeTodos($, all => {
+    const gone = new Set<string>()
+    let list = all
+    for (let isMoved = true; isMoved; ) {
+      isMoved = false
+      list = list.map(one => {
+        const f = finished.get(one.id)
+        if (!f || one.status !== 'working' || one.wakeWhen || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id)))) return one
+        gone.add(one.id)
+        isMoved = true
+        // (its words count as a report only when it handed one back or wrote one as long, as at a heard end)
+        const isTop = !one.parentId
+        const answer = f.answer || one.answer
+        return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && f.isReport ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined }
+      })
+    }
+    endedNow = [...gone]
+    return gone.size ? list : all
+  })
+  if (!endedNow.length) return
+  await log($, `work that ended while the mod was out ended on its card: ${endedNow.join(', ')}`)
+  for (const one of endedNow) {
+    const card = (await read($, todos)).find(todo => todo.id === one)
+    if (card?.parentId && card.parentId !== HELPER) await passOnHelper($, one, card.answer, 'done', true).catch(err => log($, `helper ${one}'s result not passed on: ${String(err)}`))
+  }
+  redraw($)
 }
 
 // Changes the to-do a piece of work belongs to; work the mod never saw start is looked up first, and a helper of unknown work changes nothing
@@ -1631,6 +1788,7 @@ const recoverEnded = async ($: EngineInterface) => {
     .slice(0, KEPT)
     .filter(({ one }) => !list.some(card => card.id === one && !isBare(card)) && !live.some(agent => agent.id === one && WORKING.includes(agent.status)))
   if (!fresh.length) return
+  during('read back ended work')
   const found: Todo[] = []
   for (const { one: agentId, meta } of fresh) {
     try {
@@ -1653,6 +1811,7 @@ const recoverEnded = async ($: EngineInterface) => {
       let items: Item[] = []
       const entries: Entry[] = []
       for (const row of text.split('\n')) {
+        await breathe($)
         const o = (() => {
           try {
             return JSON.parse(row) as { timestamp?: string; type?: string; message?: { model?: string; usage?: Record<string, number>; content?: unknown } }
@@ -3880,6 +4039,7 @@ const loadWork = async ($: EngineInterface, id: string) => {
     const now = await $.clock.now()
     const was = talks.get(id)
     if (was?.key !== key || (!was.lines && now - (was.at ?? 0) >= RETRY_READ)) {
+      during('read a task for its Details')
       const rows = await $.session.messages({ agentId: id }).catch(() => undefined)
       talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now })
       isChanged = true
@@ -3958,6 +4118,7 @@ const loadTheirs = async ($: EngineInterface, one: Todo) => {
     // Its folder named as the engine names its projects, and failing that any project that holds that chat
     const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-')
     const name = `${c.id}/subagents/agent-${c.agent}.jsonl`
+    during("read another chat's task")
     const r = await $.process
       .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', `${home}/.claude/projects`, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
       .catch(() => undefined)
@@ -4193,10 +4354,18 @@ const stopFlow = async ($: EngineInterface, id: string) => {
   if (r.deny) return (pressed.delete(`flow:${id}`), log($, `workflow ${id} not stopped: ${r.deny}`))
   await changeFlow($, id, (one, at) => ({ ...one, status: 'stopped', endedAt: at }))
 }
+const journalSigns = new Map<string, string>()
 const readJournal = async ($: EngineInterface, id: string) => {
   const f = (await read($, flows)).find(one => one.id === id)
   if (!f?.transcriptDir) return
-  const text = await readOr($, `${f.transcriptDir}/journal.jsonl`)
+  // Read again only once it has changed: it grows with the run, and was read whole every two seconds
+  const path = `${f.transcriptDir}/journal.jsonl`
+  const stat = await $.fs.stat(path).catch(() => undefined)
+  const sign = `${stat?.size ?? 0}:${stat?.mtimeMs ?? 0}`
+  if (stat && journalSigns.get(id) === sign) return
+  if (stat) journalSigns.set(id, sign)
+  during('read a workflow')
+  const text = await readOr($, path)
   if (!text) return
   const now = await $.clock.now()
   await changeFlow($, id, one => withJournal(one, journalOf(text), now))
@@ -4211,6 +4380,7 @@ const followFlows = async ($: EngineInterface) => {
   const running = (await read($, flows)).filter(f => f.status === 'working' && f.session === mine)
   for (const f of running) await readJournal($, f.id).catch(err => log($, `journal of ${f.id} not read: ${String(err)}`))
   if (running.length && flowLooks % END_LOOK === 0) {
+    during('read the chat for ended workflows')
     const rows = await $.session.messages().catch(() => [])
     for (const row of Array.isArray(rows) ? rows : []) if (row.role === 'user' && row.text.includes('<task-notification')) await flowEnded($, row.text)
   }
@@ -4271,6 +4441,7 @@ const pickedOf = (f: Flow) => f.agents.find(one => one.id === flowPicked.get(f.i
 const flowTalkOf = async ($: EngineInterface, f: Flow, agent: FlowAgent) => {
   const key = [agent.id, agent.status, agent.tokens ?? 0].join(':')
   if (flowTalks.get(agent.id)?.key !== key) {
+    during('read a workflow agent')
     const text = f.transcriptDir ? await readOr($, `${f.transcriptDir}/agent-${agent.id}.jsonl`) : ''
     flowTalks.set(agent.id, { key, lines: text ? talkOf(rowsOf(text)) : undefined })
   }
@@ -5460,9 +5631,47 @@ let isPressMissed = false
 const holdForPress = async ($: EngineInterface) => {
   const at = (pressFrom = await $.clock.now())
   pressFresh = freshness
-  $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), isPressMissed && ((isPressMissed = false), drawAgain($)))))
+  // A hold that ends with no press reaching the mod while a drawing was held back (a click on a button already gone) gives the buttons new keys: the app keeps a
+  // focused button in view and scrolls back to it at every drawing, which threw the panel down and back as the person clicked on
+  $.clock.after(PRESS_HOLD + 20, () => void (pressFrom === at && ((pressFrom = 0), isPressMissed && ((isPressMissed = false), (presses += 1), drawAgain($)))))
 }
 const isPressHeld = (at: number) => pressFrom > 0 && at - pressFrom < PRESS_HOLD && pressFresh === freshness
+// A pane drawn afresh is given again, as it was, until FRESH_GAP has passed (or four times what its drawing took, when longer), and
+// then drawn afresh once. The engine retires a drawing's buttons the moment a newer drawing of that pane is made, and a newer ask for
+// one drops the reply of the drawing still under way: with seven tasks, their helpers and commands, the panel was asked for about
+// five times a second and each drawing took 300 ms, so no drawing reached the app for half a minute while every one retired the
+// buttons on screen, and every click named a button already gone (16 Nov, 0.2.153: Close pressed twenty times, all "not handled").
+// Given again, a drawing is the same tree, keeps its buttons, and is answered at once. A press of the person's is drawn at once
+const FRESH_GAP = 1000
+const SLOW_DRAW = 100
+const freshDrawn = new Map<string, { at: number; ms: number; fresh: number }>()
+const freshDue = new Set<string>()
+// The panes being drawn afresh just now: an ask that comes meanwhile gets the drawing before, and the pane is asked for again the
+// moment the fresh one is made, since the engine drops the reply of a drawing a newer ask overtook
+const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean }>()
+let pressedAt = 0
+const isFreshTooSoon = ($: EngineInterface, key: string, at: number) => {
+  const going = freshUnderWay.get(key)
+  if (going && going.fresh === freshness) return (going.isOvertaken = true)
+  const last = freshDrawn.get(key)
+  // The mod's own calls for a drawing (an ask, a box, a press, a picture: freshness) come at once
+  if (!last || pressedAt >= last.at || last.fresh !== freshness) return false
+  // Only while drawings are slow, as under a load that drops them: a quick one reaches the app before the next is asked for
+  if (last.ms < SLOW_DRAW) return false
+  const gap = Math.max(FRESH_GAP, last.ms * 4)
+  if (at - last.at >= gap) return false
+  // (asked for without counting as a call of the mod's own, which would draw afresh at once and skip the gap)
+  if (!freshDue.has(key)) (freshDue.add(key), $.clock.after(gap - (at - last.at) + 20, () => void (freshDue.delete(key), drawFresh($))))
+  return true
+}
+// Around each drawing made afresh: one asked for while it was made is made again the moment it is done
+const freshBegins = (key: string) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false }), freshness)
+const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
+  const isOvertaken = freshUnderWay.get(key)?.isOvertaken
+  freshUnderWay.delete(key)
+  if (made) freshDrawn.set(key, made)
+  if (isOvertaken) void drawFresh($)
+}
 let calmAt = 0
 const engage = async ($: EngineInterface) => void (engagedAt = await $.clock.now())
 // Each second: anything new the panel shows draws it again by itself, as the values it read are written; its running times alone
@@ -5481,8 +5690,9 @@ const calmLook = async ($: EngineInterface, isMoving: boolean) => {
   if (isNew) return void ((list.side = side), drawAgain($), (list.side = sideSign()))
   // Counted from the panel's last drawing afresh or the last of these, so a Details tab or the band drawn without the panel moves on
   // every CALM too, not each second
-  if (!isMoving || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
+  if (!(isMoving || outputMoved) || isTyping || now - engagedAt < ENGAGED || now - Math.max(list.at, calmAt) < CALM) return
   calmAt = now
+  outputMoved = false
   await writeHeldOthers($)
   recordEvent($, 'redraw-calm')
   $.ui.invalidate('ui.render')
@@ -6834,6 +7044,9 @@ const boxHead = (text: string) => {
 const boxTries = new Map<string, number>()
 // The boxes something is typed in, unsent, so an ask's reply box does not take the keys from them
 const boxTyped = new Set<string>()
+// What is typed in the bar's key box while it is open, only so its Send button can send it: never written anywhere, and gone once
+// it is sent, closed or the box moves
+const barKeyTyped = new Map<string, string>()
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map<string, string>()
 // Sent from here: the box goes at once, before the runner removes its request
@@ -6912,7 +7125,7 @@ const lookBoxes = async ($: EngineInterface) => {
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
-  for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id))
+  for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), barKeyTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
   drawAgain($)
@@ -6920,8 +7133,10 @@ const lookBoxes = async ($: EngineInterface) => {
 
 // A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
 // which sendBox calls as before for set and has, so only delete goes through here
-const boxKeyring = ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
-  isLinux
+const boxKeyring = async ($: EngineInterface, what: 'set' | 'has' | 'delete', id: string, stdin?: string) =>
+  !(await hasKeychain($))
+    ? { exitCode: -1 }
+    : isLinux
     ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
     : what === 'delete'
       ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
@@ -6949,7 +7164,9 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     return void drawAgain($)
   }
   const escaped = sent.replace(/[\\"]/g, '\\$&')
-  const r = isLinux
+  const r = !(await hasKeychain($))
+    ? { exitCode: -1 }
+    : isLinux
     ? await boxKeyring($, 'set', id, `${sent}\n`)
     : await $.process
         .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
@@ -6978,6 +7195,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
   boxSent.add(id)
+  barKeyTyped.delete(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   if (boxOpen?.id === id) ((boxOpen = undefined), (barBoxAt = 0))
@@ -7031,6 +7249,7 @@ const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. A resp
 const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surface: string) => {
   if (id && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
   boxOpen = id ? { id, mode } : undefined
+  barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
   barBoxAt = 0
   boxPresses += 1
@@ -7083,6 +7302,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
 // What is typed in a key's field goes by its mode: the key to the keychain, a response to the command that asked
 const submitBox = ($: EngineInterface, id: string, mode: BoxMode, value: string) => {
   boxTyped.delete(id)
+  barKeyTyped.delete(id)
   freeTimes($)
   barBoxAt = 0
   const run = mode === 'reply' ? sendBoxReply($, id, value) : sendBox($, id, value)
@@ -7107,7 +7327,7 @@ const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string)
       <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send it as a response" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
     </ui.Box>
   ) : null
-// The row in the bar above the prompt for the key box opened there: what goes where, the field, and Close
+// The row in the bar above the prompt for the key box opened there: what goes where, the field, Send, the big one, and Close, small
 const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
   const name = boxNameOf(one)
   const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`
@@ -7124,13 +7344,14 @@ const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
               placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
               submitLabel="send"
               autoFocus
-              onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
+              onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
               onSubmit={value => submitBox($, one.id, mode, value)}
             />
           </ui.Box>
         ) : null}
-        <ui.Box flexShrink={0}>
-          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" onPress={press => openBox($, undefined, mode, press.surface)} />
+        <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+          <ui.Button key={`band-key-send-${boxPresses}`} label="Send" variant="primary" onPress={() => void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, barKeyTyped.get(one.id) ?? ''))} />
+          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" plain dimColor onPress={press => openBox($, undefined, mode, press.surface)} />
         </ui.Box>
       </ui.Box>
       {boxSaid.get(one.id) ? <ui.Text key="band-key-said" color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
@@ -7308,6 +7529,7 @@ for m in "$@"; do
   printf '%s\\n%s' "$k" "$m" | /usr/bin/perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m // "", $k), "\\n"' || exit 1
 done`
 const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-make', messages: string[]) => {
+  if (!(await hasKeychain($))) return undefined
   const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
   const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
@@ -7391,7 +7613,7 @@ let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
   if (isKeptForgotten || !dir) return
   isKeptForgotten = true
-  await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
+  if (await hasKeychain($)) await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
   if ((await readConfig($, dir)).adminPassword !== undefined) await setConfig($, dir, 'adminPassword', undefined).catch(() => undefined)
 }
 
@@ -7770,6 +7992,7 @@ const knownRead = async ($: EngineInterface): Promise<Map<string, string | null>
 }
 // Whether the kept copy's own key is there: 'no' only when the keychain answered that it is not, 'error' when it did not answer
 const knownKey = async ($: EngineInterface): Promise<'yes' | 'no' | 'error'> => {
+  if (!(await hasKeychain($))) return 'error'
   const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', 'known-has'], { timeoutMs: 20_000 }).catch(() => undefined)
   return r?.exitCode === 0 ? 'yes' : r?.exitCode === 3 ? 'no' : 'error'
 }
@@ -8382,8 +8605,9 @@ const promptHooks = (on: On) => {
 // What every kind of the mod's agents is told before its task, in place of the engine's own agent prompt
 const AGENT_HEAD =
   'You are an agent of Claude Code, working in the background on a task you are given. Use the tools you have to do it fully: no more than it asks, and not half done. Read files you know you need yourself; send calls that need nothing from each other together. Paths you give are absolute. When you are done, give your report: what was done, what you found, and what is not done or not checked, short, with the file paths that matter. Use no emojis.'
-// The panel's tools, which work keeps its card with, and the handback its report goes through
-const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall']
+// The panel's tools, which work keeps its card with, and the handback its report goes through. Each kind told to call `wake_me`
+// rather than wait has it: a task and a quick task to be started again, a helper to be told to hand back what it waits for instead
+const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall', 'mcp__claudopus__wake_me']
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback']
 // ToolSearch loads the ones among these the engine holds back until asked (Monitor, SendMessage, TaskStop and the like)
 const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit', 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback', ...PANEL_TOOLS]
@@ -8522,7 +8746,8 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
     const file = /<output-file>([^<]+)<\/output-file>/.exec(body)?.[1] ?? ''
     const status = /<status>([^<]+)<\/status>/.exec(body)?.[1] ?? ''
     const summary = /<summary>([^<]+)<\/summary>/.exec(body)?.[1] ?? ''
-    const raw = file ? (await readOr($, file)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n') : ''
+    // From the end of its output, which may be far over what the engine gives whole
+    const raw = file ? (await fileEnd($, file, 64_000)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n') : ''
     // with every kept key hidden, as in any tool's answer; withheld when that could not be checked
     if (raw) await knowKept($, true)
     const hidden = raw ? await hiddenJson($, JSON.stringify(raw)) : JSON.stringify('')
@@ -8624,7 +8849,9 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`)
   const timer = everyLoad($, STEP_LOOK, () => {
     void (async () => {
-      const text = await readOr($, logFile)
+      // Its end only: a release's whole log can be over the 4 MB the engine gives whole, and then its last line was never seen
+      during('look at a release')
+      const text = await fileEnd($, logFile, 64_000)
       const exit = /claudopus-exit (\d+)\s*$/.exec(text)?.[1]
       const isLate = (await $.clock.now()) - at > STEP_LONGEST
       if (exit === undefined && !isLate) return
@@ -8898,6 +9125,11 @@ const chatHooks = (on: On) => {
       for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)])
         if (one.status !== 'working' && one.endedAt > last && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, Infinity)
     }
+    // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold)
+    holdAt = 0
+    // (not in the test kit, whose clock a test moves by hours at once: there only a test that asks for it has it)
+    isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
+    if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     let seconds = 0
     everyLoad($, 1000, async () => {
       if (drawnNow > (await read($, lastDrawn))) await update($, lastDrawn, () => drawnNow)
@@ -8911,7 +9143,7 @@ const chatHooks = (on: On) => {
       if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
-        await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
+        if (!isBehind()) await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
       }
       const isFlowing = (await read($, flows)).some(f => f.status === 'working')
       // Held while the person types into a reply box (holdTimes)
@@ -8921,9 +9153,9 @@ const chatHooks = (on: On) => {
       // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
       if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
       // The mod alone says when its panes are drawn again, and only when what they show has moved (calmLook)
-      await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
+      if (!isBehind()) await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
-      if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
+      if (!isBehind() && (await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
       const now = await $.clock.now()
       for (const one of [...(await read($, flows)), ...(await read($, todos))].filter(card => isLingering(card, now))) {
@@ -8947,6 +9179,8 @@ const chatHooks = (on: On) => {
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
     // A chat the app runs from another Mac has a keeper on this one, which goes on with its work should the app end its process
     if (isRunFromAfar) await startKeeper($, id).catch(err => log($, `keeper not started: ${String(err)}`))
+    // and every chat a watcher that brings Claudopus back should Claude switch it off
+    await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
@@ -8973,14 +9207,19 @@ const chatHooks = (on: On) => {
     return begun
   })
 
+  // The setting that brings Claudopus back is its own: never shown in /config
+  on('config.describe', ($, e, next) => next(e.key === REVIVED_KEY ? { ...e, isHidden: true } : e))
+
   // A chat that ends removes its file, so the other panels drop its work at once
   on('session.end', async ($, e, next) => {
     isEnded = true
+    await endBeat($, (await read($, me)).id).catch(() => undefined)
     await unshare($).catch(() => undefined)
     return next(e)
   })
 
   on('prompt.submit', async ($, e, next) => {
+    await holdTest($)
     // The texts a message is answered with are the ones known: a change made since is put back first
     if (dir) await personCheck($).catch(err => log($, `files not compared as a message came: ${String(err)}`))
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))
@@ -9697,8 +9936,12 @@ const lookJobs = async ($: EngineInterface) => {
   if (psText !== undefined) void endWaiters($, await read($, todos), now).catch(err => log($, `waits not stopped: ${String(err)}`))
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
-  if (isChanged) void drawFresh($)
+  // A command that ended leaves its row at once; new output alone waits for the panel's next calm drawing (calmLook, every CALM while
+  // work runs): drawn afresh at each output, seven tasks' commands drew the panel without a pause and no click held (16 Nov)
+  if (ended.length) void drawFresh($)
+  else if (isChanged) outputMoved = true
 }
+let outputMoved = false
 
 // The memory a followed process and all it started hold, as the processes were last listed
 const memSeen = (pid?: string) => {
@@ -9772,7 +10015,7 @@ const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: 
     const several = left.filter(l => l.span === one.span).length > 1
     const what = several || !span.what ? leftName(one.top.command) : span.what
     adopted.add(one.top.pid)
-    added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true }])
+    added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true, ...(span.bgId ? { from: span.bgId } : {}) }])
   }
   if (!added.size) return
   await changeTodos($, cards => cards.map(one => (added.has(one.id) ? { ...one, detached: [...(one.detached ?? []).filter(d => !added.get(one.id)?.some(a => a.id === d.id)), ...(added.get(one.id) ?? [])].slice(-BG_KEPT) } : one)))
@@ -10280,7 +10523,7 @@ const HELPER_PASSED = (helper: string, work: string) =>
 
 // A helper that ends while the work that started it has ended its step: the engine hands its result to the chat (seen live on 16
 // Nov), so Claudopus passes it on to that work and starts it again with it. The work never holds itself open to wait for helpers
-const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status']) => {
+const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
   if (!dir || isOff) return
   const list = await read($, todos)
   const helper = list.find(one => one.id === helperId)
@@ -10290,6 +10533,9 @@ const passOnHelper = async ($: EngineInterface, helperId: string, report: string
   // A work at a step of its own has the result from the engine itself. One the engine still holds for a command of its own may have
   // it too: it is passed on all the same, as a result lost costs more than one read twice, but the chat had none of it to be told of
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === parent.id)?.status
+  // A helper whose end was never heard (it ended while the mod was out) had its result reach no step of the work's: one now at a
+  // step, woken by another such helper's result, reads it at its next step
+  if (listed === 'running' && isUnheard) return void (await tell($, parent.id, HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS))))
   if (listed === 'running') return
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
@@ -10495,6 +10741,72 @@ const tellDevice = async ($: EngineInterface, text: string) => {
 // The line on a card of cut-off work: when, and whether it goes on again
 const cutLine = (one: Todo) =>
   one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; running again since ${hhmm(one.backAt)}.` : `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; it couldn't be restarted.`) : ''
+
+// ---- Back by itself after Claude switches it off ----
+
+// Claude's engine switches off an add-on that held its shared helper for five seconds, and that chat has no Claudopus until the
+// person types /reload-plugins. The engine loads an add-on again by itself when one of its own settings changes, so each chat's
+// load writes its beat, keep/<chat>.beat naming the chat's process, every BEAT_EVERY, and starts bin/revive, one on the Mac at a
+// time, which changes the setting "revived" (plugin.json's userConfig) when a beat goes quiet while its process still runs.
+// Changed, it loads Claudopus again in every chat, as an update does
+const BEAT_EVERY = 3000
+const beatFile = (id: string) => `${dir}/keep/${id}.beat`
+const settingsFile = async ($: EngineInterface) => `${(await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`}/settings.json`
+// The key this copy has in the settings: claudopus@<marketplace> for an installed one, claudopus@inline for one loaded from a folder
+const ownKey = ($: EngineInterface) => {
+  const market = /\/plugins\/cache\/([^/]+)\/claudopus\//.exec($.plugin.root)?.[1]
+  return market && /^[\w.-]+$/.test(market) ? `claudopus@${market}` : 'claudopus@inline'
+}
+let beatLine = ''
+const beat = async ($: EngineInterface, id: string) => {
+  if (!dir || !beatLine || isEnded) return
+  await $.fs.write(beatFile(id), beatLine)
+  // The proof that it comes back, for someone who wants to see it: keep/<chat>.hold-test holding this chat's process number, written
+  // by hand, makes this chat's Claudopus hold Claude's helper long enough to be switched off, once, in the next drawing of its panel
+  // or the next message: the engine switches off only an add-on that holds the helper while one of its hooks is answering, not in a
+  // timer of its own (16 Nov trial). It is taken away whatever it holds
+  const proof = `${dir}/keep/${id}.hold-test`
+  if (!isHoldTestDue && (await $.fs.exists(proof))) {
+    const said = (await readOr($, proof)).trim()
+    await $.process.run(['rm', '-f', proof])
+    if (said !== enginePid) return void log($, "a hold-test file that did not name this chat's process was taken away")
+    isHoldTestDue = true
+    $.ui.invalidate('ui.render')
+  }
+}
+let isHoldTestDue = false
+const holdTest = async ($: EngineInterface) => {
+  if (!isHoldTestDue) return
+  isHoldTestDue = false
+  await log($, "holding Claude's helper on purpose, as keep/<chat>.hold-test asked")
+  const end = Date.now() + 10_000
+  while (Date.now() < end) Math.sqrt(Date.now())
+}
+const startReviver = async ($: EngineInterface, id: string) => {
+  if (!dir || !SAFE_CHAT.test(id)) return
+  if (!enginePid) enginePid = await pidOfEngine($)
+  if (!/^\d+$/.test(enginePid)) return
+  // A load the setting brought back says so in the log, with how long its chat had gone without it
+  const back = (await readOr($, `${dir}/keep/${id}.revived`)).trim().split('\n').at(-1)?.split(' ') ?? []
+  const backAt = Number(back[0] ?? 0) * 1000
+  if (backAt && (await $.clock.now()) - backAt < 120_000) await log($, `back after Claude switched Claudopus off in this chat (its beat was quiet ${back[1] ?? '?'} s)`)
+  const settings = await settingsFile($)
+  if (/[\t\n]/.test(settings)) return
+  beatLine = `${enginePid}\t${ownKey($)}\t${settings}\n`
+  await beat($, id)
+  everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined))
+  // In a session of its own, so it outlives the chat's process; it leaves at once when one of this copy already runs
+  const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$2" >/dev/null 2>&1 </dev/null &`
+  const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/revive`, dir]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  if (r.exitCode !== 0) await log($, `the watcher that brings Claudopus back was not started: ${r.stderr.slice(0, 200)}`)
+}
+// A chat that ends leaves no beat behind
+const endBeat = async ($: EngineInterface, id: string) => {
+  beatLine = ''
+  if (dir && SAFE_CHAT.test(id)) await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined)
+}
+const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/
+const REVIVED_KEY = 'claudopus.revived'
 
 // The keys remembered: which keys, tokens and logins the person has given, and where each is kept, by name only, never a value.
 // It is made again from each store's own list of names (Claudopus's keychain, the rest of this Mac's keychain, the .env files in each
@@ -10835,12 +11147,28 @@ const NO_PROGRESS_WAIT =
   'Not run: this wait would print nothing to show how it is going. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
 const NO_PROGRESS_SCRIPT =
   'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
+// The note the engine adds when work ends its step without its report, and what such a step says instead while the work's own
+// detached command runs or it waits to be woken: what it said before was no report (a report goes on to the engine's press)
+const HANDBACK_PRESS = '[handback-send-enforce]'
+const LEFT_AT_WORK = 'My own work is still going; I am started again when it is done, and give my report then.'
+const isPressedForReport = async ($: EngineInterface, id: string) => {
+  const talk = await $.session.messages({ as: 'api', agentId: id }).catch(() => [])
+  if (!Array.isArray(talk)) return false
+  const textOf = (m: unknown) => {
+    const content = (m as { content?: unknown } | undefined)?.content
+    return typeof content === 'string' ? content : Array.isArray(content) ? content.map(b => (b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' ? String((b as { text?: unknown }).text ?? '') : '')).join('\n') : ''
+  }
+  const last = talk.at(-1) as { role?: unknown } | undefined
+  if (last?.role !== 'user' || !textOf(last).includes(HANDBACK_PRESS)) return false
+  const said = [...talk].reverse().find(m => (m as { role?: unknown }).role === 'assistant')
+  return textOf(said).trim().length < REPORT_LEAST
+}
 // What a command that only waits is told instead, by what it waits for
-const NO_WAIT = (kind: WaitKind) =>
+const NO_WAIT = (kind: WaitKind, isHelper = false) =>
   `Not run: this command only waits${kind === 'helpers' ? ' for your helpers' : kind === 'time' ? ' for time to pass' : ''}, and nothing you start may only wait. ${
     kind === 'helpers'
       ? 'Each helper\'s result comes to you as a message, even after you end your step: carry on with what needs nothing from them, or end your step now.'
-      : 'Your own commands, in the background or detached, wake you the moment they end, and each helper\'s result comes to you as a message: carry on with what needs nothing from them, or end your step now. For a file, a page or a time that nothing of yours makes, call the `wake_me` tool and end your step: Claudopus wakes you when it is there. To try something again that failed, run it again yourself.'
+      : 'Your own commands, in the background or detached, wake you the moment they end, and each helper\'s result comes to you as a message: carry on with what needs nothing from them, or end your step now. ' + (isHelper ? 'For a file, a page or a time that nothing of yours makes, hand back what you found and what you wait for: the task that started you asks Claudopus to wake it.' : 'For a file, a page or a time that nothing of yours makes, call the `wake_me` tool and end your step: Claudopus wakes you when it is there.') + ' To try something again that failed, run it again yourself.'
   }`
 const NO_FOLLOW =
   'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20); you are woken the moment your command ends.'
@@ -11007,7 +11335,7 @@ const workHooks = (on: On) => {
       const waits = waitingOf(command, await scriptsRun($, command), { isWatch: e.tool === 'Monitor' })
       if (waits) {
         await log($, `refused ${card?.parentId ? 'helper' : 'work'} ${e.agentId}'s command that only waits (${waits})`)
-        return { deny: NO_WAIT(waits) }
+        return { deny: NO_WAIT(waits, Boolean(card?.parentId)) }
       }
       // A tail that follows a log never ends of itself and tells the work nothing as it runs: it only outlives what it watches
       // (a Monitor watch is told each line as it comes, so it says something; a Bash call's output is read only as it ends)
@@ -11317,6 +11645,15 @@ const workHooks = (on: On) => {
     // where the app sent it, and its card says so
     // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
+    // The engine presses work that ends its step without its report, while it sees nothing of the work's own at work: a command
+    // the work started detached, or what it asked Claudopus to wake it for, it does not see (16 Nov: 30 presses in 25 minutes ended a
+    // task early). That press is answered here with no model, so the work ends its step and is started again when that is done
+    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen) && (await isPressedForReport($, id))) {
+      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : 'it waits to be woken'}: let it end its step`)
+      yield { kind: 'text', index: 0, text: LEFT_AT_WORK }
+      yield { kind: 'stop', stopReason: 'end_turn', usage: null }
+      return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
+    }
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder
@@ -12011,11 +12348,12 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
     </ui.Box>
   ) : null
 // The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
-// to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
+// to, the box, Send, the big one, and Close, small, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
 // panel's scrolling. The box is the card's own: the same answer, and the same box through a new question of its work, until the
 // person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
 const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
   const draft = barDraft(one.id)
+  const send = (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
   return (
     <ui.Box key="band-reply" flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
       <ui.Box flexShrink={1} minWidth={0}>
@@ -12030,12 +12368,13 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
             submitLabel="send"
             autoFocus
             onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
-            onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))}
+            onSubmit={send}
           />
         </ui.Box>
       ) : null}
-      <ui.Box flexShrink={0}>
-        <ui.Button key={`band-reply-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
+      <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+        <ui.Button key={`band-reply-send-${presses}`} label="Send" variant="primary" onPress={() => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? ''))} />
+        <ui.Button key={`band-reply-close-${presses}`} label="Close" plain dimColor onPress={press => openReply($, undefined, press.surface)} />
       </ui.Box>
     </ui.Box>
   )
@@ -12279,22 +12618,35 @@ const panelHooks = (on: On) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
     if (paneId === LIST) ((listDrawing += 1), (listSurface = e.surface))
+    if (paneId === LIST) await holdTest($)
     try {
     // While the person types into a box the pane is drawn as it last was, whole, but for a change in its shape; not typing, as it last
     // was while only its running times moved, for CALM at most (heldDrawings)
     const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}|${e.props.scroll.offset > 0 ? 1 : 0}`
     const heldAt = await $.clock.now()
     if (paneId === LIST) drawnNow = heldAt
+    // Drawn afresh moments ago: given again as it was, at once, and drawn afresh when the gap is over (FRESH_GAP). Never while the
+    // person types, whose box keeps its own drawing below
+    const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
+    const recent = lastShown.get(shownKey)
+    // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
+    // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh). Given before anything is read, so it is
+    // answered at once: given after the pane's reads, it came too late under load and a newer ask dropped it
+    if (recent && paneId === LIST && isPressHeld(heldAt)) return ((listHeldAt = heldAt), (isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
+    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
+    // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
+    freshBegins(shownKey)
+    // (how long it takes by the wall clock: the engine's clock in a test stands still while a drawing is made)
+    const madeFrom = Date.now()
+    let isMade = false
+    try {
     const shape = await paneShape($, paneId)
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
-    // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
-    // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh)
-    const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
-    const shown = paneId === LIST && isPressHeld(heldAt) ? lastShown.get(shownKey) : undefined
-    if (shown) return ((listHeldAt = heldAt), (isPressMissed = true), shown as Awaited<ReturnType<typeof next>>)
-    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
+    // While the mod is behind (lookHold), the pane is given as it was, so the drawing adds nothing to what holds Claude's helper
+    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && ((isBehind() && heldAt - held.at < BEHIND_HELD) || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
+    during(paneId === LIST ? 'draw the panel' : 'draw a Details tab')
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
     const drawing = await (async () => {
@@ -12420,11 +12772,14 @@ const panelHooks = (on: On) => {
     // Where a piece of work is: the line it last wrote about itself
     // While it works, a run of its own that ended after that line is said in its place, so a line written while the run went ("about
     // 40% done") never stands beside a row that has ended (16 Nov), until the work writes again; not while it asks the person something
+    // A launcher whose programs still work as rows of their own has not ended for the person, and is not said; the runs that are
+    // said are named with how each ended, never a bare count that reads as the rows still working (16 Nov "2 commands have ended"
+    // stood above the two programs a launcher that had ended left working)
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? "").trim()) : []
-      const run = runs.length === 1 ? runs[0] : undefined
-      return run ? `${runWords(String(run.what))} ${RUN_ENDED_AS[run.how]}` : runs.length ? `${runs.length} commands have ended` : (entry?.text ?? '')
+      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id)) : []
+      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))} ${RUN_ENDED_AS[r.how]}`)
+      return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} and ${second}` : `${first}, ${second} and ${runs.length - 2} more ended`
     }
 
     const table = uiOf($, e)
@@ -14001,10 +14356,18 @@ const panelHooks = (on: On) => {
       </Box>
     )
     })()
+    // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
+    // ones the engine holds, and this one is made again once the click is over (holdForPress)
+    if (recent && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
-    lastShown.set(heldKey.replace(/\|[01]\|([01])$/, '|$1'), drawing)
+    lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
+    isMade = true
     return drawing
+    } finally {
+      // (a drawing given again from heldDrawings, or one that threw, counts as none made)
+      freshEnds($, shownKey, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined)
+    }
     } finally {
       if (paneId === LIST) listDrawing -= 1
     }
@@ -14022,7 +14385,7 @@ const tabHooks = (on: On) => {
     if (isRunFromAfar && e.plugin === 'claudopus') await log($, `press ${e.element} in ${e.requestId} (${e.surface}), panel drawn ${drawnNow ? (await $.clock.now()) - drawnNow : -1} ms ago; tabs ${rosterOf(await $.ui.panes().catch(() => []))}`)
     // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
     // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
-    if (e.plugin === 'claudopus') ((pressFrom = 0), freeTimes($), (freshness += 1), await engage($))
+    if (e.plugin === 'claudopus') ((pressFrom = 0), (pressedAt = await $.clock.now()), freeTimes($), (freshness += 1), await engage($))
     const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal'
     if (isTerminal) tabMoves.begin()
     let r: Awaited<ReturnType<typeof next>>

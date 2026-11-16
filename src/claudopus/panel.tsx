@@ -53,22 +53,35 @@ const panelHooks = (on: On) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
     if (paneId === LIST) ((listDrawing += 1), (listSurface = e.surface))
+    if (paneId === LIST) await holdTest($)
     try {
     // While the person types into a box the pane is drawn as it last was, whole, but for a change in its shape; not typing, as it last
     // was while only its running times moved, for CALM at most (heldDrawings)
     const heldKey = `${paneId}|${e.surface}|${e.props.placement ?? ''}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.isFocused ? 1 : 0}|${e.props.scroll.offset > 0 ? 1 : 0}`
     const heldAt = await $.clock.now()
     if (paneId === LIST) drawnNow = heldAt
+    // Drawn afresh moments ago: given again as it was, at once, and drawn afresh when the gap is over (FRESH_GAP). Never while the
+    // person types, whose box keeps its own drawing below
+    const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
+    const recent = lastShown.get(shownKey)
+    // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
+    // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh). Given before anything is read, so it is
+    // answered at once: given after the pane's reads, it came too late under load and a newer ask dropped it
+    if (recent && paneId === LIST && isPressHeld(heldAt)) return ((listHeldAt = heldAt), (isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
+    if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
+    // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
+    freshBegins(shownKey)
+    // (how long it takes by the wall clock: the engine's clock in a test stands still while a drawing is made)
+    const madeFrom = Date.now()
+    let isMade = false
+    try {
     const shape = await paneShape($, paneId)
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
-    // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
-    // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh)
-    const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
-    const shown = paneId === LIST && isPressHeld(heldAt) ? lastShown.get(shownKey) : undefined
-    if (shown) return ((listHeldAt = heldAt), (isPressMissed = true), shown as Awaited<ReturnType<typeof next>>)
-    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
+    // While the mod is behind (lookHold), the pane is given as it was, so the drawing adds nothing to what holds Claude's helper
+    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && ((isBehind() && heldAt - held.at < BEHIND_HELD) || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
+    during(paneId === LIST ? 'draw the panel' : 'draw a Details tab')
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
     const drawing = await (async () => {
@@ -194,11 +207,14 @@ const panelHooks = (on: On) => {
     // Where a piece of work is: the line it last wrote about itself
     // While it works, a run of its own that ended after that line is said in its place, so a line written while the run went ("about
     // 40% done") never stands beside a row that has ended (16 Nov), until the work writes again; not while it asks the person something
+    // A launcher whose programs still work as rows of their own has not ended for the person, and is not said; the runs that are
+    // said are named with how each ended, never a bare count that reads as the rows still working (16 Nov "2 commands have ended"
+    // stood above the two programs a launcher that had ended left working)
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? "").trim()) : []
-      const run = runs.length === 1 ? runs[0] : undefined
-      return run ? `${runWords(String(run.what))} ${RUN_ENDED_AS[run.how]}` : runs.length ? `${runs.length} commands have ended` : (entry?.text ?? '')
+      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id)) : []
+      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))} ${RUN_ENDED_AS[r.how]}`)
+      return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} and ${second}` : `${first}, ${second} and ${runs.length - 2} more ended`
     }
 
     const table = uiOf($, e)
@@ -1775,14 +1791,24 @@ const panelHooks = (on: On) => {
       </Box>
     )
     })()
+    // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
+    // ones the engine holds, and this one is made again once the click is over (holdForPress)
+    if (recent && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
-    lastShown.set(heldKey.replace(/\|[01]\|([01])$/, '|$1'), drawing)
+    lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
+    isMade = true
     return drawing
+    } finally {
+      // (a drawing given again from heldDrawings, or one that threw, counts as none made)
+      freshEnds($, shownKey, isMade ? { at: heldAt, ms: Date.now() - madeFrom, fresh: freshness } : undefined)
+    }
     } finally {
       if (paneId === LIST) listDrawing -= 1
     }
   }).catch(($, e, next) => (next.called ? next(e) : tabFailed($, e, next.error)))
 
 }
+
+
 

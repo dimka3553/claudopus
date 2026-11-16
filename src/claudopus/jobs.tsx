@@ -285,8 +285,12 @@ const lookJobs = async ($: EngineInterface) => {
   if (psText !== undefined) void endWaiters($, await read($, todos), now).catch(err => log($, `waits not stopped: ${String(err)}`))
   for (const owner of moved) jobNews.set(owner, now)
   if (moved.size) await changeTodos($, cards => cards.map(one => (moved.has(one.id) ? { ...one, newAt: now } : one)))
-  if (isChanged) void drawFresh($)
+  // A command that ended leaves its row at once; new output alone waits for the panel's next calm drawing (calmLook, every CALM while
+  // work runs): drawn afresh at each output, seven tasks' commands drew the panel without a pause and no click held (16 Nov)
+  if (ended.length) void drawFresh($)
+  else if (isChanged) outputMoved = true
 }
+let outputMoved = false
 
 // The memory a followed process and all it started hold, as the processes were last listed
 const memSeen = (pid?: string) => {
@@ -360,7 +364,7 @@ const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: 
     const several = left.filter(l => l.span === one.span).length > 1
     const what = several || !span.what ? leftName(one.top.command) : span.what
     adopted.add(one.top.pid)
-    added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true }])
+    added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true, ...(span.bgId ? { from: span.bgId } : {}) }])
   }
   if (!added.size) return
   await changeTodos($, cards => cards.map(one => (added.has(one.id) ? { ...one, detached: [...(one.detached ?? []).filter(d => !added.get(one.id)?.some(a => a.id === d.id)), ...(added.get(one.id) ?? [])].slice(-BG_KEPT) } : one)))

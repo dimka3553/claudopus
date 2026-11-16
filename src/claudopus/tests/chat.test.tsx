@@ -20,6 +20,14 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   const words = files.get(`${MEMORY}/words/engine-id.md`) ?? ''
   expect(words).toContain('fix the upload page')
   expect(words).toContain('and the nose')
+
+  // Words of a long chat, over the 4 MB the engine gives whole, are added to, never written again as only the newest
+  const long = `## 2026-11-12T07:00:00.000Z\nthe first message\n\n${'x'.repeat(4_300_000)}\n\n`
+  files.set(`${MEMORY}/words/engine-id.md`, long)
+  await $.prompt.submit({ text: 'and the chin', wait: false, origin: composer })
+  const kept = files.get(`${MEMORY}/words/engine-id.md`) ?? ''
+  expect(kept.startsWith(long)).toBe(true)
+  expect(kept.slice(long.length)).toContain('and the chin')
 })
 
 test('work starts as a copy of the chat only for a small job and as the settings allow: else a fork or an agent with no model is refused, and a brief gets the rules for the work', async ($, on) => {
@@ -134,10 +142,12 @@ test('every start is held to a current model: an older id, a parent on an older 
 })
 
 test("the mod's own kinds start as the settings say: a reader on the legwork model or its parent's, a check never weaker than its parent and at least Opus or always Fable, a quick task on its model, and every kind with everything when chosen", async ($, on) => {
-  const { asked, types, files, registered } = world(on, { model: 'claude-opus-5-5' })
+  const { asked, types, files, registered, kindTools } = world(on, { model: 'claude-opus-5-5' })
   await $.session.start(start)
   // The kinds are the engine's own from the session's start
   expect(await until(async () => (registered.length >= 5 ? [...registered].sort() : undefined))).toEqual(['check', 'helper', 'quick', 'reader', 'task'])
+  // Each kind told to call wake_me rather than wait has it (16 Nov: a task had none, and had the chat start it again by hand)
+  expect(Object.keys(kindTools).filter(kind => kindTools[kind]?.includes('mcp__claudopus__wake_me')).sort()).toEqual(['helper', 'quick', 'task'])
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   const go = async (subagentType: string, e: Record<string, unknown> = {}) => {
     await $.agent.spawn({ ...spawn, subagentType, prompt: 'p', description: 'The nose', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', ...e } as never)

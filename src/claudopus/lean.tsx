@@ -4,8 +4,9 @@
 // What every kind of the mod's agents is told before its task, in place of the engine's own agent prompt
 const AGENT_HEAD =
   'You are an agent of Claude Code, working in the background on a task you are given. Use the tools you have to do it fully: no more than it asks, and not half done. Read files you know you need yourself; send calls that need nothing from each other together. Paths you give are absolute. When you are done, give your report: what was done, what you found, and what is not done or not checked, short, with the file paths that matter. Use no emojis.'
-// The panel's tools, which work keeps its card with, and the handback its report goes through
-const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall']
+// The panel's tools, which work keeps its card with, and the handback its report goes through. Each kind told to call `wake_me`
+// rather than wait has it: a task and a quick task to be started again, a helper to be told to hand back what it waits for instead
+const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall', 'mcp__claudopus__wake_me']
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback']
 // ToolSearch loads the ones among these the engine holds back until asked (Monitor, SendMessage, TaskStop and the like)
 const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit', 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback', ...PANEL_TOOLS]
@@ -144,7 +145,8 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
     const file = /<output-file>([^<]+)<\/output-file>/.exec(body)?.[1] ?? ''
     const status = /<status>([^<]+)<\/status>/.exec(body)?.[1] ?? ''
     const summary = /<summary>([^<]+)<\/summary>/.exec(body)?.[1] ?? ''
-    const raw = file ? (await readOr($, file)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n') : ''
+    // From the end of its output, which may be far over what the engine gives whole
+    const raw = file ? (await fileEnd($, file, 64_000)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n') : ''
     // with every kept key hidden, as in any tool's answer; withheld when that could not be checked
     if (raw) await knowKept($, true)
     const hidden = raw ? await hiddenJson($, JSON.stringify(raw)) : JSON.stringify('')
@@ -246,7 +248,9 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`)
   const timer = everyLoad($, STEP_LOOK, () => {
     void (async () => {
-      const text = await readOr($, logFile)
+      // Its end only: a release's whole log can be over the 4 MB the engine gives whole, and then its last line was never seen
+      during('look at a release')
+      const text = await fileEnd($, logFile, 64_000)
       const exit = /claudopus-exit (\d+)\s*$/.exec(text)?.[1]
       const isLate = (await $.clock.now()) - at > STEP_LONGEST
       if (exit === undefined && !isLate) return
