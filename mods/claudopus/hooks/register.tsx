@@ -18,7 +18,7 @@ import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
 import { leftoversOf, memOf, leftName, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
-import { isWaiterTree, waitingOf, watcherOf } from './jobs'
+import { isWaiterTree, waiterLeavesOf, waitingOf, watcherOf } from './jobs'
 import type { OpenCall, Proc, Span, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'
 import type { TabMove } from './tabmoves'
@@ -9552,13 +9552,21 @@ const endWatchers = async ($: EngineInterface, list: Todo[], now: number) => {
 // shell, a sleep given by a variable). Not a Monitor watch, whose lines the work is told, nor a server
 const WAITER_STOPPED = (what: string) =>
   `Claudopus stopped your command "${what}": all it did was wait, and nothing you start may only wait. Your own commands wake you the moment they end, and each helper's result comes to you as a message: carry on, or end your step. For a file, a page or a time that nothing of yours makes, a task calls \`wake_me\`; a helper hands back what it waits for.`
-const waiterSeen = new Map<string, number>()
-const WAITER_LOOKS = 12_000
+// What each run's processes have shown at the looks: since when they only waited, the sleeps seen, and whether they ever did work.
+// A run that ever did work is never stopped (a script that sleeps between its steps, a retry, a deploy that waits for a service);
+// one is stopped only when, at every look over a minute, it did nothing but pass time, by sleeps that came and went (a loop) or one
+// that has run two minutes
+const waiterSeen = new Map<string, { since: number; looks: number; sleepers: Set<string>; longest: number }>()
+const workSeen = new Set<string>()
+const WAITER_FOR = 60_000
+const WAITER_LONE = 120_000
 const endWaiters = async ($: EngineInterface, list: Todo[], now: number) => {
+  // (every card's commands matched against the shells at once, so two alike never claim the same shell)
+  const allBgs = list.flatMap(one => (one.chat || one.status !== 'working' ? [] : (one.bg ?? []).filter(b => !b.isWatch && !SERVER_CMD.test(b.cmd ?? '') && describedOf(b.what).kind !== 'server')))
+  const shells = allBgs.length ? shellsOf(jobProcs, allBgs.map(b => ({ id: b.id, cmd: b.cmd ?? '', at: b.at }))) : new Map<string, string | true | null>()
   const runs = list.flatMap(one => {
     if (one.chat || one.status !== 'working') return []
-    const bgs = (one.bg ?? []).filter(b => !b.isWatch && !SERVER_CMD.test(b.cmd ?? '') && describedOf(b.what).kind !== 'server')
-    const shells = bgs.length ? shellsOf(jobProcs, bgs.map(b => ({ id: b.id, cmd: b.cmd ?? '', at: b.at }))) : new Map<string, string | true | null>()
+    const bgs = allBgs.filter(b => (one.bg ?? []).includes(b))
     return [
       ...bgs.flatMap(b => (typeof shells.get(b.id) === 'string' ? [{ owner: one, id: b.id, pid: shells.get(b.id) as string }] : [])),
       ...(one.detached ?? []).filter(d => d.pid && !SERVER_CMD.test(d.cmd) && describedOf(d.what).kind !== 'server').map(d => ({ owner: one, id: d.id, pid: d.pid ?? '' })),
@@ -9566,17 +9574,21 @@ const endWaiters = async ($: EngineInterface, list: Todo[], now: number) => {
     ]
   })
   for (const id of waiterSeen.keys()) if (!runs.some(run => run.id === id)) waiterSeen.delete(id)
+  for (const id of workSeen) if (!runs.some(run => run.id === id)) workSeen.delete(id)
   for (const run of runs) {
-    if (!isWaiterTree(jobProcs, run.pid)) {
-      waiterSeen.delete(run.id)
+    if (workSeen.has(run.id)) continue
+    const leaves = waiterLeavesOf(jobProcs, run.pid)
+    if (!leaves) {
+      // (a shell with nothing under it shows nothing of what it does: neither work nor a wait)
+      if (treeOf(jobProcs, run.pid).length > 1) (workSeen.add(run.id), waiterSeen.delete(run.id))
       continue
     }
-    const since = waiterSeen.get(run.id)
-    if (since === undefined) {
-      waiterSeen.set(run.id, now)
-      continue
-    }
-    if (now - since < WAITER_LOOKS || stoppingJobs.has(run.id)) continue
+    const seen = waiterSeen.get(run.id) ?? { since: now, looks: 0, sleepers: new Set<string>(), longest: 0 }
+    seen.looks += 1
+    for (const leaf of leaves) (seen.sleepers.add(leaf.pid), (seen.longest = Math.max(seen.longest, now - leaf.startAt)))
+    waiterSeen.set(run.id, seen)
+    const isLoop = seen.sleepers.size >= 3 && seen.looks >= 3 && now - seen.since >= WAITER_FOR
+    if ((!isLoop && seen.longest < WAITER_LONE) || stoppingJobs.has(run.id)) continue
     const job = jobsOf(run.owner, now).find(j => j.id === run.id) ?? jobsOf({ ...run.owner, bg: run.owner.bg?.filter(b => b.id === run.id), detached: run.owner.detached?.filter(d => d.id === run.id) }, now).find(j => j.id === run.id)
     if (!job) continue
     waiterSeen.delete(run.id)
@@ -9905,7 +9917,7 @@ const lookWakes = async ($: EngineInterface) => {
     // At a step of its own it reads the line at its next step; with its step ended it is started again by the message
     const isAtStep = (await $.agent.list().catch(() => [])).find(agent => agent.id === one.id)?.status === 'running'
     const r = isAtStep
-      ? await tell($, one.id, text).then(() => ({ isDelivered: true as const, reason: '' }))
+      ? await tell($, one.id, text).then(() => ({ isDelivered: true as const, reason: '' })).catch(err => ({ isDelivered: false as const, reason: String(err) }))
       : (await isReplaced($))
         ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
         : await sendOwn($, { to: { agentId: one.id }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
@@ -9977,14 +9989,14 @@ const passOnHelper = async ($: EngineInterface, helperId: string, report: string
   // it too: it is passed on all the same, as a result lost costs more than one read twice, but the chat had none of it to be told of
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === parent.id)?.status
   if (listed === 'running') return
-  // The chat is told first, so it never passes on a result it is about to hear is handled
-  if (listed !== 'waiting') await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_PASSED(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a helper's result passed on: ${String(err)}`))
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: parent.id }, text: HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (!r.isDelivered) return void (await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`))
   await wakeCard($, parent.id)
   await log($, `helper ${helperId}'s result passed on to ${parent.id}, which had ended its step`)
+  // Told once the result is on its way, so the chat never lets go of a result that did not arrive
+  if (listed !== 'waiting') await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_PASSED(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a helper's result passed on: ${String(err)}`))
 }
 
 // What a piece of work, or a helper, starts with the Agent tool runs in the background: the call comes back at once and the
@@ -11221,6 +11233,7 @@ const toolHooks = (on: On) => {
     const input = e as unknown as { what?: unknown; file?: unknown; text?: unknown; url?: unknown; minutes?: unknown }
     if (e.agentId === undefined) return { result: 'Only a background task is started again this way; the chat is started by the next message.' }
     // A helper that ends its step has ended: it hands back what it found and what it waits for, and its task asks to be woken
+    if (!(await read($, todos)).some(one => one.id === e.agentId)) await sync($)
     if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper is not started again this way: hand back your result now, saying what you were waiting for, and the task that started you asks Claudopus to wake it.' }
     const what = cut(oneLine(String(input.what ?? '')), 80)
     if (!what) return { result: 'Say in a few words what you wait for.' }

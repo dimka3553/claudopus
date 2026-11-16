@@ -598,7 +598,7 @@ const LOOKS = /^(?:\S*\/)?(?:for|while|until|select|if|elif|then|else|fi|do|done
 // Programs that only report how a job elsewhere stands (a run on GitHub, a cloud job, a container)
 const STATUS = /^(?:\S*\/)?(?:gh\s+(?:run|pr|api|workflow)\s+(?:view|list|checks|status|get|\S+\/)|gh\s+api|az\s+.*\b(?:show|list|status)\b|aws\s+.*\b(?:describe|get|list)\b|gcloud\s+.*\b(?:describe|list)\b|kubectl\s+(?:get|describe|logs)|docker\s+(?:ps|inspect|logs)|git\s+(?:status|log|ls-remote|fetch|rev-parse))\b/
 // Tools made to wait for something, as the program of a step
-const WAITERS = /^(?:\S*\/)?(?:watch|inotifywait|fswatch|wait4path|wait-on)(?:\s|$)|^(?:npx\s+(?:-y\s+)?)?wait-on\b|^(?:\S*\/)?gh\s+(?:run\s+watch|pr\s+checks\b.*--watch)|^(?:\S*\/)?(?:kubectl|docker)\s+wait\b|^(?:\S*\/)?kubectl\s+rollout\s+status\b|^(?:\S*\/)?(?:az|aws)\s+(?:\S+\s+)*wait\b|^(?:\S*\/)?caffeinate\s+(?:-\w+\s+)*-[wt]\b|^(?:\S*\/)?g?timeout\s+\S+\s+(?:\S*\/)?tail\s.*-[fF]|^(?:\S*\/)?less\s+\+F|^(?:\S*\/)?curl\s.*--retry-(?:all-errors|connrefused)|^(?:\S*\/)?wget\s.*(?:--retry-connrefused|--waitretry)/
+const WAITERS = /^(?:\S*\/)?(?:watch|inotifywait|fswatch|wait4path|wait-on)(?:\s+(?!-(?:-version|-help|h|v)\b)|$)|^(?:npx\s+(?:-y\s+)?)?wait-on\b|^(?:\S*\/)?gh\s+(?:run\s+watch|pr\s+checks\b.*--watch)|^(?:\S*\/)?(?:kubectl|docker)\s+wait\b|^(?:\S*\/)?kubectl\s+rollout\s+status\b|^(?:\S*\/)?(?:az|aws)\s+(?:\S+\s+)*wait\b|^(?:\S*\/)?caffeinate\s+(?:-\w+\s+)*-[wt]\b|^(?:\S*\/)?g?timeout\s+\S+\s+(?:\S*\/)?tail\s.*-[fF]|^(?:\S*\/)?less\s+\+F|^(?:\S*\/)?curl\s.*--retry-(?:all-errors|connrefused)|^(?:\S*\/)?wget\s.*(?:--retry-connrefused|--waitretry)/
 // A log followed until one line comes, by any program that follows one: a wait for that line
 const FOLLOW_UNTIL = /(?:\btail\b[^|;&]*\s(?:-\w*[fF]\w*|--follow\S*)|\b(?:docker|kubectl)\s+(?:\S+\s+)*logs\b[^|;&]*\s(?:-f|--follow)\b|\bjournalctl\b[^|;&]*\s(?:-f|--follow)\b)(?:[^;&|]|\d?>&\d?|&>)*\|\s*(?:(?:\S*\/)?(?:grep|egrep|ugrep|rg)\b[^|;&]*\s(?:-\w*[mq]|--max-count|--quiet)|(?:awk|gawk)\b[^|;&]*\bexit\b|sed\b[^|;&]*\bq\b|while\s+read\b[^]*\bbreak\b)/
 // The code a command hands an interpreter: the shell's own line with every quoted word and here-document blanked, and each script
@@ -632,7 +632,7 @@ const codesOf = (cmd: string, depth = 0): { shell: string; inline: string[] } =>
       const body = cmd.slice(i + 1, j)
       // Code when it follows -c or -e of an interpreter (-lc, -xc alike), or is ssh's remote command
       const before = body.trim().length > 2 ? shell.slice(-300).replace(/\s+$/, '') : ''
-      if (before && (/(?:^|[\s;&|(])(?:\S*\/)?(?:(?:ba|z|da)?sh|python\d?(?:\.\d+)?|node|perl|ruby|osascript)(?:\s+-\w+)*\s+-\w*[ce]$/.test(before) || /(?:^|[\s;&|(])ssh(?:\s+-[ioplFJLRDWbcemOQSw]\s+\S+|\s+-\w+)*\s+[^\s-]\S*$/.test(before))) inline.push(body)
+      if (before && (/(?:^|[\s;&|(])eval$/.test(before) || /(?:^|[\s;&|(])(?:\S*\/)?(?:(?:ba|z|da)?sh|python\d?(?:\.\d+)?|node|perl|ruby|osascript)(?:\s+-\w+)*\s+-\w*[ce]$/.test(before) || /(?:^|[\s;&|(])ssh(?:\s+-[ioplFJLRDWbcemOQSw]\s+\S+|\s+-\w+)*\s+[^\s-]\S*$/.test(before))) inline.push(body)
       shell += '""'
       i = j + 1
       continue
@@ -667,6 +667,8 @@ export const waitingOf = (cmd: string, scripts: string[] = [], options: WaitOpti
   const { shell, inline } = codesOf(cmd.slice(0, 10_000))
   const steps = shellSteps(shell)
   if (steps.some(step => WAITERS.test(step))) return 'tool'
+  // A log followed and nothing else, under a time limit, only passes that time
+  if (steps.length === 1 && /^(?:\S*\/)?g?timeout\s/.test(shell.trim()) && /^(?:\S*\/)?tail\b.*\s-\w*[fF]/.test(steps[0] ?? '')) return 'tool'
   if ((FOLLOW_UNTIL.test(shell) || FOLLOW_UNTIL.test(cmd.slice(0, 10_000))) && !/(?:^|[\s;&|(])g?timeout\s+(?:[1-9]|10)s?\s/.test(shell)) return 'tool'
   // The shell's own wait on something started before this command
   if (steps.some(step => /^wait\s+(?:-n\s+)?(?:\d+|\$[\w{!]+|%\S*)/.test(step)) && !/(?<![>&])&(?![>&])/.test(shell.split(/(?:^|[\s;&|(])wait\s/)[0] ?? '')) return 'process'
@@ -686,7 +688,7 @@ export const waitingOf = (cmd: string, scripts: string[] = [], options: WaitOpti
       .every(part => /^\s*(?:$|#|import\b|from\s+\S+\s+import\b|(?:time\.|asyncio\.)?sleep\b|await\b|asyncio\.run\b|print\b|pass\b|console\.log\b|setTimeout\b|\[?\s*time\.sleep\b|delay\b)/.test(part) || POLLS_FOR.test(part))
   const isInlineLook = (step: string) => /^(?:\S*\/)?(?:(?:uv|poetry)\s+run\s+)?(?:python\d?(?:\.\d+)?|node|perl|ruby|osascript)(?:\s+-\w+)*\s+(?:-\w*[ce]\s+""|-|"")$/.test(step) && inline.every(code => isTrivial(code) || isWaitScript(code))
   const functions = [...shell.matchAll(/(?:^|[\s;&|])(?:function\s+)?(\w+)\s*\(\)\s*\{/g)].map(m => m[1] ?? '')
-  const isLook = (step: string): boolean => isInlineLook(step) || ((rest => rest !== undefined && isLook(rest))(/^(?:\S*\/)?ssh(?:\s+-[ioplFJLRDWbcemOQSw]\s+\S+|\s+-\w+)*\s+[^\s-]\S*\s+(\S.*)$/.exec(step)?.[1])) || functions.includes(step.split(/\s+/)[0] ?? '') || /^[\d\s*+\-/%()]+$/.test(step) || /^(?:tee|exec)(?:\s|$)/.test(step) || LOOKS.test(step) || STATUS.test(step) || WAITERS.test(step) || /^(?:\S*\/)?(?:caffeinate|delay|osascript\s+-e\s+"")(?:\s|$)/.test(step)
+  const isLook = (step: string): boolean => isInlineLook(step) || ((rest => rest !== undefined && isLook(rest))(/^(?:\S*\/)?ssh(?:\s+-[ioplFJLRDWbcemOQSw]\s+\S+|\s+-\w+)*\s+[^\s-]\S*\s+(\S.*)$/.exec(step)?.[1])) || functions.includes(step.split(/\s+/)[0] ?? '') || /^[\d\s*+\-/%()]+$/.test(step) || /^eval\s+""$/.test(step) || /^xargs\s+(?:-\S+\s+)*(?:\S*\/)?g?sleep\b/.test(step) || /^(?:tee|exec)(?:\s|$)/.test(step) || LOOKS.test(step) || STATUS.test(step) || WAITERS.test(step) || /^(?:\S*\/)?(?:caffeinate|delay|osascript\s+-e\s+"")(?:\s|$)/.test(step)
   const isOnlyLooks = steps.every(isLook)
   // A loop that sleeps between its tries and ends when what it looks for is so (a while or until, a for that breaks or exits, zsh's
   // repeat), its every step only looking: what it waits for is a command, a file, a line or a page. A loop that never ends is a
@@ -704,7 +706,7 @@ export const waitingOf = (cmd: string, scripts: string[] = [], options: WaitOpti
   const loopless = (text: string) => text.replace(/\bdo\b[^]*\bdone\b/g, ' ')
   const codeSleeps = inline
     .filter(code => !/^\s*(?:while|for)\b|;\s*(?:while|for)\b/m.test(code))
-    .flatMap(code => [...code.replace(/(["'])(?:(?!\1)[^\\\n]|\\.)*\1/g, '""').matchAll(/\b(?:time\.)?sleep\(?\s*(\d+(?:\.\d+)?)\s*\)?|setTimeout\([^]{0,200}?,\s*(\d+)\s*\)/g)].map(m => (m[1] ? Number(m[1]) : Number(m[2] ?? 0) / 1000)))
+    .flatMap(code => [...code.replace(/(["'])(?:(?!\1)[^\\\n]|\\.)*\1/g, '""').matchAll(/\b(?:time\.)?sleep\(?\s*(\d+(?:\.\d+)?)\s*\)?|\bdelay\s+(\d+(?:\.\d+)?)|setTimeout\([^]{0,200}?,\s*(\d+)\s*\)/g)].map(m => (m[1] ? Number(m[1]) : m[2] ? Number(m[2]) : Number(m[3] ?? 0) / 1000)))
   if (isOnlyLooks && [...sleepsIn(loopless(shell)), ...codeSleeps].reduce((a, b) => a + b, 0) > LONGEST_SLEEP) return 'time'
   if (inline.some(isWaitScript)) return 'loop'
   if (scripts.some(text => text.split('\n').filter(line => line.trim() && !/^\s*#/.test(line)).length <= 30 && (isWaitScript(text) || waitingOf(text.replace(/^#![^\n]*\n/, '')) === 'loop'))) return 'loop'
@@ -738,12 +740,14 @@ export const watcherOf = (cmd: string): { isFollow: boolean } | undefined => {
 // A command's processes as they run, whatever its words: it only waits when every process at the end of its tree (one that started
 // no other) is one that only passes time or follows something (a sleep, a log followed, a tool made to wait), so a loop of any shape,
 // a function, a nested shell or a script that sleeps between its looks is seen for what it is while it runs
-const WAITER_PROC = /^(?:\S*\/)?(?:g?sleep|inotifywait|fswatch|wait4path|wait-on)(?:\s|$)|^(?:\S*\/)?u?grep\s+(?:-\S+\s+)*(?:-m\s?\d+|--max-count=\d+)(?:\s+-\S+)*\s+\S+$|^(?:\S*\/)?caffeinate\s+.*-[tw]\b|^(?:\S*\/)?(?:docker|kubectl)\s+(?:\S+\s+)*logs\s.*(?:-f|--follow)\b|^(?:\S*\/)?journalctl\s.*(?:-f|--follow)\b|^(?:\S*\/)?kubectl\s+rollout\s+status\b|^(?:\S*\/)?gh\s+run\s+watch\b|^(?:\S*\/)?node\s+\S*wait-on\b/
-export const isWaiterTree = (procs: Proc[], top: string) => {
+const WAITER_PROC = /^(?:\S*\/)?(?:g?sleep|inotifywait|fswatch|wait4path|wait-on)(?:\s|$)|^(?:\S*\/)?u?grep\s+(?:-\S+\s+)*(?:-m\s?\d+|--max-count=\d+)(?:\s+-\S+)*\s+\S+$|^(?:\S*\/)?(?:docker|kubectl)\s+(?:\S+\s+)*logs\s.*(?:-f|--follow)\b|^(?:\S*\/)?journalctl\s.*(?:-f|--follow)\b|^(?:\S*\/)?kubectl\s+rollout\s+status\b|^(?:\S*\/)?gh\s+run\s+watch\b|^(?:\S*\/)?node\s+\S*wait-on\b/
+// (a lone grep sifting a pipe is no waiter: it may be what a training's output goes through; only one that stops at a line is)
+export const waiterLeavesOf = (procs: Proc[], top: string): Proc[] | undefined => {
   const tree = treeOf(procs, top)
-  const leaves = tree.filter(p => !tree.some(child => child.ppid === p.pid))
-  return leaves.length > 0 && leaves.every(p => WAITER_PROC.test(p.command) || watcherOf(p.command) !== undefined)
+  const leaves = tree.filter(p => !tree.some(child => child.ppid === p.pid) && p.pid !== top)
+  return leaves.length > 0 && leaves.every(p => WAITER_PROC.test(p.command) || watcherOf(p.command)?.isFollow) ? leaves : undefined
 }
+export const isWaiterTree = (procs: Proc[], top: string) => waiterLeavesOf(procs, top) !== undefined
 
 // Jobs alike (the same kind, words and command, or the same wait) are one row that says how many they are, from the first one's
 // start; the newest one's output stands for them

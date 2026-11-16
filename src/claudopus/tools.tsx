@@ -57,6 +57,7 @@ const toolHooks = (on: On) => {
     const input = e as unknown as { what?: unknown; file?: unknown; text?: unknown; url?: unknown; minutes?: unknown }
     if (e.agentId === undefined) return { result: 'Only a background task is started again this way; the chat is started by the next message.' }
     // A helper that ends its step has ended: it hands back what it found and what it waits for, and its task asks to be woken
+    if (!(await read($, todos)).some(one => one.id === e.agentId)) await sync($)
     if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId) return { result: 'A helper is not started again this way: hand back your result now, saying what you were waiting for, and the task that started you asks Claudopus to wake it.' }
     const what = cut(oneLine(String(input.what ?? '')), 80)
     if (!what) return { result: 'Say in a few words what you wait for.' }

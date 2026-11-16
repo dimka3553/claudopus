@@ -206,6 +206,11 @@ test('a command whose only job is to wait is known whatever shape it takes, by w
     ['npm run watch --', [], undefined],
     ['cat src/bin/helpers.ts', [], undefined],
     ['./run.sh wait 5', [], undefined],
+    // and the second look's: eval, osascript, xargs, a log followed under a time limit
+    ['eval "sleep 120"', [], 'time'],
+    ["osascript -e 'delay 120'", [], 'time'],
+    ['echo 120 | xargs sleep', [], 'time'],
+    ['timeout 300 tail -f /dev/null', [], 'tool'],
   ]
   for (const [cmd, scripts, kind] of cases) expect([cmd, waitingOf(cmd, scripts)]).toEqual([cmd, kind])
   // A loop that never ends is a watch: let through as a Monitor watch, whose every line its work is told, and nowhere else
@@ -226,7 +231,8 @@ test("a command's processes only wait when every one at the end of its tree pass
   expect(isWaiterTree(ps([shell, '101 100 S 00:20 bash -lc until', '102 101 S 00:01 /bin/sleep 3']), '100')).toBe(true)
   expect(isWaiterTree(ps([shell, '101 100 S 00:20 tail -f /x/run.log', '102 100 S 00:20 grep -m1 done']), '100')).toBe(true)
   expect(isWaiterTree(ps([shell, '101 100 S 00:20 docker logs -f web']), '100')).toBe(true)
-  // Work at the end of the tree, or beside a sleep, is work; so is a shell with nothing under it, as what it runs is not seen
+  // Work at the end of the tree, or beside a sleep, is work; so is a lone grep a pipe goes through, and a shell with nothing under it
+  expect(isWaiterTree(ps([shell, '101 100 S 00:20 grep --line-buffered -v DEBUG']), '100')).toBe(false)
   expect(isWaiterTree(ps([shell, '101 100 S 00:20 python train.py']), '100')).toBe(false)
   expect(isWaiterTree(ps([shell, '101 100 S 00:20 rclone copy /a remote:', '102 100 S 00:01 sleep 1']), '100')).toBe(false)
   expect(isWaiterTree(ps([shell]), '100')).toBe(false)

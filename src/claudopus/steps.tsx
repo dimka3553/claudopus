@@ -198,7 +198,7 @@ const lookWakes = async ($: EngineInterface) => {
     // At a step of its own it reads the line at its next step; with its step ended it is started again by the message
     const isAtStep = (await $.agent.list().catch(() => [])).find(agent => agent.id === one.id)?.status === 'running'
     const r = isAtStep
-      ? await tell($, one.id, text).then(() => ({ isDelivered: true as const, reason: '' }))
+      ? await tell($, one.id, text).then(() => ({ isDelivered: true as const, reason: '' })).catch(err => ({ isDelivered: false as const, reason: String(err) }))
       : (await isReplaced($))
         ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
         : await sendOwn($, { to: { agentId: one.id }, text }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
@@ -270,14 +270,14 @@ const passOnHelper = async ($: EngineInterface, helperId: string, report: string
   // it too: it is passed on all the same, as a result lost costs more than one read twice, but the chat had none of it to be told of
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === parent.id)?.status
   if (listed === 'running') return
-  // The chat is told first, so it never passes on a result it is about to hear is handled
-  if (listed !== 'waiting') await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_PASSED(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a helper's result passed on: ${String(err)}`))
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
     : await sendOwn($, { to: { agentId: parent.id }, text: HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS)) }).catch(err => ({ isDelivered: false as const, reason: String(err) }))
   if (!r.isDelivered) return void (await log($, `helper ${helperId}'s result not passed on to ${parent.id}: ${r.reason}`))
   await wakeCard($, parent.id)
   await log($, `helper ${helperId}'s result passed on to ${parent.id}, which had ended its step`)
+  // Told once the result is on its way, so the chat never lets go of a result that did not arrive
+  if (listed !== 'waiting') await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: named(HELPER_PASSED(titleOf(helper), titleOf(parent))) }] } }).catch(err => log($, `chat not told of a helper's result passed on: ${String(err)}`))
 }
 
 // What a piece of work, or a helper, starts with the Agent tool runs in the background: the call comes back at once and the
