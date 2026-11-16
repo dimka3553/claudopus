@@ -281,8 +281,8 @@ test("Claude's own part, where the Mac tells each process's: of the graphics pro
   const battery = (load: string, mv: number, ma: string) => `"Voltage"=20000\n"SystemLoad"=${load}\n"SystemPowerIn"=0\n"Voltage" = ${mv}\n"InstantAmperage" = ${ma}`
   const charger = (load: string) => `"SystemLoad"=${load}\n"SystemPowerIn"=95000\n"Voltage" = 12500\n"InstantAmperage" = 1200`
   for (const [load, watts] of [
-    [battery(u(-7552), 12203, u(-5552)), 67.751],
-    [battery('2095', 12156, u(-5709)), 69.396],
+    [battery(u(-7552), 12203, u(-5552)), 67.751056],
+    [battery('2095', 12156, u(-5709)), 69.398604],
     [battery('2095', 12156, '1200'), undefined],
     [charger('80000'), 80],
     [charger(u(-3000)), undefined],
