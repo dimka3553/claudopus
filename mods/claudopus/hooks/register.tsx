@@ -8420,8 +8420,9 @@ const promptHooks = (on: On) => {
 // What every kind of the mod's agents is told before its task, in place of the engine's own agent prompt
 const AGENT_HEAD =
   'You are an agent of Claude Code, working in the background on a task you are given. Use the tools you have to do it fully: no more than it asks, and not half done. Read files you know you need yourself; send calls that need nothing from each other together. Paths you give are absolute. When you are done, give your report: what was done, what you found, and what is not done or not checked, short, with the file paths that matter. Use no emojis.'
-// The panel's tools, which work keeps its card with, and the handback its report goes through
-const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall']
+// The panel's tools, which work keeps its card with, and the handback its report goes through. Each kind told to call `wake_me`
+// rather than wait has it: a task and a quick task to be started again, a helper to be told to hand back what it waits for instead
+const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall', 'mcp__claudopus__wake_me']
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback']
 // ToolSearch loads the ones among these the engine holds back until asked (Monitor, SendMessage, TaskStop and the like)
 const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit', 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback', ...PANEL_TOOLS]
@@ -10877,12 +10878,28 @@ const NO_PROGRESS_WAIT =
   'Not run: this wait would print nothing to show how it is going. Make it print a plain line at each try and at least every 10 seconds, such as `n=$((n+1)); echo "progress: $n/40 tries waiting for the deploy"` inside its loop, then start it again.'
 const NO_PROGRESS_SCRIPT =
   'Not run: this long command would print nothing to show how far it has got. Make its script print, flushed right away, a plain line `progress: <done>/<total> <unit> <what>` at each step and at least every 10 seconds, such as `print(f"progress: {i}/{n} scans sorting", flush=True)` in Python or `echo "progress: $i/$n scans sorting"` in a shell, with no paths, file names or codes in it, then start it again.'
+// The note the engine adds when work ends its step without its report, and what such a step says instead while the work's own
+// detached command runs or it waits to be woken: what it said before was no report (a report goes on to the engine's press)
+const HANDBACK_PRESS = '[handback-send-enforce]'
+const LEFT_AT_WORK = 'My own work is still going; I am started again when it is done, and give my report then.'
+const isPressedForReport = async ($: EngineInterface, id: string) => {
+  const talk = await $.session.messages({ as: 'api', agentId: id }).catch(() => [])
+  if (!Array.isArray(talk)) return false
+  const textOf = (m: unknown) => {
+    const content = (m as { content?: unknown } | undefined)?.content
+    return typeof content === 'string' ? content : Array.isArray(content) ? content.map(b => (b && typeof b === 'object' && (b as { type?: unknown }).type === 'text' ? String((b as { text?: unknown }).text ?? '') : '')).join('\n') : ''
+  }
+  const last = talk.at(-1) as { role?: unknown } | undefined
+  if (last?.role !== 'user' || !textOf(last).includes(HANDBACK_PRESS)) return false
+  const said = [...talk].reverse().find(m => (m as { role?: unknown }).role === 'assistant')
+  return textOf(said).trim().length < REPORT_LEAST
+}
 // What a command that only waits is told instead, by what it waits for
-const NO_WAIT = (kind: WaitKind) =>
+const NO_WAIT = (kind: WaitKind, isHelper = false) =>
   `Not run: this command only waits${kind === 'helpers' ? ' for your helpers' : kind === 'time' ? ' for time to pass' : ''}, and nothing you start may only wait. ${
     kind === 'helpers'
       ? 'Each helper\'s result comes to you as a message, even after you end your step: carry on with what needs nothing from them, or end your step now.'
-      : 'Your own commands, in the background or detached, wake you the moment they end, and each helper\'s result comes to you as a message: carry on with what needs nothing from them, or end your step now. For a file, a page or a time that nothing of yours makes, call the `wake_me` tool and end your step: Claudopus wakes you when it is there. To try something again that failed, run it again yourself.'
+      : 'Your own commands, in the background or detached, wake you the moment they end, and each helper\'s result comes to you as a message: carry on with what needs nothing from them, or end your step now. ' + (isHelper ? 'For a file, a page or a time that nothing of yours makes, hand back what you found and what you wait for: the task that started you asks Claudopus to wake it.' : 'For a file, a page or a time that nothing of yours makes, call the `wake_me` tool and end your step: Claudopus wakes you when it is there.') + ' To try something again that failed, run it again yourself.'
   }`
 const NO_FOLLOW =
   'Not run: this only follows a log and would never end, so read the log once when you need it (tail -n 20); you are woken the moment your command ends.'
@@ -11049,7 +11066,7 @@ const workHooks = (on: On) => {
       const waits = waitingOf(command, await scriptsRun($, command), { isWatch: e.tool === 'Monitor' })
       if (waits) {
         await log($, `refused ${card?.parentId ? 'helper' : 'work'} ${e.agentId}'s command that only waits (${waits})`)
-        return { deny: NO_WAIT(waits) }
+        return { deny: NO_WAIT(waits, Boolean(card?.parentId)) }
       }
       // A tail that follows a log never ends of itself and tells the work nothing as it runs: it only outlives what it watches
       // (a Monitor watch is told each line as it comes, so it says something; a Bash call's output is read only as it ends)
@@ -11359,6 +11376,15 @@ const workHooks = (on: On) => {
     // where the app sent it, and its card says so
     // What it started on and whether it was flagged, kept in its card too so a reload of the mod forgets neither
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
+    // The engine presses work that ends its step without its report, while it sees nothing of the work's own at work: a command
+    // the work started detached, or what it asked Claudopus to wake it for, it does not see (16 Nov: 30 presses in 25 minutes ended a
+    // task early). That press is answered here with no model, so the work ends its step and is started again when that is done
+    if (id !== undefined && card && !isOff && card.handedBackAt === undefined && (card.detached?.length || card.wakeWhen) && (await isPressedForReport($, id))) {
+      await log($, `work ${id} pressed by the engine for its report while ${card.detached?.length ? 'its own detached command runs' : 'it waits to be woken'}: let it end its step`)
+      yield { kind: 'text', index: 0, text: LEFT_AT_WORK }
+      yield { kind: 'stop', stopReason: 'end_turn', usage: null }
+      return { turnId: e.turnId, index: e.index, answer: LEFT_AT_WORK, toolUses: [], stopReason: 'end_turn', usage: null }
+    }
     const own = id !== undefined ? (startedOn.get(id) ?? card?.startedOn) : undefined
     const isOwnOlder = id !== undefined && !flaggedOnce.has(id) && !card?.flagged && own !== undefined && Boolean(rightModel(own)) && modelName(own) === modelName(e.model)
     const isMovedByApp = id !== undefined && !isOff && Boolean(rightModel(e.model)) && !isOwnOlder

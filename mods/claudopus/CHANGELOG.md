@@ -2,6 +2,11 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.156 · 16 November 2026
+- Every background task, small task and helper now has the tool to ask Claudopus to wake it for a file, a page or a time: tasks started as Claudopus's own kinds had been told to use it without having it.
+- A task whose own detached command is still at work is no longer pressed again and again to hand back its report: it ends its step and is started again when the command ends.
+- A helper told not to wait is told to hand back what it waits for, rather than to use a tool helpers don't have.
+
 ## 0.2.155 · 16 November 2026
 - A task's card no longer says "2 commands have ended" above commands still working: a command that only started programs which still run is not said to have ended, and the commands that did end are named with how each ended instead of counted.
 

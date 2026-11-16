@@ -134,10 +134,12 @@ test('every start is held to a current model: an older id, a parent on an older 
 })
 
 test("the mod's own kinds start as the settings say: a reader on the legwork model or its parent's, a check never weaker than its parent and at least Opus or always Fable, a quick task on its model, and every kind with everything when chosen", async ($, on) => {
-  const { asked, types, files, registered } = world(on, { model: 'claude-opus-5-5' })
+  const { asked, types, files, registered, kindTools } = world(on, { model: 'claude-opus-5-5' })
   await $.session.start(start)
   // The kinds are the engine's own from the session's start
   expect(await until(async () => (registered.length >= 5 ? [...registered].sort() : undefined))).toEqual(['check', 'helper', 'quick', 'reader', 'task'])
+  // Each kind told to call wake_me rather than wait has it (16 Nov: a task had none, and had the chat start it again by hand)
+  expect(Object.keys(kindTools).filter(kind => kindTools[kind]?.includes('mcp__claudopus__wake_me')).sort()).toEqual(['helper', 'quick', 'task'])
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   const go = async (subagentType: string, e: Record<string, unknown> = {}) => {
     await $.agent.spawn({ ...spawn, subagentType, prompt: 'p', description: 'The nose', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', ...e } as never)

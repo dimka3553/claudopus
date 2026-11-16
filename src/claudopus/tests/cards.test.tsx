@@ -1168,7 +1168,8 @@ test('a run whose output cannot be found says so after three minutes, so a blank
 
 test('a run of a work\'s own wakes it the moment it ends: any command that only waits, the work\'s or its helper\'s, is refused in one sentence, the work is told it ended, and its card no longer says how far it was (16 Nov an upload read 100% beside "about 40% done"; a helper polled for a file its own script wrote)', SLOW, async ($, on) => {
   let isAlive = true
-  const { clock, appended, resumed, stopped } = world(on, { jobs: { output: () => 'progress: 8/8 GB uploading\n', wroteAt: () => 1_700_000_000_000, alive: () => isAlive } })
+  const talk: unknown[] = []
+  const { clock, appended, resumed, stopped, stepped } = world(on, { talk, jobs: { output: () => 'progress: 8/8 GB uploading\n', wroteAt: () => 1_700_000_000_000, alive: () => isAlive } })
   on('session.cwd', () => ({ value: '/repo' }) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'upload the zips', wait: false, origin: composer })
@@ -1216,6 +1217,18 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
   // Work that ended its step with a run still going is started again the moment it ends, with a message
   isAlive = true
   await $.tool.call({ tool: 'Bash', tool_use_id: 'u2', agentId: 'a1', command: 'cd /w && nohup curl -T rest.zip https://example.com/up > rest.log 2>&1 & echo $!', description: 'Upload the rest (about 10 min)' } as never)
+  // The engine, which cannot see that run, presses it for its report as it ends its step: the press is answered with no model, and
+  // its step ends (16 Nov: 30 presses in 25 minutes ended a task early). A report in words before the press still goes on to it
+  const PRESS = { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' }
+  const press = async (said: string) => {
+    talk.splice(0, talk.length, { role: 'assistant', content: [{ type: 'text', text: said }] }, PRESS)
+    const before = stepped.length
+    const texts: string[] = []
+    for await (const chunk of $.turn.step({ turnId: 't1', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') texts.push((chunk as { text: string }).text)
+    return [stepped.length - before, texts]
+  }
+  expect(await press('The rest uploads; I am woken when it ends.')).toEqual([0, ['My own work is still going; I am started again when it is done, and give my report then.']])
+  expect(await press(`Both uploads are done. ${'Every file arrived whole. '.repeat(30)}`)).toEqual([1, ['Looking at the nose.']])
   await $.turn.complete({ answer: 'The rest uploads; I am woken when it ends.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
   await clock.advance(20_000)
   expect(resumed.some(one => one.startsWith('a1: '))).toBe(false)
@@ -1230,7 +1243,12 @@ test('a run of a work\'s own wakes it the moment it ends: any command that only 
     `n=0; while pgrep -f "sets.py" >/dev/null; do n=$((n+1)); echo "progress: $n tries waiting for sheets"; sleep 8; [ $n -gt 60 ] && break; done; ls -la ~/sets | head; cat ${O}/bg253ddbk.output`,
     'until curl -s localhost:3000 >/dev/null; do echo "progress: 1 tries"; sleep 2; done',
     'sleep 300; cat out.log',
-  ]) expect([command, ((await $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a2', command, description: 'Wait for the sheets', run_in_background: true } as never)) as { deny?: string }).deny?.slice(0, 32)]).toEqual([command, 'Not run: this command only waits'])
+  ]) {
+    const deny = ((await $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a2', command, description: 'Wait for the sheets', run_in_background: true } as never)) as { deny?: string }).deny ?? ''
+    expect([command, deny.slice(0, 32)]).toEqual([command, 'Not run: this command only waits'])
+    // a helper, which is not started again, is told to hand back what it waits for, never to call wake_me (a reader and a check have no such tool)
+    if (command.startsWith('sleep')) expect([deny.includes('hand back what you found and what you wait for'), deny.includes('wake_me')]).toEqual([true, false])
+  }
   // and the wait the old rules gave for helpers, said for what it waits on
   expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'h2', agentId: 'a1', command: "'/x/mods/claudopus/bin/helpers' '/x/helpers/a1.txt'", description: 'Wait for the three builders' } as never)) as { deny?: string }).deny).toMatch(/^Not run: this command only waits for your helpers, .*even after you end your step/)
   // A helper's real work runs
