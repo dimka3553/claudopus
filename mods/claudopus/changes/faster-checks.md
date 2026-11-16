@@ -1,1 +1,0 @@
-- A release now runs its checks on this Mac while GitHub runs its own, instead of one after the other, so each release, and each release queued behind it, takes a few minutes less. Main still moves only once both passed and you allowed it.
