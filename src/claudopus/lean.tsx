@@ -1,5 +1,5 @@
 // Smaller starts and the chat's quicker ways: the mod's own kinds of agent, each with only the tools its work takes, the models they
-// run on, the single command the chat runs itself, the copy of the chat for a small job, and the repeated notice left out
+// run on, the single command the chat runs itself, and the repeated notice left out
 
 // What every kind of the mod's agents is told before its task, in place of the engine's own agent prompt
 const AGENT_HEAD =
@@ -14,9 +14,9 @@ const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEd
 const KINDS = {
   task: { description: 'A background task the chat starts: builds, fixes, researches, releases. Starts with only its working tools.', tools: WORK_TOOLS, prompt: AGENT_HEAD },
   quick: {
-    description: 'A small fresh task of a few steps: a push and a look at the build, a merge, a quick look-up. Starts small.',
+    description: 'A fresh task for a clearly stated job: a change described exactly, a push and a look at the build, a merge, a look-up. Starts small, on Sonnet.',
     tools: WORK_TOOLS,
-    prompt: `${AGENT_HEAD}\nThis is a small job: do it in as few steps as it takes.`,
+    prompt: `${AGENT_HEAD}\nThis is a clearly stated job: do what the instructions say, in as few steps as it takes.`,
   },
   helper: { description: "A task's helper that builds a part beside others, on the task's own model.", tools: WORK_TOOLS.filter(one => one !== 'mcp__claudopus__update' && one !== 'mcp__claudopus__waits'), prompt: AGENT_HEAD },
   reader: {
@@ -43,23 +43,22 @@ const registerKinds = async ($: EngineInterface) => {
       .then(r => log($, `agent kind ${(r as { agent?: string }).agent ?? name} registered`))
       .catch(err => log($, `agent kind ${name} not registered: ${String(err)}`))
 }
-// What a start of one of the mod's kinds becomes under the settings: everything for all of them when Tasks start with Everything; a
-// reader on Sonnet, or on its parent's model; a check on a model never weaker than what built it, the strongest when chosen
+// What a start of one of the mod's kinds becomes: a reader on the legwork model (Sonnet as shipped); a check on a model never weaker than
+// what built it, nor below Opus; a quick task on the legwork model unless the chat named one
 const kindStart = (e: { subagentType?: string; model?: string; parentModel?: string; fork: boolean; workflow?: unknown; resume?: unknown }): { subagentType?: string; model?: string } => {
   if (e.fork || e.workflow || e.resume) return {}
   const kind = KIND_OF(e.subagentType ?? '')
   if (!kind) return {}
-  const type = lean.start === 'all' ? { subagentType: 'general-purpose' } : {}
   const parent = rightModel(String(e.parentModel ?? '')) ?? String(e.parentModel ?? '')
-  if (kind === 'reader') return { ...type, model: lean.readers === 'own' ? parent || undefined : modelsIn(models, lean).legwork }
+  const asked = (e.model ?? '').trim()
+  if (kind === 'reader') return { model: modelsIn(models, lean).legwork }
   if (kind === 'check') {
-    if (lean.checker === 'strongest') return { ...type, model: newestModel('Fable') ?? 'fable' }
-    const asked = (e.model ?? '').trim()
     const least = rankOf(parent) >= RANK.Opus! ? parent : (newestModel('Opus') ?? 'opus')
-    return { ...type, model: asked && asked !== 'inherit' && rankOf(rightModel(asked) ?? asked) >= rankOf(least) ? asked : least }
+    return { model: asked && asked !== 'inherit' && rankOf(rightModel(asked) ?? asked) >= rankOf(least) ? asked : least }
   }
-  if (kind === 'quick') return { ...type, model: e.model?.trim() || quickModel(models, lean) }
-  return type
+  // never the chat's own model by `inherit`: a quick task started so in a Fable chat would cost four times as much
+  if (kind === 'quick') return { model: asked && asked !== 'inherit' ? asked : modelsIn(models, lean).legwork }
+  return {}
 }
 
 // ---- The single command the chat runs itself ----
@@ -156,21 +155,6 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
   return told
 }
 
-// ---- The copy of the chat for a small job ----
-
-// A copy takes about this many steps before it hands what is left to a fresh task
-const FORK_STEPS = 10
-// What a copy is told as it starts: it is a task now, with the rules every task follows, and how long it may go
-const FORK_HEAD = () =>
-  named(`You are a copy of the chat, started for one small job: you are now a background task, not the chat. The chat's rules for what it may run do not apply to you; the rules for every task below do. You start no helpers and message no other task. Do the job in at most about ${FORK_STEPS} steps. If it needs more, hand what is left to a fresh task with the \`note\` tool and its \`task\` (the chat starts it), and end with your report.`)
-const FORK_PAST = () =>
-  named(`Not run: this copy of the chat has taken its ${FORK_STEPS} steps. Hand what is left to a fresh task now: call the \`note\` tool with \`task\` set to what is left, in one line with the folder and what done looks like, send the message it gives you to the chat, then end with your report of what you did and what you handed on.`)
-const FORK_ALONE = () => named('Not run: a copy of the chat does its small job itself, with no helper and no other task. If the job needs more, hand what is left to a fresh task with the `note` tool and its `task`, send the message it gives you to the chat, and end with your report.')
-// The tools a copy past its steps may still call: the ones that hand on what is left and end it
-const FORK_ENDING = ['mcp__claudopus__note', 'mcp__claudopus__todo', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'SubagentHandback', 'ToolSearch']
-// and SendMessage to the chat alone, which the note's hand-on goes through
-const isForkEnding = (e: { tool: string; to?: unknown }) => FORK_ENDING.includes(e.tool) || (e.tool === 'SendMessage' && String(e.to ?? '') === 'main')
-
 // ---- The repeated notice ----
 
 // The engine's notice that a task stopped after its report came as a message: "it is not repeated here". It woke the chat for a turn
@@ -212,7 +196,7 @@ const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['as
     `Do the last step of the task "${titleOf(one)}", which {name} just gave the go-ahead for by pressing "${said}" (to: ${ask.text}): ${step}\nWork in ${folder}${branch && branch !== 'HEAD' ? `, on its branch ${branch}` : ''}. It is this one step: do only that, then report in one or two lines what happened. If it fails in a way that needs what the task that built it knows (a merge conflict, a failing check, a question only it can answer), send that task, "${one.id}", a message with SendMessage saying what failed and the last lines of the output, and end; do not fix it yourself.`,
   )
   await stepLine($, one.id, `On your "${said}", a small fresh task does the last step: ${cut(step, 160)}`)
-  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: quickModel(models, lean), cwd: folder } }
+  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: modelsIn(models, lean).legwork, cwd: folder } }
   wakes.push(wake)
   void $.clock.after(WAKE_WAIT, () => {
     const at = wakes.indexOf(wake)

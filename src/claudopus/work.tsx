@@ -264,19 +264,6 @@ const workHooks = (on: On) => {
       await log($, 'refused a command that pushes or merges to main itself')
       return { deny: `${NO_PUSH} It is ${$.plugin.root}/bin/release.` }
     }
-    // A copy of the chat for a small job that has taken its steps hands what is left to a fresh task, and may only do that and end
-    if (dir && !isOff && e.agentId !== undefined && !isForkEnding(e as never)) {
-      const card = (await read($, todos)).find(one => one.id === e.agentId)
-      // A copy does its small job itself: it starts no helper and sets no other task to work, whose steps it would not count
-      if (card?.isFork && !card.parentId && (e.tool === 'Agent' || (e.tool === 'SendMessage' && String((e as { to?: unknown }).to ?? '') !== 'main'))) {
-        await log($, `refused copy ${e.agentId}'s ${e.tool} to other work`)
-        return { deny: FORK_ALONE() }
-      }
-      if (card?.isFork && !card.parentId && (card.steps ?? 0) >= FORK_STEPS) {
-        await log($, `refused a step of copy ${e.agentId} past its ${FORK_STEPS} steps`)
-        return { deny: FORK_PAST() }
-      }
-    }
     // The list of admin commands always allowed, and what seals it, are the person's alone
     if (touchesGate(e) || (e.tool === 'Bash' && (await scriptsRun($, String((e as { command?: unknown }).command ?? ''))).some(text => touchesGate({ ...e, command: text } as never)))) {
       await log($, `refused ${e.tool} on the admin gate's own files`)
@@ -290,8 +277,8 @@ const workHooks = (on: On) => {
     // does a change to the person's own settings and texts. Never for a call the chat's own thread is refused below: nothing is asked
     // or granted for a call that does not run
     const isChatHere = e.agentId === undefined && !isOff && Boolean(dir) && (await read($, me)).isChat
-    // A single command the chat runs itself, unless the settings send everything to a task: one command and nothing joined to it
-    const chatCommand = isChatHere && e.tool === 'Bash' && lean.small !== 'full' ? String((e as { command?: unknown }).command ?? '') : ''
+    // A single command the chat runs itself: one command and nothing joined to it
+    const chatCommand = isChatHere && e.tool === 'Bash' ? String((e as { command?: unknown }).command ?? '') : ''
     if (chatCommand && !isOneCommand(chatCommand) && !RUNNER_NAMED.test(chatCommand)) {
       await log($, "refused a chat's own command that is more than one command")
       return { deny: NOT_ONE_COMMAND }
@@ -485,8 +472,7 @@ const workHooks = (on: On) => {
     // Work the chat starts is a fresh agent on a model it names: a copy of the chat, or an agent left to the chat's own model, is refused
     if (e.tool === 'Agent') {
       const call = e as unknown as { subagent_type?: unknown; model?: unknown }
-      const isCopyAllowed = call.subagent_type === 'fork' && lean.small === 'copy'
-      if (!isCopyAllowed && (call.subagent_type === 'fork' || !String(call.model ?? '').trim())) {
+      if (call.subagent_type === 'fork' || !String(call.model ?? '').trim()) {
         await log($, `refused an Agent call ${call.subagent_type === 'fork' ? 'that copies the chat' : 'with no model'}`)
         return { deny: NO_COPY() }
       }
@@ -658,7 +644,7 @@ const workHooks = (on: On) => {
     // and where the runner is that does an admin command with a Mac's kept password
     const rules = isTold ? await workRules($) : ''
     const isBackground = isHelperSpawn(e)
-    const r = await next(isTold ? { ...e, prompt: `${e.fork ? `${FORK_HEAD()}\n\n` : ''}${e.prompt}\n\n${rules}` } : isBackground ? { ...e, background: true } : e)
+    const r = await next(isTold ? { ...e, prompt: `${e.prompt}\n\n${rules}` } : isBackground ? { ...e, background: true } : e)
     if (isBackground && r.agentId) await log($, `helper ${r.agentId} of ${e.parentAgentId} runs in the background`)
     if (r.model) seeModel(r.model)
     // A resumed agent keeps the model it first started on, or none: the model it resumes on may be one the app moved it to after a flag. A

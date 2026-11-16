@@ -153,7 +153,6 @@ declare global {
   export import modelsOf = M6.modelsOf
   export import modelsShort = M6.modelsShort
   export import parse = M6.parse
-  export import quickModel = M6.quickModel
   export import TEXTS = M6.TEXTS
   export import Config = M6.Config
   export import ConfigShown = M6.ConfigShown

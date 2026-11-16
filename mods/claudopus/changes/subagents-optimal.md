@@ -1,0 +1,3 @@
+- A job the chat can state clearly now goes to a fresh task on Sonnet with written instructions, by itself: measured on 108 jobs, it cost least at every chat size and was as fast or faster. Work that needs judgment still goes to a task on Opus.
+- The chat never hands a job to a copy of itself any more: a copy cost 1.3 to 5.8 times as much and was no faster. It still runs a single safe command itself.
+- Config's Tasks band keeps only When to use Fable and Second check. Small jobs, Quick task model, What a task starts with, Checker model and Helpers that only read are gone; each now always works the cheapest and fastest measured way.
