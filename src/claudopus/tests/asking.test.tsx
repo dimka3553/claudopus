@@ -325,6 +325,62 @@ test('a press on one ended work\'s ask leaves the other asks\' buttons where the
   await list.unmount()
 })
 
+test('a go-ahead to finish on ended work does its last step without waking it: a release in a repo with .release is held on the card for the allow, any other step goes to a small fresh task; a reply in words or the other choice still goes to the work', async ($, on) => {
+  const { files, resumed, clock, wake, asked } = world(on)
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'four fixes', wait: false, origin: composer })
+  for (const description of ['Fix the nose', 'Fix the ear', 'Fix the chin', 'Fix the brow']) await $.agent.spawn({ ...spawn, model: 'opus', description, prompt: description } as never)
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  // The worktrees: one released by its runner, one with no .release
+  files.set('/repo/wt/.release', 'mods/claudopus/bin/release')
+  files.set('/repo/plain/README.md', '# plain')
+  files.set('git:top', '/repo/wt')
+  files.set('git:branch', 'fix-nose')
+  const ask = async (id: string, last_step: string, folder: string) => {
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${id}`, agentId: id, text: `Release ${id}?`, choices: ['Release it', 'Not now'], last_step, folder } as never)
+    await $.turn.complete({ answer: 'Waits for your Release it.', durationMs: 1, isAborted: false, turnId: `turn-${id}`, reason: 'answer', agentId: id } as never)
+  }
+  const press = async (id: string, label: string) => {
+    const key = await until(async () => (await list.findAll({ type: 'Button' })).find(b => b.props.label === label && String(b.key ?? '').startsWith(`ask-${id}-`))?.key)
+    await list.press({ key: key ?? '' })
+  }
+  await ask('a1', 'release', '/repo/wt')
+  await ask('a2', 'Merge the PR and look at the build', '/repo/plain')
+  await ask('a3', 'release', '/repo/wt')
+  await ask('a4', 'release', '/repo/wt')
+  await clock.advance(60_000)
+
+  // Release it: the card holds the release's allow box for the branch, and the work is not started again
+  await press('a1', 'Release it')
+  expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a1-.*once/.test(String(b.key ?? ''))))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Branch fix-nose' })).toBeDefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain('last step of a1 on')
+  // Denied, nothing is released and the work still sleeps
+  const deny = (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a1-.*deny/.test(String(b.key ?? '')))
+  await list.press({ key: deny?.key ?? '' })
+  expect(await until(async () => (wake(), (files.get(`${MEMORY}/log.md`) ?? '').includes('release of wt: denied') ? true : undefined))).toBe(true)
+
+  // Another last step: a small fresh task in the folder does it, started from the next hook of the mod (here the next press), and the
+  // work is not started again
+  await press('a2', 'Release it')
+  expect(await until(async () => ((files.get(`${MEMORY}/log.md`) ?? '').includes('last step of a2 on') ? 'step' : undefined))).toBe('step')
+  // The other choice still goes to the work
+  await press('a3', 'Not now')
+  expect(await until(async () => resumed.find(line => line.startsWith('a3: ') && line.includes('pressed "Not now"')))).toBeDefined()
+  // (the kit drops a kind it has no definition of, so the small task is known by its prompt and model)
+  const quick = await until(async () => prompts.find(one => one.startsWith('Do the last step of the task "Fix the ear"')))
+  expect(quick).toContain('Merge the PR and look at the build')
+  expect(quick).toContain('Work in /repo/plain, on its branch fix-nose')
+  expect(asked.at(-1)).toBe('opus')
+  expect(files.get(`${MEMORY}/log.md`)).toContain('does the last step of a2')
+  expect(resumed.filter(line => line.startsWith('a1: ') || line.startsWith('a2: '))).toEqual([])
+  // and so does a reply in words
+  const box = await until(async () => ((await list.findAll({ type: 'Input' } as never)) as { key?: string }[]).find(one => /-reply-/.test(one.key ?? '') && String(one.key).includes('a4')))
+  await list.input({ key: box?.key ?? '', text: 'Release it after lunch' })
+  expect(await until(async () => resumed.find(line => line.startsWith('a4: ') && line.includes('Release it after lunch')))).toBeDefined()
+  await list.unmount()
+})
+
 test('a reply in words that does not settle an ask keeps it, and the card active, with nothing to press while the work acts on it, until it is settled: the 13 Nov "Show me images first." to work that asked "Release it?" and handed in its report', async ($, on) => {
   const { resumed, clock } = world(on)
   await $.session.start(start)

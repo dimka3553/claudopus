@@ -47,6 +47,24 @@ test('work starts as a copy of the chat only for a small job and as the settings
   expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`)
 })
 
+test('a copy of the chat for a small job is told it is a task now, and past its 10 steps may only hand what is left on and end', async ($, on) => {
+  const { files } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'push it', wait: false, origin: composer })
+  const r = (await $.agent.spawn({ ...spawn, fork: true, subagentType: undefined, description: 'Push it', prompt: 'push it', parentModel: 'claude-opus-5-5' } as never)) as { agentId?: string }
+  expect(prompts.at(-1)?.startsWith('You are a copy of the chat')).toBe(true)
+  const id = r.agentId ?? ''
+  for (let n = 0; n < 10; n++) expect((await $.tool.call({ tool: 'Bash', tool_use_id: `f${n}`, command: 'git status', agentId: id } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 'f10', command: 'git push', agentId: id } as never)).deny).toContain('this copy of the chat has taken its 10 steps. Hand what is left to a fresh task')
+  expect((await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f11', text: 'Handing the rest on', task: 'push the branch in /repo', agentId: id } as never)).deny).toBeUndefined()
+  expect((await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'f12', message: 'done', agentId: id } as never)).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain(`refused a step of copy ${id} past its 10 steps`)
+  // A fresh task is not held to a copy's steps
+  const fresh = (await $.agent.spawn({ ...spawn, model: 'opus', description: 'Fix the nose', prompt: 'fix the nose' } as never)) as { agentId?: string }
+  expect(prompts.at(-1)?.startsWith('fix the nose')).toBe(true)
+  for (let n = 0; n < 11; n++) expect((await $.tool.call({ tool: 'Bash', tool_use_id: `g${n}`, command: 'git status', agentId: fresh.agentId } as never)).deny).toBeUndefined()
+})
+
 test('no agent is started on an older model or on Haiku, by the chat or by a piece of work: one named so starts on its family\'s newest; the aliases and their newest versions pass as named', async ($, on) => {
   const { files, agentModels } = world(on)
   await $.session.start(start)
@@ -104,6 +122,42 @@ test('every start is held to a current model: an older id, a parent on an older 
   expect((await go({ fork: true, parentModel: 'claude-opus-4-8', parentAgentId: 'a0' })).deny).toContain("Claudopus doesn't run tasks on Opus 4.8. Start a fresh agent")
   expect((await go({ fork: true, parentAgentId: 'a0' })).deny).toBeUndefined()
   expect(files.get(`${MEMORY}/log.md`)).toContain('a workflow agent asked to run on Sonnet 4.5 starts on Sonnet 5.5')
+})
+
+test("the mod's own kinds start as the settings say: a reader on the legwork model or its parent's, a check never weaker than its parent and at least Opus or always Fable, a quick task on its model, and every kind with everything when chosen", async ($, on) => {
+  const { asked, types, files, registered } = world(on, { model: 'claude-opus-5-5' })
+  await $.session.start(start)
+  // The kinds are the engine's own from the session's start
+  expect(await until(async () => (registered.length >= 5 ? [...registered].sort() : undefined))).toEqual(['check', 'helper', 'quick', 'reader', 'task'])
+  await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  const go = async (subagentType: string, e: Record<string, unknown> = {}) => {
+    await $.agent.spawn({ ...spawn, subagentType, prompt: 'p', description: 'The nose', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', ...e } as never)
+    return [asked.at(-1), types.at(-1)]
+  }
+  const shipped: [string, Record<string, unknown>, (string | undefined)[]][] = [
+    ['claudopus:reader', {}, ['sonnet', 'claudopus:reader']],
+    ['claudopus:reader', { model: 'opus' }, ['sonnet', 'claudopus:reader']],
+    ['claudopus:check', { model: 'sonnet', parentModel: 'claude-sonnet-5-5' }, ['claude-opus-5-5', 'claudopus:check']],
+    ['claudopus:check', { model: 'opus', parentModel: 'claude-fable-5-2' }, ['claude-fable-5-2', 'claudopus:check']],
+    ['claudopus:check', { model: 'fable' }, ['fable', 'claudopus:check']],
+    ['claudopus:quick', {}, ['opus', 'claudopus:quick']],
+    ['claudopus:quick', { model: 'sonnet' }, ['sonnet', 'claudopus:quick']],
+    ['claudopus:task', { model: 'opus' }, ['opus', 'claudopus:task']],
+  ]
+  for (const [type, e, want] of shipped) expect([type, e, await go(type, e)]).toEqual([type, e, want])
+  // A reader on its parent's model, a check always on Fable, and every kind started with everything
+  ownSet(files, 'config.json', JSON.stringify({ lean: { readers: 'own', checker: 'strongest', start: 'all' } }))
+  await $.session.start(start)
+  const chosen: [string, Record<string, unknown>, (string | undefined)[]][] = [
+    ['claudopus:reader', {}, ['claude-opus-5-5', 'general-purpose']],
+    ['claudopus:check', { model: 'sonnet' }, ['claude-fable-5-2', 'general-purpose']],
+    ['claudopus:quick', {}, ['opus', 'general-purpose']],
+    ['claudopus:task', { model: 'opus' }, ['opus', 'general-purpose']],
+    ['claudopus:helper', { model: 'opus' }, ['opus', 'general-purpose']],
+    ['general-purpose', { model: 'sonnet' }, ['sonnet', 'general-purpose']],
+    ['Explore', {}, [undefined, 'Explore']],
+  ]
+  for (const [type, e, want] of chosen) expect([type, e, await go(type, e)]).toEqual([type, e, want])
 })
 
 test('what counts as current follows the newest model the engine offers, never a version written into the mod', async ($, on) => {
@@ -335,6 +389,25 @@ test("a chat's own thread may only read, run a single command in the background,
   // A single command it runs itself, always in the background; reading a file, more than one command, or a runner is not that
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'git push' } as never)).deny).toBeUndefined()
   expect(files.get(`${MEMORY}/log.md`)).toContain("the chat's own command started in the background (bg-t1)")
+  // As it ends, its notice carries how it ended and its last three lines, read from its output file
+  files.set('/tmp/tasks/bg-t1.output', 'Enumerating objects: 5\nWriting objects: 100%\nTo github.com:sam/nose.git\n   1a2b3c..4d5e6f  main -> main\n')
+  const notice = (id: string, status: string, summary: string) => `<task-notification>\n<task-id>${id}</task-id>\n<output-file>/tmp/tasks/${id}.output</output-file>\n<status>${status}</status>\n<summary>${summary}</summary>\n</task-notification>`
+  const ended = (await $.prompt.submit({ text: notice('bg-t1', 'completed', 'Background command "git push" completed (exit code 0)'), wait: false, origin: { kind: 'task-notification' } } as never)) as { context?: string[]; drop?: string }
+  const endedText = ended.context?.join('\n') ?? ''
+  expect(endedText).toContain('Writing objects: 100%\nTo github.com:sam/nose.git\n   1a2b3c..4d5e6f  main -> main')
+  expect(endedText).not.toContain('Enumerating objects')
+  expect(endedText).toContain('ended (Background command "git push" completed (exit code 0))')
+  // The engine's notice that a task whose report already came has stopped is left out; one that also says something else is not
+  const REPEAT = 'Agent "Fix the nose" completed. Its report was already delivered to you as a message, so it is not repeated here.'
+  const repeat = (await $.prompt.submit({ text: notice('a9', 'completed', REPEAT), wait: false, origin: { kind: 'task-notification' } } as never)) as { drop?: string }
+  expect(repeat.drop).toContain('Left out a repeat notice')
+  const two = (await $.prompt.submit({ text: `${notice('a9', 'completed', REPEAT)}\n${notice('a8', 'completed', REPEAT)}`, wait: false, origin: { kind: 'task-notification' } } as never)) as { drop?: string }
+  expect(two.drop).toContain('Left out a repeat notice')
+  for (const text of [`${notice('a9', 'completed', REPEAT)}\n${notice('a8', 'failed', 'Agent "Fix the ear" failed: it is not repeated here')}`, `${notice('a9', 'completed', REPEAT)}\nThe build on main is red.`, notice('a7', 'completed', 'Agent "Fix the ear" completed')]) {
+    const kept = (await $.prompt.submit({ text, wait: false, origin: { kind: 'task-notification' } } as never)) as { drop?: string; text?: string }
+    expect([text, kept.drop]).toEqual([text, undefined])
+    expect(kept.text).toBe(text)
+  }
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1b', command: 'git add -A && git commit -m x' } as never)).deny).toContain('only a single command')
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1c', command: 'git log > /tmp/x' } as never)).deny).toContain('only a single command')
   const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1d', command: '/plug/claudopus/bin/release' } as never)
@@ -364,6 +437,12 @@ test("a chat's own thread may only read, run a single command in the background,
   // Work and its helpers are not held to the chat's reading: they read, write and run
   for (const [i, call] of [{ tool: 'Edit', file_path: '/repo/src/nose.ts', old_string: 'a', new_string: 'b' }, { tool: 'Write', file_path: '/repo/x', content: 'x' }, { tool: 'Grep', pattern: 'nose' }, { tool: 'Bash', command: 'npm test' }].entries())
     for (const agentId of ['w1', 'helper-1']) expect((await $.tool.call({ ...call, tool_use_id: `w${i}${agentId}`, agentId } as never)).deny).toBeUndefined()
+  // With everything as a full task, the chat runs no command of its own
+  ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'full' } }))
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'push it', wait: false, origin: composer })
+  const full = await $.tool.call({ tool: 'Bash', tool_use_id: 't9', command: 'git push' } as never)
+  expect(full.deny).toContain('Start a fresh agent')
 })
 
 test('a session the person has not typed into does its own work', async ($, on) => {

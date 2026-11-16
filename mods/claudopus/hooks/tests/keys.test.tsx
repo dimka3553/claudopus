@@ -83,6 +83,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
   const agentModels: (string | undefined)[] = []
   const asked: (string | undefined)[] = []
+  // and the kind of agent each spawn was asked to start as
+  const types: (string | undefined)[] = []
+  const registered: string[] = []
   const played: string[] = []
   const notified: string[] = []
   // What was handed to osascript
@@ -532,10 +535,13 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     prompts.push(e.prompt)
     backgrounds.push(e.background)
     asked.push(e.model)
+    types.push((e as { subagentType?: string }).subagentType)
     const resume = (e as { resume?: { agentId?: string } }).resume
     // The model an agent's own type starts it on, by its task's few words, as Explore starts on Haiku
     return { model: options.startedOn?.[e.description ?? ''] ?? options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
   })
+  // The kinds of agent the mod registers, by name
+  on('agent.register', (_, e) => (registered.push(String((e as { name?: string }).name)), { value: undefined }) as never)
   on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status, ...(options.parents?.[id] ? { parentId: options.parents[id] } : {}) })) as never }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('prompt.submit', (_, e) => {
@@ -564,7 +570,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two

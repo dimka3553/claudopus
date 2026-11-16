@@ -83,6 +83,9 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   // The model each Agent call reached the engine with, and each spawn was asked to start on (none: left to the agent's kind or parent)
   const agentModels: (string | undefined)[] = []
   const asked: (string | undefined)[] = []
+  // and the kind of agent each spawn was asked to start as
+  const types: (string | undefined)[] = []
+  const registered: string[] = []
   const played: string[] = []
   const notified: string[] = []
   // What was handed to osascript
@@ -532,10 +535,13 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     prompts.push(e.prompt)
     backgrounds.push(e.background)
     asked.push(e.model)
+    types.push((e as { subagentType?: string }).subagentType)
     const resume = (e as { resume?: { agentId?: string } }).resume
     // The model an agent's own type starts it on, by its task's few words, as Explore starts on Haiku
     return { model: options.startedOn?.[e.description ?? ''] ?? options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
   })
+  // The kinds of agent the mod registers, by name
+  on('agent.register', (_, e) => (registered.push(String((e as { name?: string }).name)), { value: undefined }) as never)
   on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status, ...(options.parents?.[id] ? { parentId: options.parents[id] } : {}) })) as never }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('prompt.submit', (_, e) => {
@@ -564,7 +570,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -771,6 +777,31 @@ test('the model each kind of work runs on comes from Config, and the chat\'s and
   // Picking what shipped takes the key out again
   await config.select({ key: 'config-model-legwork-pick', value: 'sonnet' })
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
+})
+
+test("Config's Tasks band shows how work is handed out, each with its shipped choice, and a choice is written as lean in config.json", async ($, on) => {
+  const { files } = world(on)
+  await $.session.start(start)
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  const settings: [string, string, string, string][] = [
+    ['fable', 'When to use Fable 5.2', 'heavy', 'named'],
+    ['small', 'Small jobs', 'copy', 'full'],
+    ['quick', 'Quick task model', 'opus', 'work'],
+    ['start', 'What a task starts with', 'lean', 'all'],
+    ['second', 'Second check', 'beyond', 'every'],
+    ['checker', 'Checker model', 'same', 'strongest'],
+    ['readers', 'Helpers that only read', 'sonnet', 'own'],
+  ]
+  for (const [key, name, shipped, other] of settings) {
+    expect([name, Boolean(await config.find({ type: 'Text', text: name }))]).toEqual([name, true])
+    expect([key, (await config.find({ type: 'Select', key: `config-lean-${key}-pick` } as never))?.props.value]).toEqual([key, shipped])
+    await config.select({ key: `config-lean-${key}-pick`, value: other })
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ lean: { [key]: other } })
+    expect([key, (await until(async () => ((await config.find({ type: 'Select', key: `config-lean-${key}-pick` } as never))?.props.value === other ? other : undefined)))]).toEqual([key, other])
+    // Picking what shipped takes the key out again
+    await config.select({ key: `config-lean-${key}-pick`, value: shipped })
+    expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({})
+  }
 })
 
 test('Check now in Config only looks: it shows it is checking, then what it found, and a second press meanwhile starts no second look; nothing is fetched or moved', async ($, on) => {
