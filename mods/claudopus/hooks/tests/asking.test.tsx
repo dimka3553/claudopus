@@ -1200,7 +1200,8 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
   const quick = await until(async () => prompts.find(one => one.startsWith('Do the last step of the task "Fix the ear"')))
   expect(quick).toContain('Merge the PR and look at the build')
   expect(quick).toContain('Work in /repo/plain, on its branch fix-nose')
-  expect(asked.at(-1)).toBe('opus')
+  // on Sonnet, the cheapest and fastest measured for a step stated this clearly
+  expect(asked.at(-1)).toBe('sonnet')
   expect(files.get(`${MEMORY}/log.md`)).toContain('does the last step of a2')
   expect(resumed.filter(line => line.startsWith('a1: ') || line.startsWith('a2: '))).toEqual([])
   // and so does a reply in words
