@@ -12292,11 +12292,20 @@ const panelHooks = (on: On) => {
     // Where a piece of work is: the line it last wrote about itself
     // While it works, a run of its own that ended after that line is said in its place, so a line written while the run went ("about
     // 40% done") never stands beside a row that has ended (16 Nov), until the work writes again; not while it asks the person something
+    // Nor once the work has carried on: a run that ended before the newest command or helper it has going began, or one whose
+    // own processes still work as rows of their own (a launcher whose programs go on), is not said; and runs are named, never a
+    // bare count beside rows still working (16 Nov "2 commands have ended" stood above two commands still working)
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? "").trim()) : []
-      const run = runs.length === 1 ? runs[0] : undefined
-      return run ? `${runWords(String(run.what))} ${RUN_ENDED_AS[run.how]}` : runs.length ? `${runs.length} commands have ended` : (entry?.text ?? '')
+      const going = [...(one.bg ?? []).map(b => ({ at: b.at, isLeft: false })), ...(one.detached ?? []).map(d => ({ at: d.at, isLeft: Boolean(d.isLeft) })), ...(one.running ? [{ at: one.running.at, isLeft: false }] : []), ...underOf(all, one.id).filter(kid => kid.status === 'working').map(kid => ({ at: kid.startedAt, isLeft: false }))]
+      const isOn = (r: NonNullable<Todo['endedRuns']>[number]) => going.some(g => g.at > r.endedAt || (g.isLeft && g.at >= r.at && g.at <= r.endedAt))
+      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !isOn(r)) : []
+      const [first, second] = runs
+      return !first
+        ? (entry?.text ?? '')
+        : !second
+          ? `${runWords(String(first.what))} ${RUN_ENDED_AS[first.how]}`
+          : `${runWords(String(first.what))}${runs.length > 2 ? `, ${runWords(String(second.what))} and ${runs.length - 2} more` : ` and ${runWords(String(second.what))}`} have ended`
     }
 
     const table = uiOf($, e)
