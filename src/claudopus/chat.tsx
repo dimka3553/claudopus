@@ -257,6 +257,11 @@ const chatHooks = (on: On) => {
       for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)])
         if (one.status !== 'working' && one.endedAt > last && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, Infinity)
     }
+    // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold)
+    holdAt = 0
+    // (not in the test kit, whose clock a test moves by hours at once: there only a test that asks for it has it)
+    isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
+    if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     let seconds = 0
     everyLoad($, 1000, async () => {
       if (drawnNow > (await read($, lastDrawn))) await update($, lastDrawn, () => drawnNow)
@@ -270,7 +275,7 @@ const chatHooks = (on: On) => {
       if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
-        await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
+        if (!isBehind()) await readOthers($).catch(err => log($, `other chats not read: ${String(err)}`))
       }
       const isFlowing = (await read($, flows)).some(f => f.status === 'working')
       // Held while the person types into a reply box (holdTimes)
@@ -280,9 +285,9 @@ const chatHooks = (on: On) => {
       // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
       if (!isTyping) for (const [key, held] of heldDrawings) if (calmNow - held.at >= 60_000) heldDrawings.delete(key)
       // The mod alone says when its panes are drawn again, and only when what they show has moved (calmLook)
-      await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
+      if (!isBehind()) await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`))
       // While this chat's work runs, the line above the prompt shows how Claude uses the computer: looked at every few seconds
-      if ((await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
+      if (!isBehind() && (await read($, todos)).some(one => !one.parentId && one.status === 'working')) void lookUsage($).catch(err => log($, `usage not looked at: ${String(err)}`))
       // Work in its pause after ending is drawn again the moment the pause is over, when it leaves for Finished
       const now = await $.clock.now()
       for (const one of [...(await read($, flows)), ...(await read($, todos))].filter(card => isLingering(card, now))) {
@@ -306,6 +311,8 @@ const chatHooks = (on: On) => {
     isRunFromAfar = Boolean(await $.env.get('CLAUDE_SSH_DAEMON_CHILD'))
     // A chat the app runs from another Mac has a keeper on this one, which goes on with its work should the app end its process
     if (isRunFromAfar) await startKeeper($, id).catch(err => log($, `keeper not started: ${String(err)}`))
+    // and every chat a watcher that brings Claudopus back should Claude switch it off
+    await startReviver($, id).catch(err => log($, `the watcher that brings Claudopus back was not started: ${String(err)}`))
     if (macs.length) everyLoad($, OPEN_EVERY, () => takeOpens($).catch(err => log($, `presses on other Macs not taken: ${String(err)}`)))
     if (macs.length) everyLoad($, FETCH_EVERY, () => syncResults($).catch(err => log($, `results not made the same: ${String(err)}`)))
     await shareMine($).catch(() => undefined)
@@ -332,14 +339,19 @@ const chatHooks = (on: On) => {
     return begun
   })
 
+  // The setting that brings Claudopus back is its own: never shown in /config
+  on('config.describe', ($, e, next) => next(e.key === REVIVED_KEY ? { ...e, isHidden: true } : e))
+
   // A chat that ends removes its file, so the other panels drop its work at once
   on('session.end', async ($, e, next) => {
     isEnded = true
+    await endBeat($, (await read($, me)).id).catch(() => undefined)
     await unshare($).catch(() => undefined)
     return next(e)
   })
 
   on('prompt.submit', async ($, e, next) => {
+    await holdTest($)
     // The texts a message is answered with are the ones known: a change made since is put back first
     if (dir) await personCheck($).catch(err => log($, `files not compared as a message came: ${String(err)}`))
     if (wakes.length) await sendWakes($).catch(err => log($, `answer not sent: ${String(err)}`))

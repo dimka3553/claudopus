@@ -259,7 +259,7 @@ const HELPER_PASSED = (helper: string, work: string) =>
 
 // A helper that ends while the work that started it has ended its step: the engine hands its result to the chat (seen live on 16
 // Nov), so Claudopus passes it on to that work and starts it again with it. The work never holds itself open to wait for helpers
-const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status']) => {
+const passOnHelper = async ($: EngineInterface, helperId: string, report: string, how: Todo['status'], isUnheard = false) => {
   if (!dir || isOff) return
   const list = await read($, todos)
   const helper = list.find(one => one.id === helperId)
@@ -269,6 +269,9 @@ const passOnHelper = async ($: EngineInterface, helperId: string, report: string
   // A work at a step of its own has the result from the engine itself. One the engine still holds for a command of its own may have
   // it too: it is passed on all the same, as a result lost costs more than one read twice, but the chat had none of it to be told of
   const listed = (await $.agent.list().catch(() => [])).find(one => one.id === parent.id)?.status
+  // A helper whose end was never heard (it ended while the mod was out) had its result reach no step of the work's: one now at a
+  // step, woken by another such helper's result, reads it at its next step
+  if (listed === 'running' && isUnheard) return void (await tell($, parent.id, HELPER_ENDED(titleOf(helper), how, report.slice(0, ANSWER_CHARS))))
   if (listed === 'running') return
   const r = (await isReplaced($))
     ? { isDelivered: false as const, reason: 'this copy of the mod was replaced by a reload' }
