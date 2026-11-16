@@ -311,6 +311,16 @@ test('F-021 · an old kept copy put back with the old file is not taken by a cha
   await $.session.start(start)
   await bash('o2', 'ls')
   expect(await until(async () => (logged.some(line => /could not use its key/.test(line)) ? true : undefined))).toBe(true)
+  // A home with no keychain, as a trial chat's own: the keychain is never asked, so macOS puts no "Keychain Not Found" on the
+  // screen, and the panel says so as for one that does not answer
+  files.delete('keychain:refused')
+  for (const item of ['keychain:known', 'keychain:gate', KEYCHAIN, `${MEMORY}/admin-known.json`]) files.delete(item)
+  files.delete(`${MEMORY}/log.md`)
+  await $.session.start(start)
+  await bash('o3', 'ls')
+  expect(await until(async () => (/not in force: the keychain did not answer/.test(files.get(`${MEMORY}/log.md`) ?? '') ? true : undefined))).toBe(true)
+  expect(files.get('keychain:dialog')).toBeUndefined()
+  expect(files.has('keychain:known')).toBe(false)
 })
 
 test("F-021 · another chat's Config change is never undone here: not while the keychain does not answer, nor when it lands with a lower count", async ($, on) => {

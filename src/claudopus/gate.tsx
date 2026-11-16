@@ -112,6 +112,7 @@ for m in "$@"; do
   printf '%s\\n%s' "$k" "$m" | /usr/bin/perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m // "", $k), "\\n"' || exit 1
 done`
 const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-make', messages: string[]) => {
+  if (!(await hasKeychain($))) return undefined
   const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
   const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
@@ -195,7 +196,7 @@ let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
   if (isKeptForgotten || !dir) return
   isKeptForgotten = true
-  await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
+  if (await hasKeychain($)) await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
   if ((await readConfig($, dir)).adminPassword !== undefined) await setConfig($, dir, 'adminPassword', undefined).catch(() => undefined)
 }
 
@@ -574,6 +575,7 @@ const knownRead = async ($: EngineInterface): Promise<Map<string, string | null>
 }
 // Whether the kept copy's own key is there: 'no' only when the keychain answered that it is not, 'error' when it did not answer
 const knownKey = async ($: EngineInterface): Promise<'yes' | 'no' | 'error'> => {
+  if (!(await hasKeychain($))) return 'error'
   const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', 'known-has'], { timeoutMs: 20_000 }).catch(() => undefined)
   return r?.exitCode === 0 ? 'yes' : r?.exitCode === 3 ? 'no' : 'error'
 }

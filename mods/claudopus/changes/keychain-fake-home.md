@@ -1,0 +1,1 @@
+- Claudopus no longer makes macOS show "Keychain Not Found" when it runs in a home folder that has no keychain, such as a test's or a trial chat's own: it leaves the keychain alone there and says in the panel that it could not use its key.

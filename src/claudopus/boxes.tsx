@@ -261,7 +261,9 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     return void drawAgain($)
   }
   const escaped = sent.replace(/[\\"]/g, '\\$&')
-  const r = isLinux
+  const r = !(await hasKeychain($))
+    ? { exitCode: -1 }
+    : isLinux
     ? await boxKeyring($, 'set', id, `${sent}\n`)
     : await $.process
         .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })

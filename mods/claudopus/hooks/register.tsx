@@ -453,6 +453,16 @@ const knowSystem = async ($: EngineInterface) => {
   keyringRoot = `${(await $.env.get('HOME')) ?? ''}/.local/share/claudopus/keyring`
   keyringOldRoot = data.startsWith('/') ? `${data}/claudopus/keyring` : ''
 }
+// Whether this Mac's home folder holds a keychain. One without (a test's or a trial chat's home of its own) makes security ask on
+// the person's screen for a keychain to keep an item in ("Keychain Not Found"), so nothing is asked of the keychain there: what
+// would use it fails as a keychain that does not answer. Looked at each time, so one made later is used. Linux keeps files instead
+const hasKeychain = async ($: EngineInterface) => {
+  if (isLinux) return true
+  const home = (await $.env.get('HOME')) ?? ''
+  if (!home.startsWith('/')) return false
+  const found = await $.fs.list(`${home}/Library/Keychains`).catch(() => [])
+  return found.some(one => one.kind === 'file' && /\.keychain(?:-db)?$/.test(one.name))
+}
 // How this computer is named in what the person reads
 const thisMac = () => (isLinux ? 'this machine' : 'this Mac')
 const keptWhere = () => (isLinux ? 'a file on this machine that only you can read' : "this Mac's keychain")
@@ -6952,7 +6962,9 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
     return void drawAgain($)
   }
   const escaped = sent.replace(/[\\"]/g, '\\$&')
-  const r = isLinux
+  const r = !(await hasKeychain($))
+    ? { exitCode: -1 }
+    : isLinux
     ? await boxKeyring($, 'set', id, `${sent}\n`)
     : await $.process
         .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
@@ -7315,6 +7327,7 @@ for m in "$@"; do
   printf '%s\\n%s' "$k" "$m" | /usr/bin/perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m // "", $k), "\\n"' || exit 1
 done`
 const sealed = async ($: EngineInterface, mode: 'read' | 'make' | 'new' | 'known-read' | 'known-make', messages: string[]) => {
+  if (!(await hasKeychain($))) return undefined
   const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined)
   const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined
   return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined
@@ -7398,7 +7411,7 @@ let isKeptForgotten = false
 const forgetKeptPasswords = async ($: EngineInterface) => {
   if (isKeptForgotten || !dir) return
   isKeptForgotten = true
-  await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
+  if (await hasKeychain($)) await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`))
   if ((await readConfig($, dir)).adminPassword !== undefined) await setConfig($, dir, 'adminPassword', undefined).catch(() => undefined)
 }
 
@@ -7777,6 +7790,7 @@ const knownRead = async ($: EngineInterface): Promise<Map<string, string | null>
 }
 // Whether the kept copy's own key is there: 'no' only when the keychain answered that it is not, 'error' when it did not answer
 const knownKey = async ($: EngineInterface): Promise<'yes' | 'no' | 'error'> => {
+  if (!(await hasKeychain($))) return 'error'
   const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', 'known-has'], { timeoutMs: 20_000 }).catch(() => undefined)
   return r?.exitCode === 0 ? 'yes' : r?.exitCode === 3 ? 'no' : 'error'
 }

@@ -426,6 +426,16 @@ const knowSystem = async ($: EngineInterface) => {
   keyringRoot = `${(await $.env.get('HOME')) ?? ''}/.local/share/claudopus/keyring`
   keyringOldRoot = data.startsWith('/') ? `${data}/claudopus/keyring` : ''
 }
+// Whether this Mac's home folder holds a keychain. One without (a test's or a trial chat's home of its own) makes security ask on
+// the person's screen for a keychain to keep an item in ("Keychain Not Found"), so nothing is asked of the keychain there: what
+// would use it fails as a keychain that does not answer. Looked at each time, so one made later is used. Linux keeps files instead
+const hasKeychain = async ($: EngineInterface) => {
+  if (isLinux) return true
+  const home = (await $.env.get('HOME')) ?? ''
+  if (!home.startsWith('/')) return false
+  const found = await $.fs.list(`${home}/Library/Keychains`).catch(() => [])
+  return found.some(one => one.kind === 'file' && /\.keychain(?:-db)?$/.test(one.name))
+}
 // How this computer is named in what the person reads
 const thisMac = () => (isLinux ? 'this machine' : 'this Mac')
 const keptWhere = () => (isLinux ? 'a file on this machine that only you can read' : "this Mac's keychain")
