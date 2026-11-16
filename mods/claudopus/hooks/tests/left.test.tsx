@@ -751,8 +751,8 @@ test('a launcher that starts 8 drawings and exits leaves 8 runs under its card, 
   // As they end, they leave, and the card counts them as ended
   procs.list = []
   await advance(20_000)
-  // (the card's own line may say a command of it has ended, until the work writes again)
-  expect(await until(async () => ((await leftTexts($)).every(text => !text.includes('fig4.py page') || / has ended$/.test(text)) || undefined))).toBe(true)
+  // (the card's own line may name the commands of it that ended, until the work writes again)
+  expect(await until(async () => ((await leftTexts($)).every(text => !text.includes('fig4.py page') || / (has|more) ended$/.test(text)) || undefined))).toBe(true)
   expect((await leftTexts($)).some(text => /8 commands ended/.test(text))).toBe(true)
 })
 
@@ -858,34 +858,42 @@ test('a Python pool left running is one run with its workers\' memory added up',
 })
 
 test('a background command whose shell ends leaving its scripts running hands them to its card as runs, and the card never says commands have ended above them (16 Nov "2 commands have ended" over two still working)', SLOW, async ($, on) => {
-  const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs: {} as Record<string, string> }
+  // (the launcher's own output says it exited once its shell has gone)
+  let isLaunched = false
+  const outputs = new Proxy({} as Record<string, string>, { get: (kept, file) => kept[String(file)] ?? (isLaunched && String(file).includes('l6') ? 'starting the renders\n[exited with code 0]\n' : undefined) })
+  const procs = { list: [] as string[], logs: {} as Record<string, string>, outputs }
   const { advance, appended } = leftWorld(on, procs)
   await leftStart($)
   await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'I am building the scene before the renders.' } as never)
-  // A build it left going ends after that line, before it starts the renders
+  // Two commands it left going end after that line, before it starts the renders
   procs.list.push(psLine(5060, 1, 5050, '/u/bin/python build_scene.py'))
   await $.tool.call({ tool: 'Bash', tool_use_id: 'l0', agentId: 'a1', command: 'python build_scene.py &', description: 'Run a build of the scene' } as never)
   await advance(20_000)
+  procs.list = [psLine(5260, 1, 5250, '/u/bin/python check_scene.py')]
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'l1', agentId: 'a1', command: 'python check_scene.py &', description: 'Run a check of the scene' } as never)
+  await advance(20_000)
   procs.list = []
   await advance(20_000)
-  expect(await until(async () => appended.find(one => one.startsWith('a1: Your command "Run a build of the scene" has ended')))).toBeDefined()
+  expect(await until(async () => appended.find(one => one.startsWith('a1: Your command "Run a check of the scene" has ended')))).toBeDefined()
   // While its shell runs, the background command is its own row; nothing is taken from it
-  procs.list.push(psLine(5250, 900, 5250, "/bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'python launch.py 4' < /dev/null"), ...[0, 1].map(k => psLine(5260 + k, 5250, 5250, `/u/bin/python render.py ${k}`)))
+  procs.list.push(psLine(5450, 900, 5450, "/bin/zsh -c source /h/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'python launch.py 4' < /dev/null"), ...[0, 1].map(k => psLine(5460 + k, 5450, 5450, `/u/bin/python render.py ${k}`)))
   await $.tool.call({ tool: 'Bash', tool_use_id: 'l6', agentId: 'a1', command: 'python launch.py 4', description: 'Run the renders (about 8 min)', run_in_background: true } as never)
   await advance(20_000)
   expect((await leftTexts($)).some(text => text.includes('python render.py'))).toBe(false)
   // Its shell ends; the renders run on
-  procs.list = [0, 1].map(k => psLine(5260 + k, 1, 5250, `/u/bin/python render.py ${k}`))
-  for (const k of [0, 1]) ((procs.logs[String(5260 + k)] = `/w/r${k}.log`), (procs.outputs[`/w/r${k}.log`] = 'progress: 2/9 frames\n'))
+  procs.list = [0, 1].map(k => psLine(5460 + k, 1, 5450, `/u/bin/python render.py ${k}`))
+  isLaunched = true
+  for (const k of [0, 1]) ((procs.logs[String(5460 + k)] = `/w/r${k}.log`), (procs.outputs[`/w/r${k}.log`] = 'progress: 2/9 frames\n'))
   await advance(20_000)
   expect(await until(async () => ((await leftTexts($)).some(text => /^Run python render\.py [01]/.test(text)) || undefined))).toBe(true)
-  // Neither the build, from before the renders began, nor the launcher, whose renders still work, is said ended on the card's
-  // line: it is the work's own line while they run
+  // The launcher ends too (its card counts it with the two), but its renders still work: the card's line names the two that
+  // really ended, how each ended, and never counts the launcher among them
   await advance(80_000)
+  expect(await until(async () => ((await leftTexts($)).some(text => /3 commands ended/.test(text)) || undefined))).toBe(true)
   const shown = await leftTexts($)
   expect(shown.some(text => /^Run python render\.py [01]/.test(text))).toBe(true)
-  expect(shown.some(text => /have ended|has ended|has finished/.test(text))).toBe(false)
-  expect(shown.some(text => text === 'I am building the scene before the renders.')).toBe(true)
+  expect(shown).toContain('Run a build of the scene has ended and Run a check of the scene has ended')
+  expect(shown.some(text => /commands have ended|Run the renders (has|have) /.test(text))).toBe(false)
 })
 
 test('a script that starts a session of its own while its command runs is still that command\'s run; the system\'s own programs never are', SLOW, async ($, on) => {
