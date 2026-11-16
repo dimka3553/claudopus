@@ -645,8 +645,9 @@ const panelHooks = (on: On) => {
       const warn = isWarn
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
       const isFresh = quiet !== undefined && quiet < SILENT_WARN
-      // the time left as of when it was printed, less the time since, so a run quiet for a while counts down, never up
-      const since = Math.max(0, quiet ?? 0) / 1000
+      // the time left as of when it was printed, less the time since once it has been quiet a while, so a quiet run counts down,
+      // never up; a fresh one reads as it was printed, since its output is read only every few seconds
+      const since = (quiet ?? 0) >= 10_000 ? (quiet ?? 0) / 1000 : 0
       const leftNow = (text: string | undefined) => {
         const sec = leftSeconds(text)
         return sec !== undefined && sec - since > 0 ? timeLeftText(sec - since) : undefined

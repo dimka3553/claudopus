@@ -1060,8 +1060,7 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   expect(await until(async () => ((await texts()).includes('460 MB of 1 GB · ') || undefined))).toBe(true)
   const shown = await texts()
   expect(shown).toContain('45%')
-  // (the 55 seconds curl said were left, less the moment since it said them)
-  expect(shown.some(text => /^ · 10\.5 MB\/s · 5[0-5]s left$/.test(text))).toBe(true)
+  expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // While it gives word nothing is said of when
   expect(shown.some(text => /active|ago/.test(text))).toBe(false)
   // In a narrower panel its speed gives way first
@@ -1071,11 +1070,17 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   output += '\r 52 1024M   52  532M    0     0  10.2M      0  0:01:40  0:00:52  0:00:48 10.5M'
   wroteAt = now + 1_000
   await advance(8_000)
-  const moved = await texts()
+  const moved = (await until(async () => {
+    const all = await texts()
+    return all.includes('52%') ? all : undefined
+  })) ?? []
   expect(moved).toContain('52%')
-  expect(moved.some(text => /nothing printed/.test(text))).toBe(false)
-  // and the 48 seconds curl said were left count down from when it said them, never standing still or rising while it is quiet
-  expect(moved.some(text => /· 4[0-7]s left$/.test(text))).toBe(true)
+  // and the 48 seconds curl said were left count down from when it said them once it is quiet, never standing still or rising,
+  // with nothing said of the quiet under three minutes
+  await advance(10_000)
+  const quieter = await texts()
+  expect(quieter.some(text => /· 3\ds left$/.test(text))).toBe(true)
+  expect(quieter.some(text => /nothing printed/.test(text))).toBe(false)
   await advance(12_000)
   // The work's own line, as its scripts are told to print it
   output = 'loading\nprogress: 3/6 steps fitting\nframe 12 done\n'
@@ -1260,8 +1265,7 @@ test('every run under a card says how it stands: a command held open shows its p
   // past it, the run's own time left makes a fresh expectation, never the old figure as if it held
   expect(shown).toContain('5m 00s of ~5m 53s')
   expect(shown.some(text => /of ~3m/.test(text))).toBe(false)
-  // (the 55 seconds curl said were left, less the moment since it said them)
-  expect(shown.some(text => /^ · 10\.5 MB\/s · 5[0-5]s left$/.test(text))).toBe(true)
+  expect(shown).toContain(' · 10.5 MB/s · 55s left')
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
   expect(shown.some(text => /^nothing printed for 5m 00s$/.test(text))).toBe(true)
@@ -1426,15 +1430,14 @@ test("a run's second line starts under its name, with the tree's lines carried d
   const pane = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   const shown = (await pane.findAll({ type: 'Text' })).map(one => one.text).join('\n')
   await pane.unmount()
-  // (each less the moment since it was printed)
-  expect(shown).toMatch(/ (?:4m|3m 5\ds) left/)
-  expect(shown).toMatch(/~(?:2m|1m 5\ds) left/)
+  expect(shown).toContain('4m left')
+  expect(shown).toMatch(/~2m left/)
   expect(shown).not.toMatch(/printed/)
   // A narrow panel keeps how long is left before the percent
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 40 }, surface: 'terminal' } as never)
   const tight = (await narrow.findAll({ type: 'Text' })).map(one => one.text)
-  expect(tight.some(text => /^3\/6 steps · ~(?:2m|1m 5\ds) left$/.test(text))).toBe(true)
+  expect(tight).toContain('3/6 steps · ~2m left')
   // and one under a helper, with less room, keeps its count beside it
-  expect(tight.some(text => /^10\/40 · ~(?:6m|5m 5\ds) left$/.test(text))).toBe(true)
+  expect(tight).toContain('10/40 · ~6m left')
   await narrow.unmount()
 })
