@@ -12835,7 +12835,7 @@ const panelHooks = (on: On) => {
         </Box>
       )
     // One line under a row, one line high, beside the tree's lines carried down, starting where the row's name does
-    const twigUnder = (t: Twig, key: string, body: JSX.Element, inset: number | string = lead) => (
+    const twigUnder = (t: Twig, key: string, body: JSX.Element, inset: typeof lead = lead) => (
       <Box key={key} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
         {twigRails(t, `${key}-rails`)}
         <Box flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" overflow="hidden" paddingLeft={inset}>
@@ -13327,6 +13327,7 @@ const panelHooks = (on: On) => {
       if (t.job) {
         // (its row says it in plain words, so the last line is here as it was printed too)
         const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).slice(-OUTPUT_LINES)
+        const isOpenable = canOpenJob(t.job)
         if (!tail.length) return null
         return (
           <Box key={`tail-${t.job.id}`} flexDirection="column" flexShrink={0}>
@@ -13339,7 +13340,7 @@ const panelHooks = (on: On) => {
                     {line}
                   </Text>
                 </Box>,
-                canOpenJob(t.job) ? lead : 0,
+                isOpenable ? lead : 0,
               ),
             )}
           </Box>
