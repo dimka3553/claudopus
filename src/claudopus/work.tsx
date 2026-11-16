@@ -19,6 +19,37 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   for (const text of await scriptsRun($, command)) if (touchesBoxes(text)) return true
   return false
 }
+// A piece of work reads a message only between its calls, so a command it holds open keeps the person's reply from it until the
+// command ends (16 Nov: a reply waited 8 minutes behind a 9-minute wait for the person). One that may run past this long, by the
+// time limit it asks for or the time its words give it, goes to the background instead: the work is told when it ends, and reads a
+// reply at once meanwhile. Not the mod's own waits on helpers (which come back when a reply waits), a password or a key
+const HELD_LONGEST = 2 * 60_000
+const isLongHeld = (call: { tool: string; command?: unknown; description?: unknown; timeout?: unknown; run_in_background?: unknown }) =>
+  call.tool === 'Bash' &&
+  !call.run_in_background &&
+  !/\bbin\/(?:helpers|admin|secret)\b|(?:^|[\s;&|(])\.\/(?:helpers|admin|secret)\b/.test(String(call.command ?? '')) &&
+  // A launcher that leaves its runs going and comes back is followed by what it started while it ran, so it is left as it is
+  !/\b(?:nohup|setsid|disown)\b|(?<![&>|])&(?![&>])/.test(String(call.command ?? '')) &&
+  (Number(call.timeout ?? 0) > HELD_LONGEST || (/^\s*(?:wait|watch|poll)(?:ing)?\b/i.test(String(call.description ?? '')) && (describedOf(String(call.description ?? '')).expect ?? 0) >= HELD_LONGEST))
+// A wait for the person themselves, by the words the work gives its command: there is no time to give them. Their answer to an ask
+// comes as a message the moment they give it and starts the work then, however long it takes, so the work ends its step instead
+const isPersonWait = (call: { tool: string; command?: unknown; description?: unknown }, name: string) => {
+  const them = `you${name ? `|${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` : ''}`
+  return (
+    call.tool === 'Bash' &&
+    !/\bbin\/(?:helpers|admin|secret|release)\b/.test(String(call.command ?? '')) &&
+    new RegExp(String.raw`^\s*(?:wait|watch|poll)(?:ing)?\s+(?:for|until|on)\s+(?:(?:${them})\b(?!')|(?:your|(?:${them})'s)\s+(?:answer|reply|response|press|go-ahead|yes|try|decision|word)s?(?=\s*(?:$|[(.,;:]|(?:to|on|about|before)\b)))`, 'i').test(String(call.description ?? ''))
+  )
+}
+const asksNow = (list: Todo[], agent: string) => {
+  const top = topOf(list, agent)
+  return list.some(one => (one.id === agent || one.id === top) && Boolean(one.ask) && !one.ask?.replied)
+}
+const NO_PERSON_WAIT = (name: string) =>
+  `Not run: this waits for ${name}, and a wait with a time limit gives them one. Do not wait for ${name} with a command at all. End your step now: your ask stays on the card for as long as it takes, and ${name}'s answer starts you again the moment they give it. Anything you need to see of what they did (a recording, a file, a page) you look at once their answer has come.`
+const MOVED_BACK = (name: string) =>
+  `This command may run for minutes, so it was started in the background rather than held open: ${name}'s replies reach you while it runs. You are told when it ends; its output is in the file named above. Carry on with what needs nothing from it, or end your step. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
+
 // The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
 // bin/release, bin/keyring) are let through unread
 const scriptsRun = async ($: EngineInterface, command: string) => {
@@ -140,8 +171,8 @@ const workHooks = (on: On) => {
         asked = asked.filter(one => one.id !== e.tool_use_id)
         settle($, e.tool_use_id, e.agentId, e.tool, outcomeOf(r as never), e as never)
         // A grant its admin command did not take goes with the call; one sent to the background takes its own in its own time
-        if (grants.length && !(e as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
-        runnerEnded(e.tool_use_id, Boolean((e as { run_in_background?: unknown }).run_in_background), await $.clock.now())
+        if (grants.length && !(call as { run_in_background?: unknown }).run_in_background) await dropGrants($, grants).catch(() => undefined)
+        runnerEnded(e.tool_use_id, Boolean((call as { run_in_background?: unknown }).run_in_background), await $.clock.now())
         // A note of what the person allowed for this call goes as it ends
         await noteCallEnded($, e.tool_use_id).catch(() => undefined)
       }
@@ -165,6 +196,11 @@ const workHooks = (on: On) => {
     if (ownFiles) {
       await log($, `refused ${e.tool} writing the memory folder's own files`)
       return { deny: ownFiles }
+    }
+    // (only while it, or the work it helps, has a question of its own open to the person: a wait said for them then is that)
+    if (dir && !isOff && e.agentId !== undefined && isPersonWait(e as never, who()) && asksNow(await read($, todos), e.agentId)) {
+      await log($, `refused work ${e.agentId}'s wait for the person: ${oneLine(String((e as { description?: unknown }).description ?? '')).slice(0, 80)}`)
+      return { deny: NO_PERSON_WAIT(who()) }
     }
     // Main is reached only through the release runner, which takes its turn, so two pieces of work never release at once
     if (e.tool === 'Bash' && pushesMain(String((e as { command?: unknown }).command ?? ''))) {
@@ -206,7 +242,10 @@ const workHooks = (on: On) => {
     }
     // Work sent a message works again once the message is on its way: what it reported before no longer makes a stop a finish
     let woken = ''
-    const next = async (call: typeof e) => {
+    const next = async (asked: typeof e) => {
+      const isMovedBack = Boolean(dir) && !isOff && e.agentId !== undefined && isLongHeld(asked as never)
+      const call = isMovedBack ? ({ ...asked, run_in_background: true } as typeof e) : asked
+      if (isMovedBack) await log($, `work ${e.agentId}'s long command started in the background: ${oneLine(String((asked as { description?: unknown }).description ?? '')).slice(0, 80)}`)
       // A piece of work's command is known by the process numbers handed out while it runs, so what it leaves going is found
       const isSpanned = Boolean(dir) && !isOff && e.agentId !== undefined && call.tool === 'Bash'
       const spanAt = isSpanned ? await $.clock.now() : 0
@@ -221,7 +260,8 @@ const workHooks = (on: On) => {
       // (one that failed may still have left something going)
       if (from && e.agentId !== undefined && !r.deny) await keepSpan($, e.agentId, call as never, from, spanAt, r.result).catch(err => log($, `left runs not looked for: ${String(err)}`))
       await keysLearn($, call, r).catch(err => log($, `keys not made again: ${String(err)}`))
-      return hideKept($, call, r)
+      const shown = await hideKept($, call, r)
+      return isMovedBack && !shown.deny && !shown.isError ? ({ ...shown, context: [...((shown as { context?: string[] }).context ?? []), MOVED_BACK(who())] } as typeof shown) : shown
     }
     // Work the person stopped is not set going again, by the chat or by the work above a helper of it: no message to it, no resume,
     // no fresh agent for the same task, until their next message
@@ -335,6 +375,7 @@ const workHooks = (on: On) => {
     if (steered) {
       const sent = await next(e)
       if (answer) await answeredInChat($, answer, steered, !sent.deny && !sent.isError)
+      if (words && !sent.deny && !sent.isError) await replyWaiting($, steered)
       // Work that had ended is started again by the message, and may not be running yet to take a row: it gets the line as a
       // message of its own instead, read once it reaches it
       // Each line names the message it is about: a message queued behind another is read later than its line, and a line about the
@@ -411,7 +452,7 @@ const workHooks = (on: On) => {
   // Work the person moved to another model sends each step from then on to that model; only the model the request names changes
   on('turn.step', async function* ($, e, next) {
     const id = e.agentId
-    if (id !== undefined) replyRead($, id)
+    if (id !== undefined) (replyRead($, id), await replyTaken($, id).catch(() => undefined))
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
