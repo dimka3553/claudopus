@@ -1,0 +1,1 @@
+- When you answer in your own words above the chat, or paste a key or give a response there, Send is now the big button and Close the small one beside it.

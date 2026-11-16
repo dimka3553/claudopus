@@ -6834,6 +6834,9 @@ const boxHead = (text: string) => {
 const boxTries = new Map<string, number>()
 // The boxes something is typed in, unsent, so an ask's reply box does not take the keys from them
 const boxTyped = new Set<string>()
+// What is typed in the bar's key box while it is open, only so its Send button can send it: never written anywhere, and gone once
+// it is sent, closed or the box moves
+const barKeyTyped = new Map<string, string>()
 // A line under a box: what went wrong with what was sent
 const boxSaid = new Map<string, string>()
 // Sent from here: the box goes at once, before the runner removes its request
@@ -6912,7 +6915,7 @@ const lookBoxes = async ($: EngineInterface) => {
   }
   for (const id of boxTold) if (!found.some(one => one.id === id)) boxTold.delete(id)
   for (const id of boxKeys.keys()) if (!entries.some(entry => entry.name === `${id}.json`)) boxKeys.delete(id)
-  for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id))
+  for (const id of [...boxTries.keys(), ...boxSaid.keys(), ...boxTyped, ...boxModes.keys(), ...boxHeldReply.keys()]) if (!found.some(one => one.id === id)) (boxTries.delete(id), boxSaid.delete(id), boxTyped.delete(id), barKeyTyped.delete(id), boxModes.delete(id), boxHeldReply.delete(id))
   if (JSON.stringify(found) === JSON.stringify(boxes)) return
   boxes = found
   drawAgain($)
@@ -6978,6 +6981,7 @@ const sendBox = async ($: EngineInterface, id: string, value: string) => {
 // Cancel: the request goes, and the runner, finding it gone, ends as when a box is cancelled
 const cancelBox = async ($: EngineInterface, id: string, said = 'You cancelled · nothing was saved, and what asked for it stops without it') => {
   boxSent.add(id)
+  barKeyTyped.delete(id)
   const one = boxes.find(other => other.id === id)
   boxes = boxes.filter(other => other.id !== id)
   if (boxOpen?.id === id) ((boxOpen = undefined), (barBoxAt = 0))
@@ -7031,6 +7035,7 @@ const BOX_LOOKS_KEY = (where: string) => `That looks like the key itself. A resp
 const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surface: string) => {
   if (id && replyTo) (barLeft.set(replyTo, barDraft(replyTo)), (replyTo = ''), (replyMark = ''))
   boxOpen = id ? { id, mode } : undefined
+  barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
   barBoxAt = 0
   boxPresses += 1
@@ -7083,6 +7088,7 @@ const sendBoxReply = async ($: EngineInterface, id: string, text: string, isSure
 // What is typed in a key's field goes by its mode: the key to the keychain, a response to the command that asked
 const submitBox = ($: EngineInterface, id: string, mode: BoxMode, value: string) => {
   boxTyped.delete(id)
+  barKeyTyped.delete(id)
   freeTimes($)
   barBoxAt = 0
   const run = mode === 'reply' ? sendBoxReply($, id, value) : sendBox($, id, value)
@@ -7107,7 +7113,7 @@ const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string)
       <ui.Button key={`${where}-${id}-anyway-${boxPresses}`} label="Send it as a response" plain onPress={() => void sendBoxReply($, id, boxHeldReply.get(id) ?? '', true)} />
     </ui.Box>
   ) : null
-// The row in the bar above the prompt for the key box opened there: what goes where, the field, and Close
+// The row in the bar above the prompt for the key box opened there: what goes where, the field, Send, the big one, and Close, small
 const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
   const name = boxNameOf(one)
   const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`
@@ -7124,13 +7130,14 @@ const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
               placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
               submitLabel="send"
               autoFocus
-              onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
+              onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
               onSubmit={value => submitBox($, one.id, mode, value)}
             />
           </ui.Box>
         ) : null}
-        <ui.Box flexShrink={0}>
-          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" onPress={press => openBox($, undefined, mode, press.surface)} />
+        <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+          <ui.Button key={`band-key-send-${boxPresses}`} label="Send" variant="primary" onPress={() => void (barKeyTyped.get(one.id) && submitBox($, one.id, mode, barKeyTyped.get(one.id) ?? ''))} />
+          <ui.Button key={`band-key-close-${boxPresses}`} label="Close" plain dimColor onPress={press => openBox($, undefined, mode, press.surface)} />
         </ui.Box>
       </ui.Box>
       {boxSaid.get(one.id) ? <ui.Text key="band-key-said" color={NEEDS} wrap="wrap">{boxSaid.get(one.id)}</ui.Text> : null}
@@ -12011,11 +12018,12 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
     </ui.Box>
   ) : null
 // The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
-// to, the box, and Close, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
+// to, the box, Send, the big one, and Close, small, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
 // panel's scrolling. The box is the card's own: the same answer, and the same box through a new question of its work, until the
 // person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
 const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
   const draft = barDraft(one.id)
+  const send = (value: string) => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))
   return (
     <ui.Box key="band-reply" flexDirection="row" alignItems="center" gap={2} flexShrink={0}>
       <ui.Box flexShrink={1} minWidth={0}>
@@ -12030,12 +12038,13 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
             submitLabel="send"
             autoFocus
             onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
-            onSubmit={value => void ((barBoxAt = 0), dropDrafts($, one.id), replies.set(one.id, (replies.get(one.id) ?? 0) + 1), freeTimes($), sendFromBar($, one.id, value).catch(err => log($, `reply not sent: ${String(err)}`)))}
+            onSubmit={send}
           />
         </ui.Box>
       ) : null}
-      <ui.Box flexShrink={0}>
-        <ui.Button key={`band-reply-close-${presses}`} label="Close" onPress={press => openReply($, undefined, press.surface)} />
+      <ui.Box flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
+        <ui.Button key={`band-reply-send-${presses}`} label="Send" variant="primary" onPress={() => void ((drafts.get(draft) ?? '').trim() && send(drafts.get(draft) ?? ''))} />
+        <ui.Button key={`band-reply-close-${presses}`} label="Close" plain dimColor onPress={press => openReply($, undefined, press.surface)} />
       </ui.Box>
     </ui.Box>
   )
