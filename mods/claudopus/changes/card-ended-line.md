@@ -1,1 +1,1 @@
-- A task's card no longer says "2 commands have ended" above commands still working: once the task has started something new, or what an ended command started still works, the card shows the task's own line again, and commands that did end are named instead of counted.
+- A task's card no longer says "2 commands have ended" above commands still working: a command that only started programs which still run is not said to have ended, and the commands that did end are named with how each ended instead of counted.
