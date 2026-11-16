@@ -624,8 +624,8 @@ const codesOf = (cmd: string, depth = 0): { shell: string; inline: string[] } =>
       while (j < cmd.length && cmd[j] !== c) j += cmd[j] === '\\' && c === '"' ? 2 : 1
       const body = cmd.slice(i + 1, j)
       // Code when it follows -c or -e of an interpreter, or is ssh's remote command
-      const before = shell.slice(-300).replace(/\s+$/, '')
-      if (/(?:^|[\s;&|(])(?:\S*\/)?(?:(?:ba|z|da)?sh|python\d?(?:\.\d+)?|node|perl|ruby)(?:\s+-\w+)*\s+-[ce]$/.test(before) || /(?:^|[\s;&|(])ssh(?:\s+-\S+(?:\s+\S+)?)*\s+[^\s-]\S*$/.test(before)) inline.push(body)
+      const before = body.trim().length > 2 ? shell.slice(-300).replace(/\s+$/, '') : ''
+      if (before && /(?:^|[\s;&|(])(?:\S*\/)?(?:(?:ba|z|da)?sh|python\d?(?:\.\d+)?|node|perl|ruby)(?:\s+-\w+)*\s+-[ce]$/.test(before) || /(?:^|[\s;&|(])ssh(?:\s+-\S+(?:\s+\S+)?)*\s+[^\s-]\S*$/.test(before)) inline.push(body)
       shell += '""'
       i = j + 1
       continue
@@ -649,7 +649,7 @@ const shellSteps = (shell: string) =>
 export const waitingOf = (cmd: string, scripts: string[] = []): WaitKind | undefined => {
   if (/\bbin\/helpers\b/.test(cmd)) return 'helpers'
   // (a very long command is read only so far, so no command can hold the mod up)
-  const { shell, inline } = codesOf(cmd.slice(0, 20_000))
+  const { shell, inline } = codesOf(cmd.slice(0, 10_000))
   if (WAITERS.test(shell)) return 'tool'
   // A log followed until one line comes: a wait for that line
   if (/\btail\b[^|;&]*\s(?:-\w*[fF]\w*|--follow\S*)(?:\s[^;&]*)?\|\s*(?:(?:\S*\/)?(?:grep|egrep|ugrep|rg)\b[^|;&]*\s-\w*[mq]|sed\b[^|;&]*\/q\b|head\b)/.test(shell)) return 'tool'

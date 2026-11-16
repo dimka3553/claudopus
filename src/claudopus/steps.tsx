@@ -171,6 +171,9 @@ const lookWakes = async ($: EngineInterface) => {
   if (now - wakesLookedAt < WAKE_LOOK) return
   wakesLookedAt = now
   const due = (await read($, todos)).filter(one => one.wakeWhen && one.status !== 'stopped' && one.status !== 'failed' && !isHeld(one))
+  // (nothing asked for, nothing drawn: the panel stays still under the pointer)
+  if (!due.length) return
+  let isChanged = false
   for (const one of due) {
     const w = one.wakeWhen
     if (!w) continue
@@ -187,6 +190,7 @@ const lookWakes = async ($: EngineInterface) => {
     const isMissed = !found && now >= w.until
     if (!found && !isMissed) continue
     await changeTodos($, list => list.map(card => (card.id === one.id && card.wakeWhen?.at === w.at ? { ...card, wakeWhen: undefined } : card)))
+    isChanged = true
     const text = isMissed ? WAKE_MISSED(w.what, Math.round((w.until - w.at) / 60_000)) : isTimeOnly ? WAKE_TIME(w.what) : WAKE_FOUND(w.what)
     // At a step of its own it reads the line at its next step; with its step ended it is started again by the message
     if ((await $.agent.list().catch(() => [])).find(agent => agent.id === one.id)?.status === 'running') {
@@ -197,7 +201,7 @@ const lookWakes = async ($: EngineInterface) => {
     if (!r.isDelivered) await log($, `work ${one.id} not started again for ${w.what}: ${r.reason}`)
     else (await wakeCard($, one.id), await log($, `work ${one.id} started again: ${isMissed ? 'not there' : 'there'}: ${w.what}`))
   }
-  redraw($)
+  if (isChanged) redraw($)
 }
 // What a card that asked to be started again says under its line, in place of a command that would wait
 const wakeLine = (one: Todo) => (one.wakeWhen ? `Claudopus starts Claude again when this is there: ${one.wakeWhen.what}` : '')
