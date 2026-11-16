@@ -64,8 +64,34 @@ let barFlipAt = 0
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
-  // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
+  // The bar on the desktop is redrawn as often as the panel and has buttons too, so it is given again as it was while its drawings are
+  // slow (isFreshTooSoon) and from the start of a click on one of its buttons until the click lands (isPressHeld), as the panel is:
+  // a newer drawing retires the buttons on screen, and a click on one already gone runs nothing. Never while its reply box is typed
+  // into or holds the cursor, which keeps a drawing of its own (barHeld)
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const drawBar = () => drawBarNow()
+    if (e.surface !== 'desktop' || e.props.hasSurvey) return drawBar()
+    const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
+    const at = await $.clock.now()
+    const recent = lastShown.get(key) as Awaited<ReturnType<typeof next>> | undefined
+    const isBoxHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
+    if (recent && !isBoxHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
+    if (recent && !isBoxHeld && isFreshTooSoon($, key, at, 0)) return recent
+    freshBegins(key)
+    const madeFrom = Date.now()
+    let made: { at: number; ms: number; fresh: number } | undefined
+    try {
+      const drawing = await drawBar()
+      // A click begun while it was made: the bar on screen is given instead, and this one made again once the click is over
+      if (recent && !isBoxHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
+      lastShown.set(key, drawing)
+      made = { at, ms: Date.now() - madeFrom, fresh: freshness }
+      return drawing
+    } finally {
+      freshEnds($, key, made)
+    }
+    // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
+    async function drawBarNow() {
     // Whether this surface's bar takes the reply box, and whether it shows just now: the cards draw their asks by it (repliesInBar)
     // While one of the app's surveys holds the bar the box has no place in it, and the card has its own again
     // Folded by the person, nothing of the bar is on screen: the card has its own box then too
@@ -233,6 +259,7 @@ const bandHooks = (on: On) => {
     }
     // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
     return drawing(drawn ? usageSpacersDrawn(ui) : null)
+    }
   })
 
 }

@@ -194,14 +194,16 @@ const freshDue = new Set<string>()
 // moment the fresh one is made, since the engine drops the reply of a drawing a newer ask overtook
 const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean }>()
 let pressedAt = 0
-const isFreshTooSoon = ($: EngineInterface, key: string, at: number) => {
+// (slowest: the bar above the prompt passes 0, as it is drawn five times a second under load in 50-200 ms each, and a figure
+// that moves a second later shows nothing new: it is given again within the gap however quick its drawings are)
+const isFreshTooSoon = ($: EngineInterface, key: string, at: number, slowest = SLOW_DRAW) => {
   const going = freshUnderWay.get(key)
   if (going && going.fresh === freshness) return (going.isOvertaken = true)
   const last = freshDrawn.get(key)
   // The mod's own calls for a drawing (an ask, a box, a press, a picture: freshness) come at once
   if (!last || pressedAt >= last.at || last.fresh !== freshness) return false
   // Only while drawings are slow, as under a load that drops them: a quick one reaches the app before the next is asked for
-  if (last.ms < SLOW_DRAW) return false
+  if (last.ms < slowest) return false
   const gap = Math.max(FRESH_GAP, last.ms * 4)
   if (at - last.at >= gap) return false
   // (asked for without counting as a call of the mod's own, which would draw afresh at once and skip the gap)

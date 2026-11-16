@@ -26,7 +26,9 @@ const commandHooks = (on: On) => {
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
       // after the let-go above, whose own drawing would end the hold
-      if (e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) await holdForPress($)
+      // and so does a button of the bar above the prompt on the desktop, which is redrawn as often (band.tsx)
+      const isBarButton = e.plugin === 'claudopus' && e.component === 'AbovePrompt' && barIds.get('desktop') === e.requestId && !isBarBox(e.element)
+      if ((e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) || isBarButton) await holdForPress($)
       else pressFrom = 0
       if (!isInBarBox) barBoxAt = 0
     }

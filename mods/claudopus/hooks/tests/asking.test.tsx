@@ -909,6 +909,28 @@ test('while drawings of the panel are slow, as under seven tasks and their comma
   expect(await until(async () => list.find({ type: 'Text', text: 'Find more scans' }))).toBeDefined()
 })
 
+test('the bar above the prompt on the desktop, drawn as often as the panel under load, is given again as it was for a second after each drawing made afresh, so a click on its buttons names one still there, and is then drawn afresh by itself', async ($, on) => {
+  const { clock, files } = world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix' } as never)
+  files.set(`${MEMORY}/record-panel.on`, '')
+  files.set(`mtime:${MEMORY}/record-panel.on`, String(clock.now()))
+  const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
+  await clock.advance(2500)
+  await bar.redraw()
+  // Asked for again and again within the second: the drawing on screen each time
+  for (const _ of [1, 2, 3]) await bar.redraw()
+  await clock.advance(1500)
+  await bar.redraw()
+  await clock.advance(3000)
+  const path = [...files.keys()].find(one => one.includes('/panel-record/'))
+  const renders = (files.get(path ?? '') ?? '').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as { ev: string; component?: string; held?: boolean }).filter(one => one.ev === 'render' && one.component === 'AbovePrompt')
+  expect(renders.filter(one => one.held).length).toBeGreaterThanOrEqual(3)
+  // and once the second is over, drawn afresh
+  expect(renders.some((one, n) => n > 0 && renders[n - 1]?.held && !one.held)).toBe(true)
+  await bar.unmount()
+})
+
 test("while the person types into a card's reply box the list's running times stand still, and move again once they stop", async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)

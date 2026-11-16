@@ -5479,14 +5479,16 @@ const freshDue = new Set<string>()
 // moment the fresh one is made, since the engine drops the reply of a drawing a newer ask overtook
 const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean }>()
 let pressedAt = 0
-const isFreshTooSoon = ($: EngineInterface, key: string, at: number) => {
+// (slowest: the bar above the prompt passes 0, as it is drawn five times a second under load in 50-200 ms each, and a figure
+// that moves a second later shows nothing new: it is given again within the gap however quick its drawings are)
+const isFreshTooSoon = ($: EngineInterface, key: string, at: number, slowest = SLOW_DRAW) => {
   const going = freshUnderWay.get(key)
   if (going && going.fresh === freshness) return (going.isOvertaken = true)
   const last = freshDrawn.get(key)
   // The mod's own calls for a drawing (an ask, a box, a press, a picture: freshness) come at once
   if (!last || pressedAt >= last.at || last.fresh !== freshness) return false
   // Only while drawings are slow, as under a load that drops them: a quick one reaches the app before the next is asked for
-  if (last.ms < SLOW_DRAW) return false
+  if (last.ms < slowest) return false
   const gap = Math.max(FRESH_GAP, last.ms * 4)
   if (at - last.at >= gap) return false
   // (asked for without counting as a call of the mod's own, which would draw afresh at once and skip the gap)
@@ -11582,7 +11584,9 @@ const commandHooks = (on: On) => {
       if (e.plugin === 'claudopus' && isTypedBox(e.element)) holdTimes($)
       else freeTimes($)
       // after the let-go above, whose own drawing would end the hold
-      if (e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) await holdForPress($)
+      // and so does a button of the bar above the prompt on the desktop, which is redrawn as often (band.tsx)
+      const isBarButton = e.plugin === 'claudopus' && e.component === 'AbovePrompt' && barIds.get('desktop') === e.requestId && !isBarBox(e.element)
+      if ((e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) || isBarButton) await holdForPress($)
       else pressFrom = 0
       if (!isInBarBox) barBoxAt = 0
     }
@@ -12158,8 +12162,34 @@ let barFlipAt = 0
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
-  // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
+  // The bar on the desktop is redrawn as often as the panel and has buttons too, so it is given again as it was while its drawings are
+  // slow (isFreshTooSoon) and from the start of a click on one of its buttons until the click lands (isPressHeld), as the panel is:
+  // a newer drawing retires the buttons on screen, and a click on one already gone runs nothing. Never while its reply box is typed
+  // into or holds the cursor, which keeps a drawing of its own (barHeld)
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const drawBar = () => drawBarNow()
+    if (e.surface !== 'desktop' || e.props.hasSurvey) return drawBar()
+    const key = `bar|${e.requestId ?? ''}|${e.surface}|${e.props.bodyColumns}|${e.props.isCollapsed ? 1 : 0}`
+    const at = await $.clock.now()
+    const recent = lastShown.get(key) as Awaited<ReturnType<typeof next>> | undefined
+    const isBoxHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
+    if (recent && !isBoxHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
+    if (recent && !isBoxHeld && isFreshTooSoon($, key, at, 0)) return recent
+    freshBegins(key)
+    const madeFrom = Date.now()
+    let made: { at: number; ms: number; fresh: number } | undefined
+    try {
+      const drawing = await drawBar()
+      // A click begun while it was made: the bar on screen is given instead, and this one made again once the click is over
+      if (recent && !isBoxHeld && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent)
+      lastShown.set(key, drawing)
+      made = { at, ms: Date.now() - madeFrom, fresh: freshness }
+      return drawing
+    } finally {
+      freshEnds($, key, made)
+    }
+    // Above the prompt, while work runs: a small mark that it does, and how Claude uses the computer, never what the work is doing
+    async function drawBarNow() {
     // Whether this surface's bar takes the reply box, and whether it shows just now: the cards draw their asks by it (repliesInBar)
     // While one of the app's surveys holds the bar the box has no place in it, and the card has its own again
     // Folded by the person, nothing of the bar is on screen: the card has its own box then too
@@ -12327,6 +12357,7 @@ const bandHooks = (on: On) => {
     }
     // Where the app lifts the figures' cards, each drawing moves them past the places they had in the last
     return drawing(drawn ? usageSpacersDrawn(ui) : null)
+    }
   })
 
 }
