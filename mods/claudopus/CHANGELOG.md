@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.162 · 16 November 2026
+- The watcher that brings Claudopus back names the setting your copy really has when Claudopus is loaded from a folder on your Mac, as its own checkout: before, it changed a setting nothing read, and Claudopus stayed off
+
 ## 0.2.161 · 16 November 2026
 - Claudopus stays on: Claude's engine switches off an add-on that keeps its shared helper busy for five seconds, and Claudopus now notices when it falls behind and does less (gives the panel as it was, leaves out looks that can wait) until it has caught up
 - If Claude switches Claudopus off anyway, it comes back by itself within about half a minute, with its tools, kinds of task, rules and panel, with nothing to type: a small watcher sees the chat go quiet and changes Claudopus's own hidden setting, which makes Claude load it again

@@ -226,6 +226,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The end or the first line of a file, as tail and head give them
     if (tool === 'tail' && rest[0] === '-c') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').slice(-Number(rest[1]))) : ok('', 1)
     if (tool === 'head' && rest[0] === '-n') return files.has(String(rest[2])) ? ok((files.get(String(rest[2])) ?? '').split('\n').slice(0, Number(rest[1])).join('\n') + '\n') : ok('', 1)
+    // The chat's own process, as the shell the mod starts names its parent
+    if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
@@ -812,4 +814,17 @@ test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper
   await lapse('t2')
   expect(files.has(`${KEEP_AT}.handover`)).toBe(true)
   expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ ids: ['a1'] })
+})
+
+test('each chat beats for the watcher that brings Claudopus back, naming its process, the key its copy has in the settings and the settings file, and starts the watcher', async ($, on) => {
+  const { files, clock } = world(on)
+  // This copy is loaded from a marketplace that is a folder on this Mac, as Claudopus's own checkout: its key is that marketplace's
+  files.set(`${HOME}/.claude/plugins/known_marketplaces.json`, JSON.stringify({ other: { installLocation: '/elsewhere' }, mine: { installLocation: PLUGIN.replace(/\/mods\/claudopus$/, '') } }))
+  await $.session.start(start)
+  const beat = `${MEMORY}/keep/engine-id.beat`
+  expect(files.get(beat)).toBe(`4242\tclaudopus@mine\t${HOME}/.claude/settings.json\n`)
+  expect(files.get(`${MEMORY}/log.md`)).not.toContain('was not started')
+  files.set(beat, 'old')
+  await clock.advance(3_000)
+  expect(files.get(beat)).toContain('4242')
 })

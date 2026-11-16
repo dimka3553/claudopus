@@ -177,11 +177,16 @@ const cutLine = (one: Todo) =>
 // Changed, it loads Claudopus again in every chat, as an update does
 const BEAT_EVERY = 3000
 const beatFile = (id: string) => `${dir}/keep/${id}.beat`
-const settingsFile = async ($: EngineInterface) => `${(await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`}/settings.json`
-// The key this copy has in the settings: claudopus@<marketplace> for an installed one, claudopus@inline for one loaded from a folder
-const ownKey = ($: EngineInterface) => {
+const configDir = async ($: EngineInterface) => (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`
+// The key this copy has in the settings: claudopus@<marketplace> for an installed one, whether Claude Code keeps it in its cache or
+// loads it from the marketplace's own folder (a marketplace of a folder on this Mac, as Claudopus's own checkout); claudopus@inline
+// for one loaded with --plugin-dir. On 16 Nov this Mac's chats ran from the checkout, and claudopus@inline would have changed nothing
+const ownKey = async ($: EngineInterface, configDir: string) => {
   const market = /\/plugins\/cache\/([^/]+)\/claudopus\//.exec($.plugin.root)?.[1]
-  return market && /^[\w.-]+$/.test(market) ? `claudopus@${market}` : 'claudopus@inline'
+  if (market && /^[\w.-]+$/.test(market)) return `claudopus@${market}`
+  const known = parsedOr<Record<string, { installLocation?: string }>>(await readOr($, `${configDir}/plugins/known_marketplaces.json`), {})
+  const name = Object.entries(known).find(([, one]) => typeof one?.installLocation === 'string' && one.installLocation && ($.plugin.root === one.installLocation || $.plugin.root.startsWith(`${one.installLocation.replace(/\/$/, '')}/`)))?.[0]
+  return name && /^[\w.-]+$/.test(name) ? `claudopus@${name}` : 'claudopus@inline'
 }
 let beatLine = ''
 const beat = async ($: EngineInterface, id: string) => {
@@ -216,9 +221,10 @@ const startReviver = async ($: EngineInterface, id: string) => {
   const back = (await readOr($, `${dir}/keep/${id}.revived`)).trim().split('\n').at(-1)?.split(' ') ?? []
   const backAt = Number(back[0] ?? 0) * 1000
   if (backAt && (await $.clock.now()) - backAt < 120_000) await log($, `back after Claude switched Claudopus off in this chat (its beat was quiet ${back[1] ?? '?'} s)`)
-  const settings = await settingsFile($)
+  const config = await configDir($)
+  const settings = `${config}/settings.json`
   if (/[\t\n]/.test(settings)) return
-  beatLine = `${enginePid}\t${ownKey($)}\t${settings}\n`
+  beatLine = `${enginePid}\t${await ownKey($, config)}\t${settings}\n`
   await beat($, id)
   everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined))
   // In a session of its own, so it outlives the chat's process; it leaves at once when one of this copy already runs
