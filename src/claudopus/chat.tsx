@@ -110,14 +110,14 @@ const chatHooks = (on: On) => {
 
     await $.tool.register({
       name: 'update',
-      description: 'Records a subject of work in the memory index: creates it, or changes the fields given. `brief` replaces its whole one-page brief: read it first and keep what other work wrote.',
+      description: 'Records a topic in the memory index: creates it, or changes the fields given. `brief` replaces the whole page of notes on it: read it first and keep what other tasks wrote.',
       inputSchema: {
         type: 'object',
         properties: {
           name: { type: 'string' },
-          repo: { type: 'string', description: 'The folder the work happens in' },
-          state: { type: 'string', description: 'Where it stands, in at most six words; start with "done" once it is pushed or deployed. Detail goes in the brief' },
-          summary: { type: 'string', description: 'One line on what the subject is for' },
+          repo: { type: 'string', description: 'The folder the task happens in' },
+          state: { type: 'string', description: 'How far it has got, in at most six words; start with "done" once it is pushed or deployed. Put detail in `brief`' },
+          summary: { type: 'string', description: 'One line on what the topic is for' },
           brief: { type: 'string' },
         },
         required: ['name'],
@@ -126,14 +126,14 @@ const chatHooks = (on: On) => {
     })
     await $.tool.register({
       name: 'recall',
-      description: named("Searches the memory for a phrase: {name}'s messages word for word, what they asked, subject briefs, pastes, and the results finished work left for {name} (reports/<id>/report.md, each dated). Returns matching lines with their files."),
+      description: named("Searches the memory for a phrase: {name}'s messages word for word, what they asked, topic notes, pastes, and the results finished tasks left for {name} (reports/<id>/report.md, each dated). Returns matching lines with their files."),
       inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] },
       isDeferred: false,
     })
     await $.tool.register({
       name: 'todo',
       description:
-        named('For background work: keeps the to-dos on your card in the panel {name} reads beside the chat. Adds `item`, or changes one already listed: `state` marks the one you are doing, ticks it done or drops it; `was` gives its earlier wording when you reword it.'),
+        named('For background tasks: keeps the to-dos on your card in the panel {name} reads beside the chat. Adds `item`, or changes one already listed: `state` marks the one you are doing, ticks it done or drops it; `was` gives its earlier wording when you reword it.'),
       inputSchema: {
         type: 'object',
         properties: {
@@ -148,12 +148,12 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'note',
       description:
-        named('For background work: says where your work stands now on its card, replacing the line before; write it when you start and whenever that changes: what is done and what you are doing, in one plain sentence of at most 20 words, first person, to {name} as "you", no file names, commands or code.'),
+        named('For background tasks: says how far you have got, on your card, replacing the line before. Write it when you start and whenever that changes: what is done and what you are doing, in one plain sentence of at most 20 words, in the first person, speaking to {name} as "you", with no file names, commands or code.'),
       inputSchema: {
         type: 'object',
         properties: {
           text: { type: 'string' },
-          task: { type: 'string', description: named('Only after a message from {name} that is a new task of its own, which you do not do: the ask in one line. The chat starts it as its own piece of work') },
+          task: { type: 'string', description: named('Only after a message from {name} that is a new task of its own, which you do not do: that request in one line. The chat starts it as a task of its own') },
         },
         required: ['text'],
       },
@@ -162,7 +162,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'ask',
       description: named(
-        "For background work: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts the ask at the top of the panel on your card and in the chat as a notice; {name} answers with a button or in their own words. {name} sees it before your report, so it carries everything needed to decide and never points at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile carry on with what does not depend on it, or end your step saying what you wait for. Ask again if the answer leaves something waiting; call it with empty `text` only once you have seen it done. Open no terminal for a command yourself.",
+        "For background tasks: when a step needs {name}'s own hands or go-ahead now (a code to paste, a box to fill, a key or button to press, an approval), puts your question at the top of the panel on your card and in the chat as a notice; {Name} answers with a button or in their own words. {Name} sees it before your report, so it must carry everything needed to decide and never point at an explanation elsewhere. It stays until answered, even after you finish; the answer arrives as a message at your next step, or starts you again. Meanwhile continue with what does not depend on it, or end your step saying what you are waiting for. Ask again if the answer leaves something open; call it with empty `text` only once you have seen it done. Never open a terminal for a command yourself.",
       ),
       inputSchema: {
         type: 'object',
@@ -173,7 +173,7 @@ const chatHooks = (on: On) => {
           choices: { type: 'array', items: { type: 'string' }, description: 'Buttons to answer with, such as Approve and Not now (Done and Not now when left out)' },
           command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
           cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },
-          pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the ask is about, shown with it on the card and in the chat' },
+          pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the question is about, shown with it on the card and in the chat' },
         },
         required: ['text'],
       },
@@ -182,7 +182,7 @@ const chatHooks = (on: On) => {
     await $.tool.register({
       name: 'waits',
       description: named(
-        "For background work, before it finishes: records what in its report waits on {name}, each one short line {name} can answer yes or no. The panel shows each with Yes / No / Not now. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. It replaces what was recorded before; leave it uncalled when nothing waits.",
+        "For background tasks, before you finish: records what in your report waits on {name}, each as one short line {name} can answer yes or no. The panel shows each with Yes / No / Not now. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. It replaces what was recorded before; do not call it when nothing waits.",
       ),
       inputSchema: {
         type: 'object',
@@ -350,15 +350,15 @@ const chatHooks = (on: On) => {
       if (!m.isChat || m.needsContext || roleSent !== m.roleSent) {
         // Each subject with the path of its brief, so a brief for work on it can name that path without a search
         const subjects = (await readIndex($)).map(s => `- ${[s.name, s.repo, s.session, s.state, s.summary, `streams/${slug(s.name)}.md`].join(' | ')}`).join('\n')
-        context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\nSubjects so far (name | folder | session | state | summary | its brief, under ${dir}):\n${subjects || '(none yet)'}`)
+        context.push(`${role}\nThis chat's saved words: ${dir}/words/${m.id}.md\nTopics so far (name | folder | session | state | summary | its notes, under ${dir}):\n${subjects || '(none yet)'}`)
       }
       // How full each piece of work is, so a steer for one that is nearly full goes to a fresh agent instead
       const sizes = (await read($, todos))
         .filter(one => !one.parentId && one.tokens > 0)
         .slice(-8)
-        .map(one => `${one.title || 'work'} (${one.id}) ${one.isFork && m.window ? `${Math.round((one.tokens / m.window) * 100)}%` : thousands(one.tokens)}`)
+        .map(one => `${one.title || 'task'} (${one.id}) ${one.isFork && m.window ? `${Math.round((one.tokens / m.window) * 100)}%` : thousands(one.tokens)}`)
       const told = reportsTold(await read($, reports), await $.clock.now())
-      context.push(`${BRIEF}${sizes.length ? `\nContext of each piece of work: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
+      context.push(`${BRIEF}${sizes.length ? `\nHow full each task's context is: ${sizes.join('; ')}.` : ''}${told ? `\n${told}` : ''}`)
       await update($, me, one => ({ ...one, isChat: true, needsContext: false, roleSent }))
 
       if (text.length > PASTE_CHARS) {

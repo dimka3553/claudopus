@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -740,7 +740,7 @@ test('Update fetches the release and checks it against what the release publishe
   await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
   await pressed(panel, 'update-download')
   await shownIn(panel, "Couldn't update Claudopus 0.1.2")
-  await shownIn(panel, "What was downloaded isn't what the release published, so it was thrown away. Nothing was changed: this chat still runs v0.1.0.")
+  await shownIn(panel, "What was downloaded isn't what the release published, so it was thrown away. Nothing changed: this chat still runs v0.1.0.")
   expect(await keyed(panel, 'update-install')).toBeUndefined()
   expect(gitRan).toContain('update-ref -d refs/claudopus/update')
   // A steps file that says it was downloaded, planted or left from before: the panel checks the download it names, finds it is not
@@ -812,9 +812,9 @@ test('Update pressed while a look reads the version page waits for the look to e
 const UPDATE_JARGON = /folder|checkout|fetch|forward|detached|brought|commit|\bmain\b|branch|worktree|\bgit\b|fingerprint|marketplace|~\/|\/Users\//i
 // Update never overwrites uncommitted work nor moves a main with commits of its own: it says why it could not move forward, and nothing moves
 const STAYS: { name: string; release: Release; said: string; isNewerAfterFetch?: boolean; title?: string }[] = [
-  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes of its own in files this version changes, so updating would lose them: ask a chat to set them aside, then press Try again. Nothing was changed: this chat still runs v0.1.0.' },
+  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes of its own in files this version changes, so updating would lose them: ask a chat to set them aside, then press Try again. Nothing changed: this chat still runs v0.1.0.' },
   { name: 'a newer version out between its fetch and its move', release: RELEASE, isNewerAfterFetch: true, title: 'Claudopus 0.1.3 is out', said: 'The bar shows the battery · and 3 more changes' },
-  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes of its own that this version doesn't have, so Update leaves it as it is. Nothing was changed: this chat still runs v0.1.0." },
+  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes of its own that this version doesn't have, so Update leaves it as it is. Nothing changed: this chat still runs v0.1.0." },
 ]
 for (const one of STAYS)
   test(`Update with ${one.name}: it says why it could not move forward, and nothing is overwritten or moved`, SLOW, async ($, on) => {
@@ -911,7 +911,7 @@ test('Not now keeps a version quiet for a day, Skip this version until a newer o
 
 // A chat whose code Update must leave alone is told so in plain words, and offered no download
 const LEFT_ALONE: { name: string; release: Release; said: string }[] = [
-  { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a build of Claudopus that a piece of work is changing: Update leaves it alone, and it gets the newest version when that work takes it in.' },
+  { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a build of Claudopus that a task is changing: Update leaves it alone; it gets the newest version when that task merges it in.' },
   { name: 'a test build', release: { ...RELEASE, noBranch: true }, said: 'This chat runs a test build of Claudopus: Update leaves it alone.' },
 ]
 for (const one of LEFT_ALONE)

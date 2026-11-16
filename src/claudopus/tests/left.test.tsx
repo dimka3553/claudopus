@@ -79,9 +79,9 @@ test('a launcher that starts 8 drawings and exits leaves 8 runs under its card, 
   // As they end, they leave, and the card counts them as ended
   procs.list = []
   await advance(20_000)
-  // (the card's own line may say a run of it has ended, until the work writes again)
+  // (the card's own line may say a command of it has ended, until the work writes again)
   expect(await until(async () => ((await leftTexts($)).every(text => !text.includes('fig4.py page') || / has ended$/.test(text)) || undefined))).toBe(true)
-  expect((await leftTexts($)).some(text => /8 runs ended/.test(text))).toBe(true)
+  expect((await leftTexts($)).some(text => /8 commands ended/.test(text))).toBe(true)
 })
 
 test('a shell loop that sends scripts off with & leaves its runs under the card', SLOW, async ($, on) => {

@@ -54,7 +54,7 @@ test('Config lists each thing a person can set with what is in force, edits a te
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config')
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  for (const name of ['Principles', "The chat's rules", 'Work rules', 'Your name', 'Background work', 'Sound', 'Notifications', 'Most work', 'Long legwork', 'Heavy work'])
+  for (const name of ['Principles', "The chat's rules", 'Task rules', 'Your name', 'Background tasks', 'Sound', 'Notifications', 'Most tasks', 'Long searching and reading', 'Heavy tasks'])
     expect(await config.find({ type: 'Text', text: name })).toBeDefined()
   // Only what differs from what shipped has a Reset: here the name
   expect((await config.findAll({ type: 'Button' })).filter(one => one.props.label === 'Reset').length).toBe(1)
@@ -138,7 +138,7 @@ test('Check now in Config only looks: it shows it is checking, then what it foun
   await pressed(config, 'config-check')
   await until(async () => answer)
   release()
-  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is out: the panel offers it.' }))).toBeDefined()
+  expect(await until(() => config.find({ type: 'Text', text: 'v0.1.2 is out. You can update from the panel.' }))).toBeDefined()
   expect(gitRan.filter(one => /^(fetch|merge)/.test(one) || one.includes('fetch --progress'))).toEqual([])
   expect(files.get('manifest')).toBeUndefined()
   // An older page with no fingerprint is no release: said as a failure, in the error colour

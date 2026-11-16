@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -730,7 +730,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   // What round 1's check found, with how many; who is at work in round 2, in blue beside the moving dots; round 3 runs if needed
   expect(await pane.find({ type: 'Text', text: /^1 found · to_roman\(True\) is not refused$/ })).toBeDefined()
   expect((await pane.find({ type: 'Text', text: /^Maker fixing what the check found$/ }))?.props.color).toBe('#4E93EF')
-  expect((await pane.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Being done now' && String(one.props.source).includes('#4E93EF'))).toBe(true)
+  expect((await pane.findAll({ type: 'Svg' })).some(one => one.props.alt === 'Working now' && String(one.props.source).includes('#4E93EF'))).toBe(true)
   expect(await pane.find({ type: 'Text', text: /^if needed$/ })).toBeDefined()
   // No boxed Details button and no round count at the bottom: the card's own parts say it
   expect((await pane.findAll({ type: 'Button' })).filter(one => one.props.label === 'Details')).toEqual([])
@@ -759,12 +759,12 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   // Each failed round lists what the checker found, and each round has its own squares
   expect(await tab.find({ type: 'Text', text: /^– to_roman\(True\) returns I$/ })).toBeDefined()
   expect((await tab.findAll({ type: 'Svg' })).map(one => one.props.alt)).toEqual(['round 1: done, failed; round 2: running, waiting', 'round 1: done, failed', 'round 2: running, waiting'])
-  expect(await tab.find({ type: 'Text', text: /^Chat of the maker, round 2$/ })).toBeDefined()
+  expect(await tab.find({ type: 'Text', text: /^Conversation of the maker, round 2$/ })).toBeDefined()
   expect(await tab.find({ type: 'Markdown', text: /Booleans are refused now/ })).toBeDefined()
   expect(JSON.stringify(await tab.findAll({ type: 'Markdown' }))).not.toContain('SECRET')
   // Another agent's chat is a press away
   await pressed(tab, 'flow-pick-a2')
-  expect(await until(async () => tab.find({ type: 'Text', text: /^Chat of the checker, round 1$/ }))).toBeDefined()
+  expect(await until(async () => tab.find({ type: 'Text', text: /^Conversation of the checker, round 1$/ }))).toBeDefined()
   await tab.unmount()
 
   // The notice that it ended ends its card: it leaves the running cards and is under Finished
@@ -779,7 +779,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
   expect(await pane.find({ type: 'Text', text: /^not needed$/ })).toBeDefined()
   // A workflow that passed makes the octopus happy for its pause too, then it rests
   const octopus = async () => (await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).find(alt => /^Claudopus/.test(alt))
-  expect(await octopus()).toBe('Claudopus, work finished')
+  expect(await octopus()).toBe('Claudopus, task finished')
   expect((await pane.findAll({ type: 'Button' })).some(b => /Finished/.test(String(b.props.label)))).toBe(false)
   await clock.advance(2_100)
   expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeUndefined()

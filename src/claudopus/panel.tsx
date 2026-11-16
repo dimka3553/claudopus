@@ -137,9 +137,9 @@ const panelHooks = (on: On) => {
     const isFinishMoment = (one: Todo) => one.status === 'done' && !one.ask && lingers(one, at)
     const isFlowMoment = (f: Flow) => f.status === 'done' && isLingering(f, at) && flowPassed(f, roundsOf(f)) !== false
     // Work under way says nothing of its state: the moving dots do
-    const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'An error stopped it before it finished' }
+    const stood: Record<Todo['status'], string> = { working: '', done: 'Finished', stopped: 'Stopped before it finished', failed: 'Failed with an error' }
     // Work the app sent to an older model says so, and which one; work that answers from one all the same says so
-    const offModel = (one: Todo) => (one.flagged ? `ended after a safety flag, not carried on on ${one.flagged}` : one.moved ? `moved to ${one.moved} by the app` : rightModel(one.model ?? '') ? 'not a model work should run on' : '')
+    const offModel = (one: Todo) => (one.flagged ? `ended after a safety flag, so it doesn't continue on ${one.flagged}` : one.moved ? `moved to ${one.moved} by the app` : rightModel(one.model ?? '') ? "Claudopus doesn't run tasks on this model" : '')
     const glance = (one: Todo, count = '') =>
       [one.ask && one.status === 'done' && !isActingOnReply(one) ? 'Waits for your answer' : one.status === 'stopped' && one.byYou ? 'Stopped by you' : stood[isActingOnReply(one) ? 'working' : one.status], modelName(one.model ?? ''), offModel(one), one.tokens ? share(one.tokens, windowOf(one)) : '', count, took((one.endedAt || at) - one.startedAt)].filter(Boolean).join(' · ')
     // The same line on running work, whose model's name is a control: dim like the rest, underlined under the pointer. Pressed,
@@ -212,7 +212,7 @@ const panelHooks = (on: On) => {
     const live = (key: string) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box flexShrink={0}>
-          <table.Svg key={key} source={LIVE_DOTS} alt="Being done now" width={22} height={LINE} isInteractive />
+          <table.Svg key={key} source={LIVE_DOTS} alt="Working now" width={22} height={LINE} isInteractive />
         </Box>
       ) : (
         (e.surface === 'terminal' ? termDots(table, $, paneId, key) : null) ?? <Text color={LIVE}>▸</Text>
@@ -461,11 +461,11 @@ const panelHooks = (on: On) => {
                 {/* In its pause after ending, the line says in a word how it ended: green when it finished, plain when it was stopped */}
                 {(!one.ask && lingers(one, at)) || leftLine(one, at) ? (
                   <Text wrap="truncate-end" color={one.status === 'done' ? DONE : one.status === 'failed' ? 'error' : undefined} dimColor={one.status !== 'done' && one.status !== 'failed'}>
-                    {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? '✕ Stopped by an error' : one.byYou ? 'Stopped by you' : 'Stopped'}
+                    {one.status === 'done' ? '✓ Finished' : one.status === 'failed' ? '✕ Failed with an error' : one.byYou ? 'Stopped by you' : 'Stopped'}
                   </Text>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
-                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? 'Starting' : 'It wrote no line about itself')}</Text>
+                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? 'Starting' : "Claude hasn't said what it's doing")}</Text>
                     {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
                     {!one.ask && !sentLine(one, at) && heldAnswer(one, at) ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
                   </Box>
@@ -525,7 +525,7 @@ const panelHooks = (on: On) => {
           <table.Svg
             key={`${key}-svg`}
             source={twigSvg(t, LINE, status ? { working: LIVE, done: TWIG_ENDED, failed: TWIG_FAILED, stopped: '#808080' }[status] : '', status === 'working')}
-            alt={status ? { working: 'At work', done: 'Finished', failed: 'Stopped by an error', stopped: 'Stopped' }[status] : 'Ended'}
+            alt={status ? { working: 'Working', done: 'Finished', failed: 'Failed with an error', stopped: 'Stopped' }[status] : 'Ended'}
             width={twigWidth(t)}
             height={LINE}
             isInteractive
@@ -587,7 +587,7 @@ const panelHooks = (on: On) => {
     const jobRails = (t: Twig, key: string) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt={t.isLast ? 'Last on the tree' : 'The tree goes on'} width={twigWidth(t)} height={LINE} />
+          <table.Svg key={`${key}-svg`} source={railSvg(t, LINE)} alt={t.isLast ? 'Last row' : 'More rows below'} width={twigWidth(t)} height={LINE} />
         </Box>
       ) : (
         <Box key={key} flexShrink={0}>
@@ -640,7 +640,7 @@ const panelHooks = (on: On) => {
         // While it gives word nothing is said of when (a run is never to be anything but active)
         // (one whose output has not been read yet is not known to be silent until a minute has passed)
         : quiet === undefined && !job.isEmpty && ran < SILENT_WARN ? ['', '', false]
-        : (quiet ?? ran) >= SILENT_AFTER ?[`silent for ${ago(quiet ?? ran)}`, `silent ${ago(quiet ?? ran)}`, (quiet ?? ran) >= SILENT_WARN]
+        : (quiet ?? ran) >= SILENT_AFTER ?[`nothing printed for ${ago(quiet ?? ran)}`, `nothing printed ${ago(quiet ?? ran)}`, (quiet ?? ran) >= SILENT_WARN]
         : ['', '', false]
       const warn = isWarn
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
@@ -701,7 +701,7 @@ const panelHooks = (on: On) => {
       // (Stop sits at the end of its second line, under its time, so its name keeps its room)
       const stopButton = isStoppable ? (
         <Box key={`stop-box-${key}`} flexShrink={0}>
-          <Button key={`stop-${key}-${presses}`} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop run'} plain hover={{ scope: `stop-${key}`, underline: true }} onPress={() => void stopJob($, owner, job).catch(err => log($, `run not stopped: ${String(err)}`))} />
+          <Button key={`stop-${key}-${presses}`} label={stoppingJobs.has(job.id) ? 'Stopping' : 'Stop'} plain hover={{ scope: `stop-${key}`, underline: true }} onPress={() => void stopJob($, owner, job).catch(err => log($, `run not stopped: ${String(err)}`))} />
         </Box>
       ) : null
       const { text: stand, isWarn } = jobStand(job, width - (isStoppable ? 10 : 0))
@@ -746,7 +746,7 @@ const panelHooks = (on: On) => {
       if (isAll || jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
       const more = jobs.length - JOBS_SHOWN + 1
       const shown = jobs.slice(-(JOBS_SHOWN - 1))
-      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (job.count ?? 1), 0)} more jobs`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
+      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (job.count ?? 1), 0)} more commands`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
       return [...shown, rest].map(job => ({ one: card, job, kids: [] }))
     }
     const withJobs = (branches: Branch[], isAll = false): Branch[] =>
@@ -850,13 +850,13 @@ const panelHooks = (on: On) => {
       const phase = one?.phase || stageOf(f)
       if (!one) return 'between steps'
       if (phase === 'Make') return r.n === 1 ? 'Maker building it' : 'Maker fixing what the check found'
-      if (phase === 'Check') return 'Checker testing it against the bar'
+      if (phase === 'Check') return 'Checker testing it'
       return doing(phase || 'Working')
     }
     const flowDots = (key: string) =>
       'Svg' in table && e.surface !== 'terminal' ? (
         <Box key={key} flexShrink={0}>
-          <table.Svg key={`${key}-svg`} source={dots(FLOW, LINE)} alt="Being done now" width={22} height={LINE} isInteractive />
+          <table.Svg key={`${key}-svg`} source={dots(FLOW, LINE)} alt="Working now" width={22} height={LINE} isInteractive />
         </Box>
       ) : e.surface === 'terminal' ? (
         (termDots(table, $, paneId, key, FLOW) ?? <Text key={key} color={FLOW}>▸</Text>)
@@ -888,7 +888,7 @@ const panelHooks = (on: On) => {
           </Box>,
         ])
       const cutShort = r.pass === undefined && !r.why && r.agents.some(one => one.status !== 'done')
-      const why = (r.why || (r.pass ? 'passed' : r.pass === false ? 'failed' : cutShort ? (f.status === 'failed' ? 'stopped by an error' : 'stopped') : 'ended')).replace(/[.。]+$/, '')
+      const why = (r.why || (r.pass ? 'passed' : r.pass === false ? 'failed' : cutShort ? (f.status === 'failed' ? 'failed with an error' : 'stopped') : 'ended')).replace(/[.。]+$/, '')
       const found = r.pass === false && r.findings.length ? `${r.findings.length} found · ` : ''
       return row([
         label(r.pass ? DONE : undefined),
@@ -950,7 +950,7 @@ const panelHooks = (on: On) => {
             {f.bar ? (
               <Box flexDirection="row" gap={1} height={2} overflow="hidden" paddingLeft={lead}>
                 <Box flexShrink={0}>
-                  <Text dimColor>Bar ·</Text>
+                  <Text dimColor>Test to pass ·</Text>
                 </Box>
                 <Box flexShrink={1} minWidth={0}>
                   <Text dimColor wrap="wrap">{cut(f.bar, Math.max(20, room - 12))}</Text>
@@ -1048,7 +1048,7 @@ const panelHooks = (on: On) => {
         'To-dos',
         kept ? `${done} of ${kept} done` : '',
         <Box flexDirection="column">
-          {done > DONE_FOLDED ? opener(OPEN_DONE, isFolded ? `${done} done` : 'Fold the done') : null}
+          {done > DONE_FOLDED ? opener(OPEN_DONE, isFolded ? `${done} done` : 'Hide the done ones') : null}
           {one.items.map((item, i) => {
             if (item.state === 'done' && isFolded) return null
             if (item.state === 'doing') {
@@ -1117,11 +1117,11 @@ const panelHooks = (on: On) => {
       if (!under.length && !jobs) return null
       const running = under.filter(kid => kid.status === 'working').length
       // Beside the jobs, the helpers are named, so neither count reads as the other's
-      const helpers = !jobs ? (running ? `${running} at work · ${under.length} in all` : `${under.length} in all`) : running === under.length ? `${running} ${running === 1 ? 'helper' : 'helpers'} at work` : running ? `${running} of ${under.length} helpers at work` : `${under.length} ${under.length === 1 ? 'helper' : 'helpers'}`
-      const side = [jobs ? `${jobs} ${jobs === 1 ? 'job' : 'jobs'} running` : '', under.length ? helpers : ''].filter(Boolean).join(' · ')
+      const helpers = running === under.length ? `${running} ${running === 1 ? 'helper' : 'helpers'} working` : running ? `${running} of ${under.length} helpers working` : `${under.length} ${under.length === 1 ? 'helper' : 'helpers'}`
+      const side = [jobs ? `${jobs} ${jobs === 1 ? 'command' : 'commands'} running` : '', under.length ? helpers : ''].filter(Boolean).join(' · ')
       return part(
         'part-helpers',
-        !jobs ? 'Helpers' : under.length ? 'Helpers and jobs' : 'Running',
+        !jobs ? 'Helpers' : under.length ? 'Helpers and commands' : 'Running',
         side,
         <Box flexDirection="column">{twigsOf(branches).flatMap(t => [t.job ? jobRow(t, 'details') : twigRow(t, 'details'), underTwig(t)])}</Box>,
       )
@@ -1135,13 +1135,13 @@ const panelHooks = (on: On) => {
       const bad = runs.filter(isBad).length
       return part(
         'part-ended-runs',
-        'Runs ended',
-        `${runs.length} ${runs.length === 1 ? 'run' : 'runs'}${bad ? ` · ${bad} did not finish` : ''}`,
+        'Commands ended',
+        `${runs.length} ${runs.length === 1 ? 'command' : 'commands'}${bad ? ` · ${bad} did not finish` : ''}`,
         <Box flexDirection="column">
           {runs.map(run => (
             <Box key={`ended-${run.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
               <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A run'}</Text>
+                <Text wrap="truncate-end">{describedOf(run.what).text || run.what || 'A command'}</Text>
               </Box>
               <Box flexShrink={0}>
                 <Text dimColor={!isBad(run)} color={isBad(run) ? NEEDS : undefined}>{`${endedWord(run)} after ${took(run.endedAt - run.at)} · ${shortAgo(at - run.endedAt)} ago`}</Text>
@@ -1174,7 +1174,7 @@ const panelHooks = (on: On) => {
                   />
                 ) : null}
                 {pic.isGone ? (
-                  <Text dimColor wrap="wrap">{`Picture: ${pic.name} · no longer kept`}</Text>
+                  <Text dimColor wrap="wrap">{`Picture: ${pic.name} · no longer available`}</Text>
                 ) : (
                   <Button
                     key={`pic-open-${at}-${n}-${presses}`}
@@ -1198,7 +1198,7 @@ const panelHooks = (on: On) => {
       }, [])
       return (
         <Box flexDirection="column" gap={1}>
-          {lines ? null : <Text dimColor>The app has not kept the chat of this work.</Text>}
+          {lines ? null : <Text dimColor>The app didn't save this task's conversation.</Text>}
           {blocks.map((block, i) => {
             const first = block[0]
             const at = first?.at ?? 0
@@ -1238,7 +1238,7 @@ const panelHooks = (on: On) => {
             if (i === 0 && first?.kind === 'told' && isLong && !isOpen)
               return (
                 <Box key={`talk-${i}`} alignItems="flex-start">
-                  <Button key={`told-${at}-${presses}`} label="▸ The brief it was given" plain dimColor onPress={() => fold(-at - 1)} />
+                  <Button key={`told-${at}-${presses}`} label="▸ The instructions Claude was given" plain dimColor onPress={() => fold(-at - 1)} />
                 </Box>
               )
             return (
@@ -1259,7 +1259,7 @@ const panelHooks = (on: On) => {
     // Another chat's work whose chat cannot be read here (a chat on another Mac, or one its file no longer holds): where it is. Its
     // head has the press that opens that chat
     const theirChat = (one: Todo, c: NonNullable<Todo['chat']>) => (
-      <Text dimColor wrap="wrap">{`Its chat is kept by the chat "${chatName(c)}"${c.host ? ` on ${macName(c.host)}` : ''}, which runs it.${one.status === 'working' ? ' Stop it or move it to another model there.' : ''}`}</Text>
+      <Text dimColor wrap="wrap">{`This task runs in the chat "${chatName(c)}"${c.host ? ` on ${macName(c.host)}` : ''}.${one.status === 'working' ? ' Stop it or change its model there.' : ''}`}</Text>
     )
     // The press on another chat's name that opens it, wherever the app can open that chat (a chat of the app on this Mac, or one Remote
     // Control serves)
@@ -1333,7 +1333,7 @@ const panelHooks = (on: On) => {
             <Box key="part-needs" flexDirection="row" backgroundColor={FILL} flexShrink={0}>
               <Box width={1} flexShrink={0} backgroundColor={needsPerson(one) ? NEEDS : LIVE} />
               <Box flexDirection="column" gap={1} paddingX={2} paddingY={1} minWidth={0} flexGrow={1} flexShrink={1}>
-                <Text bold dimColor>{needsPerson(one) ? 'Needs you now' : 'Acting on your reply'}</Text>
+                <Text bold dimColor>{needsPerson(one) ? 'Needs you now' : 'Claude is working on your reply'}</Text>
                 {askBlock(one, `ask-big-${one.id}`, true)}
               </Box>
             </Box>
@@ -1348,8 +1348,8 @@ const panelHooks = (on: On) => {
           {helpersPart(one)}
           {endedRunsPart(one)}
           {one.chat && !lines && (talks.has(one.id) || one.chat.host)
-            ? part('part-chat', 'Its chat', '', theirChat(one, one.chat))
-            : part('part-chat', 'Its chat', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading its chat…</Text>)}
+            ? part('part-chat', 'Conversation', '', theirChat(one, one.chat))
+            : part('part-chat', 'Conversation', lines && showing < lines.length ? `last ${showing} lines` : '', talks.has(one.id) ? talk(one, lines, shots.get(one.id)?.shots ?? new Map()) : <Text dimColor>Reading the conversation…</Text>)}
         </Box>
       )
     }
@@ -1378,7 +1378,7 @@ const panelHooks = (on: On) => {
           <Text bold wrap="truncate-end">{p.title || (c ? 'That chat itself' : 'This chat itself')}</Text>
           {/* At the top, away from its chat's name: which chat it is */}
           {c ? <Text key={`prompt-${key}-chat`} dimColor wrap="truncate-end">{`In the chat “${chatName(c)}”${c.host ? ` on ${macName(c.host)}` : ''}`}</Text> : null}
-          <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Asks you a question' : p.kind === 'plan' ? 'Asks you to approve its plan' : 'Asks your permission'}</Text>
+          <Text dimColor wrap="wrap">{p.kind === 'question' ? 'Has a question for you' : p.kind === 'plan' ? 'Wants you to approve its plan' : 'Needs your permission'}</Text>
         </Box>
         <Text wrap="wrap" color={NEEDS} bold>{p.text}</Text>
         {p.detail ? (
@@ -1406,9 +1406,9 @@ const panelHooks = (on: On) => {
     // of what came of it (purple while it runs, grey once over)
     const saidOf = (p: Prompt) => {
       if (p.answered === 'stopped') return 'It ended before you answered · nothing happened'
-      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · no answer went back, and it waits for you' : p.kind === 'plan' ? 'You said no · it keeps planning' : p.title ? 'You said no · it did not happen, and the work was told' : 'You said no · it did not happen, and it waits for what you say next'
-      if (p.kind === 'question') return p.isRunning ? 'You answered · it is taking your answer' : 'You answered · it carries on with your answer'
-      if (p.kind === 'plan') return 'You approved the plan · it is carrying it out'
+      if (p.answered === 'no') return p.kind === 'question' ? 'You skipped it · Claude got no answer and is waiting for you' : p.kind === 'plan' ? 'You said no · Claude keeps planning' : p.title ? "You said no · it didn't run, and Claudopus told Claude" : "You said no · it didn't run, and Claude is waiting for what you say next"
+      if (p.kind === 'question') return p.isRunning ? 'You answered · Claude is taking your answer' : 'You answered · Claude is continuing with your answer'
+      if (p.kind === 'plan') return 'You approved the plan · Claude is carrying it out'
       if (p.isCut) return 'You allowed it · it was stopped before it finished'
       return p.isRunning ? 'You allowed it · it is running now' : `You allowed it · ${p.done ?? 'it ran and is done'}`
     }
@@ -1485,7 +1485,7 @@ const panelHooks = (on: On) => {
       const current = stageOf(f)
       const agentRow = (one: FlowAgent) => {
         const isPicked = picked?.id === one.id
-        const facts = [modelName(one.model ?? ''), one.tokens ? `context ${thousands(one.tokens)}` : '', one.status === 'working' ? (f.status === 'working' ? 'at work' : 'stopped') : one.status === 'failed' ? 'failed' : ''].filter(Boolean).join(' · ')
+        const facts = [modelName(one.model ?? ''), one.tokens ? `context ${thousands(one.tokens)}` : '', one.status === 'working' ? (f.status === 'working' ? 'working' : 'stopped') : one.status === 'failed' ? 'failed' : ''].filter(Boolean).join(' · ')
         return (
           <Box key={`flow-agent-${one.id}`} flexDirection="row" alignItems="flex-start" gap={1} paddingLeft={2}>
             <Button
@@ -1579,7 +1579,7 @@ const panelHooks = (on: On) => {
           {picked
             ? part(
                 'part-chat',
-                `Chat of the ${picked.label || picked.phase || 'agent'}${rounds.length > 1 ? `, round ${rounds.find(r => r.agents.some(one => one.id === picked.id))?.n ?? ''}` : ''}`,
+                `Conversation of the ${picked.label || picked.phase || 'agent'}${rounds.length > 1 ? `, round ${rounds.find(r => r.agents.some(one => one.id === picked.id))?.n ?? ''}` : ''}`,
                 modelName(picked.model ?? ''),
                 talk({ ...started(picked.id, '', picked.label, '', picked.at), answer: picked.result ?? '' }, lines, new Map()),
               )
@@ -1589,7 +1589,7 @@ const panelHooks = (on: On) => {
       )
     }
     if (paneId.startsWith(FLOW_PANE)) {
-      if (!flowShown) return <Text dimColor>This workflow is no longer kept.</Text>
+      if (!flowShown) return <Text dimColor>This workflow is no longer available.</Text>
       const picked = pickedOf(flowShown)
       const lines = picked ? await flowTalkOf($, flowShown, picked).catch(() => undefined) : undefined
       return (
@@ -1601,7 +1601,7 @@ const panelHooks = (on: On) => {
 
     // A Details tab stays, even once its work has ended, until it is closed; work no longer kept says so
     const alone = [...all, ...elsewhere, ...helpersThere].find(one => one.id === workId)
-    if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This work has ended, or its chat is closed. Its chat keeps it.' : 'This work is no longer kept.'}</Text>
+    if (paneId !== LIST && !alone) return <Text dimColor>{paneId.startsWith(`${WORK_PANE}r-`) ? 'This task has finished, or its chat is closed. Open that chat to see it.' : 'This task is no longer available.'}</Text>
     // Its chat and pictures are read outside the drawing, which draws at once from what was read last: a long chat takes seconds to
     // read, and a drawing that waits on it is never shown
     // Another chat's is read from that chat's own file, on this Mac
@@ -1704,7 +1704,7 @@ const panelHooks = (on: On) => {
             <Box flexDirection="row" alignItems="center" gap={2}>
               {/* Just moved to a newer version: the octopus turns blue and jumps for the moment. Above the prompt in a narrow terminal the
                   panel is a few rows tall, so it keeps them for the work and leaves the octopus to the line above the prompt */}
-              {isInline ? null : updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, work finished', working: 'Claudopus at work', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
+              {isInline ? null : updated ? octopus(ui, 'head-mark', 'updated', HEAD_MARK, `Claudopus, updated to ${versions.version}`, $, { surface: e.surface, requestId: paneId }) : octopus(ui, 'head-mark', mood, HEAD_MARK, { asking: 'Claudopus, something needs you', happy: 'Claudopus, task finished', working: 'Claudopus, working', mark: 'Claudopus' }[mood], $, { surface: e.surface, requestId: paneId })}
               <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
                 {/* The version this chat loaded beside the name, and a newer one when the Mac has it, so two Macs on different ones are told apart */}
                 {/* Just moved to a newer version: "Claudopus updated" in blue, then the new version, for the moment */}

@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -727,7 +727,7 @@ test('three single lookups in a row are told to go together or to a helper; two 
     return toldOf(batch($, 'a1', [{ tool: 'Bash', input: { command }, id }]))
   }
   expect(await run('t1', 'npm test -- nose')).toBe('')
-  expect(await run('t2', 'npm test -- ears')).toContain('Two long runs of one kind (npm test)')
+  expect(await run('t2', 'npm test -- ears')).toContain('Two long commands of one kind (npm test)')
 })
 
 test('the work waits for its helpers with a command of its own: a file it waits on names the helpers running and how each is doing, and changes the moment one ends', async ($, on) => {
@@ -793,7 +793,7 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   expect(await pane.find({ type: 'Text', text: /looked in on|helper running/ })).toBeUndefined()
   await clock.advance(5 * 60_000)
   expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1)
-  expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, the work was told$/ }))?.text).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, Claudopus told Claude$/ }))?.text).toBeDefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })
@@ -808,8 +808,8 @@ test('work whose context was compacted is handed its rules again at its next ste
   await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: [{ role: 'user', text: 'one', toolUses: [] }] } as never)
   const told = await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))
   expect(told).toContain('Your context was compacted')
-  expect(told).toContain('What follows is told to every piece of work')
-  expect(told).toContain('Keep it true as you work')
+  expect(told).toContain('What follows is what Claudopus tells Claude in every task')
+  expect(told).toContain('Keep the card up to date as you work')
   expect(await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))).not.toContain('These are the rules now')
   // The rules change under it, saved in Config: the new text reaches it
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)

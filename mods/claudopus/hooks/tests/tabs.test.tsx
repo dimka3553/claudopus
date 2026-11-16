@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -702,9 +702,9 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   }
   // The headline: time saved, cost, work done
   expect(await value('10m')).toBe('time saved')
-  expect(await value('Pieces of work done')).toBe('2')
+  expect(await value('Tasks done')).toBe('2')
   expect(await value('To-dos done')).toBe('2')
-  expect(await value('Work added up')).toBe('30m')
+  expect(await value('Task time added up')).toBe('30m')
   expect(await value('On the clock')).toBe('20m')
   expect(await value('Saved by running side by side')).toBe('10m')
   // From the person's message to the chat's last response or tool result before the next message: 20 seconds here
@@ -734,7 +734,7 @@ test('Stats draws whatever the history: the timeline of 240 pieces of work at on
   const allTime = await until(async () => (await stats.findAll({ type: 'Button' })).find(one => one.props.label === 'All time'))
   await stats.press({ key: allTime?.key ?? '' })
   // The timeline is drawn, its bars on a coarser grid, in one drawing the app takes
-  const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 pieces of work on a time axis'))
+  const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 tasks on a time axis'))
   expect(String(timeline?.props.source)).toContain('#8A63F0')
   expect((await stats.findAll({ type: 'Svg' })).filter(one => String(one.props.source).length > 131_072)).toEqual([])
   // The rest of the tab is drawn as ever

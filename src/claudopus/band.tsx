@@ -16,7 +16,7 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
       >
         {waitsAtTop > 0 ? (
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 waits' : `${waitsAtTop} wait`} for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
+          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 thing is' : `${waitsAtTop} things are`} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
         ) : (
           <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}, at the top of the panel`}</ui.Text>
         )}
@@ -118,7 +118,7 @@ const bandHooks = (on: On) => {
           <Box flexDirection="column">
             {await waitMarker($, ui, e.surface)}
             <Box flexDirection="row" gap={1}>
-              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus at work on your reply', $, { surface: e.surface, requestId: e.requestId })}
+              {octopus(ui, 'band-mark', needsPerson(first) ? 'asking' : 'workingSmall', BAND_MARK, needsPerson(first) ? 'Claudopus, something needs you' : 'Claudopus is working on your reply', $, { surface: e.surface, requestId: e.requestId })}
               <Box flexShrink={1} minWidth={0}>
                 <Text wrap="wrap">
                   <Text dimColor>{`${titleOf(first)}: `}</Text>
@@ -132,7 +132,7 @@ const bandHooks = (on: On) => {
             ) : (
               <Box flexDirection="column">
                 {/* The chat's notice with what it is about went only to the chat that started the work */}
-                {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{cards.includes(first) ? '    What it is about is in the chat above and on its card' : '    What it is about is on its card'}</Text> : null}
+                {ask.details ? <Text key="band-ask-details" dimColor wrap="truncate-end">{cards.includes(first) ? '    The details are in the chat above and on its card' : '    The details are on its card'}</Text> : null}
                 {ask.copy ? <Text key="band-ask-copy" wrap="truncate-end">{`    ${oneLine(ask.copy)}`}</Text> : null}
                 <Box flexDirection="row" flexWrap="wrap" columnGap={3} paddingLeft={4}>
                   {answers.map((choice, n) => (
@@ -188,7 +188,7 @@ const bandHooks = (on: On) => {
     const drawing = (spacers: JSX.Element | null) => {
       const row = (
         <Box key="band-row" flexDirection="row" alignItems="center" gap={1} height={1} overflow="hidden">
-          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, work finished' : 'Claudopus at work', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
+          {octopus(ui, 'band-mark', happy ? 'happySmall' : 'workingSmall', BAND_MARK, happy ? 'Claudopus, task finished' : 'Claudopus, working', $, { surface: e.surface, requestId: e.requestId }) ?? <Text dimColor>•••</Text>}
           {spacers}
           {figures ? (drawn ?? <Box flexShrink={1} minWidth={0}>{usageText(ui, figures, e.surface === 'terminal' ? e.props.bodyColumns - BAND_TERM_MARK - 1 : Infinity)}</Box>) : null}
           {/* The figures fill a phone's terminal: the hint shows until they come */}

@@ -61,7 +61,7 @@ test('three single lookups in a row are told to go together or to a helper; two 
     return toldOf(batch($, 'a1', [{ tool: 'Bash', input: { command }, id }]))
   }
   expect(await run('t1', 'npm test -- nose')).toBe('')
-  expect(await run('t2', 'npm test -- ears')).toContain('Two long runs of one kind (npm test)')
+  expect(await run('t2', 'npm test -- ears')).toContain('Two long commands of one kind (npm test)')
 })
 
 test('the work waits for its helpers with a command of its own: a file it waits on names the helpers running and how each is doing, and changes the moment one ends', async ($, on) => {
@@ -127,7 +127,7 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   expect(await pane.find({ type: 'Text', text: /looked in on|helper running/ })).toBeUndefined()
   await clock.advance(5 * 60_000)
   expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1)
-  expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, the work was told$/ }))?.text).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, Claudopus told Claude$/ }))?.text).toBeDefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })
@@ -142,8 +142,8 @@ test('work whose context was compacted is handed its rules again at its next ste
   await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: [{ role: 'user', text: 'one', toolUses: [] }] } as never)
   const told = await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))
   expect(told).toContain('Your context was compacted')
-  expect(told).toContain('What follows is told to every piece of work')
-  expect(told).toContain('Keep it true as you work')
+  expect(told).toContain('What follows is what Claudopus tells Claude in every task')
+  expect(told).toContain('Keep the card up to date as you work')
   expect(await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))).not.toContain('These are the rules now')
   // The rules change under it, saved in Config: the new text reaches it
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)

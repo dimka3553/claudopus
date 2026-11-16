@@ -294,7 +294,7 @@ const isChecker = (description: string) => ONLY_CHECKS.test(description) || (CHE
 // Work a safety check flagged whose next steps the app would send to an older model: it is ended with this report instead, so its
 // parent starts what is left again on a current model. The steps of it answered so
 const FLAGGED = (on: string) =>
-  `Stopped by Claudopus: a safety check flagged this agent's last message, and the app would have carried it on on ${modelName(on) || on}, an older model no work runs on, so nothing after the flag was done. Start what is left again on the current model, leaving out what was flagged.`
+  `Stopped by Claudopus: a safety check flagged this agent's last message, and the app would have continued it on ${modelName(on) || on}, an older model Claudopus doesn't run tasks on, so nothing after the flag was done. Start what is left again on the current model, leaving out what was flagged.`
 const flaggedSteps = new Map<string, number>()
 // Work a safety check flagged once: its steps on an older model are never sent to a newer one, whatever it was started on
 const flaggedOnce = new Set<string>()
@@ -321,7 +321,7 @@ const startedOn = new Map<string, string>()
 const sentElsewhere = new Set<string>()
 // What a fork is answered when the model it would copy is such a model
 const WRONG_MODEL = (named: string) =>
-  `No work runs on ${modelName(named) || named}. Start a fresh agent and name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
+  `Claudopus doesn't run tasks on ${modelName(named) || named}. Start a fresh agent and name the model by its alias: ${modelsShort(models)}. Never an older version${Object.values(models).includes('haiku') ? '' : ', never Haiku'}.`
 // The line written into a piece of work's own chat when the person moves it to another model; the panel draws it as a line of its own
 const MODEL_HEAD = 'Model changed to '
 const MODEL_LINE = /^Model changed to (.+?) at (\d{1,2}:\d{2})\./

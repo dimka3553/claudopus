@@ -58,7 +58,7 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: string[] }, cards: T
   if (id.startsWith('flow:')) {
     const f = runs.find(one => `flow:${one.id}` === id)
     if (!f) return undefined
-    const what = f.status === 'done' ? fewWords(f.result) || 'Finished.' : f.status === 'failed' ? 'Stopped by an error.' : 'Stopped.'
+    const what = f.status === 'done' ? fewWords(f.result) || 'Finished.' : f.status === 'failed' ? 'Failed with an error.' : 'Stopped.'
     return { title: f.title || f.name || 'Workflow', isDone: f.status === 'done', what }
   }
   const one = cards.find(card => card.id === id)
@@ -68,12 +68,12 @@ const readyOf = ({ id, waits: seen }: { id: string; waits?: string[] }, cards: T
   const what =
     one.status === 'done'
       ? waits.length
-        ? `Waits on ${who()}: ${fewWords(waits[0] ?? '')}${waits.length > 1 ? ` (and ${waits.length - 1} more)` : ''}`
+        ? `Waiting for ${who()}: ${fewWords(waits[0] ?? '')}${waits.length > 1 ? ` (and ${waits.length - 1} more)` : ''}`
         : fewWords(one.answer) || fewWords(said) || 'Finished.'
       : one.status === 'failed'
-        ? 'Stopped by an error.'
+        ? 'Failed with an error.'
         : 'Stopped.'
-  return { title: one.title || 'Work', isDone: one.status === 'done', what }
+  return { title: one.title || 'Task', isDone: one.status === 'done', what }
 }
 
 // One sound for all that ended together, only when some finished; one notification naming them. config.json switches each off
@@ -95,8 +95,8 @@ const announce = async ($: EngineInterface) => {
   if (config.notifications === false) return
   const [first] = items
   const done = items.filter(one => one.isDone).length
-  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} pieces of work are ready` : `${items.length} pieces of work ended`
-  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${one.isDone ? 'ready' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
+  const title = items.length === 1 && first ? first.title : done === items.length ? `${items.length} tasks are done` : `${items.length} tasks ended`
+  const text = items.length === 1 && first ? first.what : items.map(one => `${one.title}: ${one.isDone ? 'done' : one.what.replace(/\.$/, '').toLowerCase()}`).join(' · ').slice(0, 300)
   await alertPerson($, 'ready', title, text, `ready-${ids.map(one => one.id).join('-')}`)
 }
 
@@ -177,4 +177,4 @@ const aloud = async ($: EngineInterface, what: string, title: string, text: stri
   lastChime = now
   void $.audio.play({ asset: READY_SOUND }).catch(err => log($, `ask sound not played: ${String(err)}`))
 }
-const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} needs you`, text, `ask-${one.id}`)
+const askAloud = ($: EngineInterface, one: Todo, text: string) => aloud($, 'ask', `${titleOf(one)} has a question for you`, text, `ask-${one.id}`)

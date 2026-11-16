@@ -44,7 +44,7 @@ declare const setTimeout: (run: () => void, ms: number) => unknown
 // The principles and working rules the mod ships
 const PRINCIPLES = '# How I work with Claude\n\n## Principles\n\n1. My words are the spec.\n'
 // The principles exactly as the mod ships them: the build puts the file's text in place of this line's string
-const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every piece of work carries them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current work. It switches task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
+const SHIPPED_PRINCIPLES: string = "# How I work with Claude\n\nThese are my principles. Every chat and every task follows them.\n\n## Core truths\n\n- My words are the spec. They beat Claude's earlier suggestions.\n- Solutions, not questions. Research it properly, then bring a solution with the evidence. Ask only when it needs my hands or can't be undone: one recommendation, yes or no.\n- Build only what I asked for, and name everything that was built.\n- Show me the result. My yes or no is the gate, not the agent's verdict.\n\n## Boundaries\n\n- A new message adds to the current task. It switches to a new task only if I say so.\n- If the work doesn't depend on it right now, drop it.\n- A repo's own files and notes win over these principles for that repo.\n\n## Vibe\n\n- Short replies and short rules. Say it once, in general terms, without examples.\n- Before starting, say back what I want to find out and what you will show me.\n\n## Checking\n\n- Set the bar with what already exists, and show each new attempt beside it on the same input.\n- Judge a result by looking at it, not by a number.\n- Before showing me a result, have a second agent that didn't build it look for what is wrong. A lookup or a small fix proved directly goes without.\n- Show the first result early. After two or three failed fixes, question the approach.\n- A surprising number means checking our own code first.\n- Explore with mockups and tests. Build for real once I say the decision is final.\n\n## Continuity\n\n- Context lives in files. Chats are disposable and stay small.\n- Read files in one batch. Send big searches and outputs to helpers.\n- Each session works on its own branch and ends with what shipped and what's left.\n"
 // The prompt each piece of work started with, as the mod left it
 const prompts: string[] = []
 
@@ -726,11 +726,11 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect(grants()).toEqual([])
   expect((await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' }))?.props.color).toBe('#E5A50A')
   expect((await list.find({ type: 'Text', text: 'chmod 644 /etc/hosts' }))?.props.mono).toBe(true)
-  expect(await list.find({ type: 'Text', text: 'Allow: it runs with admin rights. Deny: it does not run, and the work is told.' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: "Allow: it runs with admin rights. Deny: it doesn't run, and Claudopus tells Claude." })).toBeDefined()
   expect((await labels()).filter(one => ['Allow once', 'Always allow this command', 'Deny'].includes(one))).toEqual(['Allow once', 'Always allow this command', 'Deny'])
   // Said in the chat and as a notification; its Details tab has it at the top
-  expect(logged.some(line => line.includes('The work "Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts') && line.includes('Nothing typed in the chat allows it'))).toBe(true)
-  expect(notified).toContain('Fix the hosts file needs you | Wants to run an admin command on this Mac: chmod 644 /etc/hosts')
+  expect(logged.some(line => line.includes('The task "Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts') && line.includes('Nothing typed in the chat allows it'))).toBe(true)
+  expect(notified).toContain('Fix the hosts file has a question for you | Wants to run an admin command on this Mac: chmod 644 /etc/hosts')
   const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   expect(await details.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
   await press('gate-b1-0-once')
@@ -759,11 +759,11 @@ test('Deny refuses the call with a line that says the person refused it, and not
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on m4' })).toBeDefined()
   await press('gate-b1-0-deny')
   const r = await call
-  expect(r.deny).toBe('Refused by Sam: Sam pressed Deny on this admin command, so it did not run. Do not try to run it another way. Carry on without it, or say what it is needed for and ask again.')
+  expect(r.deny).toBe("Refused by Sam: Sam pressed Deny on this admin command, so it didn't run. Don't try to run it another way. Continue without it, or say what it is needed for and ask again.")
   expect(admins).toEqual([])
   expect(grants()).toEqual([])
   expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on m4' })).toBeUndefined()
-  expect(await until(async () => list.find({ type: 'Text', text: 'You denied it · it did not run, and the work was told' }))).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: "You denied it · it didn't run, and Claudopus told Claude" }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Admin command on m4' })).toBeDefined()
 })
 
@@ -862,9 +862,9 @@ test('work never reads or writes the allowed list, the grants or the key that se
     'security add-generic-password -U -s claudopus-admin-gate -a seal -w abc',
     'security delete-generic-password -s claudopus-admin-gate -a seal',
   ])
-    expect((await bash(`t${command.length}`, command)).deny).toContain('only Sam adds to them')
+    expect((await bash(`t${command.length}`, command)).deny).toContain('Only Sam adds to them')
   for (const tool of ['Write', 'Edit'])
-    for (const path of [ALLOWED, `${GRANTS}g.json`]) expect((await $.tool.call({ tool, tool_use_id: `w-${tool}-${path.length}`, file_path: path, content: '{}', agentId: 'a1' } as never)).deny).toContain('only Sam adds to them')
+    for (const path of [ALLOWED, `${GRANTS}g.json`]) expect((await $.tool.call({ tool, tool_use_id: `w-${tool}-${path.length}`, file_path: path, content: '{}', agentId: 'a1' } as never)).deny).toContain('Only Sam adds to them')
   expect(files.has(ALLOWED)).toBe(false)
   // The memory folder's other files are work's to write as before
   expect((await $.tool.call({ tool: 'Write', tool_use_id: 'w9', file_path: `${MEMORY}/streams/x.md`, content: 'x', agentId: 'a1' } as never)).deny).toBeUndefined()
@@ -886,7 +886,7 @@ test('asked once per piece of work: one Allow covers that work and its helpers u
   await $.agent.spawn({ ...spawn, description: 'Update the other Mac', prompt: 'update the other Mac' } as never)
   const first = bash('b1', `${ADMIN} here 'id -u'`)
   expect(await held('b1')).toBeDefined()
-  expect(await labels()).toContain('Allow for this work')
+  expect(await labels()).toContain('Allow for this task')
   expect(await labels()).not.toContain('Allow once')
   await press('gate-b1-0-once')
   expect((await first).result).toBe('ran')
@@ -945,7 +945,7 @@ test('never asked, as Config sealed it: the call goes through as it was made, wi
 
 test('with no panel to ask on, an admin command is refused, never run unasked', async ($, on) => {
   const { press, bash, admins } = await gated($, on, {}, { headless: true })
-  expect((await bash('b1', `${ADMIN} here 'id -u'`)).deny).toContain('no panel is drawn for this chat')
+  expect((await bash('b1', `${ADMIN} here 'id -u'`)).deny).toContain('this chat has no panel open')
   expect(admins).toEqual([])
 })
 
@@ -955,7 +955,7 @@ test('F-008 F-009 · no admin password is kept: Config has no setting to keep on
   expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').adminPassword === undefined ? true : undefined))).toBe(true)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   expect(await config.find({ type: 'Text', text: 'Admin password' })).toBeUndefined()
-  expect(await config.find({ type: 'Text', text: /each one also asks for the admin password, which is never kept/ })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: /each one also asks for the admin password, which is never saved/ })).toBeDefined()
   // Another Mac's admin command is held on its card as this Mac's is: its password is asked when it runs
   const call = bash('b2', `${ADMIN} m4 'id -u'`)
   expect(await held('b2')).toBeDefined()
@@ -977,7 +977,7 @@ test("the chat's own thread, doing its own work, is asked at the top of the pane
     expect(await list.find({ type: 'Text', text: 'Wants to run an admin command on this Mac' })).toBeDefined()
     // No piece of work to allow it for: the chat's thread never ends, so it is asked each time
     expect((await list.findAll({ type: 'Button' })).map(one => one.props.label)).toContain('Allow once')
-    expect((await list.findAll({ type: 'Button' })).map(one => one.props.label)).not.toContain('Allow for this work')
+    expect((await list.findAll({ type: 'Button' })).map(one => one.props.label)).not.toContain('Allow for this task')
     await pressed(list, `gate-${id}-0-once`)
     w.wake()
     expect((await call).result).toBe('ran')
@@ -1107,7 +1107,7 @@ test('scrolled down a long list, the line above the prompt says how many wait at
   const at = 1_700_000_000_000
   files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }))
   await clock.advance(5000)
-  const MARK = '↑ 2 wait for you at the top of the panel'
+  const MARK = '↑ 2 things are waiting for you at the top of the panel'
   for (const surface of ['desktop', 'terminal']) {
     const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface } as never)
     expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
@@ -1152,7 +1152,7 @@ test('the line above the prompt never points into a list that is not open', asyn
   expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()
   await down.unmount()
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-  expect((await textOrder(band)).some(one => one.includes('wait for you at the top'))).toBe(false)
+  expect((await textOrder(band)).some(one => one.includes('waiting for you at the top'))).toBe(false)
 })
 
 test('in the terminal, a password box that comes while a reply is being typed leaves the keys with the reply', async ($, on) => {
@@ -1271,7 +1271,7 @@ const pressedFirst = async ($: Parameters<TestBody>[0], on: On, button: 'once' |
 }
 test("Allow once on a gate draws it answered in the press's own drawing, before the wait reads it: green, with no buttons left", ($, on) => pressedFirst($, on, 'once', 'You allowed it once · it runs now'))
 test("Always allow on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'always', 'You always allow this command · it runs now, and will not ask again'))
-test("Deny on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'deny', 'You denied it · it did not run, and the work was told'))
+test("Deny on a gate draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'deny', "You denied it · it didn't run, and Claudopus told Claude"))
 test("Allow once on a release draws it answered in the press's own drawing", ($, on) => pressedFirst($, on, 'once', 'You allowed it once · it releases now', true))
 
 test('two presses on a gate before its wait reads them send one answer: the first, as drawn', async ($, on) => {
@@ -1305,7 +1305,7 @@ test('a gate allowed but not let through says so where its green box was, never 
   const r = (await call) as { deny?: string }
   expect(r.deny).toBeDefined()
   expect(w.grants()).toEqual([])
-  expect(await until(async () => w.list.find({ type: 'Text', text: 'It could not be sealed · it did not run, and the work was told' }))).toBeDefined()
+  expect(await until(async () => w.list.find({ type: 'Text', text: "It could not be secured · it didn't run, and Claudopus told Claude" }))).toBeDefined()
   expect(await w.list.find({ type: 'Text', text: 'You allowed it once · it runs now' })).toBeUndefined()
   expect(await w.list.find({ type: 'Text', text: /· allowed$/ })).toBeUndefined()
 })

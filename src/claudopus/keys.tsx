@@ -144,7 +144,7 @@ const routeOf = (root: string, one: KeyEntry) =>
         ? `SBOS by its name: \`send_with_secret\` with {{secret:${one.name}}}, or \`secret_link\` for a command`
         : `asked in SBOS but never put in: ask for it in the secret runner instead`
       : one.store === 'keychain'
-        ? `kept by another app (${one.where}): work cannot use it; {name} can paste it into Claudopus's keychain once`
+        ? `kept by another app (${one.where}): a task cannot use it; {name} can paste it into Claudopus's keychain once`
         : `in ${one.where}, which that project's own scripts load`
 const keysText = (root: string, state: KeysState) => {
   const rows = [...state.entries]
@@ -155,7 +155,7 @@ const keysText = (root: string, state: KeysState) => {
     '',
     `The keys, tokens and logins ${who()} has given, by name and where each is kept: never a value. Made again from each store's own list of names on ${dayOf(state.at)}; SBOS's as it last listed them${state.sbosAt ? ` on ${dayOf(state.sbosAt)}` : ' (not yet listed: call its `secrets`)'}. A key taken out of a store goes from here.`,
     '',
-    '| Name | For | Store | State | Added | Last seen | How work uses it |',
+    '| Name | For | Store | State | Added | Last seen | How a task uses it |',
     '| --- | --- | --- | --- | --- | --- | --- |',
     ...rows,
     '',

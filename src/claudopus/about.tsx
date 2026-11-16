@@ -64,9 +64,9 @@ const aboutView = async ($: EngineInterface, ui: Ui, surface?: string) => {
         'What it does',
         '',
         <Box flexDirection="column" gap={1}>
-          <Text wrap="wrap">Every chat hands each of your messages to an agent that works in the background, so the chat stays small and free to talk.</Text>
-          <Text wrap="wrap">This panel shows each piece of work as a card with its to-dos. What finished work leaves is kept under Results.</Text>
-          <Text wrap="wrap">Your words, the subjects you work on and every result are kept as plain files under Memory. Stats adds up what the work cost and the time it saved.</Text>
+          <Text wrap="wrap">Each message you send in a chat starts a task that Claude does in the background, so the chat stays small and free for your next message.</Text>
+          <Text wrap="wrap">This panel shows each task as a card with its to-dos. When a task finishes, Claudopus saves what it found under Results.</Text>
+          <Text wrap="wrap">Claudopus saves your words, the topics you work on and every result as plain files under Memory. Stats adds up what your tasks cost and the time they saved.</Text>
         </Box>,
       )}
       {band(

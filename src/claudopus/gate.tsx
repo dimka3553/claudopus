@@ -27,18 +27,18 @@ let looseGates: Gate[] = []
 // The pieces of work allowed under "work", by card: taken out as the work ends (ended, in cards), so one that comes back asks again
 const workAllowed = new Set<string>()
 const GATE_DENIED = (gate?: Pick<Gate, 'kind'>) =>
-  named(`Refused by {name}: {name} pressed Deny on this ${gate?.kind === 'release' ? 'release, so nothing was released. Do not try to release it another way' : gate?.kind === 'file' ? 'change, so the file was not changed. Do not try to change it another way' : 'admin command, so it did not run. Do not try to run it another way'}. Carry on without it, or say what it is needed for and ask again.`)
+  named(`Refused by {name}: {name} pressed Deny on this ${gate?.kind === 'release' ? "release, so nothing was released. Don't try to release it another way" : gate?.kind === 'file' ? "change, so the file was not changed. Don't try to change it another way" : "admin command, so it didn't run. Don't try to run it another way"}. Continue without it, or say what it is needed for and ask again.`)
 const gateThing = (gate?: Pick<Gate, 'kind'>) => (gate?.kind === 'release' ? 'This release did not run' : gate?.kind === 'file' ? 'This change was not made' : 'This admin command did not run')
-const GATE_GONE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: the wait for {name} to allow it was cut short. Run it again if it is still needed.`)
-const GATE_LATE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {name} did not answer in the time a call can be held. Run it again when it is needed, and {name} is asked again.`)
-const GATE_BLIND = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {name} is asked first, on a card in the Claudopus panel, and no panel is drawn for this chat.`)
-const GATE_UNSEALED = () => `This admin command did not run: what was allowed could not be sealed in ${keptWhere()}. Run it again.`
+const GATE_GONE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: the wait for {name} to allow it was interrupted. Run it again if it is still needed.`)
+const GATE_LATE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {name} didn't answer in time. Run it again when it is needed, and Claudopus will ask {name} again.`)
+const GATE_BLIND = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: Claudopus asks {name} first, on a card in its panel, and this chat has no panel open.`)
+const GATE_UNSEALED = () => `This admin command did not run: Claudopus could not secure what was allowed in ${keptWhere()}. Run it again.`
 const NO_GATE_TOUCH = () =>
-  named('The list of admin commands {name} always allows, what {name} allowed and the key that seals them are never read or written by work: only {name} adds to them, with a press on a card or in Config.')
+  named('Claude never reads or writes the list of admin commands {name} always allows, what {name} allowed, or the key that locks them. Only {name} adds to them, with a press on a card or in Config.')
 
 // What a gate asks, in words, by its kind
 const gateWhat = (gate: Gate) =>
-  gate.isUndone ? (gate.isOutside ? `Something other than Claudopus changed ${gate.host}, and it was put back` : `A command changed ${gate.host}, and it was put back`) : gate.kind === 'release' ? `Wants to release ${gate.host} to its main branch` : gate.kind === 'file' ? `Wants to change ${gate.host}` : `Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
+  gate.isUndone ? (gate.isOutside ? `Something other than Claudopus changed ${gate.host}, and the change was undone` : `A command changed ${gate.host}, and the change was undone`) : gate.kind === 'release' ? `Wants to release ${gate.host} to its main branch` : gate.kind === 'file' ? `Wants to change ${gate.host}` : `Wants to run an admin command on ${gate.host === 'here' ? thisMac() : gate.host}`
 
 // The admin commands a Bash command runs, as the shell splits it: bin/admin by any spelling of its path, after what runs a
 // command it is handed, and inside a shell's -c or an eval. What the shell would build (a variable, a substitution) is read as
@@ -235,7 +235,7 @@ const RELEASE_MOVED =
 const movesRunner = (command: string) =>
   [command, unquoted(command)].map(one => one.replace(/^\s*#.*$/gm, '')).some(one => (RUNNER_NAMED.test(one) && RUNNER_MOVED.test(one)) || (RELEASE_NAMED.test(one) && RELEASE_MOVED.test(one)))
 const NO_RUNNER_MOVED =
-  "This command did not run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the marks Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or takes CLAUDECODE away, is refused, and so is one that sets the PATH, BASH_ENV, shell options or git's settings for bin/release, sources a script before it, or starts it through a shell. Run the runner as it is."
+  "This command didn't run: Claudopus's runners (bin/admin, bin/secret, bin/release, bin/keyring) run with the home folder and the environment variables Claude Code gave the shell, so a command that sets HOME or XDG_DATA_HOME for one, or removes CLAUDECODE, is refused, and so is one that sets the PATH, BASH_ENV, shell options or git's settings for bin/release, sources a script before it, or starts it through a shell. Run the runner as it is."
 const touchesGate = (e: ToolCallInput) => {
   if (e.tool === 'Bash') {
     const command = String((e as { command?: unknown }).command ?? '')
@@ -269,7 +269,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   const text = `${gateWhat(gate)}: ${cut(oneLine(gate.command), 200)}`
   await (card ? askAloud($, card, text) : aloud($, 'ask', gate.kind === 'release' ? 'A release needs you' : gate.kind === 'file' ? 'A change to your settings needs you' : 'An admin command needs you', text, `gate-${gate.id}`)).catch(err => log($, `admin command not told: ${String(err)}`))
   $.ui.log(
-    `${card ? `The work "${titleOf(card)}"` : 'This chat'} ${gateWhat(gate).replace(/^Wants/, 'wants')}: ${cut(oneLine(gate.command), 300)} · Press ${gate.kind ? 'Allow once or Deny' : `${gate.isWork ? 'Allow for this work' : 'Allow once'}, Always allow this command or Deny`} ${card ? 'on its card' : 'at the top'} in the Claudopus panel (/claudopus opens it). Nothing typed in the chat allows it.`,
+    `${card ? `The task "${titleOf(card)}"` : 'This chat'} ${gateWhat(gate).replace(/^Wants/, 'wants')}: ${cut(oneLine(gate.command), 300)} · Press ${gate.kind ? 'Allow once or Deny' : `${gate.isWork ? 'Allow for this task' : 'Allow once'}, Always allow this command or Deny`} ${card ? 'on its card' : 'at the top'} in the Claudopus panel (/claudopus opens it). Nothing typed in the chat allows it.`,
   )
   let said: GateSaid | 'gone' | 'late' | undefined
   try {
@@ -289,7 +289,7 @@ const holdGate = async ($: EngineInterface, next: { signal?: AbortSignal; budget
   // A press the wait did not take (it stopped waiting as the press came) is said as such where its note was
   const pressed = gatePressed.get(gate.id)
   gatePressed.delete(gate.id)
-  if (pressed && pressed !== said) await gateNoteFailed($, gate, top, `It had stopped waiting when your press came · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}`)
+  if (pressed && pressed !== said) await gateNoteFailed($, gate, top, `It had stopped waiting when you pressed · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}`)
   await log($, `${gate.kind === 'release' ? 'release of' : gate.kind === 'file' ? 'change to' : 'admin command on'} ${gate.host}: ${said === 'once' ? 'allowed once' : said === 'always' ? 'always allowed' : said === 'deny' ? 'denied' : 'not answered'}`)
   return said
 }
@@ -338,13 +338,13 @@ const answerGate = ($: EngineInterface, gate: Gate, said: GateSaid, card = '') =
       head: gateHead(gate),
       said:
         said === 'deny'
-          ? `You denied it · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : 'it did not run'}, and the work was told`
+          ? `You denied it · ${gate.kind === 'release' ? 'nothing was released' : gate.kind === 'file' ? 'nothing was changed' : "it didn't run"}, and Claudopus told Claude`
           : gate.kind
             ? `You allowed it once · ${gate.kind === 'release' ? 'it releases now' : 'the change is made now'}`
             : said === 'always'
             ? 'You always allow this command · it runs now, and will not ask again'
             : gate.isWork
-              ? "You allowed this work's admin commands · it runs now"
+              ? "You allowed this task's admin commands · it runs now"
               : 'You allowed it once · it runs now',
       what: gateWhatLine(gate),
       isOn: said !== 'deny',
@@ -378,13 +378,13 @@ const gateAdmin = async ($: EngineInterface, e: ToolCallInput, next: { signal?: 
         await allowAlways($, call).catch(async err => {
           await log($, `admin command not always allowed: ${String(err)}`)
           const gate = { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }
-          if (doneNotes.some(one => one.id === `gate-${gate.id}`)) await noteDone($, { id: `gate-${gate.id}`, call: e.tool_use_id, ...(card ? { card: top } : {}), head: gateHead(gate), said: 'You allowed it once · it runs now, but it could not be kept as always allowed', what: gateWhatLine(gate), isOn: true })
+          if (doneNotes.some(one => one.id === `gate-${gate.id}`)) await noteDone($, { id: `gate-${gate.id}`, call: e.tool_use_id, ...(card ? { card: top } : {}), head: gateHead(gate), said: "You allowed it once · it runs now, but it couldn't be saved as always allowed", what: gateWhatLine(gate), isOn: true })
         })
       if (isWork) workAllowed.add(top)
     }
     const grant = await issueGrant($, `${e.tool_use_id}-${n}`, call)
     if (!grant) {
-      await gateNoteFailed($, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }, card ? top : '', 'It could not be sealed · it did not run, and the work was told')
+      await gateNoteFailed($, { id: `${e.tool_use_id}-${n}`, call: e.tool_use_id, host: call.host, command: call.command, at: 0 }, card ? top : '', "It could not be secured · it didn't run, and Claudopus told Claude")
       await dropGrants($, grants)
       return { deny: GATE_UNSEALED(), grants: [] }
     }
@@ -471,7 +471,7 @@ const gateRelease = async ($: EngineInterface, e: ToolCallInput, next: { signal?
     }
     const grant = await issueGrant($, id, { host: 'release', command: `${repo}\n${branch}` }, 'release-grant')
     if (!grant) {
-      await gateNoteFailed($, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: 0 }, card ? top : '', 'It could not be sealed · nothing was released, and the work was told')
+      await gateNoteFailed($, { id, call: e.tool_use_id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at: 0 }, card ? top : '', 'It could not be secured · nothing was released, and Claudopus told Claude')
       await dropGrants($, grants)
       return { deny: GATE_UNSEALED(), grants: [] }
     }
@@ -583,14 +583,14 @@ const knownWarn = ($: EngineInterface, why: string) => {
   void log($, `the kept copy of the settings and texts is not in force: ${why}`)
   if (isKnownWarned) return
   isKnownWarned = true
-  $.ui.log(`Claudopus could not use its key in ${keptWhere()} (${why}), so a change made to your settings, principles or rules outside Claudopus is not put back in this chat until it can. Unlock the keychain, or start a new chat once it is unlocked.`)
+  $.ui.log(`Claudopus could not use its key in ${keptWhere()} (${why}), so a change made to your settings, principles or rules outside Claudopus is not undone in this chat until it can. Unlock the keychain, or start a new chat once it is unlocked.`)
 }
 const knownWrite = async ($: EngineInterface, known: Map<string, string | null>, after: number) => {
   const files = Object.fromEntries(known)
   const count = after + 1
   const seal = (await sealed($, 'known-make', [knownMessage(files, count)]))?.[0]
   if (!seal) {
-    knownWarn($, 'it could not be sealed')
+    knownWarn($, 'it could not be secured')
     throw new Error(`the kept copy could not be sealed in ${keptWhere()}`)
   }
   const text = `${JSON.stringify({ files, count, seal }, null, 2)}\n`
@@ -760,7 +760,7 @@ const personSeen = async ($: EngineInterface, e: ToolCallInput, before?: string 
   await personWrote($, dir, name, text)
 }
 const PERSON_UNDONE = (names: string[]) =>
-  named(`This command changed ${names.join(', ')} in {name}'s memory folder, and the change was undone: {name}'s own settings and texts are changed by work only with the Edit or Write tool, which waits for {name}'s press on the work's card. Do not try to change them another way.`)
+  named(`This command changed ${names.join(', ')} in {name}'s memory folder, and the change was undone: {name}'s own settings and texts are changed only with the Edit or Write tool, which waits for {name}'s press on the task's card. Don't try to change them another way.`)
 // The change undone, on the card of the work whose command made it, else at the top: Allow makes it again. One card for each file:
 // a later change to it replaces the one shown
 const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, name: string, text: string | null) => {
@@ -782,7 +782,7 @@ const offerUndone = async ($: EngineInterface, by: ToolCallInput | undefined, na
   gatePressed.delete(id)
   await setGates($, card ? top : '', gates => [...gates.filter(one => one.id !== id), { id, kind: 'file', isUndone: true, ...(by ? {} : { isOutside: true }), host: what, command: cut(text ?? '(the file taken away)', 2000), at, ...(by?.agentId ? { from: by.agentId } : {}) }])
   await openList($).catch(() => undefined)
-  $.ui.log(`${card ? `A command of the work "${titleOf(card)}" changed` : by ? 'A command changed' : 'Something outside Claudopus changed'} ${what}, and it was put back · Press Allow once ${card ? 'on its card' : 'at the top'} in the Claudopus panel to make the change again, or Deny.`)
+  $.ui.log(`${card ? `A command of the task "${titleOf(card)}" changed` : by ? 'A command changed' : 'Something outside Claudopus changed'} ${what}, and the change was undone · Press Allow once ${card ? 'on its card' : 'at the top'} in the Claudopus panel to make the change again, or Deny.`)
 }
 const undoneOffers = new Map<string, { name: string; text: string | null; top: string }>()
 const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
@@ -801,7 +801,7 @@ const answerUndone = async ($: EngineInterface, gate: Gate, said: GateSaid) => {
 // that holds the call allows it
 // Drawn as Claude Code draws its own permission asks: an outlined box with the kind of ask at its top, never a filled card with an
 // edge as work's cards are, so an ask is not taken for one more piece of work
-const gateKind = (gate: Gate) => (gate.isUndone ? 'Put back' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
+const gateKind = (gate: Gate) => (gate.isUndone ? 'Undone' : gate.kind === 'release' ? 'Release' : gate.kind === 'file' ? 'Change to your files' : 'Admin command')
 const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewhere: boolean, card = '') => (
   <ui.Box key={key} flexDirection="column" gap={1} borderStyle="round" borderColor={NEEDS} paddingX={1} flexShrink={0}>
     <ui.Text wrap="truncate-end" dimColor>{`${gateKind(gate)} · ${gateHeld.has(gate.id) && !isElsewhere ? (gate.isUndone ? 'yours to decide' : 'waits for your press') : isElsewhere ? 'asked in another chat' : 'no longer waits'}`}</ui.Text>
@@ -820,18 +820,18 @@ const gateRow = ($: EngineInterface, ui: Ui, gate: Gate, key: string, isElsewher
     )}
     <ui.Text wrap="wrap">
       {gate.kind === 'release'
-        ? 'Allow: this branch is merged into main, checked and pushed, with its version and tag. Deny: nothing is released, and the work is told.'
+        ? 'Allow: this branch is merged into main, checked and pushed, with its version and tag. Deny: nothing is released, and Claudopus tells Claude.'
         : gate.isUndone && gate.isOutside
-          ? 'It changed while no command of work was running: by you in an editor, or by a program a command left running. Work changes this file only with Edit or Write, which ask you first, so the change was undone. Allow: the change is made again, as shown (if you made it yourself, allow it). Deny: the file stays as it was. Either way what it held is kept beside it as a .put-back copy.'
+          ? 'It changed while no command of a task was running: by you in an editor, or by a program a command left running. Claude changes this file only with Edit or Write, which ask you first, so the change was undone. Allow: the change is made again, as shown (if you made it yourself, allow it). Deny: the file stays as it was. Either way what it held is saved beside it as a .put-back copy.'
           : gate.isUndone
-          ? 'Work changes this file only with Edit or Write, which ask you first, so what a command wrote to it was undone. Allow: the change is made again, as it was written (if you made it yourself, allow it). Deny: the file stays as it was. Either way what it held is kept beside it as a .put-back copy.'
+          ? 'Claude changes this file only with Edit or Write, which ask you first, so what a command wrote to it was undone. Allow: the change is made again, as it was written (if you made it yourself, allow it). Deny: the file stays as it was. Either way what it held is saved beside it as a .put-back copy.'
           : gate.kind === 'file'
-          ? 'Allow: the change is made to this file of yours. Deny: the file stays as it is, and the work is told.'
-          : `Allow: it runs with admin rights${gate.isWork ? ', and this work runs its next admin commands without asking' : ''}. Deny: it does not run, and the work is told.`}
+          ? 'Allow: the change is made to this file of yours. Deny: the file stays as it is, and Claudopus tells Claude.'
+          : `Allow: it runs with admin rights${gate.isWork ? ', and this task runs its next admin commands without asking' : ''}. Deny: it doesn't run, and Claudopus tells Claude.`}
     </ui.Text>
     {gateHeld.has(gate.id) && !isElsewhere ? (
       <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-        <ui.Button key={`${key}-once-${loadMark}`} label={gate.isWork ? 'Allow for this work' : 'Allow once'} onPress={() => answerGate($, gate, 'once', card)} />
+        <ui.Button key={`${key}-once-${loadMark}`} label={gate.isWork ? 'Allow for this task' : 'Allow once'} onPress={() => answerGate($, gate, 'once', card)} />
         {gate.kind ? null : <ui.Button key={`${key}-always-${loadMark}`} label="Always allow this command" onPress={() => answerGate($, gate, 'always', card)} />}
         <ui.Button key={`${key}-deny-${loadMark}`} label="Deny" onPress={() => answerGate($, gate, 'deny', card)} />
       </ui.Box>
