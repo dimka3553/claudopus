@@ -1735,11 +1735,11 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   // still percent between two looks says nothing of quiet (16 Nov: "nothing printed for 5 seconds, 10 seconds")
   output += '\r 52 1024M   52  532M    0     0  10.2M      0  0:01:40  0:00:52  0:00:48 10.5M'
   wroteAt = now + 1_000
-  // (a second at a time, as the panel's every-second look runs once for each advance of the clock)
-  for (let n = 0; n < 8; n++) await advance(1_000)
-  expect(await until(async () => ((await texts()).includes('52%') || undefined))).toBe(true)
+  // (in short steps, as the panel's every-second look runs once for each advance of the clock; the list is next followed at 20)
+  for (let n = 0; n < 6; n++) await advance(3_000)
+  expect(await texts()).toContain('52%')
   // and quiet for half a minute after, its percent stands with nothing said of the quiet
-  for (let n = 0; n < 30; n++) await advance(1_000)
+  for (let n = 0; n < 3; n++) await advance(10_000)
   const quieter = await texts()
   expect(quieter).toContain('52%')
   expect(quieter.some(text => /nothing printed/.test(text))).toBe(false)
