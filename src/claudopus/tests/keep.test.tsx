@@ -122,3 +122,16 @@ test('a turn ended by the lapsed sign-in of the app hands the chat to the keeper
   expect(files.has(`${KEEP_AT}.handover`)).toBe(true)
   expect(JSON.parse(files.get(`${KEEP_AT}.json`) ?? '{}')).toMatchObject({ ids: ['a1'] })
 })
+
+test('each chat beats for the watcher that brings Claudopus back, naming its process, the key its copy has in the settings and the settings file, and starts the watcher', async ($, on) => {
+  const { files, clock } = world(on)
+  // This copy is loaded from a marketplace that is a folder on this Mac, as Claudopus's own checkout: its key is that marketplace's
+  files.set(`${HOME}/.claude/plugins/known_marketplaces.json`, JSON.stringify({ other: { installLocation: '/elsewhere' }, mine: { installLocation: PLUGIN.replace(/\/mods\/claudopus$/, '') } }))
+  await $.session.start(start)
+  const beat = `${MEMORY}/keep/engine-id.beat`
+  expect(files.get(beat)).toBe(`4242\tclaudopus@mine\t${HOME}/.claude/settings.json\n`)
+  expect(files.get(`${MEMORY}/log.md`)).not.toContain('was not started')
+  files.set(beat, 'old')
+  await clock.advance(3_000)
+  expect(files.get(beat)).toContain('4242')
+})
