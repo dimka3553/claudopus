@@ -1,0 +1,162 @@
+"use strict";
+// The mod's own tools: update, recall, todo, waits, ask and note
+const toolHooks = (on) => {
+    on('tool.call', { tool: 'mcp__claudopus__update' }, async ($, e) => {
+        const input = e;
+        if (!input.name?.trim())
+            return { result: 'A topic needs a name.' };
+        const saved = await saveStream($, input.name, { repo: input.repo, state: input.state?.slice(0, 60), summary: input.summary });
+        // The subject a piece of work recorded names the subject of its report
+        if (e.agentId !== undefined)
+            await change($, e.agentId, one => ({ ...one, subject: saved.name }));
+        const path = `${dir}/streams/${slug(saved.name)}.md`;
+        if (input.brief?.trim())
+            await $.fs.write(`${dir}/streams/${slug(saved.name)}.md`, `${input.brief.trim()}\n`);
+        return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nNotes: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` };
+    });
+    on('tool.call', { tool: 'mcp__claudopus__recall' }, async ($, e) => {
+        const query = e.query?.trim() ?? '';
+        if (!query)
+            return { result: 'Nothing to search for.' };
+        const r = await $.process.run(['grep', '-rniF', '--include=*.md', '-e', query, dir]);
+        // A result the person put away is still found, marked, so it is answered from only when they name it
+        const archived = new Set((await loadReports($).catch(() => [])).filter(one => one.archived).map(one => one.id));
+        const lines = r.stdout
+            .split('\n')
+            .filter(Boolean)
+            .map(line => line.replace(`${dir}/`, ''))
+            .map(line => (archived.has(line.match(/^reports\/([^/]+)\//)?.[1] ?? '') ? `[archived] ${line}` : line).slice(0, 240));
+        if (!lines.length)
+            return { result: `Nothing in ${dir} mentions "${query}".` };
+        const more = lines.length > 40 ? `\n(${lines.length - 40} more lines; narrow the phrase)` : '';
+        return { result: `Files are under ${dir}.\n${lines.slice(0, 40).join('\n')}${more}` };
+    });
+    // The work lists what it sets out to do under its to-do, ticks it, rewords it or marks it dropped
+    on('tool.call', { tool: 'mcp__claudopus__todo' }, async ($, e) => {
+        const input = e;
+        const text = oneLine(input.item ?? '').slice(0, 200);
+        if (!text)
+            return { result: 'A to-do needs its words.' };
+        if (e.agentId === undefined)
+            return { result: "Only a background task has a to-do in the panel; the chat has none." };
+        const state = input.state === 'done' || input.state === 'dropped' || input.state === 'open' || input.state === 'doing' ? input.state : undefined;
+        const old = slug(input.was?.trim() ? input.was : text);
+        let items = [];
+        await change($, e.agentId, one => {
+            const isListed = one.items.some(item => slug(item.text) === old);
+            const next = isListed ? one.items.map(item => (slug(item.text) === old ? { text, state: state ?? item.state } : item)) : [...one.items, { text, state: state ?? 'open' }];
+            // One thing is being done at a time: what was being done before waits again
+            items = state === 'doing' ? next.map(item => (item.state === 'doing' && item.text !== text ? { ...item, state: 'open' } : item)) : next;
+            return { ...one, items };
+        });
+        return { result: items.map(item => `${item.state === 'done' ? '[x]' : item.state === 'dropped' ? '[dropped]' : item.state === 'doing' ? '[doing]' : '[ ]'} ${item.text}`).join('\n') };
+    });
+    // The work says what in its report waits on the person: it knows best. Its next report takes them, one item each
+    on('tool.call', { tool: 'mcp__claudopus__waits' }, async ($, e) => {
+        const input = e;
+        if (e.agentId === undefined)
+            return { result: "Only a background task leaves a result; the chat has none." };
+        // A helper's answer is no report: the work it answers to records what waits
+        if ((await read($, todos)).find(one => one.id === e.agentId)?.parentId)
+            return { result: 'A helper records nothing here: say what waits in your answer, and the task that started you records it.' };
+        const items = [...new Set((Array.isArray(input.items) ? input.items : []).filter((one) => typeof one === 'string').map(one => cut(oneLine(one), 200)).filter(Boolean))].slice(0, 12);
+        await change($, e.agentId, one => ({ ...one, waits: items.length ? items : undefined }));
+        return { result: items.length ? `Recorded ${items.length} waiting on ${who()}; the panel shows them with your result.` : `Nothing waits on ${who()}.` };
+    });
+    // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
+    on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
+        const input = e;
+        if (e.agentId === undefined)
+            return { result: `Only a background task asks through the panel; the chat asks ${who()} in its reply.` };
+        // The question is one line; what it is about goes with it, whole, so the person never answers an ask whose reason has not reached
+        // them yet (a report reaches the chat only after the work ends). A question too long for one line is cut at a word on the card and
+        // kept whole at the top of its details
+        const asked = oneLine(typeof input.text === 'string' ? input.text : '');
+        const text = asked.length > ASK_TEXT ? cut(asked, ASK_TEXT) : asked;
+        const given1 = (typeof input.details === 'string' ? input.details : '').replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        const whole = [text === asked ? '' : asked, given1].filter(Boolean).join('\n\n');
+        const details = whole.length > ASK_DETAILS ? cut(whole, ASK_DETAILS) : whole;
+        // An ask that points at an explanation it does not carry is not shown: the person would see it before that explanation reaches them
+        if (!given1 && POINTS_AWAY.test(asked))
+            return { result: `Not shown: the question points at an explanation it doesn't carry, and ${who()} sees a question before your report, which reaches them only after you finish. Ask it again with that explanation, in full, in \`details\`.` };
+        const given0 = oneLine(typeof input.command === 'string' ? input.command : '').slice(0, 1000);
+        const hasFolder = typeof input.cwd === 'string' && input.cwd.startsWith('/');
+        // A command is given whole, runnable as it is wherever the person types it: it starts in its folder, and one that starts with a
+        // path relative to a folder never named is refused, since the person types it somewhere else
+        if (given0 && !hasFolder && /^(?:\.{1,2}\/|[\w-][\w.-]*\/)/.test(given0)) {
+            return { result: 'Not shown: the command starts with a path relative to a folder it does not name. Give `cwd`, the full path of the folder it runs in, or a full path, so it runs as it is wherever it is typed.' };
+        }
+        const command = given0 && hasFolder && !/^cd\s/.test(given0) ? `cd ${zshQuoted(String(input.cwd))} && ${given0}` : given0;
+        // Copy is for text pasted elsewhere: a sentence of instructions, or the ask's own words, gets none
+        const given = (typeof input.copy === 'string' ? input.copy : '').trim().slice(0, 4000);
+        const isProse = given.split(/\s+/).length > 8 && /[a-z]{3,} [a-z]{3,} [a-z]{3,}/i.test(given) && !/[\/=_$`@]|https?:/.test(given);
+        const copy = command || (isProse || flat(text).includes(flat(given)) ? '' : given);
+        const folder = typeof input.cwd === 'string' && input.cwd.startsWith('/') ? input.cwd : cwd;
+        const choices = [...new Set((Array.isArray(input.choices) ? input.choices : []).filter((one) => typeof one === 'string').map(one => oneLine(one).slice(0, 40)).filter(Boolean))].slice(0, 4);
+        // Pictures the ask is about, by full path; one that is not a picture file on this Mac is left out
+        const givenPics = [...new Set((Array.isArray(input.pictures) ? input.pictures : []).filter((one) => typeof one === 'string').map(one => one.trim()).filter(one => IMAGE.test(one)))].slice(0, 8);
+        const pictures = [];
+        for (const path of givenPics)
+            if (path.startsWith('/') && (await $.fs.stat(path).catch(() => undefined))?.kind === 'file')
+                pictures.push(path);
+        const at = await $.clock.now();
+        const before = await read($, todos);
+        const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask;
+        // The step a go-ahead finishes with, which Claudopus does on the first choice without starting the task again: only a task's own
+        // ask with buttons, in a folder that is there
+        const stepGiven = typeof input.last_step === 'string' ? oneLine(input.last_step).slice(0, 400) : '';
+        const stepFolder = typeof input.folder === 'string' ? input.folder.trim() : '';
+        const isStepped = Boolean(stepGiven && choices.length && stepFolder.startsWith('/') && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(stepFolder).catch(() => undefined))?.kind === 'dir');
+        await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(isStepped ? { lastStep: stepGiven, folder: stepFolder } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined }));
+        const list = await read($, todos);
+        const card = list.find(one => one.id === topOf(list, e.agentId ?? ''));
+        if (!text) {
+            if (card && was)
+                await askGone($, card);
+            return { result: 'Cleared: your card no longer has a question.' };
+        }
+        // The same ask said again is not told again
+        if (card && was?.text !== text)
+            await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`));
+        if (card)
+            await askInChat($, card);
+        // A command for the person opens in a terminal only on their press of the card's button: nothing opens by itself
+        const terminal = command ? (isRunFromAfar ? ` ${who(true)} is on another device: they type it in their own session to this Mac, and nothing opens a terminal here.` : isLinux ? ` Do not open a terminal for it: on Linux the card gives it with a Copy button, and ${who()} runs it in a terminal of their own.` : ` Do not open a terminal for it: the card's Open in Terminal button opens one with the command typed when ${who()} presses it.`) : '';
+        const shown = [command ? `the whole command${command === given0 ? '' : ` (${command})`}, a Copy button${isRunFromAfar ? '' : ' and an Open in Terminal button'}` : copy ? 'a Copy button for the text' : '', `the buttons ${(choices.length ? choices : DEFAULT_ANSWERS).join(', ')} and a box for a reply in their own words`].filter(Boolean).join(' and ');
+        const lost = givenPics.length - pictures.length;
+        // An ask that points at an explanation it does not carry: the person sees the ask before the work's report, so it is said back
+        const long = text === asked ? '' : ` The question was longer than one line: the card shows it cut at a word, and it is whole at the top of its details.`;
+        const tooLong = whole.length > ASK_DETAILS ? ` Its details were longer than ${ASK_DETAILS} letters and were cut at a word: put what matters first.` : '';
+        // A go-ahead asked with nothing to decide it on: said back, since ${who()} sees the ask before the report
+        const bare = choices.length && !details && !copy ? ` It carries no details: if deciding it needs more than this one line (what goes out, what it changes), ask it again with that in \`details\`; ${who()} sees the ask before your report.` : '';
+        const seen = pictures.length ? ` Its ${pictures.length === 1 ? 'picture is' : `${pictures.length} pictures are`} drawn small on the card, each opening large on a press, and the chat shows ${pictures.length === 1 ? 'it' : 'them'} in its next reply.` : '';
+        const missing = lost ? ` ${lost} of the pictures given ${lost === 1 ? 'is' : 'are'} no picture file found here, by full path, and ${lost === 1 ? 'was' : 'were'} left out.` : '';
+        return { result: `Shown on your card with ${details ? 'what it is about under it, ' : ''}${shown}, and shown in the chat as a notice from the panel${details ? ' with what it is about' : ''}, where ${who()} can answer it too.${seen}${missing}${long}${tooLong}${bare} It stays until ${who()} answers, even after you finish; an answer comes back to you as a message the moment it is given, and starts you again if you have finished. Never wait for it with a command or a timer: with nothing else to do, end your step. Ask again if the answer leaves something waiting. Clear it with empty text only once you have seen it done.${terminal}` };
+    });
+    // The work writes its own log, on purpose, in plain words: what it starts and what it decides
+    on('tool.call', { tool: 'mcp__claudopus__note' }, async ($, e) => {
+        const input = e;
+        const text = oneLine(input.text ?? '').slice(0, NOTE_CHARS);
+        if (!text)
+            return { result: 'A note needs its text.' };
+        if (e.agentId === undefined)
+            return { result: "Only a background task keeps a log in the panel; the chat has none." };
+        const kind = input.decision ? 'decision' : 'note';
+        await change($, e.agentId, (one, at) => ({ ...one, entries: [...one.entries, { at, kind, text }].slice(-ENTRIES_KEPT) }));
+        // A steer the work found to be a new task of its own goes back to the chat, which starts it. The work sends it itself, as a
+        // message to the chat: it arrives as the work's and wakes the chat, where a prompt the mod submitted would show as the person's own.
+        // A session cannot send to itself, so the mod cannot send it for the work
+        const task = oneLine(input.task ?? '').slice(0, 400);
+        if (!task)
+            return { result: 'Noted.' };
+        const list = await read($, todos);
+        const card = list.find(one => one.id === topOf(list, e.agentId ?? ''));
+        const words = [...(card?.entries ?? [])].reverse().find(entry => entry.kind === 'steer')?.text ?? '';
+        said = words || task;
+        const isHandingOn = Boolean(card?.isFork && (card.steps ?? 0) >= FORK_STEPS);
+        const handed = isHandingOn
+            ? `The copy of this chat that did "${card?.title || 'a small job'}" took its steps and hands on what is left. Start it as its own background task: ${task}`
+            : `A message from ${who()} to the task "${card?.title || 'in the background'}" is a new task of its own, not part of that task, and that task hasn't done it. Start it as its own background task: ${task}${words ? `\n${who(true)}'s words: “${words}”` : ''}`;
+        return { result: `Noted. Hand the task to the chat now: call SendMessage (load it with ToolSearch if needed) with to "main" and this message, exactly:\n${handed}\n${isHandingOn ? 'Then end with your report.' : "Then continue your own task; don't do that new one here."}` };
+    });
+};

@@ -847,7 +847,8 @@ export const shellsOf = (procs: Proc[], jobs: { id: string; cmd: string; at: num
 // by the process numbers handed out while it ran, from just before it to just after it, so nothing depends on how it was written
 // (on 15 Nov a launcher started with nohup but no `echo $!` drew 8 pages at once with 56 GB and no row on its card)
 // (`until`: the latest a process it left can have started; none while a command sent to the background may still start more)
-export type Span = { id: string; from: number; to: number; at: number; endAt: number; cmd: string; until?: number }
+// (`agent`: whose command it is, where known)
+export type Span = { id: string; from: number; to: number; at: number; endAt: number; cmd: string; until?: number; agent?: string }
 // A command still running: what it starts is not given to another that ended meanwhile
 export type OpenCall = { from: number; at: number }
 // Process numbers wrap round past this on macOS
@@ -877,20 +878,29 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
     for (let at: Proc | undefined = p, n = 0; at && n < 64; at = byPid.get(at.ppid), n++) if (known.has(at.pid)) return true
     return false
   }
-  // The command a number was handed out under; where two ran at once, the one whose words the process holds, else the newest
+  // The command a number was handed out under; where two ran at once, the one that names the process (its script or its
+  // arguments), else the one whose first number is nearest below
   const spanOf = (pid: number, p: Proc, isOwnSession: boolean) => {
     const fits = spans.filter(s => inSpan(pid, s) && isTimely(p, s))
     if (fits.length <= 1) return fits[0]
+    // The process's own words, past its program: a command that holds them started it. A session of its own also goes by the
+    // command's words it holds
+    const own = p.command.trim().split(/\s+/).slice(1).filter(word => word.length >= 6 && !word.startsWith('-') && /^[\w./:=,@%+-]+$/.test(word))
+    const worded = fits.filter(s => own.some(word => s.cmd.includes(word)) || (isOwnSession && fragmentsOf(s.cmd).some(word => p.command.includes(word.split('/').at(-1) ?? word))))
+    // Where no command names it and the commands are different tasks', it is no one's: a task's card shows nothing rather than a
+    // run another task started at the same moment (16 Nov a code search's row read another task's "0 of 2 heads · 2.0 GB memory")
+    if (!worded.length && new Set(fits.map(s => s.agent ?? '')).size > 1) return undefined
     // A group's leader is its command's own shell, handed its number just after that command's first one: the command whose first
-    // number is nearest below is it. A session of its own goes by the words it holds first
-    const worded = isOwnSession ? fits.filter(s => fragmentsOf(s.cmd).some(word => p.command.includes(word.split('/').at(-1) ?? word))) : []
+    // number is nearest below is it
     return (worded.length ? worded : fits).reduce((a, b) => (after(pid, b.from) < after(pid, a.from) ? b : a))
   }
   const out: Left[] = []
   for (const p of procs) {
     if (p.ppid !== '1' || !p.pgid || known.has(p.pid) || knownGroups.has(p.pgid) || isUnderKnown(p)) continue
     const isOwnSession = p.pgid === p.pid
-    if (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid)) continue
+    // (nor one ps can only name in brackets, as it does a process that is ending or not this person's: on 16 Nov the system's
+    // own indexer, "(mdworker_shared)", was taken for runs of four tasks)
+    if (/^\(/.test(p.command.trim()) || (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid))) continue
     const n = Number(isOwnSession ? p.pid : p.pgid)
     if (isOpenOnes(n, p)) continue
     const span = spanOf(n, p, isOwnSession)
