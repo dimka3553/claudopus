@@ -2,6 +2,10 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.149 · 16 November 2026
+- A box asking for a key has no field of its own in the panel any more, so the panel no longer jumps while you type in it: press Paste the key or Give a response instead, and its field opens in the row above the chat's prompt, as a reply in your own words does.
+- Give a response instead tells the task that asked something other than the key, such as where it already is on this Mac: your words go to that task, nothing is saved, and it carries on from them. Words that look like the key itself are held until you say whether to keep them as the key or send them anyway.
+
 ## 0.2.148 · 16 November 2026
 - When a task's own command ends (finished, failed or stopped), Claudopus wakes the task at once, even if it had ended its step, so it carries on right away instead of waiting.
 - A command that only waits for one of the task's own commands to end is refused, with one sentence saying the task will be woken when it ends; so is a `tail -f` that would follow a log forever.

@@ -342,6 +342,7 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
   if (replyTo) barLeft.set(replyTo, barDraft(replyTo))
   if (one) (carryDraft($, one, barLeft.get(one.id)), barLeft.delete(one.id))
   replyTo = one?.ask ? one.id : ''
+  if (one?.ask) boxOpen = undefined
   replyMark = one?.ask ? askMark(one.ask) : ''
   barBoxAt = 0
   presses += 1

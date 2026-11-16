@@ -41,6 +41,28 @@ printf '%s\n' "abcd1234" | "$k" set claudopus-secret TEST_KEY "Claudopus: TEST_K
 ok 'secret --list names a kept key' '[ "$("$here/secret" --list)" = TEST_KEY ]'
 ok 'secret runs a command with the key and hides it in what it prints' '[ "$("$here/secret" TEST_KEY here "echo got \$TEST_KEY")" = "got [hidden TEST_KEY]" ]'
 ok 'secret --forget removes it' '"$here/secret" TEST_KEY --forget >/dev/null && [ -z "$("$here/secret" --list)" ]'
+# A key asked in the panel and answered with a response instead: the panel leaves the words beside the request and removes it;
+# the runner prints them, keeps nothing and runs nothing, and ends 4
+asked=$tmp/asked
+mkdir -p "$asked"
+(
+  for _ in $(seq 50); do
+    req=$(ls "$asked"/*.json 2>/dev/null | head -1)
+    if [ -n "$req" ]; then
+      : >"${req%.json}.told"
+      printf 'The person answered in the Claudopus panel instead of giving NEW_KEY, in their own words: it is in the other repo\n' >"${req%.json}.reply"
+      rm -f "$req"
+      break
+    fi
+    sleep 0.2
+  done
+) &
+CLAUDOPUS_BOXES=$asked "$here/secret" NEW_KEY here 'echo ran' >"$tmp/out" 2>"$tmp/err"
+said=$?
+wait
+ok 'a response instead of a key ends 4 and runs nothing' '[ "$said" = 4 ] && [ ! -s "$tmp/out" ]'
+ok 'and its words reach the caller, with nothing kept' 'grep -q "in their own words: it is in the other repo" "$tmp/err" && grep -q "NEW_KEY was not given" "$tmp/err" && ! "$k" has claudopus-secret NEW_KEY'
+ok 'and leaves nothing beside the requests' '[ -z "$(ls -A "$asked")" ]'
 
 # bin/notify with no desktop: 3, and its status says so
 ok 'notify with no desktop ends 3' '"$here/notify" --title T --text X; [ $? = 3 ]'

@@ -1617,7 +1617,7 @@ const panelHooks = (on: On) => {
     // then leaves the top; a card goes back to its own place among the rest, which keep their order
     const notices = [
       // A box that comes while the person types a reply in the terminal leaves the keys with that reply
-      ...boxRows($, ui, e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk))),
+      ...boxRows($, ui, e.surface === 'terminal' && Boolean(keysAsk && hasDraft(keysAsk)), e.surface),
       ...looseGates.map(gate => ({ at: gate.at, node: gateRow($, ui, gate, `gate-${gate.id}`, false) })),
       ...waiting.map(p => ({ at: p.at, node: promptCard(p, `this-${p.id}`, answerHere(p)) })),
       ...otherChats.flatMap(c => {
