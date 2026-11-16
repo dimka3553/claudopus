@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.160 · 16 November 2026
+- A helper or task that finished while Claudopus was out of the chat is now ended on its card when Claudopus comes back: it is no longer drawn as working, warned about as stuck, or keeps its finished task's card open.
+
 ## 0.2.159 · 16 November 2026
 - Claudopus no longer makes macOS show "Keychain Not Found" when it runs in a home folder that has no keychain, such as a test's or a trial chat's own: it leaves the keychain alone there and says in the panel that it could not use its key.
 
