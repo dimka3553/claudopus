@@ -1430,6 +1430,10 @@ const sync = async ($: EngineInterface) => {
           ? // Work the mod never saw start: a copy of the chat was started for a message of the person's, anything else is some work's helper
             started(one.id, one.parentId ?? (one.type === 'fork' || ownCalls.has(one.description) ? '' : HELPER), one.description, '', now, one.type === 'fork')
           : undefined
+        : // Work that ended its step to let its helpers work, or for what it asked Claudopus to look for, is still at work: the engine
+          // lists it as completed, but a helper's result or the thing it waits for starts it again (16 Nov its card vanished meanwhile)
+          card.status === 'working' && one.status === 'completed' && !handedBack.has(card.id) && card.handedBackAt === undefined && (card.wakeWhen !== undefined || list.some(kid => kid.parentId === card.id && kid.status === 'working'))
+          ? undefined
         : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
           ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
           : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended

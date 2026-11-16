@@ -732,7 +732,7 @@ test('three single lookups in a row are told to go together or to a helper; two 
 
 test("work never waits for its helpers: it is told it may end its step, it is let go when it does, and a helper's result that the engine hands the chat is passed on to it, which starts it again; a report handed back while helpers run is still held", async ($, on) => {
   const agents: Record<string, string> = {}
-  const { stopped, resumed, appended } = world(on, { agents })
+  const { stopped, resumed, appended, clock } = world(on, { agents })
   on('classic.SubagentStop', () => ({}) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
@@ -761,6 +761,13 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   // Its step ended, the engine lists it as done; the second helper's result is passed on and starts it again, and the chat is told
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'Waiting for the drawing.', durationMs: 1, isAborted: false, turnId: 'h1', reason: 'answer', agentId: 'a1' } as never)
+  // and its card stays at work with its helper under it, though the engine lists it as completed (16 Nov it vanished meanwhile)
+  await clock.advance(25_000)
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
+  const texts = (await list.findAll({ type: 'Text' })).map(one => one.text)
+  await list.unmount()
+  expect(texts).toContain('Working on 1 thing')
+  expect(texts).toContain('Fix the nose')
   agents.a3 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' } as never)
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'h3', reason: 'answer', agentId: 'a3' } as never)
