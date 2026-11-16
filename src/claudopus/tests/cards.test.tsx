@@ -1089,10 +1089,15 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   wroteAt = now + 19_000
   await advance(20_000)
   expect(await until(async () => (await texts()).find(text => /^7 tries$/.test(text)))).toBeDefined()
-  // Silent past ten seconds it says so, plainly, and Stop on its row ends its process and tells the work it was stuck
-  wroteAt = now - 25_000
+  // Quiet for a minute or two it says nothing of it: tests, builds and installs go that quiet and are fine
+  wroteAt = now - 100_000
   await advance(20_000)
-  expect(await until(async () => (await texts()).find(text => /^7 tries · nothing printed for 4\ds$/.test(text)))).toBeDefined()
+  expect(await until(async () => (await texts()).find(text => /^7 tries$/.test(text)))).toBeDefined()
+  expect((await texts()).some(text => /nothing printed/.test(text))).toBe(false)
+  // Silent for three minutes it says so, plainly, and Stop on its row ends its process and tells the work it was stuck
+  wroteAt = now - 185_000
+  await advance(20_000)
+  expect(await until(async () => (await texts()).find(text => /^7 tries · nothing printed for 3m [1-3]0s$/.test(text)))).toBeDefined()
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
   const stop = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop' && String(b.key ?? '').startsWith('stop-list-job-'))
   expect(stop).toBeDefined()
@@ -1100,25 +1105,64 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   await list.unmount()
   expect(await until(async () => killed.includes('48213') || undefined)).toBe(true)
   isAlive = false
-  expect(await until(async () => appended.find(line => /^a1: .*stopped your command "Fetch the CT scans" from the panel\. Don't start it again unless/.test(line)))).toBeDefined()
+  // (quiet three minutes, it is told it looked stuck)
+  expect(await until(async () => appended.find(line => /^a1: .*stopped your command "Fetch the CT scans" from the panel because it looked stuck: it had printed nothing for 3m/.test(line)))).toBeDefined()
   await advance(5_000)
   // (its row goes; the card's own line says it was stopped until the work writes again)
   expect(await until(async () => ((await texts()).every(text => !/^Fetch the CT scans/.test(text) || text === 'Fetch the CT scans was stopped') || undefined))).toBe(true)
 })
 
-test('a run whose output cannot be found says so after a minute, so a blank row is never taken for one that moves', async ($, on) => {
+test('a percent moves up on its row within seconds of being printed, and a quiet of under three minutes says nothing (16 Nov: "nothing printed for 5 seconds, 10 seconds", while the percent sat still)', async ($, on) => {
+  const meter = (pct: number) => `  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n\r ${pct} 1024M   ${pct}  ${pct * 10}M    0     0  10.2M      0  0:01:40  0:00:45  0:00:55 10.5M`
+  let output = meter(45)
+  let now = 1_700_000_000_000
+  let wroteAt = now
+  const { clock } = world(on, { jobs: { output: () => output, wroteAt: () => wroteAt } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  // (in short steps, as the panel's every-second look runs once for each advance of the clock; the list is followed every 20)
+  const advance = async (ms: number) => {
+    for (let left = ms; left > 0; left -= 3_000) {
+      now += Math.min(3_000, left)
+      await clock.advance(Math.min(3_000, left))
+    }
+  }
+  const texts = async () => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
+    const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
+    await list.unmount()
+    return all
+  }
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fetch the scans', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fetch the scans', prompt: 'fetch the scans' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'a1', command: 'cd /w && nohup curl -L -o scans.zip https://example.com/scans.zip > fetch.log 2>&1 & echo $!', description: 'Fetch the CT scans' } as never)
+  await advance(21_000)
+  expect(await until(async () => ((await texts()).includes('45%') || undefined))).toBe(true)
+  // curl rewrites its meter: the row has the new percent before the list is next followed
+  output = meter(52)
+  wroteAt = now
+  await advance(15_000)
+  expect(await texts()).toContain('52%')
+  // quiet for half a minute after, its percent stands with nothing said of the quiet
+  await advance(30_000)
+  const quiet = await texts()
+  expect(quiet).toContain('52%')
+  expect(quiet.some(text => /nothing printed/.test(text))).toBe(false)
+})
+
+test('a run whose output cannot be found says so after three minutes, so a blank row is never taken for one that moves', async ($, on) => {
   const { clock } = world(on)
   on('session.cwd', () => ({ value: '/repo' }) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fetch the scans', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Fetch the scans', prompt: 'fetch the scans' } as never)
   await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'a1', command: 'cd /w && nohup curl -L -o scans.zip https://example.com/scans.zip > fetch.log 2>&1 & echo $!', description: 'Fetch the CT scans' } as never)
-  await clock.advance(70_000)
+  await clock.advance(190_000)
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   const shown = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
   // Its name, its kind already said in the work's own words
   expect(shown.some(text => /^Fetch the CT scans/.test(text))).toBe(true)
-  expect(shown.some(text => /^nothing printed for 1m [01]0s$/.test(text))).toBe(true)
+  expect(shown.some(text => /^nothing printed for 3m [01]0s$/.test(text))).toBe(true)
   await list.unmount()
 })
 
