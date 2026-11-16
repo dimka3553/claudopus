@@ -1731,18 +1731,6 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   expect(shown.some(text => /active|ago/.test(text))).toBe(false)
   // In a narrower panel its speed gives way first
   expect((await texts(100)).some(text => /^460 MB(\/| of )1 GB · $/.test(text))).toBe(true)
-  // Its percent moves up within seconds of curl rewriting it, not only as the list is followed every 20 seconds, and a
-  // still percent between two looks says nothing of quiet (16 Nov: "nothing printed for 5 seconds, 10 seconds")
-  output += '\r 52 1024M   52  532M    0     0  10.2M      0  0:01:40  0:00:52  0:00:48 10.5M'
-  wroteAt = now + 1_000
-  // (in short steps, as the panel's every-second look runs once for each advance of the clock; the list is next followed at 20)
-  for (let n = 0; n < 6; n++) await advance(3_000)
-  expect(await texts()).toContain('52%')
-  // and quiet for half a minute after, its percent stands with nothing said of the quiet
-  for (let n = 0; n < 3; n++) await advance(10_000)
-  const quieter = await texts()
-  expect(quieter).toContain('52%')
-  expect(quieter.some(text => /nothing printed/.test(text))).toBe(false)
   // The work's own line, as its scripts are told to print it
   output = 'loading\nprogress: 3/6 steps fitting\nframe 12 done\n'
   wroteAt = now
@@ -1783,10 +1771,49 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   await list.unmount()
   expect(await until(async () => killed.includes('48213') || undefined)).toBe(true)
   isAlive = false
-  expect(await until(async () => appended.find(line => /^a1: .*stopped your command "Fetch the CT scans" from the panel\. Don't start it again unless/.test(line)))).toBeDefined()
+  // (quiet three minutes, it is told it looked stuck)
+  expect(await until(async () => appended.find(line => /^a1: .*stopped your command "Fetch the CT scans" from the panel because it looked stuck: it had printed nothing for 3m/.test(line)))).toBeDefined()
   await advance(5_000)
   // (its row goes; the card's own line says it was stopped until the work writes again)
   expect(await until(async () => ((await texts()).every(text => !/^Fetch the CT scans/.test(text) || text === 'Fetch the CT scans was stopped') || undefined))).toBe(true)
+})
+
+test('a percent moves up on its row within seconds of being printed, and a quiet of under three minutes says nothing (16 Nov: "nothing printed for 5 seconds, 10 seconds", while the percent sat still)', async ($, on) => {
+  const meter = (pct: number) => `  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current\n\r ${pct} 1024M   ${pct}  ${pct * 10}M    0     0  10.2M      0  0:01:40  0:00:45  0:00:55 10.5M`
+  let output = meter(45)
+  let now = 1_700_000_000_000
+  let wroteAt = now
+  const { clock } = world(on, { jobs: { output: () => output, wroteAt: () => wroteAt } })
+  on('session.cwd', () => ({ value: '/repo' }) as never)
+  // (in short steps, as the panel's every-second look runs once for each advance of the clock; the list is followed every 20)
+  const advance = async (ms: number) => {
+    for (let left = ms; left > 0; left -= 3_000) {
+      now += Math.min(3_000, left)
+      await clock.advance(Math.min(3_000, left))
+    }
+  }
+  const texts = async () => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
+    const all = (await list.findAll({ type: 'Text' })).map(one => one.text)
+    await list.unmount()
+    return all
+  }
+  await $.session.start(start)
+  await $.prompt.submit({ text: 'fetch the scans', wait: false, origin: composer })
+  await $.agent.spawn({ ...spawn, description: 'Fetch the scans', prompt: 'fetch the scans' } as never)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'a1', command: 'cd /w && nohup curl -L -o scans.zip https://example.com/scans.zip > fetch.log 2>&1 & echo $!', description: 'Fetch the CT scans' } as never)
+  await advance(21_000)
+  expect(await until(async () => ((await texts()).includes('45%') || undefined))).toBe(true)
+  // curl rewrites its meter: the row has the new percent before the list is next followed
+  output = meter(52)
+  wroteAt = now
+  await advance(15_000)
+  expect(await texts()).toContain('52%')
+  // quiet for half a minute after, its percent stands with nothing said of the quiet
+  await advance(30_000)
+  const quiet = await texts()
+  expect(quiet).toContain('52%')
+  expect(quiet.some(text => /nothing printed/.test(text))).toBe(false)
 })
 
 test('a run whose output cannot be found says so after three minutes, so a blank row is never taken for one that moves', async ($, on) => {
