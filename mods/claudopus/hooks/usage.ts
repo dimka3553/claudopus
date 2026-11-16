@@ -14,7 +14,7 @@ export const MEMORY_WARN = 0.9
 // One look on a Mac: the engine's own process, every process with its parent, memory and processor time, the memory as Activity
 // Monitor counts it, the disks' and the network's running totals, and now and then top's own memory of each process
 export const usageMac = (isTop: boolean) =>
-  `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,pgid=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt; echo @@POWER@@; ioreg -rn AppleSmartBattery -w0 | grep -oE '"SystemLoad"=[0-9]+'; echo @@GPUP@@; ioreg -r -c AGXDeviceUserClient -l -w0 | grep -E '"AppUsage"|"IOUserClientCreator"'; echo @@NETP@@; nettop -n -P -L 1 -x -J bytes_in,bytes_out 2>/dev/null; echo @@RU@@; ${USAGE_RU}${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`
+  `echo "@@SELF@@ $PPID"; echo @@PS@@; ps -axo pid=,ppid=,rss=,time=,pgid=,comm=; echo @@VM@@; vm_stat; echo @@SYS@@; sysctl -n hw.memsize hw.ncpu; echo @@IO@@; iostat -Id -c 1; echo @@NET@@; netstat -ibn; echo @@GPU@@; ioreg -r -d 1 -w 0 -c IOAccelerator | grep -oE '"(Device Utilization %|In use system memory)"=[0-9]+'; echo @@BATT@@; pmset -g batt; echo @@POWER@@; ioreg -rn AppleSmartBattery -w0 | grep -oE '"(SystemLoad|SystemPowerIn|Voltage|InstantAmperage)" ?= ?[0-9]+'; echo @@GPUP@@; ioreg -r -c AGXDeviceUserClient -l -w0 | grep -E '"AppUsage"|"IOUserClientCreator"'; echo @@NETP@@; nettop -n -P -L 1 -x -J bytes_in,bytes_out 2>/dev/null; echo @@RU@@; ${USAGE_RU}${isTop ? '; echo @@TOP@@; top -l 1 -stats pid,mem' : ''}`
 // Each process's disk bytes read and written and the energy its processors used (nanojoules), as the Mac keeps them for Activity
 // Monitor: libproc's proc_pid_rusage, through the system's Python, and only where the developer tools are there, as without them
 // /usr/bin/python3 asks to install them. A process of another user gives nothing. Then the whole processors' and the graphics
@@ -241,16 +241,32 @@ export const rawOfMac = (text: string, at: number, footprint?: Record<string, nu
   const gpuNs = gpuTimesOf(s.GPUP ?? '')
   const netBy = netByOf(s.NETP ?? '')
   const ru = rusageOf(s.RU ?? '')
-  const load = Number(/"SystemLoad"=(\d+)/.exec(s.POWER ?? '')?.[1] ?? 0)
+  const load = loadOf(s.POWER ?? '')
   const own = {
     ...(Object.keys(gpuNs).length ? { gpuNs } : {}),
     ...(Object.keys(netBy.netIn).length ? { netInBy: netBy.netIn, netOutBy: netBy.netOut } : {}),
     ...(Object.keys(ru.disk).length ? { diskBy: ru.disk, energyBy: ru.energy } : {}),
     ...(ru.cpuNj !== undefined ? { cpuNj: ru.cpuNj, gpuNj: ru.gpuNj } : {}),
     energyAll: true as const,
-    ...(load > 0 ? { watts: load / 1000 } : {}),
+    ...(load !== undefined ? { watts: load / 1000 } : {}),
   }
   return { ...own, names: Object.fromEntries(procs.map(p => [p.pid, p.name])), memTop, ...(gpuMem ? { gpuMem: gpuMem.used } : {}), ...netSplitOf(s.NET ?? '', false), at, cpu: Object.fromEntries(procs.map(p => [p.pid, p.cpu])), claude: [...claude], claudeMem, memUsed, memTotal, ncpu: ncpu || 1, disk, net, ...(gpu !== undefined ? { gpu } : {}), ...(battery ? { battery } : {}) }
+}
+
+// The whole Mac's draw in milliwatts, from the battery's gauge. It writes signed numbers as unsigned 64-bit ones, so a value below
+// zero reads as nearly 2^64: each is read back as signed. On the charger its system load is the draw; on battery that figure is
+// off (a Mac drawing 69 W told 2 W, or below zero), so the draw is what leaves the battery, its voltage times its current. A draw
+// no Mac makes is no draw at all
+const loadOf = (text: string): number | undefined => {
+  // The load and power in are the gauge's telemetry ("Key"=n); the battery's own voltage and current its top-level lines ("Key" = n),
+  // as another part of the gauge tells a voltage of its own
+  const of = (key: string, sep = '=') => {
+    const digits = new RegExp(`"${key}"${sep}(\\d+)`).exec(text)?.[1]
+    return digits ? Number(BigInt.asIntN(64, BigInt(digits))) : undefined
+  }
+  const [load, powerIn, mv, ma] = [of('SystemLoad'), of('SystemPowerIn'), of('Voltage', ' = '), of('InstantAmperage', ' = ')]
+  const mw = powerIn ? load : mv !== undefined && ma !== undefined ? (mv * -ma) / 1000 : powerIn === undefined ? load : undefined
+  return mw !== undefined && mw > 0 && mw <= 2_000_000 ? mw : undefined
 }
 
 // A Linux look: processes from /proc/<pid>/stat (Claude's memory is each process's resident memory less what it shares)

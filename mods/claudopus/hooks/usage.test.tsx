@@ -239,12 +239,12 @@ test('programs are named as a person knows them: the app, Claude Code\'s engine 
 
 test("Claude's own part, where the Mac tells each process's: of the graphics processor, the disk, the network, and the power its processors draw", async () => {
   // The renderer (932, under the app) draws with the graphics processor; Safari too. A process of another user gives no rusage
-  const own = (o: { gpu932: number; gpu700: number; in932: number; out932: number; in700: number; disk1423: number; disk700: number; nj1423: number; load: number }) =>
+  const own = (o: { gpu932: number; gpu700: number; in932: number; out932: number; in700: number; disk1423: number; disk700: number; nj1423: number; load: number | string }) =>
     [
       '@@GPU@@',
       '"Device Utilization %"=50',
       '@@POWER@@',
-      `"SystemLoad"=${o.load}`,
+      typeof o.load === 'string' ? o.load : `"SystemLoad"=${o.load}`,
       '@@GPUP@@',
       `      "AppUsage" = ({"API"="Metal","accumulatedGPUTime"=${o.gpu932 - 100},"lastSubmittedTime"=1},{"API"="Metal","accumulatedGPUTime"=100})`,
       '      "IOUserClientCreator" = "pid 932, Claude Helper (Renderer)"',
@@ -274,6 +274,24 @@ test("Claude's own part, where the Mac tells each process's: of the graphics pro
   // 38 joules over five seconds is 7.6 W of the 98 W the Mac draws
   expect(near(f?.wattsClaude)).toBe(7.6)
   expect(near(f?.watts)).toBe(98.316)
+  // The gauge writes numbers below zero as unsigned 64-bit ones. On battery its system load is off (below zero, which once showed
+  // 18446744073709544 W, or 2 W of a 69 W draw), so the draw is the battery's voltage times its current; on the charger it is the
+  // system load; and a draw no Mac makes shows none
+  const u = (n: number) => (2n ** 64n + BigInt(n)).toString()
+  const battery = (load: string, mv: number, ma: string) => `"Voltage"=20000\n"SystemLoad"=${load}\n"SystemPowerIn"=0\n"Voltage" = ${mv}\n"InstantAmperage" = ${ma}`
+  const charger = (load: string) => `"SystemLoad"=${load}\n"SystemPowerIn"=95000\n"Voltage" = 12500\n"InstantAmperage" = 1200`
+  for (const [load, watts] of [
+    [battery(u(-7552), 12203, u(-5552)), 67.751056],
+    [battery('2095', 12156, u(-5709)), 69.398604],
+    [battery('2095', 12156, '1200'), undefined],
+    [charger('80000'), 80],
+    [charger(u(-3000)), undefined],
+    [charger('5000000'), undefined],
+    ['"SystemLoad"=0', undefined],
+  ] as [string, number | undefined][]) {
+    const odd = nextKept(first, `${macLook(look)}${own({ gpu932: 2e9, gpu700: 4e9, in932: 0, out932: 0, in700: 0, disk1423: 0, disk700: 0, nj1423: 0, load })}`, 5000, false)
+    expect([load, odd?.figures?.watts === undefined ? undefined : near(odd?.figures?.watts)]).toEqual([load, watts])
+  }
   // A Mac that tells none of it shows none
   const bare = nextKept(nextKept(undefined, macLook(look), 0, false), macLook(look), 5000, false)?.figures
   expect([bare?.gpuClaude, bare?.diskClaude, bare?.netInClaude, bare?.wattsClaude, bare?.watts]).toEqual([undefined, undefined, undefined, undefined, undefined])
