@@ -1006,6 +1006,43 @@ test("while the person types into a card's reply box the list's running times st
   await list.unmount()
 })
 
+test('a button the panel draws again with the same key and the same look keeps the number the engine gave it, though the panel was drawn anew around it, so a click on the drawing still on screen names a button the engine still holds', async ($, on) => {
+  world(on)
+  await $.session.start(start)
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
+  // Each drawn button's number, by its key: the number a click names, which the engine drops with the drawing it was made in
+  const numbers = async () => {
+    const found = new Map<string, number>()
+    const walk = (node: unknown) => {
+      if (Array.isArray(node)) return void node.forEach(walk)
+      if (!node || typeof node !== 'object') return
+      const one = node as { type?: string; props?: { key?: string }; press?: { handle?: number }; children?: unknown }
+      if (one.type === 'Button' && one.props?.key && one.press?.handle !== undefined) found.set(one.props.key, one.press.handle)
+      walk(one.children)
+    }
+    walk(await list.drawn())
+    return found
+  }
+  const first = await numbers()
+  const bar = [...first.keys()].filter(key => /^(stats|config|about|memory)-open-\d+$/.test(key))
+  expect(bar.length).toBe(4)
+  // A task starts: its card is drawn, so the whole panel is made anew, every button in it handed to the engine again
+  await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Fix the nose' }))).toBeDefined()
+  const second = await numbers()
+  expect([...second.keys()].some(key => /^open-a1-\d+$/.test(key))).toBe(true)
+  // The bar's buttons look as they did: each has the number it had, so a click on the drawing before still lands
+  expect(bar.map(key => [key, second.get(key)])).toEqual(bar.map(key => [key, first.get(key)]))
+  // and again as the task writes a line, its card's own buttons too
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'Looking at the nose.' } as never)
+  expect(await until(async () => list.find({ type: 'Text', text: 'Looking at the nose.' }))).toBeDefined()
+  const third = await numbers()
+  const kept = [...second.keys()].filter(key => third.has(key))
+  expect(kept.length).toBeGreaterThanOrEqual(bar.length + 1)
+  expect(kept.map(key => [key, third.get(key)])).toEqual(kept.map(key => [key, second.get(key)]))
+  await list.unmount()
+})
+
 test('with work running and nobody typing, the panel is drawn again at once for anything new, but for its running times alone only every ten seconds, so a button under the pointer keeps its hover and takes its click', async ($, on) => {
   const { clock } = world(on)
   await $.session.start(start)

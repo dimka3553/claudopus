@@ -1,0 +1,2 @@
+- A click on a button no longer goes missing because the panel was drawn again around it: a button that looks the same from one drawing to the next is kept as the same button, so a click on the drawing still on your screen reaches it. A button whose words have just changed can still miss a click in that instant
+- Every click that reaches its button is one line in Claudopus's log, so the clicks that land can be counted against the ones the app's log shows as dropped

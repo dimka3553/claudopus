@@ -125,11 +125,13 @@ test('the header names the version this chat loaded beside Claudopus, and a newe
 })
 
 test('About says what Claudopus is, its version and the app\'s, and links the site, the code and its licence', async ($, on) => {
-  const { tabs } = world(on)
+  const { files, tabs } = world(on)
   await $.session.start(start)
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 80 }, surface: 'desktop' } as never)
   await pressed(list, 'about-open')
   expect(await until(async () => tabs.find(tab => tab === 'about: About'))).toBe('about: About')
+  // A press that reached its button is one line in the log, naming the button, so landed presses can be counted against dropped ones
+  expect(await until(async () => (files.get(`${MEMORY}/log.md`) ?? '').match(/press landed: about-open-\d+ in claudopus \(desktop\)/)?.[0])).toBeDefined()
   const about = await $.ui.mount({ ...LIST, requestId: 'about', props: { ...LIST.props, title: 'About', bodyColumns: 60 }, surface: 'desktop' } as never)
   expect(await about.find({ type: 'Text', text: 'Version 0.1.0 · Claude Code 2.1.321' })).toBeDefined()
   expect(await about.find({ type: 'Text', text: 'What it does' })).toBeDefined()
