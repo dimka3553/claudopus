@@ -10,5 +10,8 @@
   "privacyPolicyUrl": "https://github.com/dimka3553/claudopus#privacy",
   "keywords": ["background-agents", "panel", "memory", "workflow", "mod"],
   "icon": "./.claude-plugin/icon.png",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "revived": { "type": "string", "title": "Brought back", "description": "Claudopus sets this itself to load again when Claude switches it off. Leave it as it is.", "required": false, "default": "" }
+  }
 }

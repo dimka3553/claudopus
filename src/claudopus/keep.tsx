@@ -167,3 +167,56 @@ const tellDevice = async ($: EngineInterface, text: string) => {
 // The line on a card of cut-off work: when, and whether it goes on again
 const cutLine = (one: Todo) =>
   one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; running again since ${hhmm(one.backAt)}.` : `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; it couldn't be restarted.`) : ''
+
+// ---- Back by itself after Claude switches it off ----
+
+// Claude's engine switches off an add-on that held its shared helper for five seconds, and that chat has no Claudopus until the
+// person types /reload-plugins. The engine loads an add-on again by itself when one of its own settings changes, so each chat's
+// load writes its beat, keep/<chat>.beat naming the chat's process, every BEAT_EVERY, and starts bin/revive, one on the Mac at a
+// time, which changes the setting "revived" (plugin.json's userConfig) when a beat goes quiet while its process still runs.
+// Changed, it loads Claudopus again in every chat, as an update does
+const BEAT_EVERY = 3000
+const beatFile = (id: string) => `${dir}/keep/${id}.beat`
+const settingsFile = async ($: EngineInterface) => `${(await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`}/settings.json`
+const beat = async ($: EngineInterface, id: string) => {
+  if (!dir || !/^\d+$/.test(enginePid)) return
+  await $.fs.write(beatFile(id), `${enginePid}\n`)
+  // The proof that it comes back, for someone who wants to see it: keep/<chat>.hold-test, written by hand, makes this chat's Claudopus
+  // hold Claude's helper long enough to be switched off, once
+  // hold Claude's helper long enough to be switched off, once, in the next drawing of its panel or the next message: the engine
+  // switches off only an add-on that holds the helper while one of its hooks is answering, not in a timer of its own (16 Nov trial)
+  if (!isHoldTestDue && (await $.fs.exists(`${dir}/keep/${id}.hold-test`))) {
+    await $.process.run(['rm', '-f', `${dir}/keep/${id}.hold-test`])
+    isHoldTestDue = true
+    $.ui.invalidate('ui.render')
+  }
+}
+let isHoldTestDue = false
+const holdTest = async ($: EngineInterface) => {
+  if (!isHoldTestDue) return
+  isHoldTestDue = false
+  await log($, "holding Claude's helper on purpose, as keep/<chat>.hold-test asked")
+  const end = Date.now() + 10_000
+  while (Date.now() < end) Math.sqrt(Date.now())
+}
+const startReviver = async ($: EngineInterface, id: string) => {
+  if (!dir || !SAFE_CHAT.test(id)) return
+  if (!enginePid) enginePid = await pidOfEngine($)
+  if (!/^\d+$/.test(enginePid)) return
+  // A load the setting brought back says so in the log, with how long its chat had gone without it
+  const back = (await readOr($, `${dir}/keep/${id}.revived`)).trim().split('\n').at(-1)?.split(' ') ?? []
+  const backAt = Number(back[0] ?? 0) * 1000
+  if (backAt && (await $.clock.now()) - backAt < 120_000) await log($, `back after Claude switched Claudopus off in this chat (its beat was quiet ${back[1] ?? '?'} s)`)
+  await beat($, id)
+  everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined))
+  // In a session of its own, so it outlives the chat's process; it leaves at once when one already runs
+  const script = `nohup /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' "$1" "$2" "$3" >/dev/null 2>&1 </dev/null &`
+  const r = await $.process.run(['/bin/sh', '-c', script, 'sh', `${$.plugin.root}/bin/revive`, dir, await settingsFile($)]).catch(err => ({ exitCode: -1, stderr: String(err) }))
+  if (r.exitCode !== 0) await log($, `the watcher that brings Claudopus back was not started: ${r.stderr.slice(0, 200)}`)
+}
+// A chat that ends leaves no beat behind
+const endBeat = async ($: EngineInterface, id: string) => {
+  if (dir && SAFE_CHAT.test(id)) await $.process.run(['rm', '-f', beatFile(id)]).catch(() => undefined)
+}
+const SAFE_CHAT = /^[A-Za-z0-9-]{1,80}$/
+const REVIVED_KEY = 'claudopus.revived'

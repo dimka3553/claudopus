@@ -184,6 +184,7 @@ const sync = async ($: EngineInterface) => {
   const isUnseen = live.some(
     one => (!known.has(one.id) || known.get(one.id) === HELPER) && !helpersChecked.has(one.id) && (one.status === 'running' || one.status === 'pending') && !one.parentId && one.type !== 'fork',
   )
+  if (isUnseen) during('read the chat for its tasks')
   const rows = isUnseen ? await $.session.messages().catch(() => []) : []
   const ownCalls = new Set(
     (Array.isArray(rows) ? rows : []).flatMap(row => (row.toolUses ?? []).filter(use => use.tool === 'Agent').map(use => String(use.input?.description ?? ''))).filter(Boolean),
@@ -397,6 +398,7 @@ const recoverEnded = async ($: EngineInterface) => {
     .slice(0, KEPT)
     .filter(({ one }) => !list.some(card => card.id === one && !isBare(card)) && !live.some(agent => agent.id === one && WORKING.includes(agent.status)))
   if (!fresh.length) return
+  during('read back ended work')
   const found: Todo[] = []
   for (const { one: agentId, meta } of fresh) {
     try {
@@ -419,6 +421,7 @@ const recoverEnded = async ($: EngineInterface) => {
       let items: Item[] = []
       const entries: Entry[] = []
       for (const row of text.split('\n')) {
+        await breathe($)
         const o = (() => {
           try {
             return JSON.parse(row) as { timestamp?: string; type?: string; message?: { model?: string; usage?: Record<string, number>; content?: unknown } }

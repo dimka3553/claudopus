@@ -139,10 +139,18 @@ const stopFlow = async ($: EngineInterface, id: string) => {
   if (r.deny) return (pressed.delete(`flow:${id}`), log($, `workflow ${id} not stopped: ${r.deny}`))
   await changeFlow($, id, (one, at) => ({ ...one, status: 'stopped', endedAt: at }))
 }
+const journalSigns = new Map<string, string>()
 const readJournal = async ($: EngineInterface, id: string) => {
   const f = (await read($, flows)).find(one => one.id === id)
   if (!f?.transcriptDir) return
-  const text = await readOr($, `${f.transcriptDir}/journal.jsonl`)
+  // Read again only once it has changed: it grows with the run, and was read whole every two seconds
+  const path = `${f.transcriptDir}/journal.jsonl`
+  const stat = await $.fs.stat(path).catch(() => undefined)
+  const sign = `${stat?.size ?? 0}:${stat?.mtimeMs ?? 0}`
+  if (stat && journalSigns.get(id) === sign) return
+  if (stat) journalSigns.set(id, sign)
+  during('read a workflow')
+  const text = await readOr($, path)
   if (!text) return
   const now = await $.clock.now()
   await changeFlow($, id, one => withJournal(one, journalOf(text), now))
@@ -157,6 +165,7 @@ const followFlows = async ($: EngineInterface) => {
   const running = (await read($, flows)).filter(f => f.status === 'working' && f.session === mine)
   for (const f of running) await readJournal($, f.id).catch(err => log($, `journal of ${f.id} not read: ${String(err)}`))
   if (running.length && flowLooks % END_LOOK === 0) {
+    during('read the chat for ended workflows')
     const rows = await $.session.messages().catch(() => [])
     for (const row of Array.isArray(rows) ? rows : []) if (row.role === 'user' && row.text.includes('<task-notification')) await flowEnded($, row.text)
   }
@@ -217,6 +226,7 @@ const pickedOf = (f: Flow) => f.agents.find(one => one.id === flowPicked.get(f.i
 const flowTalkOf = async ($: EngineInterface, f: Flow, agent: FlowAgent) => {
   const key = [agent.id, agent.status, agent.tokens ?? 0].join(':')
   if (flowTalks.get(agent.id)?.key !== key) {
+    during('read a workflow agent')
     const text = f.transcriptDir ? await readOr($, `${f.transcriptDir}/agent-${agent.id}.jsonl`) : ''
     flowTalks.set(agent.id, { key, lines: text ? talkOf(rowsOf(text)) : undefined })
   }

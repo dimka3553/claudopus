@@ -144,7 +144,8 @@ const chatCommandEnded = async ($: EngineInterface, text: string): Promise<strin
     const file = /<output-file>([^<]+)<\/output-file>/.exec(body)?.[1] ?? ''
     const status = /<status>([^<]+)<\/status>/.exec(body)?.[1] ?? ''
     const summary = /<summary>([^<]+)<\/summary>/.exec(body)?.[1] ?? ''
-    const raw = file ? (await readOr($, file)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n') : ''
+    // From the end of its output, which may be far over what the engine gives whole
+    const raw = file ? (await fileEnd($, file, 64_000)).replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n') : ''
     // with every kept key hidden, as in any tool's answer; withheld when that could not be checked
     if (raw) await knowKept($, true)
     const hidden = raw ? await hiddenJson($, JSON.stringify(raw)) : JSON.stringify('')
@@ -246,7 +247,9 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`)
   const timer = everyLoad($, STEP_LOOK, () => {
     void (async () => {
-      const text = await readOr($, logFile)
+      // Its end only: a release's whole log can be over the 4 MB the engine gives whole, and then its last line was never seen
+      during('look at a release')
+      const text = await fileEnd($, logFile, 64_000)
       const exit = /claudopus-exit (\d+)\s*$/.exec(text)?.[1]
       const isLate = (await $.clock.now()) - at > STEP_LONGEST
       if (exit === undefined && !isLate) return

@@ -1,0 +1,6 @@
+- Claudopus stays on: Claude's engine switches off an add-on that keeps its shared helper busy for five seconds, and Claudopus now notices when it falls behind and does less (gives the panel as it was, leaves out looks that can wait) until it has caught up
+- If Claude switches Claudopus off anyway, it comes back by itself within about half a minute, with its tools, kinds of task, rules and panel, with nothing to type: a small watcher sees the chat go quiet and changes Claudopus's own hidden setting, which makes Claude load it again
+- A pane left open across a reload draws again by itself instead of staying empty
+- A long hold is written in Claudopus's log with the steps that were under way, so a switch-off can be traced
+- A release's log and a command's output are read from their end, so one over 4 MB no longer goes unread (a release over that size was never seen to end)
+- The saved words and asks of a long chat are added to, never written again whole: once over 4 MB they would have been replaced by only the newest message

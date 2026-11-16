@@ -53,6 +53,7 @@ const panelHooks = (on: On) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
     if (paneId === LIST) ((listDrawing += 1), (listSurface = e.surface))
+    if (paneId === LIST) await holdTest($)
     try {
     // While the person types into a box the pane is drawn as it last was, whole, but for a change in its shape; not typing, as it last
     // was while only its running times moved, for CALM at most (heldDrawings)
@@ -67,8 +68,10 @@ const panelHooks = (on: On) => {
     const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
     const shown = paneId === LIST && isPressHeld(heldAt) ? lastShown.get(shownKey) : undefined
     if (shown) return ((listHeldAt = heldAt), (isPressMissed = true), shown as Awaited<ReturnType<typeof next>>)
-    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
+    // While the mod is behind (lookHold), the pane is given as it was, so the drawing adds nothing to what holds Claude's helper
+    if (held && held.shape === shape && (isTyping || (held.fresh === freshness && (isBehind() || (held.content === content && heldAt - held.at < CALM))))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
+    during(paneId === LIST ? 'draw the panel' : 'draw a Details tab')
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
     if (paneId === LIST) await read($, tick)
     const drawing = await (async () => {
