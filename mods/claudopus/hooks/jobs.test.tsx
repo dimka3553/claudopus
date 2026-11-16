@@ -432,6 +432,8 @@ test('what a command left running is told by its group and by when it started: o
   const run = '75360 1 75355 S 00:20 2097152 /u/.venvs/tex/bin/python -u runall.py --set open --workers 2 --only scan-sonicom-P0065,scan-sonicom-P0066'
   expect(leftoversOf(ps([run]), [paint, search]).map(l => l.span)).toEqual(['paint'])
   expect(leftoversOf(ps(['75361 1 75356 S 00:20 1000 sleep 600']), [paint, search]).length).toBe(0)
+  // A process ps names only in brackets (the system's indexer, ending) is no command's
+  expect(leftoversOf(ps(['5090 1 5090 Z 00:05 0 (mdworker_shared)']), [span]).length).toBe(0)
   // A call still open past the wrap holds back what it may have started
   expect(leftoversOf(ps(['20 1 20 S 00:05 1000 /u/bin/python daemon.py']), [{ ...span, from: 99_990, to: 40 }], new Set(), [{ from: 99_995, at: now - 8_000 }]).length).toBe(0)
   expect(leftName('/opt/homebrew/Cellar/python/Python.app/Contents/MacOS/Python fig4.py page 3')).toBe('Run python fig4.py page 3')

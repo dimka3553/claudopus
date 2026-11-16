@@ -801,7 +801,9 @@ export const leftoversOf = (procs: Proc[], spans: Span[], known: Set<string> = n
   for (const p of procs) {
     if (p.ppid !== '1' || !p.pgid || known.has(p.pid) || knownGroups.has(p.pgid) || isUnderKnown(p)) continue
     const isOwnSession = p.pgid === p.pid
-    if (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid)) continue
+    // (nor one ps can only name in brackets, as it does a process that is ending or not this person's: on 16 Nov the system's
+    // own indexer, "(mdworker_shared)", was taken for runs of four tasks)
+    if (/^\(/.test(p.command.trim()) || (isOwnSession ? SYSTEM_PROG.test(p.command) : pids.has(p.pgid))) continue
     const n = Number(isOwnSession ? p.pid : p.pgid)
     if (isOpenOnes(n, p)) continue
     const span = spanOf(n, p, isOwnSession)
