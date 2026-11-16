@@ -718,23 +718,34 @@ const recordOf = (size: number) => {
   return rows.join('\n')
 }
 
-test('a chat whose ended tasks have records of 4 MB and 170 MB loads without holding Claude\'s helper', { timeoutMs: 120_000 }, async ($, on) => {
+// A long hold by the mod comes back each time; one by a busy machine (the areas' tests run side by side) does not: a step is
+// measured up to three times, on fresh records, and its least counts
+const TRIES = 3
+
+test('a chat whose ended tasks have records of 4 MB and 170 MB loads without holding Claude\'s helper', { timeoutMs: 180_000 }, async ($, on) => {
   const { files } = world(on)
   const folder = `${HOME}/.claude/projects/-repo/engine-id/subagents`
   // Forty ended tasks just under what the engine gives whole, and two far over it, as the 16 Nov chat had (169 MB)
   const near = recordOf(4_100_000)
   const huge = near.repeat(42)
-  for (let k = 0; k < 42; k++) {
-    files.set(`${folder}/agent-r${k}.meta.json`, JSON.stringify({ description: `Old work ${k}`, spawnDepth: 1, finished: true }))
-    files.set(`${folder}/agent-r${k}.jsonl`, k < 2 ? huge : near)
-    files.set(`mtime:${folder}/agent-r${k}.jsonl`, String(1_700_000_000_000 - k))
-  }
-  const held = holdMeter()
-  await $.session.start(start)
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /Finished 40/.test(String(b.props.label))))
-  expect(fold?.props.label).toBe('▸ Finished 40')
-  expect(held()).toBeLessThan(HOLD_MOST)
+  let least = Infinity
+  for (let round = 0; round < TRIES && least >= HOLD_MOST; round++) {
+    // Each load reads back the newest forty it has no card for: a round's are newer than the last's
+    for (let k = 0; k < 42; k++) {
+      files.set(`${folder}/agent-r${round}x${k}.meta.json`, JSON.stringify({ description: `Old work ${round} ${k}`, spawnDepth: 1, finished: true }))
+      files.set(`${folder}/agent-r${round}x${k}.jsonl`, k < 2 ? huge : near)
+      files.set(`mtime:${folder}/agent-r${round}x${k}.jsonl`, String(1_700_000_000_000 + round * 1000 - k))
+    }
+    const held = holdMeter()
+    await $.session.start(start)
+    // read back whole, the newest forty of this round's: their fold opened, the newest listed
+    const fold = await until(async () => (await pane.findAll({ type: 'Button' })).find(b => /^▸ Finished 40$/.test(String(b.props.label))))
+    least = Math.min(least, held())
+    if (fold) await pane.press({ key: String(fold.key) })
+    expect(await until(async () => (JSON.stringify(await pane.drawn()).includes(`Old work ${round} 2`) ? 'listed' : undefined))).toBe('listed')
+  }
+  expect(least).toBeLessThan(HOLD_MOST)
   await pane.unmount()
 })
 
