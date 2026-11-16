@@ -86,6 +86,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   // and the kind of agent each spawn was asked to start as
   const types: (string | undefined)[] = []
   const registered: string[] = []
+  // and the tools each kind is given, by its name
+  const kindTools: Record<string, string[]> = {}
   const played: string[] = []
   const notified: string[] = []
   // What was handed to osascript
@@ -541,7 +543,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { model: options.startedOn?.[e.description ?? ''] ?? options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` } as never
   })
   // The kinds of agent the mod registers, by name
-  on('agent.register', (_, e) => (registered.push(String((e as { name?: string }).name)), { value: undefined }) as never)
+  on('agent.register', (_, e) => (registered.push(String((e as { name?: string }).name)), (kindTools[String((e as { name?: string }).name)] = (e as { tools?: string[] }).tools ?? []), { value: undefined }) as never)
   on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status, ...(options.parents?.[id] ? { parentId: options.parents[id] } : {}) })) as never }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('prompt.submit', (_, e) => {
@@ -570,7 +572,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered }
+  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
@@ -806,10 +808,12 @@ test('every start is held to a current model: an older id, a parent on an older 
 })
 
 test("the mod's own kinds start as the settings say: a reader on the legwork model or its parent's, a check never weaker than its parent and at least Opus or always Fable, a quick task on its model, and every kind with everything when chosen", async ($, on) => {
-  const { asked, types, files, registered } = world(on, { model: 'claude-opus-5-5' })
+  const { asked, types, files, registered, kindTools } = world(on, { model: 'claude-opus-5-5' })
   await $.session.start(start)
   // The kinds are the engine's own from the session's start
   expect(await until(async () => (registered.length >= 5 ? [...registered].sort() : undefined))).toEqual(['check', 'helper', 'quick', 'reader', 'task'])
+  // Each kind told to call wake_me rather than wait has it (16 Nov: a task had none, and had the chat start it again by hand)
+  expect(Object.keys(kindTools).filter(kind => kindTools[kind]?.includes('mcp__claudopus__wake_me')).sort()).toEqual(['helper', 'quick', 'task'])
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   const go = async (subagentType: string, e: Record<string, unknown> = {}) => {
     await $.agent.spawn({ ...spawn, subagentType, prompt: 'p', description: 'The nose', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', ...e } as never)
