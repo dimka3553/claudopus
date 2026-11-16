@@ -26,7 +26,7 @@ TRIES=${CLAUDOPUS_REVIVE_TRIES:-3}
 IDLE=${CLAUDOPUS_REVIVE_IDLE:-600}
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$dir/revive.log"; }
 now() { date +%s; }
-# (GNU stat first: on Linux `stat -f` reads the file system and prints words, not a time)
+# (GNU stat first: its -f reads the file system and succeeds, so the BSD form would give nonsense on Linux)
 mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 me="$0"
 
@@ -74,7 +74,7 @@ JS
 import json, os, re, sys, tempfile
 path, key, at = os.path.realpath(sys.argv[1]), sys.argv[2], sys.argv[3]
 with open(path) as f: text = f.read()
-# A number of more than 15 digits is left as it is here too, as Claude Code's own JavaScript would change it
+# As on a Mac: a number of more than 15 digits is left as it is
 if re.search(r'[-:\[,\s]\d{16,}|\d\.\d{16,}', text): sys.exit(1)
 d = json.loads(text)
 if key != 'claudopus@inline' and (d.get('enabledPlugins') or {}).get(key) is not True: print('off'); sys.exit(0)
