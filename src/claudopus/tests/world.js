@@ -5,7 +5,7 @@ const PLUGIN = new URL('../..', import.meta.url).pathname.replace(/\/$/, '');
 // Every test may take a minute, not the kit's 5 seconds: the areas' files run side by side, and on a busy machine or GitHub's runner
 // (about twice as slow as a Mac) the longest scenarios, 4 to 8 seconds alone, passed or failed by the machine's load, not by the mod.
 // SLOW is that limit, kept for the tests that name it
-const SLOW = { timeoutMs: 60_000 };
+const SLOW = { timeoutMs: 60000 };
 function test(name, options, body) {
     if (typeof options === 'function')
         kitTest(name, SLOW, options);
@@ -73,8 +73,6 @@ const world = (on, options = {}) => {
     // and the kind of agent each spawn was asked to start as
     const types = [];
     const registered = [];
-    // and the tools each kind is given, by its name
-    const kindTools = {};
     const played = [];
     const notified = [];
     // What was handed to osascript
@@ -98,7 +96,7 @@ const world = (on, options = {}) => {
     // What each Bash call that ran the admin runner found waiting for it: the grants, as bin/admin would read them
     const admins = [];
     mock.env(on, { HOME, ...options.env });
-    const clock = mock.clock(on, { now: 1_700_000_000_000 });
+    const clock = mock.clock(on, { now: 1700000000000 });
     // What the engine draws where the mod draws nothing
     on('ui.render', ($, e) => {
         const { Text } = $.ui.resolve(e);
@@ -174,7 +172,7 @@ const world = (on, options = {}) => {
     // A promise given as the chat is one the app is slow to give
     on('session.messages', async () => ({ value: (await (options.talk ?? [])) }));
     on('session.measure', (_, e) => ({ changed: e.changed }));
-    on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: options.tokens ?? 1000, window: 500_000 }, rateLimits: [] } }));
+    on('session.usage', () => ({ value: { startedAt: 0, context: { tokens: options.tokens ?? 1000, window: 500000 }, rateLimits: [] } }));
     on('model.complete', () => ({
         value: {
             isAnswered: true,
@@ -192,7 +190,7 @@ const world = (on, options = {}) => {
             answer: '',
             toolUses: [],
             stopReason: 'tool_use',
-            usage: { model: options.answered?.by ?? e.model, input_tokens: 5000, output_tokens: 10, cache_read_input_tokens: 290_000, cache_creation_input_tokens: 10_000 },
+            usage: { model: options.answered?.by ?? e.model, input_tokens: 5000, output_tokens: 10, cache_read_input_tokens: 290000, cache_creation_input_tokens: 10000 },
         };
     });
     on('ui.log', (_, e) => {
@@ -617,7 +615,7 @@ const world = (on, options = {}) => {
             // as the engine answers: a watch not kept for good ends at its time limit, at most 30 minutes
             const w = e;
             const forGood = w.persistent === undefined || w.persistent === true || w.persistent === 'true';
-            return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: forGood ? 0 : Math.min(w.timeout_ms ?? 300_000, 1_800_000), persistent: forGood } };
+            return { result: { taskId: `mon-${e.tool_use_id}`, timeoutMs: forGood ? 0 : Math.min(w.timeout_ms ?? 300000, 1800000), persistent: forGood } };
         }
         if (e.tool === 'Workflow')
             return { result: { status: 'async_launched', taskId: 'wt1', runId: 'wf_1', taskType: 'local_workflow', workflowName: 'rounds', transcriptDir: '/t/wf_1', scriptPath: '/t/wf_1.js' } };
@@ -633,7 +631,7 @@ const world = (on, options = {}) => {
         return { model: options.startedOn?.[e.description ?? ''] ?? options.model ?? 'm', agentId: resume?.agentId ?? `a${(spawned += 1)}` };
     });
     // The kinds of agent the mod registers, by name
-    on('agent.register', (_, e) => (registered.push(String(e.name)), (kindTools[String(e.name)] = e.tools ?? []), { value: undefined }));
+    on('agent.register', (_, e) => (registered.push(String(e.name)), { value: undefined }));
     on('agent.list', () => ({ value: Object.entries(options.agents ?? {}).map(([id, status]) => ({ id, description: 'Listed by the engine', type: options.kinds?.[id] ?? 'fork', status, ...(options.parents?.[id] ? { parentId: options.parents[id] } : {}) })) }));
     on('session.start', (_, e) => ({ cwd: e.cwd }));
     on('prompt.submit', (_, e) => {
@@ -663,7 +661,7 @@ const world = (on, options = {}) => {
         compacts.push(e.instructions);
         return { messages: e.messages };
     });
-    return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools };
+    return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered };
 };
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
 const fakeSeal = (key, message) => Array.from({ length: 8 }, (_, n) => [...`${n}${key}\n${message}`].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261 + n).toString(16).padStart(8, '0')).join('');
@@ -701,7 +699,7 @@ const keyed = async (pane, base) => (await pane.findAll({ type: 'Button' })).fin
 const pressed = async (pane, base) => pane.press({ key: (await keyed(pane, base))?.key ?? base });
 const spawn = { subagentType: 'general-purpose', fork: false, background: true, description: 'Fix the nose' };
 const until = async (look) => {
-    for (const end = Date.now() + 40_000;;) {
+    for (const end = Date.now() + 40000;;) {
         const got = await look();
         if (got)
             return got;
@@ -739,7 +737,7 @@ const gated = async ($, on, config = {}, options = {}) => {
 };
 // A prompt's Yes or No, by the start of its key: the prompt's id and the count of presses follow
 const button = async (pane, start) => (await pane.findAll({ type: 'Button' })).find(one => String(one.key ?? '').startsWith(start));
-const NOW = 1_700_000_000_000;
+const NOW = 1700000000000;
 // This chat's own work as its file shares it with the other chats
 const read$todos = async (files) => (JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}').cards?.find((one) => one.id === 'a1') ?? {});
 // Another chat's file as that chat writes it: one piece of work that asks for a go-ahead, and one that runs
@@ -750,8 +748,8 @@ const otherChat = (at, chat = 'chat-b', title = 'Billing page') => JSON.stringif
     host: '',
     at,
     cards: [
-        { id: 'b1', parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: 'Send the invoices', words: 'send them', items: [{ text: 'Draft the mail', state: 'done' }], entries: [{ at, kind: 'note', text: 'I drafted the mail.' }], answer: '', ask: { text: 'May I send 12 invoices?', choices: ['Send', 'Not now'], from: 'b1', at }, startedAt: at - 60_000, endedAt: 0, status: 'working' },
-        { id: 'b2', parentId: '', isFork: false, tokens: 0, title: 'Check the totals', words: 'check', items: [], entries: [{ at, kind: 'note', text: 'Adding up March.' }], answer: '', startedAt: at - 30_000, endedAt: 0, status: 'working' },
+        { id: 'b1', parentId: '', isFork: false, tokens: 0, model: 'claude-opus-5-5', title: 'Send the invoices', words: 'send them', items: [{ text: 'Draft the mail', state: 'done' }], entries: [{ at, kind: 'note', text: 'I drafted the mail.' }], answer: '', ask: { text: 'May I send 12 invoices?', choices: ['Send', 'Not now'], from: 'b1', at }, startedAt: at - 60000, endedAt: 0, status: 'working' },
+        { id: 'b2', parentId: '', isFork: false, tokens: 0, title: 'Check the totals', words: 'check', items: [], entries: [{ at, kind: 'note', text: 'Adding up March.' }], answer: '', startedAt: at - 30000, endedAt: 0, status: 'working' },
     ],
 });
 export {};

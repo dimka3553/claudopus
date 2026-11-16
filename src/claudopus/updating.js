@@ -14,7 +14,7 @@ let isUpdating = false;
 // chat that closed mid-step is moved aside by exactly one chat once it is old (by what it says, else by when it was written).
 // Taken, the act runs and only this chat's own lock is removed after it; held by another chat, nothing runs and 'busy' comes back
 const UPDATE_BUSY = 'busy';
-const LOCK_SKEW = 60_000;
+const LOCK_SKEW = 60000;
 const underUpdateLock = async ($, act) => {
     const lock = `${dir}/update.lock`;
     const token = `${await $.clock.now()} ${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
@@ -76,7 +76,7 @@ const engineOf = async ($) => {
 // this chat only, as the lines of what is new are shown from it and never from a file any program could write
 const lookedPath = () => `${dir}/update-seen.json`;
 let pageRead;
-const PAGE_AGAIN = 10 * 60_000;
+const PAGE_AGAIN = 10 * 60000;
 let pageAsked = 0;
 // One read of the page; a page with no fingerprint is no release a download can be checked against, and is read as none
 const readPage = async ($) => {
@@ -211,7 +211,7 @@ const knowSource = async ($, isAgain = false) => {
         return done({ src: { kind: 'none', why: 'its marketplace is not one Claudopus can check a download in' }, cannot: { what: 'This chat runs a copy of Claudopus installed another way', why: 'update it with /plugin in Claude Code' }, where: "Claude Code's installed copy" });
     }
     // Run from a folder of the code: the folder is what a release has to reach
-    const top = (await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20_000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim();
+    const top = (await io.run(['git', '-C', root, 'rev-parse', '--show-toplevel'], 20000).catch(() => ({ exitCode: 1, stdout: '', stderr: '' }))).stdout.trim();
     const ready = top ? await folderReady(io, top) : { ok: false, what: "Claudopus code that Update can't change", why: "it isn't Claudopus's released code" };
     const marketplace = folderMarketplace(known, root);
     const scopes = (() => {
@@ -234,7 +234,7 @@ const knowSource = async ($, isAgain = false) => {
 const stepsPath = () => `${dir}/update-steps.json`;
 const laterPath = () => `${dir}/update-later.json`;
 // Not now keeps a version quiet for this long
-const LATER_FOR = 24 * 3_600_000;
+const LATER_FOR = 24 * 3600000;
 const writeSteps = ($, steps) => $.fs.write(stepsPath(), JSON.stringify(steps));
 // What the last step in this chat said beyond its kind of failure, kept in this chat only
 const stepSaid = { version: '', detail: '', dirty: false };
@@ -279,7 +279,7 @@ const progressDrawn = { shown: '', phase: '', at: 0 };
 let isUpdatePress = false;
 // A press while only a look runs (the timed one, or Config's Check now) waits for the look to end, then acts: before, it did nothing
 const afterLook = ($, act) => void (async () => {
-    for (const end = (await $.clock.now()) + 30_000; isUpdating && !isStepping && (await $.clock.now()) < end;)
+    for (const end = (await $.clock.now()) + 30000; isUpdating && !isStepping && (await $.clock.now()) < end;)
         await new Promise(done => void $.clock.after(250, done));
     if (!isUpdating && !isStepping)
         act();
@@ -365,7 +365,7 @@ const installStep = async ($, version, commit) => {
     await writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at: now, from: loaded });
     // A long install keeps its step alive for the other chats
     let isOn = true;
-    const beat = () => $.clock.after(20_000, () => void (isOn && $.clock.now().then(at => writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at, from: loaded })).then(() => isOn && beat())));
+    const beat = () => $.clock.after(20000, () => void (isOn && $.clock.now().then(at => writeSteps($, { version, stage: 'installing', step: 'install', commit, tree: page.tree, at, from: loaded })).then(() => isOn && beat())));
     beat();
     const got = await install(lookIo($), src, page, commit, await engineOf($)).finally(() => (isOn = false));
     const at = await $.clock.now();
@@ -402,7 +402,7 @@ const isDownloadHeld = async ($, src, steps) => {
     const known = heldChecked.get(key);
     if (known !== undefined)
         return known;
-    const git = (args) => $.process.run(['env', 'GIT_TERMINAL_PROMPT=0', 'git', '-C', src.repo, ...args], { timeoutMs: 20_000 }).catch(() => ({ exitCode: 1, stdout: '' }));
+    const git = (args) => $.process.run(['env', 'GIT_TERMINAL_PROMPT=0', 'git', '-C', src.repo, ...args], { timeoutMs: 20000 }).catch(() => ({ exitCode: 1, stdout: '' }));
     const held = (await git(['rev-parse', '--verify', '-q', 'refs/claudopus/update^{commit}'])).stdout.trim();
     const tree = held === steps.commit ? (await git(['rev-parse', '--verify', '-q', `${steps.commit}:${src.sub}`])).stdout.trim() : '';
     const isHeld = tree === steps.tree;
@@ -470,7 +470,7 @@ const ONE_PRESS_FAILS = {
 };
 const noticeCard = async ($, ui, n, loaded) => {
     const now = await $.clock.now();
-    const busy = now - busyAt < 10_000 ? <ui.Text key="update-busy" dimColor wrap="wrap">Another chat is updating Claudopus. Try again in a moment.</ui.Text> : null;
+    const busy = now - busyAt < 10000 ? <ui.Text key="update-busy" dimColor wrap="wrap">Another chat is updating Claudopus. Try again in a moment.</ui.Text> : null;
     if (!n)
         return null;
     const known = await knowSource($);
@@ -605,7 +605,7 @@ const ranVersion = atom({ plugin: 'claudopus', key: 'ran' }, '', { shape: 'ran-1
 // the load has started whole (isReady), or UPDATED_READY after the load if its start never finishes: in a chat run over ssh the
 // start took 6 s, and drawings asked for meanwhile can be dropped as each new change is announced, so a moment begun then could be
 // over before one of its drawings arrived. Until then the header is as before, so the octopus's jump and the words keep time
-const UPDATED_READY = 15_000;
+const UPDATED_READY = 15000;
 let updatedMoment;
 const noteLoaded = async ($) => {
     updatedMoment = undefined;

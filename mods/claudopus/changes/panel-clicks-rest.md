@@ -1,0 +1,2 @@
+- An answer pressed on a card by mistake can be taken back while the card still says it: "Take back" puts the question back with its buttons, and the task is told not to act on that answer
+- The bar above the prompt holds still for clicks too: on the desktop it is drawn afresh at most about once a second, and not at all from the start of a click on one of its buttons until the click lands

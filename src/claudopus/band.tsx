@@ -64,8 +64,8 @@ let barFlipAt = 0
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
-  // The bar on the desktop is redrawn as often as the panel and has buttons too, so it is given again as it was while its drawings are
-  // slow (isFreshTooSoon) and from the start of a click on one of its buttons until the click lands (isPressHeld), as the panel is:
+  // The bar on the desktop is redrawn as often as the panel and has buttons too, so it is given again as it was while its drawings or
+  // the panel's are slow (isFreshTooSoon) and from the start of a click on one of its buttons until the click lands (isPressHeld), as the panel is:
   // a newer drawing retires the buttons on screen, and a click on one already gone runs nothing. Never while its reply box is typed
   // into or holds the cursor, which keeps a drawing of its own (barHeld)
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -76,7 +76,7 @@ const bandHooks = (on: On) => {
     const recent = lastShown.get(key) as Awaited<ReturnType<typeof next>> | undefined
     const isBoxHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
     if (recent && !isBoxHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
-    if (recent && !isBoxHeld && isFreshTooSoon($, key, at, 0)) return recent
+    if (recent && !isBoxHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
     freshBegins(key)
     const madeFrom = Date.now()
     let made: { at: number; ms: number; fresh: number } | undefined

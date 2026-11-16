@@ -100,7 +100,7 @@ test('finished work leaves a report for good: its pictures copied, listed under 
 });
 test('work started from a report keeps its own report linked to it, beside the older one on the same subject', async ($, on) => {
     const { files, clock, opened } = world(on);
-    const old = { id: '20261101-0900-revenue', title: 'Revenue', subject: 'Revenue', at: 1_600_000_000_000, chat: 'c', chatId: 'c', folder: '/repo', gist: 'Revenue was flat.', files: [], agent: '' };
+    const old = { id: '20261101-0900-revenue', title: 'Revenue', subject: 'Revenue', at: 1600000000000, chat: 'c', chatId: 'c', folder: '/repo', gist: 'Revenue was flat.', files: [], agent: '' };
     files.set(`${MEMORY}/reports/${old.id}/meta.json`, JSON.stringify(old));
     files.set(`${MEMORY}/reports/${old.id}/report.md`, 'Revenue was flat.\n');
     await $.session.start(start);
@@ -123,7 +123,7 @@ test('work started from a report keeps its own report linked to it, beside the o
     expect(files.get(`${MEMORY}/reports/${old.id}/report.md`)).toBe('Revenue was flat.\n');
     // The same work reporting again, and the report it started from, are one row: the newest
     await $.turn.complete({ agentId: 'a1', answer: `Revenue rose 6% once the refunds are counted.\n\n${'Refunds are in the table. '.repeat(30)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' });
-    await clock.advance(70_000);
+    await clock.advance(70000);
     await until(async () => ([...files.keys()].filter(path => path.endsWith('/meta.json')).length === 3 ? true : undefined));
     const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Reports', bodyColumns: 80 }, surface: 'desktop' });
     const rows = (await list.findAll({ type: 'Button' })).filter(one => /^report-\d{8}/.test(one.key ?? ''));
@@ -145,7 +145,7 @@ test('work started from a report keeps its own report linked to it, beside the o
 });
 test('a report opened when three are open closes the one opened longest ago', async ($, on) => {
     const { files, opened, closed } = world(on, { panes: ['claudopus', 'report-a', 'reports', 'report-b', 'report-c'] });
-    const r = { id: 'd', title: 'Fourth', subject: 'Fourth', at: 1_600_000_000_000, chat: 'c', chatId: 'c', folder: '/repo', gist: 'It was found.', files: [], agent: '' };
+    const r = { id: 'd', title: 'Fourth', subject: 'Fourth', at: 1600000000000, chat: 'c', chatId: 'c', folder: '/repo', gist: 'It was found.', files: [], agent: '' };
     files.set(`${MEMORY}/reports/d/meta.json`, JSON.stringify(r));
     files.set(`${MEMORY}/reports/d/report.md`, 'It was found.\n');
     await $.session.start(start);
@@ -158,9 +158,9 @@ test('an older report waits by its one question, a report that only ends with a 
     const { files } = world(on);
     const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [], agent: '' };
     const reps = [
-        { ...base, id: 'old', title: 'Old', at: 1_600_000_000_000, gist: 'Old one.', question: 'Ship the old one?' },
-        { ...base, id: 'two', title: 'Two', at: 1_600_000_100_000, gist: 'Two things.', waiting: [{ text: 'Delete the folder?', answer: 'No' }, { text: 'Make it public?' }] },
-        { ...base, id: 'ends', title: 'Ends', at: 1_600_000_200_000, gist: 'Ends asking.' },
+        { ...base, id: 'old', title: 'Old', at: 1600000000000, gist: 'Old one.', question: 'Ship the old one?' },
+        { ...base, id: 'two', title: 'Two', at: 1600000100000, gist: 'Two things.', waiting: [{ text: 'Delete the folder?', answer: 'No' }, { text: 'Make it public?' }] },
+        { ...base, id: 'ends', title: 'Ends', at: 1600000200000, gist: 'Ends asking.' },
     ];
     for (const r of reps) {
         files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify(r));
@@ -181,10 +181,10 @@ test('a result archived with one press leaves the list, its tab, the count and t
     const { files, closed } = world(on, { panes: ['claudopus', 'reports', 'report-b'] });
     const base = { subject: 'S', chat: 'c', chatId: 'c', folder: '/repo', files: [] };
     const reps = [
-        { ...base, id: 'a0', title: 'Revenue', at: 1_600_000_000_000, gist: 'Revenue was flat.', agent: 'w1' },
-        { ...base, id: 'a1', title: 'Revenue', at: 1_600_000_100_000, gist: 'Revenue rose.', agent: 'w1' },
-        { ...base, id: 'b', title: 'Bots', subject: 'Bots', at: 1_600_000_200_000, gist: 'A bot wave.', agent: '', waiting: [{ text: 'Block them?' }] },
-        { ...base, id: 'c', title: 'Kept', subject: 'Kept', at: 1_600_000_300_000, gist: 'Still here.', agent: '' },
+        { ...base, id: 'a0', title: 'Revenue', at: 1600000000000, gist: 'Revenue was flat.', agent: 'w1' },
+        { ...base, id: 'a1', title: 'Revenue', at: 1600000100000, gist: 'Revenue rose.', agent: 'w1' },
+        { ...base, id: 'b', title: 'Bots', subject: 'Bots', at: 1600000200000, gist: 'A bot wave.', agent: '', waiting: [{ text: 'Block them?' }] },
+        { ...base, id: 'c', title: 'Kept', subject: 'Kept', at: 1600000300000, gist: 'Still here.', agent: '' },
     ];
     for (const r of reps) {
         files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify(r));
@@ -199,7 +199,7 @@ test('a result archived with one press leaves the list, its tab, the count and t
     const tab = await $.ui.mount({ ...LIST, requestId: 'report-b', surface: 'desktop' });
     await pressed(tab, 'report-archive');
     await until(async () => closed.includes('report-b') || undefined);
-    expect(JSON.parse(files.get(`${MEMORY}/reports/b/meta.json`) ?? '{}').archived).toBe(1_700_000_000_000);
+    expect(JSON.parse(files.get(`${MEMORY}/reports/b/meta.json`) ?? '{}').archived).toBe(1700000000000);
     expect(files.get(`${MEMORY}/reports/b/report.md`)).toBe('A bot wave.\n');
     expect(await until(async () => list.find({ type: 'Text', text: /^2$/ }))).toBeDefined();
     expect((await keyed(pane, 'reports-open'))?.props.label).toBe('Results 2');
@@ -232,7 +232,7 @@ test('a result archived with one press leaves the list, its tab, the count and t
     expect(await old.find({ type: 'Text', text: /· archived$/ })).toBeDefined();
     // One that came after the list was opened, archived and brought back, is listed in its place
     await pressed(pane, 'reports-open');
-    const d = { ...base, id: 'd', title: 'Later', subject: 'Later', at: 1_600_000_400_000, gist: 'Came later.', agent: '' };
+    const d = { ...base, id: 'd', title: 'Later', subject: 'Later', at: 1600000400000, gist: 'Came later.', agent: '' };
     files.set(`${MEMORY}/reports/d/meta.json`, JSON.stringify(d));
     files.set(`${MEMORY}/reports/d/report.md`, 'Came later.\n');
     await pressed(old, 'report-archive');
@@ -246,7 +246,7 @@ test('a result archived with one press leaves the list, its tab, the count and t
 test('the results list is one line a row: what waits first, the five newest, the rest folded, rounds of one work as one row, archived and told as one', async ($, on) => {
     const { files } = world(on, { panes: ['claudopus', 'reports'] });
     const base = { chat: 'c', chatId: 'c', folder: '/repo', files: [], gist: 'A long line that no row shows.' };
-    const at = (n) => 1_700_000_000_000 - n * 60_000;
+    const at = (n) => 1700000000000 - n * 60000;
     const reps = [
         // A video in three rounds by three pieces of work, each started from the one before: the newest waits, the older waits are its to ask again
         { ...base, id: 'v1', title: 'Explainer video', subject: 'Claude workflow', at: at(60), agent: 'w1', waiting: [{ text: 'Keep the first cut?' }] },
@@ -330,8 +330,8 @@ test('every button of the results list and of a result takes a new key whenever 
         files.set(`${MEMORY}/reports/${r.id}/meta.json`, JSON.stringify({ ...base, gist: 'It was found.', ...r }));
         files.set(`${MEMORY}/reports/${r.id}/report.md`, 'It was found, and it is written here in full.\n');
     };
-    put({ id: 'bucket', title: 'FaceIQ bucket migration plan', at: 1_699_000_000_000, waiting: [{ text: 'Start step 0?' }] });
-    put({ id: 'header', title: 'Rethink the panel header', at: 1_699_000_100_000, waiting: [{ text: 'Reopen the M4 chat?' }] });
+    put({ id: 'bucket', title: 'FaceIQ bucket migration plan', at: 1699000000000, waiting: [{ text: 'Start step 0?' }] });
+    put({ id: 'header', title: 'Rethink the panel header', at: 1699000100000, waiting: [{ text: 'Reopen the M4 chat?' }] });
     await $.session.start(start);
     const list = await $.ui.mount({ ...LIST, requestId: 'reports', props: { ...LIST.props, title: 'Results', bodyColumns: 80 }, surface: 'desktop' });
     const keys = async () => (await list.findAll({ type: 'Button' })).map(one => String(one.key));
@@ -341,7 +341,7 @@ test('every button of the results list and of a result takes a new key whenever 
     await clock.advance(5000);
     expect(await keys()).toEqual(first);
     // A result arriving from another chat changes the drawing: no key stays, so the app takes every button afresh
-    put({ id: 'fresh', title: 'Something new', at: 1_700_000_000_000 });
+    put({ id: 'fresh', title: 'Something new', at: 1700000000000 });
     // (a search of the memory reads the results again, as the panel's own look does)
     await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't1', query: 'found' });
     expect(await until(async () => ((await list.findAll({ type: 'Button' })).some(one => /^report-fresh-\d+$/.test(String(one.key))) || undefined))).toBe(true);
@@ -356,7 +356,7 @@ test('every button of the results list and of a result takes a new key whenever 
     expect(await tab.find({ type: 'Text', text: /^Rethink the panel header$/ })).toBeDefined();
     const tabKeys = (await tab.findAll({ type: 'Button' })).map(one => String(one.key));
     // The result's own tab follows the same rule: answered on another Mac, it changes with no press here, and every key moves
-    put({ id: 'header', title: 'Rethink the panel header', at: 1_699_000_100_000, waiting: [{ text: 'Reopen the M4 chat?', answer: 'Not now' }] });
+    put({ id: 'header', title: 'Rethink the panel header', at: 1699000100000, waiting: [{ text: 'Reopen the M4 chat?', answer: 'Not now' }] });
     await $.tool.call({ tool: 'mcp__claudopus__recall', tool_use_id: 't2', query: 'found' });
     expect(await until(async () => ((await tab.findAll({ type: 'Button' })).some(one => one.props.label === 'Yes') ? undefined : true))).toBe(true);
     expect((await tab.findAll({ type: 'Button' })).map(one => String(one.key)).filter(key => tabKeys.includes(key))).toEqual([]);

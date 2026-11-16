@@ -20,27 +20,27 @@ test('work and its helpers that get nothing new back for 12 minutes are flagged 
     await bash('a1', 'git log', 'p1');
     await bash('h1', 'git status', 'b1');
     await bash('h2', 'git status', 'b2');
-    await clock.advance(11 * 60_000);
+    await clock.advance(11 * 60000);
     expect(await stuck()).toBeUndefined();
-    await clock.advance(2 * 60_000);
+    await clock.advance(2 * 60000);
     expect((await stuck())?.props.color).toBe('#E5A50A');
     expect((await stuck())?.text).toMatch(/^No progress for 1[23] min\.$/);
     expect(logged.filter(line => line.includes(`"One merger for all pushes" hasn't made progress`))).toHaveLength(1);
     // Looked at again, nothing more is said
-    await clock.advance(60_000);
+    await clock.advance(60000);
     expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(1);
     // Something new comes back: the flag goes at the next look
     void keep(bash('h1', 'hold release', 'b3'));
     const letRelease = await until(async () => held.get('release'));
     letRelease?.('released Thing 0.1.1');
     expect(await stuck()).toBeDefined();
-    await clock.advance(25_000);
+    await clock.advance(25000);
     expect(await stuck()).toBeUndefined();
     // A poll that prints what it printed before, a new count aside, is no news: twelve minutes on it is flagged again
     void keep(bash('h1', 'hold poll', 'b4'));
     const letPoll = await until(async () => held.get('poll'));
     letPoll?.('released Thing 0.1.7');
-    await clock.advance(13 * 60_000);
+    await clock.advance(13 * 60000);
     expect(await stuck()).toBeDefined();
     expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(2);
     expect(resumed.filter(line => line.includes('stopped partway through'))).toEqual([]);
@@ -56,14 +56,14 @@ test('stuck work the engine no longer runs had stopped partway through: the mod 
     await $.agent.spawn({ ...spawn, description: 'Render the lids', prompt: 'render', parentAgentId: 'a2' });
     for (const id of ['a1', 'a2', 'a3'])
         await $.tool.call({ tool: 'Bash', tool_use_id: `s-${id}`, agentId: id, command: 'git status' });
-    await clock.advance(13 * 60_000);
+    await clock.advance(13 * 60000);
     expect(resumed.filter(line => line.includes('stopped partway through'))).toHaveLength(1);
     expect(logged.filter(line => line.includes('"Fit the video" had stopped partway through') && line.includes('restarted it'))).toHaveLength(1);
     expect(logged.filter(line => line.includes(`"Fit the video" hasn't made progress`))).toEqual([]);
     expect(logged.filter(line => line.includes(`"Draw the lids" hasn't made progress`))).toHaveLength(1);
     // Stuck again, it is not started a second time: the chat is only told
     await $.tool.call({ tool: 'Bash', tool_use_id: 's-a1-again', agentId: 'a1', command: 'git status' });
-    await clock.advance(13 * 60_000);
+    await clock.advance(13 * 60000);
     expect(resumed.filter(line => line.includes('stopped partway through'))).toHaveLength(1);
     expect(resumed.every(line => !line.includes('stopped partway through') || line.startsWith('a1: From Claudopus, not'))).toBe(true);
     await settle();
@@ -83,13 +83,13 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
         return r;
     };
     // (a row from ten seconds on: it was two minutes, and commands ran with nothing shown)
-    await clock.advance(5_000);
+    await clock.advance(5000);
     expect(await rows()).toEqual([]);
-    await clock.advance(70_000);
+    await clock.advance(70000);
     expect(await rows()).toEqual(['Command · hold search']);
     const letSearch = await until(async () => held.get('search'));
     letSearch?.('found it');
-    await clock.advance(1_000);
+    await clock.advance(1000);
     expect(await rows()).toEqual([]);
     await settle();
 });
@@ -101,15 +101,15 @@ test('work sent a message after a long rest, and work only held by what it left 
     await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'draw the ears' });
     // Its first run, moving all along, takes longer than the stuck check waits; then it rests
     for (const part of ['left ear', 'right ear', 'lobes']) {
-        await clock.advance(5 * 60_000);
+        await clock.advance(5 * 60000);
         void keep($.tool.call({ tool: 'Bash', tool_use_id: `e-${part}`, agentId: 'a1', command: `hold ${part}` }));
         const letGo = await until(async () => held.get(part));
         letGo?.(`drew the ${part}`);
     }
     await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' });
-    await clock.advance(30 * 60_000);
+    await clock.advance(30 * 60000);
     await $.agent.spawn({ ...spawn, description: 'Draw the ears', prompt: 'bigger', resume: { agentId: 'a1' } });
-    await clock.advance(25_000);
+    await clock.advance(25000);
     const look = async () => {
         const pane = await $.ui.mount({ ...LIST, surface: 'desktop' });
         const r = await pane.find({ type: 'Text', text: /^No progress for / });
@@ -122,7 +122,7 @@ test('work sent a message after a long rest, and work only held by what it left 
     agents.a2 = 'waiting';
     await $.agent.spawn({ ...spawn, description: 'Watch the build', prompt: 'watch' });
     await $.turn.complete({ answer: `The build is watched. ${'Every check passes and it is pushed. '.repeat(15)}`, durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer', agentId: 'a2' });
-    await clock.advance(13 * 60_000);
+    await clock.advance(13 * 60000);
     expect(await look()).toBeUndefined();
     expect(logged.filter(line => line.includes("hasn't made progress"))).toEqual([]);
     await settle();
@@ -132,7 +132,7 @@ test('work asking the person something waits on them and is never flagged', SLOW
     await $.session.start(start);
     await $.agent.spawn({ ...spawn, description: 'Release it', prompt: 'release it' });
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Release it?', choices: ['Approve', 'Not now'] });
-    await clock.advance(30 * 60_000);
+    await clock.advance(30 * 60000);
     const pane = await $.ui.mount({ ...LIST, surface: 'desktop' });
     expect(await pane.find({ type: 'Text', text: /^No progress for / })).toBeUndefined();
     expect(logged.filter(line => line.includes("hasn't made progress"))).toHaveLength(0);

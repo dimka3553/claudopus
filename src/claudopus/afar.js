@@ -6,15 +6,15 @@
 let offChats = [];
 let stuckAt = '';
 let afarAt = -Infinity;
-const AFAR_EVERY = 30_000;
+const AFAR_EVERY = 30000;
 // Says whether what was found changed, so the panel is drawn again
 const lookAfar = async ($, now) => {
     if (now - afarAt < AFAR_EVERY)
         return false;
     afarAt = now;
     const failed = { exitCode: -1, stdout: '' };
-    const here = await $.process.run(['sh', '-c', OFF_LOOK], { timeoutMs: 10_000 }).catch(() => failed);
-    const app = await $.process.run(['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10_000 }).catch(() => failed);
+    const here = await $.process.run(['sh', '-c', OFF_LOOK], { timeoutMs: 10000 }).catch(() => failed);
+    const app = await $.process.run(['sh', '-c', APP_LOG_LOOK], { timeoutMs: 10000 }).catch(() => failed);
     const found = here.exitCode === 0 ? offOf(here.stdout).map(one => ({ ...one, host: '' })) : [];
     for (const mac of macs) {
         const f = JSON.parse((await readOr($, macPath(mac))) || '{}');
@@ -51,7 +51,7 @@ const afarPart = (ui) => {
 // ---- Another Mac's chats, told here: their asks, prompts and finishes as a notification on this Mac, where the person is, as that
 // Mac's own notifications show only on its own screen. Only for the Macs this one reaches (config.json `macs`); each once, whichever
 // chat here sees it first, and only when it is fresh, so a chat that starts tells nothing old ----
-const AFAR_FRESH = 3 * 60_000;
+const AFAR_FRESH = 3 * 60000;
 const toldDir = () => `${liveDir()}/${MACS}/told`;
 const tellOnce = async ($, key, tell) => {
     const path = `${toldDir()}/${key.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 150)}`;
@@ -63,7 +63,7 @@ let toldSwept = -Infinity;
 const tellAfar = async ($, list, now) => {
     if (!list.length)
         return;
-    if (now - toldSwept > 3_600_000) {
+    if (now - toldSwept > 3600000) {
         toldSwept = now;
         await $.process.run(['find', toldDir(), '-mindepth', '1', '-maxdepth', '1', '-mmin', '+120', '-exec', 'rmdir', '{}', '+']).catch(() => undefined);
     }

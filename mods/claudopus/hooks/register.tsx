@@ -5479,22 +5479,24 @@ const freshDue = new Set<string>()
 // moment the fresh one is made, since the engine drops the reply of a drawing a newer ask overtook
 const freshUnderWay = new Map<string, { fresh: number; isOvertaken: boolean }>()
 let pressedAt = 0
-// (slowest: the bar above the prompt passes 0, as it is drawn five times a second under load in 50-200 ms each, and a figure
-// that moves a second later shows nothing new: it is given again within the gap however quick its drawings are)
-const isFreshTooSoon = ($: EngineInterface, key: string, at: number, slowest = SLOW_DRAW) => {
+// (isLoaded: the bar above the prompt is drawn in 50-200 ms under the same load, often under SLOW_DRAW, so it is given again
+// whenever the panel's own drawings are slow (isPanelSlow))
+const isFreshTooSoon = ($: EngineInterface, key: string, at: number, isLoaded = false) => {
   const going = freshUnderWay.get(key)
   if (going && going.fresh === freshness) return (going.isOvertaken = true)
   const last = freshDrawn.get(key)
   // The mod's own calls for a drawing (an ask, a box, a press, a picture: freshness) come at once
   if (!last || pressedAt >= last.at || last.fresh !== freshness) return false
   // Only while drawings are slow, as under a load that drops them: a quick one reaches the app before the next is asked for
-  if (last.ms < slowest) return false
+  if (last.ms < SLOW_DRAW && !isLoaded) return false
   const gap = Math.max(FRESH_GAP, last.ms * 4)
   if (at - last.at >= gap) return false
   // (asked for without counting as a call of the mod's own, which would draw afresh at once and skip the gap)
   if (!freshDue.has(key)) (freshDue.add(key), $.clock.after(gap - (at - last.at) + 20, () => void (freshDue.delete(key), drawFresh($))))
   return true
 }
+// Whether the panel's last drawings made afresh, in the last ten seconds, were slow: the load that drops drawings is on
+const isPanelSlow = (at: number) => [...freshDrawn].some(([key, last]) => key.startsWith(`${LIST}|`) && last.ms >= SLOW_DRAW && at - last.at < 10_000)
 // Around each drawing made afresh: one asked for while it was made is made again the moment it is done
 const freshBegins = (key: string) => (freshUnderWay.set(key, { fresh: freshness, isOvertaken: false }), freshness)
 const freshEnds = ($: EngineInterface, key: string, made?: { at: number; ms: number; fresh: number }) => {
@@ -12162,8 +12164,8 @@ let barFlipAt = 0
 const BAND_TERM_MARK = 3
 const bandHooks = (on: On) => {
 
-  // The bar on the desktop is redrawn as often as the panel and has buttons too, so it is given again as it was while its drawings are
-  // slow (isFreshTooSoon) and from the start of a click on one of its buttons until the click lands (isPressHeld), as the panel is:
+  // The bar on the desktop is redrawn as often as the panel and has buttons too, so it is given again as it was while its drawings or
+  // the panel's are slow (isFreshTooSoon) and from the start of a click on one of its buttons until the click lands (isPressHeld), as the panel is:
   // a newer drawing retires the buttons on screen, and a click on one already gone runs nothing. Never while its reply box is typed
   // into or holds the cursor, which keeps a drawing of its own (barHeld)
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -12174,7 +12176,7 @@ const bandHooks = (on: On) => {
     const recent = lastShown.get(key) as Awaited<ReturnType<typeof next>> | undefined
     const isBoxHeld = isTyping || (barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
     if (recent && !isBoxHeld && isPressHeld(at)) return ((isPressMissed = true), recent)
-    if (recent && !isBoxHeld && isFreshTooSoon($, key, at, 0)) return recent
+    if (recent && !isBoxHeld && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent
     freshBegins(key)
     const madeFrom = Date.now()
     let made: { at: number; ms: number; fresh: number } | undefined

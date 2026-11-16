@@ -9,7 +9,7 @@ const tabHooks = (on) => {
         // In the terminal a tab the press opens or closes is opened or closed here, by this hook's handle (tabmoves.ts)
         // A press is the person's own move: a panel held while they type is let go before the press acts, so what it does shows
         if (e.plugin === 'claudopus')
-            ((pressFrom = 0), (pressedAt = await $.clock.now()), freeTimes($), (freshness += 1), await engage($));
+            ((pressFrom = 0), freeTimes($), (freshness += 1), await engage($));
         const isTerminal = e.plugin === 'claudopus' && e.surface === 'terminal';
         if (isTerminal)
             tabMoves.begin();
@@ -107,7 +107,7 @@ const tabHooks = (on) => {
 // nothing that changes, as Stats, About or a result, is never told. So each ask is noted, and a tab open but not asked for since it
 // opened, since this code loaded, or since it came in front, is drawn again after 2, 6, 15 and 40 seconds until it is asked for. A
 // redraw tells the app to ask every tab it shows, so it reaches one the engine has never drawn as well
-const TAB_CHECKS = [2_000, 6_000, 15_000, 40_000];
+const TAB_CHECKS = [2000, 6000, 15000, 40000];
 const tabAsked = new Map();
 const tabFails = new Map();
 let tabInFront = '';
@@ -147,13 +147,13 @@ const watchFront = async ($) => {
         return;
     tabInFront = front;
     if (front)
-        await watchTabs($, [front], 'it came in front', 2_000);
+        await watchTabs($, [front], 'it came in front', 2000);
 };
 // A tab whose drawing failed shows why, in place of nothing, and is asked for again in a few seconds: three times a minute at most
 const tabFailed = async ($, e, error) => {
     const id = e.requestId ?? '';
     const now = await $.clock.now();
-    const fails = [...(tabFails.get(id) ?? []).filter(at => now - at < 60_000), now];
+    const fails = [...(tabFails.get(id) ?? []).filter(at => now - at < 60000), now];
     tabFails.set(id, fails);
     const why = error?.kind === 'timeout' ? 'It took too long to draw.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.';
     await log($, `tab ${id} not drawn (${error?.kind ?? 'unknown'}): ${why}`);

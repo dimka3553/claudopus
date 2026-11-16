@@ -22,8 +22,8 @@ const FLOW_EVERY = 2000;
 const FLOWS_KEPT = 20;
 const END_LOOK = 5;
 // A run of another session whose file has not changed for this long has lost its session; one older than a day is not looked at again
-const FLOW_STALE = 30 * 60_000;
-const FLOW_OLD = 24 * 3600_000;
+const FLOW_STALE = 30 * 60000;
+const FLOW_OLD = 24 * 3600000;
 // The agent of each workflow's Details tab whose chat it shows, by the run
 const flowPicked = new Map();
 // Each workflow agent's chat as last read from its transcript, by the agent

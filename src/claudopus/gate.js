@@ -98,7 +98,7 @@ for m in "$@"; do
   printf '%s\\n%s' "$k" "$m" | /usr/bin/perl -MDigest::SHA=hmac_sha256_hex -e '$k = <STDIN>; chomp $k; local $/; $m = <STDIN>; print hmac_sha256_hex($m // "", $k), "\\n"' || exit 1
 done`;
 const sealed = async ($, mode, messages) => {
-    const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20_000 }).catch(() => undefined);
+    const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', mode, ...messages], { timeoutMs: 20000 }).catch(() => undefined);
     const lines = r?.exitCode === 0 ? r.stdout.split('\n').filter(Boolean) : undefined;
     return lines && lines.length === messages.length && lines.every(line => /^[0-9a-f]{64}$/.test(line)) ? lines : undefined;
 };
@@ -183,7 +183,7 @@ const forgetKeptPasswords = async ($) => {
     if (isKeptForgotten || !dir)
         return;
     isKeptForgotten = true;
-    await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30_000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`));
+    await $.process.run(['/bin/sh', '-c', FORGET_KEPT], { timeoutMs: 30000 }).catch(err => log($, `kept admin passwords not forgotten: ${String(err)}`));
     if ((await readConfig($, dir)).adminPassword !== undefined)
         await setConfig($, dir, 'adminPassword', undefined).catch(() => undefined);
 };
@@ -197,7 +197,7 @@ const issueGrant = async ($, id, call, word = 'grant') => {
     if (!seal)
         return '';
     // Grants a call sent to the background never took are cleared as the next one is made
-    await $.process.run(['/usr/bin/find', grantsDir(), '-type', 'f', '-mmin', '+10', '-delete'], { timeoutMs: 10_000 }).catch(() => undefined);
+    await $.process.run(['/usr/bin/find', grantsDir(), '-type', 'f', '-mmin', '+10', '-delete'], { timeoutMs: 10000 }).catch(() => undefined);
     await $.fs.write(`${grantsDir()}/${name}.json`, JSON.stringify({ id: name, host: call.host, command: call.command, at, seal }));
     return name;
 };
@@ -269,7 +269,7 @@ const holdGate = async ($, next, gate, top) => {
                 said = 'late';
             if (said)
                 break;
-            await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10_000 }).catch(() => undefined);
+            await $.process.run(['/bin/sleep', '1'], { timeoutMs: 10000 }).catch(() => undefined);
         }
     }
     finally {
@@ -449,7 +449,7 @@ const gateRelease = async ($, e, next) => {
     const card = list.find(one => one.id === top);
     const grants = [];
     for (const [n, call] of calls.entries()) {
-        const git = (args) => $.process.run(['git', '-C', call.folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '');
+        const git = (args) => $.process.run(['git', '-C', call.folder, ...args], { timeoutMs: 15000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '');
         const repo = await git(['rev-parse', '--show-toplevel']);
         const branch = call.branch || (await git(['rev-parse', '--abbrev-ref', 'HEAD']));
         // Not a repo, or no branch: the runner itself says what is wrong, and it releases nothing without a grant
@@ -584,7 +584,7 @@ const knownRead = async ($) => {
 };
 // Whether the kept copy's own key is there: 'no' only when the keychain answered that it is not, 'error' when it did not answer
 const knownKey = async ($) => {
-    const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', 'known-has'], { timeoutMs: 20_000 }).catch(() => undefined);
+    const r = await $.process.run(['/bin/sh', '-c', SEAL, 'sh', 'known-has'], { timeoutMs: 20000 }).catch(() => undefined);
     return r?.exitCode === 0 ? 'yes' : r?.exitCode === 3 ? 'no' : 'error';
 };
 // Said once in a chat, at the top of the panel: while the key cannot be made or read, a change made outside Claudopus is not caught
@@ -608,7 +608,7 @@ const knownWrite = async ($, known, after) => {
     // Written beside it and moved into place, so no chat ever reads half of it
     const aside = `${knownPath()}.${count}-${Math.random().toString(36).slice(2)}.new`;
     await $.fs.write(aside, text);
-    const moved = await $.process.run(['mv', '-f', aside, knownPath()], { timeoutMs: 10_000 }).catch(() => undefined);
+    const moved = await $.process.run(['mv', '-f', aside, knownPath()], { timeoutMs: 10000 }).catch(() => undefined);
     if (moved?.exitCode !== 0)
         await $.fs.write(knownPath(), text);
     if (knownSeen)
@@ -641,7 +641,7 @@ const personPut = async ($, name, text, is) => {
         await $.fs.write(`${dir}/${name}.${at}${Math.random().toString(36).slice(2, 6)}.put-back`, is).catch(() => undefined);
     }
     // Taken away first, so a link put in its place is replaced, never written through
-    await $.process.run(['rm', '-f', `${dir}/${name}`], { timeoutMs: 10_000 }).catch(() => undefined);
+    await $.process.run(['rm', '-f', `${dir}/${name}`], { timeoutMs: 10000 }).catch(() => undefined);
     if (text !== null)
         await $.fs.write(`${dir}/${name}`, text);
 };

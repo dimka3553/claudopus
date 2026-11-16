@@ -90,7 +90,7 @@ const chatHooks = (on) => {
         // another Mac over ssh): the app keeps each button it drew by its key, with the handle of the code now gone, so every press
         // reached nothing. Keys no load before used make it take each button afresh: the moment of the load, with room for a thousand presses
         if ((await $.ui.panes().catch(() => [])).length)
-            (loadMark = presses = 1 + ((await $.clock.now()) % 1_000_000_000) * 1000), (freshness += 1);
+            (loadMark = presses = 1 + ((await $.clock.now()) % 1000000000) * 1000), (freshness += 1);
         await loadSettings($);
         await clearGates($).catch(err => log($, `admin holds not cleared: ${String(err)}`));
         // An empty tab a press left before this load closes, now and once the surface has had a moment to place the panes
@@ -179,22 +179,6 @@ const chatHooks = (on) => {
             isDeferred: false,
         });
         await $.tool.register({
-            name: 'wake_me',
-            description: named('For a file, a page or a time that nothing of yours makes (a file another program writes, a page that comes up, a moment to look again): Claudopus looks for it and starts you again the moment it is there, so you end your step instead of waiting with a command. Your own commands, in the background or detached, and your helpers wake you by themselves: never use this for them. Name a file, a line in it, a page, or only minutes. A new call replaces the last one.'),
-            inputSchema: {
-                type: 'object',
-                properties: {
-                    what: { type: 'string', description: 'What you wait for, in a few plain words read at a glance on your card' },
-                    file: { type: 'string', description: 'The full path of a file to appear (with `text`, a file to hold that text)' },
-                    text: { type: 'string', description: 'A line of text to appear in `file`' },
-                    url: { type: 'string', description: 'A page to answer without an error' },
-                    minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (60 when left out, at most 360)' },
-                },
-                required: ['what'],
-            },
-            isDeferred: false,
-        });
-        await $.tool.register({
             name: 'waits',
             description: named("For background tasks, before you finish: records what in your report waits on {name}, each as one short line {name} can answer yes or no. The panel shows each with Yes / No / Not now. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. It replaces what was recorded before; do not call it when nothing waits."),
             inputSchema: {
@@ -275,7 +259,7 @@ const chatHooks = (on) => {
             // A drawing of a size or tab no longer drawn is let go after a minute: it would only be drawn afresh
             if (!isTyping)
                 for (const [key, held] of heldDrawings)
-                    if (calmNow - held.at >= 60_000)
+                    if (calmNow - held.at >= 60000)
                         heldDrawings.delete(key);
             // The mod alone says when its panes are drawn again, and only when what they show has moved (calmLook)
             await calmLook($, isMoving).catch(err => log($, `panes not looked at: ${String(err)}`));
@@ -460,13 +444,12 @@ const chatHooks = (on) => {
             if (isHandedBack)
                 endedByHandback.add(id);
             if (isHandedBack)
-                await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now, wakeWhen: undefined } : one)));
+                await changeTodos($, list => list.map(one => (one.id === id ? { ...one, handedBackAt: now } : one)));
             // Work nothing holds any more has nothing of its own left running in the background
             if (!isHeld)
                 await changeTodos($, list => (list.some(one => one.id === id && one.bg) ? list.map(one => (one.id === id ? { ...one, bg: undefined, waitsSince: undefined } : one)) : list));
             await changeTodos($, list => {
-                // (or for what it asked Claudopus to start it again for)
-                const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => (one.parentId === id && one.status === 'working') || (one.id === id && one.wakeWhen !== undefined)));
+                const isWaiting = how === 'done' && !isHandedBack && (isHeld || list.some(one => one.parentId === id && one.status === 'working'));
                 // What it waits on of its own, since when: the card says so, and a long wait for it is not taken for being stuck
                 // Work that gave its report waits on nothing it means to finish
                 const waitsSince = (one) => (isHeld && !isReport && one.bg?.some(b => !b.isWatch) ? (one.waitsSince ?? now) : undefined);
@@ -496,10 +479,10 @@ const chatHooks = (on) => {
             // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
             // held on its own background work leaves it once it ends (keepStoppedReports)
             const card = (await read($, todos)).find(one => one.id === id);
-            const report = (e.answer ?? '').trim() || answer;
-            // A helper that has ended while its work had ended its step: its result is passed on to that work, which starts again with it
+            // A helper that has ended lets the work waiting on it go at once, not at the next look round
             if (card?.parentId && card.status !== 'working')
-                await passOnHelper($, id, report, card.status).catch(err => log($, `helper's result not passed on: ${String(err)}`));
+                await writeRolls($, true).catch(err => log($, `helpers not written: ${String(err)}`));
+            const report = (e.answer ?? '').trim() || answer;
             if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
                 $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)));
             }

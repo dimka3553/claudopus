@@ -43,7 +43,7 @@ const startKeeper = async ($, id) => {
 // ends it on <chat>.handover); the work that failed so is counted as at work, to be started again there
 // Only the API's own words for a lapsed sign-in, and only twice within a few minutes: one helper's refusal is no lapse
 const SIGNIN_LAPSED = /API Error: 401\b[\s\S]{0,400}(authentication_error|OAuth token has expired|OAuth token revoked|invalid authentication credentials)/i;
-const LAPSED_AGAIN = 10 * 60_000;
+const LAPSED_AGAIN = 10 * 60000;
 const lapsed = new Set();
 let lapsedAt = [];
 const lapsedSignIn = async ($, e) => {
@@ -67,9 +67,9 @@ const lapsedSignIn = async ($, e) => {
 };
 // ---- Work cut off: marked, started again, said ----
 // How long after the chat starts its cut-off work is looked at: by then Claude Code has started again what it starts itself
-const CUT_LOOK = 30_000;
+const CUT_LOOK = 30000;
 // Work cut off longer ago than this is not started again
-const CUT_OLD = 24 * 3600_000;
+const CUT_OLD = 24 * 3600000;
 const parsedOr = (text, or) => {
     try {
         return text ? JSON.parse(text) : or;
@@ -163,7 +163,7 @@ const bringBack = async ($, id, ids, cutAt, isCopy) => {
 const tellDevice = async ($, text) => {
     const pushed = await $.tool.call({ tool: 'PushNotification', message: text.slice(0, 199) }).catch(err => ({ deny: String(err) }));
     await log($, `cut-off notice pushed: ${JSON.stringify(pushed).slice(0, 200)}`);
-    await alertPerson($, 'cut', 'Task interrupted and restarted', text, `cut-${Math.round((await $.clock.now()) / 60_000)}`);
+    await alertPerson($, 'cut', 'Task interrupted and restarted', text, `cut-${Math.round((await $.clock.now()) / 60000)}`);
 };
 // The line on a card of cut-off work: when, and whether it goes on again
 const cutLine = (one) => one.cutAt ? (one.backAt ? `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; running again since ${hhmm(one.backAt)}.` : `Interrupted at ${hhmm(one.cutAt)} because the chat's process ended; it couldn't be restarted.`) : '';

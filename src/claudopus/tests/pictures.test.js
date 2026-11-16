@@ -82,7 +82,7 @@ test("in a chat the app runs on another Mac over ssh, a picture's row in Details
     expect(logged).toEqual([]);
 });
 // The most characters the app draws in one tab (its renderer throws a larger drawing away whole)
-const APP_DRAWING_CHARS = 262_144;
+const APP_DRAWING_CHARS = 262144;
 // How many characters a tab's drawing holds, as the app counts them before it draws one: its texts, labels and pictures' sources
 const drawnChars = async (tab) => (await tab.findAll({ type: 'Svg' })).reduce((sum, one) => sum + String(one.props.source).length + String(one.props.alt ?? '').length, 0) +
     (await tab.findAll({ type: 'Text' })).reduce((sum, one) => sum + String(one.text ?? '').length, 0) +
@@ -144,7 +144,7 @@ test("a Details tab's small pictures together stay under what the app draws in o
     ];
     // Each small copy as large as one may be: 36000 bytes, 48000 characters of base64
     const sips = (argv) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 360\npixelHeight: 240' : '');
-    const bytes = (path) => (path.includes('/thumbs/') ? 'A'.repeat(48_000) : undefined);
+    const bytes = (path) => (path.includes('/thumbs/') ? 'A'.repeat(48000) : undefined);
     const { files, logged } = world(on, { talk, sips, bytes });
     for (const path of shots)
         files.set(path, 'png');
@@ -168,7 +168,7 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
     // Each small copy as made, 600 wide
     const sips = (argv) => (argv.join(' ').startsWith('sips -g') ? 'pixelWidth: 600\npixelHeight: 375' : '');
     // Each ask copy as large as one may be, 25000 bytes; the chat's own copies, of the same pictures it sent, as large as theirs may be
-    const bytes = (path) => (path.includes('/thumbs/ask-') ? 'A'.repeat(33_400) : path.includes('/thumbs/') ? 'A'.repeat(48_000) : undefined);
+    const bytes = (path) => (path.includes('/thumbs/ask-') ? 'A'.repeat(33400) : path.includes('/thumbs/') ? 'A'.repeat(48000) : undefined);
     const talk = [
         { role: 'user', text: 'Draw the designs.', toolUses: [] },
         { role: 'assistant', text: 'Here they are.', toolUses: [{ tool_use_id: 'u1', tool: 'SendUserFile', input: { files: shots, status: 'normal' } }] },

@@ -96,7 +96,7 @@ test('a workflow the chat starts is one blue card: how many agents, its rounds a
     const octopus = async () => (await pane.findAll({ type: 'Svg' })).map(one => String(one.props.alt)).find(alt => /^Claudopus/.test(alt));
     expect(await octopus()).toBe('Claudopus, task finished');
     expect((await pane.findAll({ type: 'Button' })).some(b => /Finished/.test(String(b.props.label)))).toBe(false);
-    await clock.advance(2_100);
+    await clock.advance(2100);
     expect(await pane.find({ type: 'Text', text: /^Roman numerals$/ })).toBeUndefined();
     expect(await octopus()).toBe('Claudopus');
     await pressed(pane, 'finished-fold');

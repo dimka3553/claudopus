@@ -3,9 +3,8 @@
 // run on, the single command the chat runs itself, the copy of the chat for a small job, and the repeated notice left out
 // What every kind of the mod's agents is told before its task, in place of the engine's own agent prompt
 const AGENT_HEAD = 'You are an agent of Claude Code, working in the background on a task you are given. Use the tools you have to do it fully: no more than it asks, and not half done. Read files you know you need yourself; send calls that need nothing from each other together. Paths you give are absolute. When you are done, give your report: what was done, what you found, and what is not done or not checked, short, with the file paths that matter. Use no emojis.';
-// The panel's tools, which work keeps its card with, and the handback its report goes through. Each kind told to call `wake_me`
-// rather than wait has it: a task and a quick task to be started again, a helper to be told to hand back what it waits for instead
-const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall', 'mcp__claudopus__wake_me'];
+// The panel's tools, which work keeps its card with, and the handback its report goes through
+const PANEL_TOOLS = ['mcp__claudopus__todo', 'mcp__claudopus__note', 'mcp__claudopus__ask', 'mcp__claudopus__waits', 'mcp__claudopus__update', 'mcp__claudopus__recall'];
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback'];
 // ToolSearch loads the ones among these the engine holds back until asked (Monitor, SendMessage, TaskStop and the like)
 const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEdit', 'Agent', 'SendMessage', 'TaskStop', 'Monitor', 'WebFetch', 'WebSearch', 'ToolSearch', 'SubagentHandback', ...PANEL_TOOLS];
@@ -66,7 +65,7 @@ const kindStart = (e) => {
 };
 // ---- The single command the chat runs itself ----
 // The longest a command the chat runs may take: it is stopped then
-const CHAT_COMMAND_MS = 10 * 60_000;
+const CHAT_COMMAND_MS = 10 * 60000;
 // How many of its last lines come back with its end
 const CHAT_TAIL = 3;
 // A command the chat may run itself: one command, with nothing joined to it or sent into a file
@@ -198,8 +197,8 @@ const isRepeatOnly = (text) => {
 // that needs what it knows
 const RELEASE_STEP = /^\s*(?:release|run (?:the )?release(?: runner)?|(?:cd \S+ && )?\S*bin\/release)\s*\.?\s*$/i;
 // How often a release Claudopus runs is looked at, and the longest it is waited for
-const STEP_LOOK = 10_000;
-const STEP_LONGEST = 90 * 60_000;
+const STEP_LOOK = 10000;
+const STEP_LONGEST = 90 * 60000;
 const stepLine = async ($, id, text) => {
     const at = await $.clock.now();
     await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note', text }].slice(-ENTRIES_KEPT) } : card)));
@@ -208,7 +207,7 @@ const stepLine = async ($, id, text) => {
 const lastStep = async ($, one, ask, said) => {
     const folder = ask.folder ?? '';
     const step = ask.lastStep ?? '';
-    const git = (args) => $.process.run(['git', '-C', folder, ...args], { timeoutMs: 15_000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '');
+    const git = (args) => $.process.run(['git', '-C', folder, ...args], { timeoutMs: 15000 }).then(r => (r.exitCode === 0 ? r.stdout.trim() : '')).catch(() => '');
     const repo = await git(['rev-parse', '--show-toplevel']);
     const branch = await git(['rev-parse', '--abbrev-ref', 'HEAD']);
     const wakeText = `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\n${RESUMED_BY_ANSWER}`;
@@ -232,7 +231,7 @@ const lastStep = async ($, one, ask, said) => {
 // The release with no model: the card's allow box first, as for any release, then the runner on its own, followed by the mod
 const releaseItself = async ($, one, ask, said, repo, branch, wakeText) => {
     const at = await $.clock.now();
-    const common = await $.process.run(['git', '-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 15_000 }).then(r => r.stdout.trim()).catch(() => '');
+    const common = await $.process.run(['git', '-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { timeoutMs: 15000 }).then(r => r.stdout.trim()).catch(() => '');
     const name = (/\/\.git$/.test(common) ? common.replace(/\/\.git$/, '') : repo).split('/').pop() || repo;
     const id = `step-${one.id}-${at}`;
     const gate = { id, call: id, kind: 'release', host: name, command: `${branch} from ${repo}`, folder: repo, branch, at, from: one.id };
@@ -249,7 +248,7 @@ const releaseItself = async ($, one, ask, said, repo, branch, wakeText) => {
         return stepLine($, one.id, 'Nothing was released: the allow could not be secured');
     // Detached, so it outlives the ten minutes a call of the mod may take; its exit is written as its last line
     const run = await $.process
-        .run(['/bin/sh', '-c', 'nohup /bin/sh -c \'"$1" > "$2" 2>&1; echo "claudopus-exit $?" >> "$2"\' sh "$1" "$2" > /dev/null 2>&1 &', 'sh', `${$.plugin.root}/bin/release`, logFile], { cwd: repo, env: { CLAUDECODE: '1' }, timeoutMs: 15_000 })
+        .run(['/bin/sh', '-c', 'nohup /bin/sh -c \'"$1" > "$2" 2>&1; echo "claudopus-exit $?" >> "$2"\' sh "$1" "$2" > /dev/null 2>&1 &', 'sh', `${$.plugin.root}/bin/release`, logFile], { cwd: repo, env: { CLAUDECODE: '1' }, timeoutMs: 15000 })
         .catch(err => ({ exitCode: 1, stderr: String(err) }));
     if (run.exitCode !== 0) {
         await dropGrants($, [grant]);

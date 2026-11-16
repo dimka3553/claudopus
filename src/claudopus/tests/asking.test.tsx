@@ -237,12 +237,23 @@ test('while drawings of the panel are slow, as under seven tasks and their comma
 
 test('the bar above the prompt on the desktop, drawn as often as the panel under load, is given again as it was for a second after each drawing made afresh, so a click on its buttons names one still there, and is then drawn afresh by itself', async ($, on) => {
   const { clock, files } = world(on)
+  // Each drawing of the panel takes 300 ms, as on 16 Nov with seven tasks at work; the bar's own stay quick
+  const slow = { isOn: false }
+  on('session.model', () => {
+    const until = Date.now() + (slow.isOn ? 300 : 0)
+    while (Date.now() < until);
+    return { value: 'claude-opus-5-5' } as never
+  })
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix' } as never)
   files.set(`${MEMORY}/record-panel.on`, '')
   files.set(`mtime:${MEMORY}/record-panel.on`, String(clock.now()))
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   const bar = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await clock.advance(2500)
+  slow.isOn = true
+  await list.redraw()
+  slow.isOn = false
   await bar.redraw()
   // Asked for again and again within the second: the drawing on screen each time
   for (const _ of [1, 2, 3]) await bar.redraw()

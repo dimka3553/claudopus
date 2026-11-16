@@ -17,11 +17,11 @@ test('opened in one chat, the panel opens in every other chat, at once in one th
     await $.session.start(start);
     expect(opened).toEqual([]);
     // Another chat on this Mac opened it
-    files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_700_000_000_500 }));
-    await clock.advance(2_000);
+    files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1700000000500 }));
+    await clock.advance(2000);
     expect(opened).toEqual(['claudopus']);
     // Followed once: the same choice does not open it again
-    await clock.advance(10_000);
+    await clock.advance(10000);
     expect(opened).toEqual(['claudopus']);
     // A chat that starts while the choice stands opens it as it loads
     await $.session.start(start);
@@ -29,7 +29,7 @@ test('opened in one chat, the panel opens in every other chat, at once in one th
 });
 test("a chat that starts reads the other chats before its panel opens, so they never drop out of it while it loads", async ($, on) => {
     const { files, events } = world(on);
-    files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_700_000_000_500 }));
+    files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1700000000500 }));
     files.set(`${MEMORY}/live/chat-b.json`, otherChat(NOW));
     await $.session.start(start);
     const read = events.indexOf(`list ${MEMORY}/live/pushed`);
@@ -42,7 +42,7 @@ test('/claudopus opens the panel for every chat; closed by hand it closes in eve
     await $.command.run({ command: 'claudopus', args: '' });
     expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}').isOpen).toBe(true);
     // The person's own close, as the app raises it, keeps this choice (the test kit cannot raise a close of the person's)
-    files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1_700_000_000_005 }));
+    files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1700000000005 }));
     const closedAt = JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}');
     expect(closedAt.isOpen).toBe(false);
     opened.length = 0;
@@ -59,13 +59,13 @@ test('/claudopus opens the panel for every chat; closed by hand it closes in eve
 });
 test("closed by hand in another chat, the panel closes here; the mod's own close and a screen with nowhere to draw it choose nothing", async ($, on) => {
     const { closed, files, clock } = world(on, { panes: ['claudopus'] });
-    files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1_699_999_999_000 }));
+    files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: true, at: 1699999999000 }));
     await $.session.start(start);
-    files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1_700_000_000_500 }));
-    await clock.advance(2_000);
+    files.set(`${MEMORY}/panel.json`, JSON.stringify({ isOpen: false, at: 1700000000500 }));
+    await clock.advance(2000);
     expect(closed).toContain('claudopus');
     // That close is the mod's own and leaves the choice as it was
-    expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')).toEqual({ isOpen: false, at: 1_700_000_000_500 });
+    expect(JSON.parse(files.get(`${MEMORY}/panel.json`) ?? '{}')).toEqual({ isOpen: false, at: 1700000000500 });
 });
 test('/claudopus on a screen with nowhere to draw the panel does not open it for the other chats', async ($, on) => {
     const { files } = world(on, { unplaced: true });

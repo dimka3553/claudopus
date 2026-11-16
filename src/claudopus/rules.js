@@ -230,7 +230,7 @@ const NO_MEMORY_BASH = () => named("Claude changes {name}'s own settings and tex
 const NO_BOXES = 'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name.';
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.';
 // How long the names of kept keys are trusted before they are asked again
-const SECRETS_MS = 60_000;
+const SECRETS_MS = 60000;
 // The first line of what the mod adds to every brief: the work's own rules and where the chat's words are. The panel leaves it out
 const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`;
 const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.';
@@ -261,7 +261,7 @@ const ASK_ANSWERED = (title, said, isYou = false) => isYou ? `✓ You answered "
 // What the chat is told when it sends work an answer of the person's that reached it from the card a moment ago
 const ANSWER_ALREADY_SENT = (said) => `Not sent: "${said}" is the answer {name} gave on that task's card. Claude already has it from there and has asked nothing since, so a second copy would only start it again. If {name} means those words for something new, send them with what they are for.`;
 // How long an answer given on the card counts as the one the chat would send again
-const ANSWER_ECHO = 60 * 60_000;
+const ANSWER_ECHO = 60 * 60000;
 // What the chat is told when the person replies on the card in words that do not settle the ask: it stays open
 const ASK_REPLIED = (title, said, isYou = false) => isYou
     ? `✓ You replied to "${title}" on its card: ${said}. Claude is working on it now, and will ask again if it still needs you.`
