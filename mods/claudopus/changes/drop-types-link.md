@@ -1,1 +1,2 @@
 - Removes a link to a local folder that the last release took in by mistake.
+- Claudopus's watcher that brings a chat's Claudopus back reads files' times correctly on Linux.

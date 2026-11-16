@@ -26,7 +26,8 @@ TRIES=${CLAUDOPUS_REVIVE_TRIES:-3}
 IDLE=${CLAUDOPUS_REVIVE_IDLE:-600}
 log() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$dir/revive.log"; }
 now() { date +%s; }
-mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null; }
+# (GNU stat first: on Linux `stat -f` reads the file system and prints words, not a time)
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 me="$0"
 
 # One at a time, the newest copy's: one already running from this same file is left to run; one from another copy (an older
