@@ -66,9 +66,10 @@ else no "cut off with work at work, the chat is started again here as it ran"; f
 within "grep -q '\"cutAt\":[0-9]*,\"movedAt\":[0-9]*,\"copy\":\"1a2b3c4d\"' '$mem/keep/$s.state' 2>/dev/null" 5 && ok "its state says when it was cut off and when it went on" || no "its state says when it was cut off and when it went on: $(cat "$mem/keep/$s.state")"
 
 # 4. The app starts the chat again while the copy runs: the copy is stopped at once, and the state says when (backAt, which only
-# that stop writes). Up to 15 seconds, as it runs beside the mod's tests, where a loaded Mac took over 5
+# that stop writes). Up to 30 seconds, as it runs beside the mod's tests and the release's trial, where a loaded Mac took over 5
+# and GitHub's Linux runner over 15 (16 Nov); it ends as soon as the copy is stopped
 touch "$tmp/ccd-cli/engine.run"; "$tmp/ccd-cli/engine" --resume=$s & app=$!
-within "grep -q 1a2b3c4d '$tmp/stopped' 2>/dev/null" 15 && grep -q '"backAt":' "$mem/keep/$s.state" && ok "the app's start of the chat stops the copy within seconds" || no "the app's start of the chat stops the copy within seconds"
+within "grep -q 1a2b3c4d '$tmp/stopped' 2>/dev/null" 30 && grep -q '"backAt":' "$mem/keep/$s.state" && ok "the app's start of the chat stops the copy within seconds" || { no "the app's start of the chat stops the copy within seconds"; echo "  the keeper's log:"; sed 's/^/    /' "$mem/keep/$s.log" 2>/dev/null | tail -8; echo "  its state: $(cat "$mem/keep/$s.state" 2>/dev/null)"; }
 rm -f "$tmp/ccd-cli/engine.run"; wait $app 2>/dev/null
 
 # 5. The copy's work is done: it is stopped once it has rested

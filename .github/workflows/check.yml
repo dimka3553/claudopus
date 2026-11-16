@@ -58,10 +58,18 @@ jobs:
       - name: The shell tests and the mod's tests pass
         run: |
           o=$(mktemp -d); r=0
-          for t in admin keep revive linux; do { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
+          # Every shell test in the tree, a branch's new ones among them: a release runs this file as main has it, and a test only
+          # the branch names here would first run once main had moved (16 Nov: 0.2.161's watcher test, red on Linux, held up every
+          # release after it). The ones main names must still be there
+          tests=$(cd mods/claudopus/bin && ls *.test.sh | sed 's/\.test\.sh$//')
+          for t in admin keep revive linux release; do [ -f mods/claudopus/bin/$t.test.sh ] || { echo "::error::$t.test.sh is gone"; r=1; }; done
+          # (the release's own trial, which starts releases of its own, after the mod's tests: beside them it slowed cards.test.tsx
+          # past its limit on GitHub's Mac)
+          for t in $tests; do [ $t = release ] && continue; { bash mods/claudopus/bin/$t.test.sh >"$o/$t" 2>&1 && echo 0 || echo 1; } >"$o/$t.rc" & done
           npx --yes @anthropic-ai/claude-code@2.1.325 plugin test mods/claudopus || r=1
+          [ -f mods/claudopus/bin/release.test.sh ] && { bash mods/claudopus/bin/release.test.sh >"$o/release" 2>&1 && echo 0 || echo 1; } >"$o/release.rc"
           wait
-          for t in admin keep revive linux; do
+          for t in $tests; do
             echo "::group::$t.test.sh"; cat "$o/$t"; echo "::endgroup::"
             [ "$(cat "$o/$t.rc")" = 0 ] || { echo "::error::$t.test.sh failed"; r=1; }
           done

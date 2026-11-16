@@ -72,7 +72,9 @@ expect() {
   if [ "$got" = "$status" ] && printf '%s' "$out" | grep -q -e "$words"; then
     echo "ok $n - $what"
   else
-    echo "NOT OK $n - $what: ended $got, wanted $status with \"$words\"; it printed: $out"
+    # (the name alone on its line, as a release compares failures by name; what it printed on the lines after)
+    echo "NOT OK $n - $what"
+    echo "  ended $got, wanted $status with \"$words\"; it printed: $out"
     failed=1
   fi
 }

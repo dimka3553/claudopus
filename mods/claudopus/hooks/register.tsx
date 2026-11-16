@@ -10232,6 +10232,7 @@ const waiterSeen = new Map<string, { since: number; looks: number; sleepers: Set
 const workSeen = new Set<string>()
 const WAITER_FOR = 60_000
 const WAITER_LONE = 120_000
+const RUNNER_PROC = /\/bin\/(?:release|admin|secret|helpers)(?:\s|$)/
 const endWaiters = async ($: EngineInterface, list: Todo[], now: number) => {
   // (every card's commands matched against the shells at once, so two alike never claim the same shell)
   const allBgs = list.flatMap(one => (one.chat || one.status !== 'working' ? [] : (one.bg ?? []).filter(b => !b.isWatch && !SERVER_CMD.test(b.cmd ?? '') && describedOf(b.what).kind !== 'server')))
@@ -10249,6 +10250,9 @@ const endWaiters = async ($: EngineInterface, list: Todo[], now: number) => {
   for (const id of workSeen) if (!runs.some(run => run.id === id)) workSeen.delete(id)
   for (const run of runs) {
     if (workSeen.has(run.id)) continue
+    // A release waits its turn and for GitHub's checks by design, saying how far it got as it goes: stopping it there lost the
+    // 16 Nov release of the faster checks, never started again. So is any of Claudopus's own runners
+    if (treeOf(jobProcs, run.pid).some(p => RUNNER_PROC.test(p.command))) continue
     const leaves = waiterLeavesOf(jobProcs, run.pid)
     if (!leaves) {
       // (a shell with nothing under it shows nothing of what it does: neither work nor a wait)
