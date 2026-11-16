@@ -8783,6 +8783,25 @@ const stepLine = async ($: EngineInterface, id: string, text: string) => {
   await changeTodos($, list => list.map(card => (card.id === id ? { ...card, entries: [...card.entries, { at, kind: 'note' as const, text }].slice(-ENTRIES_KEPT) } : card)))
   redraw($)
 }
+// What a running release says it waits for, from its last `progress: <so far>/<expected> s <what>, eta <n> min` line: the card's
+// line while it runs, so a release in line or waiting for GitHub is never a card that only says it started
+const RELEASING = 'Releasing: '
+const releaseDoing = (text: string) => {
+  const last = text.split('\n').filter(line => /^progress: /.test(line)).at(-1)
+  return last ? oneLine(last.replace(/^progress: \S+(?: s)? /, '').replace(/, eta \d+ min$/, '')) : ''
+}
+const stepDoing = async ($: EngineInterface, id: string, text: string) => {
+  const at = await $.clock.now()
+  await changeTodos($, list =>
+    list.map(card => {
+      if (card.id !== id) return card
+      const last = card.entries.at(-1)
+      const entry = { at, kind: 'note' as const, text: `${RELEASING}${text}` }
+      return { ...card, entries: last?.kind === 'note' && last.text.startsWith(RELEASING) ? [...card.entries.slice(0, -1), entry] : [...card.entries, entry].slice(-ENTRIES_KEPT) }
+    }),
+  )
+  redraw($)
+}
 const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask']>, said: string) => {
   const folder = ask.folder ?? ''
   const step = ask.lastStep ?? ''
@@ -8831,6 +8850,7 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
     return stepLine($, one.id, 'Nothing was released: Claudopus could not start the release')
   }
   await log($, `release of ${branch} in ${name} started by Claudopus for ${one.id}`)
+  let doing = ''
   const timer = everyLoad($, STEP_LOOK, () => {
     void (async () => {
       // Its end only: a release's whole log can be over the 4 MB the engine gives whole, and then its last line was never seen
@@ -8838,7 +8858,11 @@ const releaseItself = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
       const text = await fileEnd($, logFile, 64_000)
       const exit = /claudopus-exit (\d+)\s*$/.exec(text)?.[1]
       const isLate = (await $.clock.now()) - at > STEP_LONGEST
-      if (exit === undefined && !isLate) return
+      if (exit === undefined && !isLate) {
+        const now = releaseDoing(text)
+        if (now && now !== doing) ((doing = now), await stepDoing($, one.id, cut(now, 160)))
+        return
+      }
       timer.cancel()
       const tail = text.replace(/claudopus-exit \d+\s*$/, '').replace(/\s+$/, '').split('\n').slice(-CHAT_TAIL).join('\n')
       if (exit === '0') {
@@ -10092,6 +10116,7 @@ const waiterSeen = new Map<string, { since: number; looks: number; sleepers: Set
 const workSeen = new Set<string>()
 const WAITER_FOR = 60_000
 const WAITER_LONE = 120_000
+const RUNNER_PROC = /\/bin\/(?:release|admin|secret|helpers)(?:\s|$)/
 const endWaiters = async ($: EngineInterface, list: Todo[], now: number) => {
   // (every card's commands matched against the shells at once, so two alike never claim the same shell)
   const allBgs = list.flatMap(one => (one.chat || one.status !== 'working' ? [] : (one.bg ?? []).filter(b => !b.isWatch && !SERVER_CMD.test(b.cmd ?? '') && describedOf(b.what).kind !== 'server')))
@@ -10109,6 +10134,9 @@ const endWaiters = async ($: EngineInterface, list: Todo[], now: number) => {
   for (const id of workSeen) if (!runs.some(run => run.id === id)) workSeen.delete(id)
   for (const run of runs) {
     if (workSeen.has(run.id)) continue
+    // A release waits its turn and for GitHub's checks by design, saying how far it got as it goes: stopping it there lost the
+    // 16 Nov release of the faster checks, never started again. So is any of Claudopus's own runners
+    if (treeOf(jobProcs, run.pid).some(p => RUNNER_PROC.test(p.command))) continue
     const leaves = waiterLeavesOf(jobProcs, run.pid)
     if (!leaves) {
       // (a shell with nothing under it shows nothing of what it does: neither work nor a wait)

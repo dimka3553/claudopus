@@ -1,0 +1,5 @@
+- Releases pressed close together no longer wait for each other: each is checked at once on top of the one ahead of it, here and on GitHub, and they land in turn, each with its own number. Three at once take about as long as one.
+- A release ahead that fails no longer holds up the ones behind it: they are made again without it, by themselves.
+- A failure main already has no longer stops every release after it: a release is refused only for a failure it brings, and says which.
+- Every shell test in a branch is checked before the release, a new one among them, so a test only the branch has can no longer break main once it lands.
+- A release says what it waits for at least every 10 seconds, and its card shows it while it runs. Claudopus no longer stops a release waiting its turn as a command that only waits.

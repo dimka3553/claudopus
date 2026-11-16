@@ -857,6 +857,10 @@ test('a command that only waits is stopped as it runs, whatever its words: when 
   await advance(20_000)
   for (let n = 0; n < 6; n++) ((procs.list = [psLine(48213, 1, 48213, 'bash ./copy.sh'), psLine(48410 + n, 48213, 48213, 'sleep 30')]), await advance(20_000))
   expect(killed).toEqual([])
+  // A release waiting its turn, however long it only sleeps, runs on (16 Nov: the faster checks' release stopped in line)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'w3', agentId: 'a1', command: 'cd /w && nohup bash ./ship.sh > ship.log 2>&1 & echo $!', description: 'Run the release of the branch (about 10 min)' } as never)
+  for (let n = 0; n < 6; n++) ((procs.list = [psLine(48213, 1, 48213, 'bash ./ship.sh'), psLine(48501, 48213, 48213, '/bin/bash -p /x/mods/claudopus/bin/release'), psLine(48510 + n, 48501, 48213, 'sleep 0.5')]), await advance(20_000))
+  expect(killed).toEqual([])
 })
 
 test('a Python pool left running is one run with its workers\' memory added up', SLOW, async ($, on) => {
