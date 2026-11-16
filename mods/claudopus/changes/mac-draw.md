@@ -1,1 +1,1 @@
-- The battery card no longer shows an impossible figure for what the whole Mac draws: a reading the battery gives below zero or past what a Mac can draw is left out instead of shown in watts.
+- The battery card shows what the whole Mac really draws on battery, from the battery's own voltage and current, instead of an impossible figure; a reading below zero or past what a Mac can draw is left out instead of shown in watts.
