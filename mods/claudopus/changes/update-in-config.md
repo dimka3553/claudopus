@@ -1,0 +1,2 @@
+- Check now in Config shows a newer version right under the press, with its Update button (Download, then Install, on an installed copy) and how far it has got, then says to type /reload-plugins: you no longer go to the panel to update.
+- Check now also brings back a version you had put off with Not now.

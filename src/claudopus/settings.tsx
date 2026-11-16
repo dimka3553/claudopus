@@ -211,7 +211,7 @@ const configActs = ($: EngineInterface) => ({
       await setConfig($, dir, 'updates', hours ? undefined : false)
       await setConfig($, dir, 'updateEvery', hours && hours !== 1 ? hours : undefined)
     }),
-  // A press while a check runs does nothing: the tab shows it checking. It only looks; the panel offers what it found
+  // A press while a check runs does nothing: the tab shows it checking. It only looks; Config and the panel offer what it found
   check: () => {
     if (updateCheck.isChecking) return
     presses += 1

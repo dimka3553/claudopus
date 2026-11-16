@@ -110,7 +110,7 @@ const lookForNew = async ($: EngineInterface) => {
     isUpdating = false
   }
 }
-// Config's Check now: the page read now, whatever the setting; it only looks, and the panel offers what it found
+// Config's Check now: the page read now, whatever the setting; it only looks, and Config and the panel offer what it found
 const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean }> => {
   if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
   const loaded = (await versionsOf($)).version
@@ -123,7 +123,10 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
           await log($, `Claudopus looked for a new version from Config: ${got.page?.version ?? got.why}`)
           if (!got.page) return { text: `Couldn't check: ${got.why}. Try again later.`, isError: true }
           await knowSource($, true)
-          return loaded && isNewer(got.page.version, loaded) ? { text: `v${got.page.version} is out. You can update from the panel.`, isError: false } : { text: `You're on the newest version (v${got.page.version}).`, isError: false }
+          if (!loaded || !isNewer(got.page.version, loaded)) return { text: `You're on the newest version (v${got.page.version}).`, isError: false }
+          // Asked for now: a Not now pressed earlier no longer keeps it quiet, and Config shows its Update right under the press
+          if ((await readOr($, laterPath())).trim()) await $.fs.write(laterPath(), JSON.stringify({ version: got.page.version, until: 0 }))
+          return { text: `v${got.page.version} is out.`, isError: false }
         }
       } finally {
         isUpdating = false
@@ -537,6 +540,17 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${why.replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
     [<ui.Button key={`update-again-${presses}`} label="Try again" onPress={() => downloadPress($, v)} />, ...quiet('failed', v)],
   )
+}
+
+// Config's Updates band: where updating stands, in the same box as the panel's header and with the same presses, right under Check
+// now, so a version it found is updated where it was asked for (16 Nov: the Update button only in the panel's header was confusing).
+// Once the Mac has it, what is left is said there too: type /reload-plugins
+const configUpdateBox = async ($: EngineInterface, ui: Ui) => {
+  const versions = await versionsOf($)
+  if (!versions.version) return null
+  const n = await noticeNow($, versions.version, versions.installed).catch(() => undefined)
+  if (n?.kind === 'reload') return <ui.Text key="update-ready" wrap="wrap">{`Claudopus ${n.version} is ready: type /reload-plugins to switch this chat to it.`}</ui.Text>
+  return noticeCard($, ui, n, versions.version).catch(() => null)
 }
 
 // ---- Moving an open chat to the version installed ----
