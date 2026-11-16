@@ -36,7 +36,7 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   }
   // The headline: time saved, cost, work done
   expect(await value('10m')).toBe('time saved')
-  expect(await value('Pieces of work done')).toBe('2')
+  expect(await value('Tasks done')).toBe('2')
   expect(await value('To-dos done')).toBe('2')
   expect(await value('Work added up')).toBe('30m')
   expect(await value('On the clock')).toBe('20m')
@@ -68,7 +68,7 @@ test('Stats draws whatever the history: the timeline of 240 pieces of work at on
   const allTime = await until(async () => (await stats.findAll({ type: 'Button' })).find(one => one.props.label === 'All time'))
   await stats.press({ key: allTime?.key ?? '' })
   // The timeline is drawn, its bars on a coarser grid, in one drawing the app takes
-  const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 pieces of work on a time axis'))
+  const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 tasks on a time axis'))
   expect(String(timeline?.props.source)).toContain('#8A63F0')
   expect((await stats.findAll({ type: 'Svg' })).filter(one => String(one.props.source).length > 131_072)).toEqual([])
   // The rest of the tab is drawn as ever

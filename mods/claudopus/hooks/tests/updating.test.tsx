@@ -911,7 +911,7 @@ test('Not now keeps a version quiet for a day, Skip this version until a newer o
 
 // A chat whose code Update must leave alone is told so in plain words, and offered no download
 const LEFT_ALONE: { name: string; release: Release; said: string }[] = [
-  { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a build of Claudopus that a piece of work is changing: Update leaves it alone, and it gets the newest version when that work takes it in.' },
+  { name: 'a build a piece of work is changing', release: { ...RELEASE, worktree: true }, said: 'This chat runs a build of Claudopus that a task is changing: Update leaves it alone; it gets the newest version when that task merges it in.' },
   { name: 'a test build', release: { ...RELEASE, noBranch: true }, said: 'This chat runs a test build of Claudopus: Update leaves it alone.' },
 ]
 for (const one of LEFT_ALONE)

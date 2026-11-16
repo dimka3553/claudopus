@@ -8,17 +8,17 @@ type Ui = ElementTable
 
 export type Text = { key: string; name: string; what: string; path: string }
 export const TEXTS: Text[] = [
-  { key: 'principles', name: 'Principles', what: 'How you work: every chat and every piece of work carries them.', path: 'rules/CLAUDE.md' },
-  { key: 'chat', name: "The chat's rules", what: 'How a chat hands each of your messages to background work.', path: 'roles/chat.md' },
-  { key: 'work', name: 'Work rules', what: 'What every piece of background work is told as it starts.', path: 'roles/work.md' },
+  { key: 'principles', name: 'Principles', what: 'How you work: every chat and every background task follows them.', path: 'rules/CLAUDE.md' },
+  { key: 'chat', name: "The chat's rules", what: 'How a chat starts a background task for each of your messages.', path: 'roles/chat.md' },
+  { key: 'work', name: 'Task rules', what: 'What Claudopus tells Claude at the start of every background task.', path: 'roles/work.md' },
 ]
 
 // ---- Settings, config.json ----
 
 export const ROLES = [
-  { key: 'work', name: 'Most work', shipped: 'opus' },
+  { key: 'work', name: 'Most tasks', shipped: 'opus' },
   { key: 'legwork', name: 'Long legwork', shipped: 'sonnet' },
-  { key: 'heavy', name: 'Heavy work', shipped: 'fable' },
+  { key: 'heavy', name: 'Heavy tasks', shipped: 'fable' },
 ] as const
 export type Role = (typeof ROLES)[number]['key']
 export type Models = Record<Role, string>
@@ -32,7 +32,7 @@ export const MODEL_NAMES: Record<string, string> = { opus: 'Opus 5.5', sonnet: '
 export type Config = { name?: string; agents?: boolean; sound?: boolean; notifications?: boolean; updates?: boolean; updateEvery?: number; skipVersion?: string; models?: Partial<Models>; admin?: string; adminSealed?: string; adminPassword?: string }
 export const ADMIN_MODES = [
   { value: 'each', label: 'Ask each time' },
-  { value: 'work', label: 'Ask once per piece of work' },
+  { value: 'work', label: 'Ask once per task' },
   { value: 'never', label: 'Never ask' },
 ] as const
 export type AdminMode = (typeof ADMIN_MODES)[number]['value']
@@ -224,7 +224,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         item(
           'config-name',
           'Your name',
-          'What the chat and the work call you. Read when a chat starts.',
+          'What the chat and Claude call you. Read when a chat starts.',
           <Box width={22} flexShrink={0}>
             <Input key="config-name-input" value={typeof config.name === 'string' ? config.name : ''} placeholder="the person" submitLabel="save" onSubmit={value => acts.set('name', value.trim() || undefined)} />
           </Box>,
@@ -238,12 +238,12 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         'Work',
         '',
         <Box flexDirection="column" gap={1}>
-          {toggle('agents', 'Background work', 'Each message is handed to work in the background. Off, every chat does its own work. Read when a chat starts.')}
+          {toggle('agents', 'Background tasks', 'Each message starts a task that Claude does in the background. Off, every chat does the task itself. Read when a chat starts.')}
           {ROLES.map(one =>
             item(
               `config-model-${one.key}`,
               one.name,
-              one.key === 'work' ? 'The model most work runs on.' : one.key === 'legwork' ? 'Long, simple work such as indexing. Helpers run on it too, but a check of finished work never does.' : 'Only heavy or really complicated work.',
+              one.key === 'work' ? 'The model most tasks run on.' : one.key === 'legwork' ? 'Long, simple tasks such as indexing. Helpers run on it too, but a check of a finished task never does.' : 'Only heavy or really complicated work.',
               <Select key={`config-model-${one.key}-pick`} options={choices} value={models[one.key]} onSelect={value => acts.set('models', value === one.shipped ? undefined : value, one.key)} />,
               models[one.key] !== one.shipped,
               () => acts.set('models', undefined, one.key),
@@ -260,7 +260,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           {item(
             'config-admin-mode',
             'Ask before an admin command',
-            `Work runs a command as administrator only after you allow it on its card: each time, or once for a piece of work and its helpers until it ends. Never ask runs them without the card asking. Whatever you choose, each one also asks for the admin password, which is never kept: macOS asks in its own box on this Mac's screen, and the panel asks over SSH, on Linux or from another device.${shown.gate.unsealed ? ` config.json says "${shown.gate.unsealed}", but it was not chosen here, so every command asks.` : ''}`,
+            `Claude runs a command as administrator only after you allow it on the task's card: each time, or once for a task and its helpers until it ends. With Never ask, Claudopus runs them without asking on the card. Whatever you choose, each one also asks for the admin password, which is never kept: macOS asks in its own box on this Mac's screen, and the panel asks over SSH, on Linux or from another device.${shown.gate.unsealed ? ` config.json says "${shown.gate.unsealed}", but it was not chosen here, so every command asks.` : ''}`,
             <Select key="config-admin-mode-pick" options={ADMIN_MODES.map(one => ({ value: one.value, label: one.label }))} value={shown.gate.mode} onSelect={value => acts.gateMode(value as AdminMode)} />,
             shown.gate.mode !== 'each' || Boolean(shown.gate.unsealed),
             () => acts.gateMode('each'),
@@ -293,11 +293,11 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       {band(
         ui,
         'config-ready',
-        'When work is ready',
+        'When a task is done',
         '',
         <Box flexDirection="column" gap={1}>
           {toggle('sound', 'Sound', 'A short chime.')}
-          {toggle('notifications', 'Notifications', 'A notification naming the work, also when it stopped or failed.')}
+          {toggle('notifications', 'Notifications', 'A notification naming the task, also when it was stopped or failed.')}
         </Box>,
       )}
       {band(

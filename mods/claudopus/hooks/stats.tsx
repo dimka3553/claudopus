@@ -574,7 +574,7 @@ const tile = (ui: Ui, key: string, value: string, label: string, wraps = false) 
     <ui.Box height={1} overflow="hidden">
       <ui.Text bold wrap="truncate-end">{value}</ui.Text>
     </ui.Box>
-    {/* In the terminal the label wraps rather than being cut: in a narrow one 'pieces of work done' read 'pieces of work d…' */}
+    {/* In the terminal the label wraps rather than being cut: in a narrow one 'tasks done' read 'pieces of work d…' */}
     <ui.Box minWidth={0} {...(wraps ? {} : { height: 1, overflow: 'hidden' as const })}>
       <ui.Text dimColor wrap={wraps ? 'wrap' : 'truncate-end'}>{label}</ui.Text>
     </ui.Box>
@@ -614,8 +614,8 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
       {reading.has(view.scope) ? <Text dimColor>Reading…</Text> : null}
     </Box>
   )
-  if (!s) return [nav, note(ui, 'stats-wait', kept?.error ?? 'Reading Claude’s records of the work…')]
-  if (!s.all.total && !s.pieces.length) return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), note(ui, 'stats-none', view.range === 'today' ? 'No work today yet.' : 'No work on record yet.')]
+  if (!s) return [nav, note(ui, 'stats-wait', kept?.error ?? 'Reading Claude’s records of your tasks…')]
+  if (!s.all.total && !s.pieces.length) return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), note(ui, 'stats-none', view.range === 'today' ? 'No tasks today yet.' : 'No tasks on record yet.')]
   const top = s.models[0]?.[1].total || 1
   const count = (n: number) => n.toLocaleString('en-US')
   // Whole dollars from a hundred up, cents below
@@ -627,7 +627,7 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     <Box key="stats-hero" flexDirection="row" gap={1} flexShrink={0}>
       {tile(ui, 'hero-saved', hours(saved), 'time saved', surface === 'terminal')}
       {tile(ui, 'hero-cost', money(s.all.cost), 'at API prices', surface === 'terminal')}
-      {tile(ui, 'hero-work', count(s.finished), 'pieces of work done', surface === 'terminal')}
+      {tile(ui, 'hero-work', count(s.finished), 'tasks done', surface === 'terminal')}
     </Box>
   )
   const width = Math.max(200, Math.round(px))
@@ -643,10 +643,10 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
       {table.Svg && surface !== 'terminal' ? (
         svgFits(svg) ? (
           <Box flexShrink={0}>
-            <table.Svg key={`timeline-${view.scope}-${view.range}`} source={svg} alt={`${s.pieces.length} pieces of work on a time axis`} width={width} height={BARS + 18} isInteractive />
+            <table.Svg key={`timeline-${view.scope}-${view.range}`} source={svg} alt={`${s.pieces.length} tasks on a time axis`} width={width} height={BARS + 18} isInteractive />
           </Box>
         ) : (
-          note(ui, 'timeline-too-big', `${s.pieces.length.toLocaleString('en-US')} pieces of work are more than one drawing can hold here. Today or This chat draws fewer.`)
+          note(ui, 'timeline-too-big', `${s.pieces.length.toLocaleString('en-US')} tasks are more than one drawing can hold here. Today or This chat draws fewer.`)
         )
       ) : (
         timelineText(ui, s.pieces, Math.max(20, Math.floor((px + 32) / 7.4) - 6))
@@ -675,7 +675,7 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     '',
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column" flexShrink={0}>
-        {line(ui, 'time-added', 'Work added up', hours(s.time.added))}
+        {line(ui, 'time-added', 'Task time added up', hours(s.time.added))}
         {line(ui, 'time-clock', 'On the clock', hours(s.time.clock))}
         {line(ui, 'time-saved', 'Saved by running side by side', hours(saved), true)}
       </Box>
@@ -689,14 +689,14 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     s.running ? `${s.running} still running, not counted` : '',
     <Box flexDirection="column" gap={1}>
       <Box flexDirection="column" flexShrink={0}>
-        {line(ui, 'work-finished', 'Pieces of work done', count(s.finished))}
+        {line(ui, 'work-finished', 'Tasks done', count(s.finished))}
         {line(ui, 'work-flows', 'Workflows run', count(s.flows))}
         {line(ui, 'work-todos', 'To-dos done', count(s.todosDone))}
         {line(ui, 'talk-count', 'Your messages', count(s.messages))}
         {line(ui, 'talk-turn', view.scope === 'all' ? 'From your message to a chat’s last step, on average' : 'From your message to the chat’s last step, on average', s.messages ? shortly(s.turn) : '–')}
-        {line(ui, 'talk-piece', 'A piece of work, on average', s.perPiece ? shortly(s.perPiece) : '–')}
+        {line(ui, 'talk-piece', 'A task, on average', s.perPiece ? shortly(s.perPiece) : '–')}
       </Box>
-      {note(ui, 'talk-how', 'Each of your messages is timed from when the chat takes it up to the chat’s last step before the next message; the background work it started is not counted.')}
+      {note(ui, 'talk-how', 'Each of your messages is timed from when the chat takes it up to the chat’s last step before the next message; the background tasks it started are not counted.')}
     </Box>,
   )
   const share = Math.round((s.all.read / Math.max(1, s.all.total)) * 100)
@@ -748,8 +748,8 @@ export function statsView(invalidate: () => void, ui: Ui, now: number, reload: (
     ui,
     'stats-off',
     view.scope === 'all'
-      ? `From Claude’s own records of the ${chats} chats with kept work: each piece of work, its helpers, workflows and the chat itself.`
-      : 'From Claude’s own records of this chat: each piece of work, its helpers, workflows and the chat itself.',
+      ? `From Claude’s own records of the ${chats} chats with saved tasks: each task, its helpers, workflows and the chat itself.`
+      : 'From Claude’s own records of this chat: each task, its helpers, workflows and the chat itself.',
   )
   return [nav, ...(kept?.error ? [note(ui, 'stats-error', kept.error)] : []), hero, timeline, time, work, tokens, cost, ...(mem ? [mem] : []), off]
 }
