@@ -2,6 +2,12 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.140 · 16 November 2026
+- Your reply reaches work at once even while it runs something long: a command the work gives minutes, by its time limit or a wait it says takes minutes, now runs in the background, so the work reads your reply while it keeps going.
+- Work never waits for your answer with a timer: a command that waits for you is refused, the work stops, its question stays on the card for as long as it takes, and your answer starts it again the moment you give it.
+- When your reply does wait behind a short command, the card says so at once: "waiting: it reads it when “Run the build” ends (running 1m 10s)".
+- Work waiting on its helpers comes back as soon as you reply, instead of after up to two minutes.
+
 ## 0.2.139 · 16 November 2026
 - In the desktop app a card's answers now end with "Reply in your own words": it opens the reply box in the bar above the chat's prompt, named after the work it goes to, so the panel scrolls freely while you type. One box and one Send; the card has a box of its own only while that bar is folded or one of the app's surveys is in it
 - Close in the bar, or "Close the reply box" on the card, takes the box away again and keeps what you had typed; pressing "Reply in your own words" on another card moves the box to that one. A new question from the same work leaves the box open with what you typed, and what you send then answers that question

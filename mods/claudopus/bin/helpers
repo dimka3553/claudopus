@@ -7,9 +7,13 @@ f="$1"
 [ -f "$f" ] || { echo "No helper of yours is running."; exit 0; }
 first=$(head -n 1 "$f")
 [ "$first" = "running: " ] && { echo "No helper of yours is running."; tail -n +2 "$f"; exit 0; }
+# A message from the person written in while the work waits here makes it come back at once: the work reads it at its next step
+replied() { [ -s "$f.reply" ]; }
+replied && { echo "A message from the person is waiting for you: it is read the moment this wait ends, which is now. Answer it, then wait again if you still need to."; exit 0; }
 changed=''
 i=0
 while [ "$i" -lt 55 ]; do
+  replied && { echo "A message from the person is waiting for you: it is read the moment this wait ends, which is now. Answer it, then wait again if you still need to."; tail -n +2 "$f"; exit 0; }
   now=$(head -n 1 "$f")
   # A file read while it is being written has no first line yet: that is no change
   case "$now" in
