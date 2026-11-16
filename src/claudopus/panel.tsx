@@ -21,6 +21,8 @@ const listOffsets = new Map<string, number>()
 let waitsAtTop = 0
 // The last drawing made of each pane on each surface, what a press under way keeps on screen (isPressHeld)
 const lastShown = new Map<string, unknown>()
+// The surface the list was last drawn on: the focus says none, and only the desktop's clicks are held for (isPressHeld)
+let listSurface = ''
 const panelHooks = (on: On) => {
 
   // In the terminal a tab holds the keys once it is opened, and nothing of the engine's goes back to the panel from them: every
@@ -50,7 +52,7 @@ const panelHooks = (on: On) => {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     const paneId = e.requestId ?? ''
     if (paneId !== LIST && !paneId.startsWith(WORK_PANE) && !paneId.startsWith(FLOW_PANE)) return next(e)
-    if (paneId === LIST) listDrawing += 1
+    if (paneId === LIST) ((listDrawing += 1), (listSurface = e.surface))
     try {
     // While the person types into a box the pane is drawn as it last was, whole, but for a change in its shape; not typing, as it last
     // was while only its running times moved, for CALM at most (heldDrawings)
@@ -61,8 +63,10 @@ const panelHooks = (on: On) => {
     const content = await paneContent($)
     const held = heldDrawings.get(heldKey)
     // A press under way: the drawing on screen, the one last made for this pane on this surface, focused or not
-    const shown = paneId === LIST && isPressHeld(heldAt) ? lastShown.get(`${paneId}|${e.surface}`) : undefined
-    if (shown) return ((listHeldAt = heldAt), shown as Awaited<ReturnType<typeof next>>)
+    // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh)
+    const shownKey = heldKey.replace(/\|[01]\|([01])$/, '|$1')
+    const shown = paneId === LIST && isPressHeld(heldAt) ? lastShown.get(shownKey) : undefined
+    if (shown) return ((listHeldAt = heldAt), (isPressMissed = true), shown as Awaited<ReturnType<typeof next>>)
     if (held && held.shape === shape && (isTyping || (held.fresh === freshness && held.content === content && heldAt - held.at < CALM))) return ((paneId === LIST && (listHeldAt = heldAt)), held.drawing as Awaited<ReturnType<typeof next>>)
     if (paneId === LIST) drawnFiles.clear()
     // Read only for a drawing made afresh, so the running times alone ask for one again only once CALM is over (chatHooks)
@@ -1735,7 +1739,7 @@ const panelHooks = (on: On) => {
     )
     })()
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
-    lastShown.set(`${paneId}|${e.surface}`, drawing)
+    lastShown.set(heldKey.replace(/\|[01]\|([01])$/, '|$1'), drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
     return drawing
     } finally {

@@ -256,7 +256,14 @@ let downloadProgress: { version: string; pct: number; got: number; phase: string
 const progressDrawn = { shown: '', phase: '', at: 0 }
 // Update's press, from its fetch to the end of its move: the panel says Updating throughout, and offers no press in between
 let isUpdatePress = false
+// A press while only a look runs (the timed one, or Config's Check now) waits for the look to end, then acts: before, it did nothing
+const afterLook = ($: EngineInterface, act: () => void) =>
+  void (async () => {
+    for (const end = (await $.clock.now()) + 30_000; isUpdating && !isStepping && (await $.clock.now()) < end; ) await new Promise<void>(done => void $.clock.after(250, done))
+    if (!isUpdating && !isStepping) act()
+  })()
 const downloadPress = ($: EngineInterface, version: string) => {
+  if (isUpdating && !isStepping) return afterLook($, () => downloadPress($, version))
   presses += 1
   // A press while a step runs does nothing, as atStep would, and leaves the flag to the press that set it
   if (isStepping || isUpdating) return
@@ -307,6 +314,7 @@ const downloadPress = ($: EngineInterface, version: string) => {
 }
 // Install, pressed for the download the notice showed: checked against the page read now, then put in place
 const installPress = ($: EngineInterface, version: string, commit: string) => {
+  if (isUpdating && !isStepping) return afterLook($, () => installPress($, version, commit))
   presses += 1
   void atStep($, () => installStep($, version, commit))
 }
