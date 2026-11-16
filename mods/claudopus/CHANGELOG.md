@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.155 · 16 November 2026
+- A task's card no longer says "2 commands have ended" above commands still working: a command that only started programs which still run is not said to have ended, and the commands that did end are named with how each ended instead of counted.
+
 ## 0.2.154 · 16 November 2026
 - A run one task leaves going is shown on the card of the task whose command started it, never on another task's command that ran at the same moment: a code search's row no longer shows another task's "0 of 2 heads" and its memory. A run that no command names, started while two tasks' commands ran, is shown on neither.
 - The Mac's own file indexer, which ps lists in brackets as it ends, no longer shows up as runs under your tasks.

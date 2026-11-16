@@ -2063,7 +2063,9 @@ test('only runs really running are listed: a watch the engine killed at its time
   })) ?? []
   // The watches the engine killed at their limit, the failed and the finished command are gone from the tree, and no clock runs for them
   expect(shown.some(text => /\[killed\]/.test(text))).toBe(false)
-  expect(shown.some(text => /screening pass ×2|Run the fetch|Run the tidy/.test(text))).toBe(false)
+  expect(shown.some(text => /^(Wait for first screening pass ×2|Run the fetch of the list|Run the tidy up)\b(?! (failed|has finished))/.test(text))).toBe(false)
+  // (the card's own line names the two that ended since its last line, with how each ended)
+  expect(shown).toContain('Run the tidy up has finished and Run the fetch of the list failed')
   // The closing row counts them and says, in words, how many did not finish well
   expect(shown).toContain('4 commands ended · 1 failed, 2 timed out')
   // The wait still running stays, within its time
