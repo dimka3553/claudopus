@@ -8611,6 +8611,9 @@ const chatHooks = (on: On) => {
       // The hidden boxes of the admin and secret runners, drawn in the panel in every chat
       await lookBoxes($).catch(err => log($, `boxes not looked at: ${String(err)}`))
       await watchFront($).catch(err => log($, `tab in front not watched: ${String(err)}`))
+      // While a command has a row, its output is read every few seconds (lookJobs keeps to JOB_LOOK), not only as the list is followed
+      // every 20: a download rewriting its percent each second sat still for 20 seconds and read "nothing printed for 15s" (16 Nov)
+      if (jobLog.size) void lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`))
       if (seconds % 2 === 0) await lookForStarted($).catch(err => log($, `running commands not looked at: ${String(err)}`))
       if ((seconds += 1) % (LOOK_EVERY / 1000) === 0) {
         await readAnswers($).catch(err => log($, `answers from other chats not read: ${String(err)}`))
@@ -12391,15 +12394,15 @@ const panelHooks = (on: On) => {
         // A server or a watch speaks only when there is something to say, so its quiet is no fault
         : job.kind === 'server' ? ['serving', 'serving', false]
         : job.kind === 'watch' ? ['watching', 'watching', false]
-        // Any other run gives word at least every 10 seconds: past that it is silent, and from a minute that is a fault, in amber.
-        // While it gives word nothing is said of when (a run is never to be anything but active)
+        // Any other run gives word often; one quiet for three minutes says so, in amber. Before that nothing is said of when: a
+        // count of seconds beside a still percent told nothing, and runs quiet for a minute or two were all fine (16 Nov)
         // (one whose output has not been read yet is not known to be silent until a minute has passed)
         : quiet === undefined && !job.isEmpty && ran < SILENT_WARN ? ['', '', false]
         : (quiet ?? ran) >= SILENT_AFTER ?[`nothing printed for ${ago(quiet ?? ran)}`, `nothing printed ${ago(quiet ?? ran)}`, (quiet ?? ran) >= SILENT_WARN]
         : ['', '', false]
       const warn = isWarn
-      // its speed and time left only while it prints: a minute old, they are no longer how it goes
-      const isFresh = quiet !== undefined && quiet < SILENT_AFTER
+      // its speed and time left only while it prints: ten seconds old, they are no longer how it goes
+      const isFresh = quiet !== undefined && quiet < 10_000
       const guess = guessLeft(job, ran)
       const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
