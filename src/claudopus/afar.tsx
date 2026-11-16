@@ -79,7 +79,7 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
     const where = `${chatName(s)} on ${macName(s.host)}`
     for (const card of s.cards) {
       const id = remoteId(s, card.id)
-      if (card.ask && Math.abs(now - card.ask.at) < AFAR_FRESH) await tellOnce($, `ask-${id}-${card.ask.at}`, () => aloud($, 'ask', `${titleOf(card)} needs you`, `${card.ask?.text ?? ''} · ${where}`, `ask-${id}`, opens))
+      if (card.ask && Math.abs(now - card.ask.at) < AFAR_FRESH) await tellOnce($, `ask-${id}-${card.ask.at}`, () => aloud($, 'ask', `${titleOf(card)} has a question for you`, `${card.ask?.text ?? ''} · ${where}`, `ask-${id}`, opens))
       if (card.status !== 'working' && card.endedAt && now - card.endedAt < AFAR_FRESH && config.notifications !== false) {
         const item = readyOf({ id: card.id }, [card], [])
         if (item) await tellOnce($, `end-${id}`, () => alertPerson($, 'ready', item.title, `${item.what} · ${where}`, `ready-${id}`, undefined, opens))

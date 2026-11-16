@@ -727,7 +727,7 @@ test('three single lookups in a row are told to go together or to a helper; two 
     return toldOf(batch($, 'a1', [{ tool: 'Bash', input: { command }, id }]))
   }
   expect(await run('t1', 'npm test -- nose')).toBe('')
-  expect(await run('t2', 'npm test -- ears')).toContain('Two long runs of one kind (npm test)')
+  expect(await run('t2', 'npm test -- ears')).toContain('Two long commands of one kind (npm test)')
 })
 
 test('the work waits for its helpers with a command of its own: a file it waits on names the helpers running and how each is doing, and changes as one ends', async ($, on) => {
@@ -808,8 +808,8 @@ test('work whose context was compacted is handed its rules again at its next ste
   await $.session.compact({ trigger: 'auto', agentId: 'a1', messages: [{ role: 'user', text: 'one', toolUses: [] }] } as never)
   const told = await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))
   expect(told).toContain('Your context was compacted')
-  expect(told).toContain('What follows is what Claudopus tells every task')
-  expect(told).toContain('Keep it true as you work')
+  expect(told).toContain('What follows is what Claudopus tells Claude in every task')
+  expect(told).toContain('Keep the card up to date as you work')
   expect(await toldOf(batch($, 'a1', [{ tool: 'Read', input: { file_path: '/repo/a' } }, { tool: 'Read', input: { file_path: '/repo/b' } }]))).not.toContain('These are the rules now')
   // The rules change under it, saved in Config: the new text reaches it
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)

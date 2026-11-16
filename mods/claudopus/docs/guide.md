@@ -291,7 +291,7 @@ Everything Claudopus saves is in `~/.claude/claudopus`, as plain files:
 | `stats/`, `thumbs/` | Sums Stats made of Claude Code's records, and small copies of pictures shown in the panel |
 | `servers.json` | The servers `/servers` last saw |
 | `config.json` | Your settings, written by the Config tab |
-| `admin-allowed.json` | The admin commands you chose Always allow for, by Mac, each sealed. Config lists them |
+| `admin-allowed.json` | The admin commands you chose Always allow for, by Mac, each locked to that command. Config lists them |
 | `admin-grants/` | What you just allowed, for the admin tool to take once. It's gone as the command starts or its call ends. One that a call sent to the background never took stops counting after two minutes and is cleared later |
 | `welcome.json` | Whether the first-run welcome still shows |
 | `panel.json` | Whether you last opened or closed the panel, which every chat follows |

@@ -11,7 +11,7 @@ const toolHooks = (on: On) => {
     const path = `${dir}/streams/${slug(saved.name)}.md`
     if (input.brief?.trim()) await $.fs.write(`${dir}/streams/${slug(saved.name)}.md`, `${input.brief.trim()}\n`)
 
-    return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nInstructions: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` }
+    return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nNotes: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` }
   })
 
   on('tool.call', { tool: 'mcp__claudopus__recall' }, async ($, e) => {

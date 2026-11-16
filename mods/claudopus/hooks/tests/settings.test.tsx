@@ -720,7 +720,7 @@ test('Config lists each thing a person can set with what is in force, edits a te
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBe('config: Config')
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  for (const name of ['Principles', "The chat's rules", 'Task rules', 'Your name', 'Background tasks', 'Sound', 'Notifications', 'Most work', 'Long legwork', 'Heavy work'])
+  for (const name of ['Principles', "The chat's rules", 'Task rules', 'Your name', 'Background tasks', 'Sound', 'Notifications', 'Most tasks', 'Long searching and reading', 'Heavy tasks'])
     expect(await config.find({ type: 'Text', text: name })).toBeDefined()
   // Only what differs from what shipped has a Reset: here the name
   expect((await config.findAll({ type: 'Button' })).filter(one => one.props.label === 'Reset').length).toBe(1)

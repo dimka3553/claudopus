@@ -641,7 +641,7 @@ const recorderHooks = (on: On) => {
 // Work always starts as a fresh agent from a brief, never as a copy of the chat: it needs no more of the chat than the brief and
 // the saved words, and a copy would carry the whole chat on the chat's own, dearest model
 const BRIEF =
-  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "general-purpose", the model the rule names, and the task\'s instructions as the prompt. Only a message about what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
+  'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "general-purpose", the model the rule names, and the task\'s instructions as the prompt. Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
   'This chat\'s own thread only reads (Read, Grep, Glob); it changes no file and runs no command. Start a fresh agent for this: the Agent tool with subagent_type "general-purpose", the model named, and the task\'s instructions as the prompt.'
 const NO_COPY = () =>
@@ -823,16 +823,16 @@ const writesMemory = (text: string, names: readonly string[]): boolean => {
   return namesMemory(kept, names) || (names === MEMORY_PERSON && /\brelease\.local\b/.test(kept))
 }
 const NO_MEMORY =
-  "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them, with any tool."
+  "Only Claudopus writes the files chats share and answer one another through, and the update's own files: Claude never writes them with any tool."
 const NO_MEMORY_BASH = () =>
   named("Claude changes {name}'s own settings and texts (config.json, the rules and roles in the memory folder, a repo's release.local) only with the Edit or Write tool, never with a command, so the change shows on the task's card and waits for {name} to press.")
 const NO_BOXES =
-  'The password and key runners\' boxes belong to them alone: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name.'
+  'Only the password and key runners use their boxes: Claude never writes into their folder or reads their keychain entries. Ask for a password only through the admin runner, and for a key only through the secret runner the task rules name.'
 const NO_PUSH = 'Claude never pushes or merges to main itself, so two tasks never release at once: commit on your own branch and run the release runner the task rules name, from your worktree.'
 // How long the names of kept keys are trusted before they are asked again
 const SECRETS_MS = 60_000
 // The first line of what the mod adds to every brief: the work's own rules and where the chat's words are. The panel leaves it out
-const workHead = () => `What follows is what Claudopus tells every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
+const workHead = () => `What follows is what Claudopus tells Claude in every task started from a chat for ${person ? `${person}, the person` : 'the person'} you work for.`
 const PASTED = 'The middle of this message is in the file it names. Do not read that file into this chat: the agent that needs it reads it from that path.'
 const KEEP =
   "Keep every request the user made and every decision, in the user's own words where short. Keep the state of each file and what is not committed. Drop tool output."
@@ -859,7 +859,7 @@ const ASK_IN_CHAT = (title: string, ask: NonNullable<Todo['ask']>, answers: stri
     .filter(Boolean)
     .join('\n')
 const ASK_RELAY = (id: string, title: string, ask: NonNullable<Todo['ask']>, answers: string[]) =>
-  `Claude, working on the background task "${title}", asked {name} a question. {Name} sees it on the task's card and in this chat as a Claudopus notice, which you do not see: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, which {name} sees in full with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words; its card then stops showing the question.`
+  `In the background task "${title}", Claude asked {name} a question. {Name} sees it on the task's card and in this chat as a Claudopus notice, which you do not see: ${ask.text} (answers: ${answers.join(' · ')}${ask.details ? `; what it is about, which {name} sees in full with it on the card and in the notice: ${ask.details.length > DETAILS_IN_RELAY ? `${cut(ask.details, DETAILS_IN_RELAY)} (the rest is on the card)` : ask.details}` : ''}${ask.copy ? `; ${ask.isCommand ? 'the command to type' : 'the text to paste'}: ${ask.copy}` : ''}${ask.pictures?.length ? `; pictures: ${ask.pictures.join(', ')}` : ''}). {Name} already has it: do not pass it on${ask.details ? ' and do not repeat what it is about; at most say in one line that it is on the card' : ''}, do not answer it yourself, and do not start a task for it${ask.pictures?.length ? ', but begin your next reply by showing its pictures in this chat with one SendUserFile call (status "normal", display "render"), where that tool is available' : ''}. When {name} answers it in this chat, send their words to that task with SendMessage to "${id}", in their words; its card then stops showing the question.`
 // What the chat is told when an ask it was sent is answered on the card, or the work no longer needs it. The person sees the
 // notice (isYou) and the chat's model reads it with the person named
 const ASK_ANSWERED = (title: string, said: string, isYou = false) =>
@@ -947,7 +947,7 @@ const STOPPED_BY_YOU = (title: string, id: string, left: string[] = []) =>
 const STOPPED_REFUSED = (title: string) =>
   `Refused by Claudopus: {name} stopped "${title}" with Stop on its card. {Name} stopped this; do not restart it, message it or start the same task again unless {name} asks for that in a new message. Do not try another way.`
 const STOPPED_EARLIER = (titles: string[]) =>
-  `{Name} stopped these earlier with Stop on their cards: ${titles.join('; ')}. Start one again, message it or start the same task afresh only if this message asks for that.`
+  `{Name} stopped ${titles.length === 1 ? 'this' : 'these'} earlier with Stop on ${titles.length === 1 ? 'its card' : 'their cards'}: ${titles.join('; ')}. Start ${titles.length === 1 ? 'it' : 'one'} again, message it or start the same task afresh only if this message asks for that.`
 // The work is reminded after this many steps past a steer with no decision, and after this many without touching its to-dos
 const OWED_AFTER = 2
 const QUIET_STEPS = 12
@@ -5317,7 +5317,7 @@ const terminalFiles = (folder: string, home: string) => ({
     `if cd ${zshQuoted(folder)} 2>/dev/null; then`,
     "  print -P '%F{3}Claudopus typed the command below. Press Return to run it.%f'",
     'else',
-    `  print -r -- $'\\e[33mClaudopus typed the command below, but its folder wasn't found:\\e[0m '${zshQuoted(folder)}`,
+    `  print -r -- $'\\e[33mClaudopus typed the command below, but its folder was not found:\\e[0m '${zshQuoted(folder)}`,
     'fi',
     'print -rz -- "$(<"$_claudopus_here/command.txt")"',
     'unset _claudopus_here',
@@ -6670,7 +6670,7 @@ const tellAfar = async ($: EngineInterface, list: readonly Shared[], now: number
     const where = `${chatName(s)} on ${macName(s.host)}`
     for (const card of s.cards) {
       const id = remoteId(s, card.id)
-      if (card.ask && Math.abs(now - card.ask.at) < AFAR_FRESH) await tellOnce($, `ask-${id}-${card.ask.at}`, () => aloud($, 'ask', `${titleOf(card)} needs you`, `${card.ask?.text ?? ''} · ${where}`, `ask-${id}`, opens))
+      if (card.ask && Math.abs(now - card.ask.at) < AFAR_FRESH) await tellOnce($, `ask-${id}-${card.ask.at}`, () => aloud($, 'ask', `${titleOf(card)} has a question for you`, `${card.ask?.text ?? ''} · ${where}`, `ask-${id}`, opens))
       if (card.status !== 'working' && card.endedAt && now - card.endedAt < AFAR_FRESH && config.notifications !== false) {
         const item = readyOf({ id: card.id }, [card], [])
         if (item) await tellOnce($, `end-${id}`, () => alertPerson($, 'ready', item.title, `${item.what} · ${where}`, `ready-${id}`, undefined, opens))
@@ -7039,7 +7039,7 @@ const GATE_LATE = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: {nam
 const GATE_BLIND = (gate?: Pick<Gate, 'kind'>) => named(`${gateThing(gate)}: Claudopus asks {name} first, on a card in its panel, and this chat has no panel open.`)
 const GATE_UNSEALED = () => `This admin command did not run: Claudopus could not secure what was allowed in ${keptWhere()}. Run it again.`
 const NO_GATE_TOUCH = () =>
-  named('Tasks never read or write the list of admin commands {name} always allows, what {name} allowed, or the key that locks them. Only {name} adds to them, with a press on a card or in Config.')
+  named('Claude never reads or writes the list of admin commands {name} always allows, what {name} allowed, or the key that locks them. Only {name} adds to them, with a press on a card or in Config.')
 
 // What a gate asks, in words, by its kind
 const gateWhat = (gate: Gate) =>
@@ -8824,7 +8824,7 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
   const helpers = underOf(list, one.id).filter(kid => kid.status === 'working')
   const tail = helpers.length
     ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper is still' : helpers.length === 2 ? 'Both helpers are still' : `All ${helpers.length} helpers are still`} waiting.` : ''
-    : isLong(one) ? ` One command has been running for ${took(at - (one.running?.at ?? at))}.` : ''
+    : isLong(one) ? ` One step has been running for ${took(at - (one.running?.at ?? at))}.` : ''
   return `No progress for ${mins} min.${tail}`
 }
 
@@ -9379,7 +9379,7 @@ const openJobOutput = async ($: EngineInterface, job: Job) => {
   const base = `${dir}/terminal`
   const home = `${base}/output-${slug(job.id) || 'job'}-${at}`
   const path = file.startsWith('~/') ? `"$HOME"/${zshQuoted(file.slice(2))}` : zshQuoted(file)
-  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'There's no output yet. This window shows it as soon as the command prints something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
+  const script = ['#!/bin/zsh', `print -r -- $'\\e[2m'${zshQuoted(`${job.label} · ${file}`)}$'\\e[0m'`, `[[ -e ${path} ]] || print -r -- 'No output yet. This window shows it as soon as the command prints something.'`, `exec tail -n 1000 -F ${path}`, ''].join('\n')
   await $.fs.write(`${home}/output.command`, script)
   const ready = await $.process.run(['sh', '-c', 'find "$1" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} +; chmod 755 "$2"', 'sh', base, `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
   const r = ready.exitCode === 0 ? await $.process.run(['open', `${home}/output.command`]).catch(err => ({ exitCode: 1, stderr: String(err) })) : ready
@@ -9419,7 +9419,7 @@ const LOOKUP_RUN = (n: number) =>
 const SERIAL_RUNS = (what: string) =>
   `Two long commands of one kind (${what}) ran one after the other, each alone in its step. When they don't depend on each other, run them side by side: each in its own throwaway chat, worktree, terminal session or background command, or each as a helper, all started in one step.`
 const BOOK_ALONE =
-  'That step held only to-do and note calls. They cost a turn of their own: send them in the same step as your next call.'
+  'That step held only to-do and note calls. They cost a turn of their own: send them in the same step as your next working call.'
 const LOOK_NOW =
   'You committed. The second look, the pictures and the docs need nothing more than this: start them now, as helpers in the same step as your next calls, not after the rest is done.'
 
@@ -10788,7 +10788,7 @@ const toolHooks = (on: On) => {
     const path = `${dir}/streams/${slug(saved.name)}.md`
     if (input.brief?.trim()) await $.fs.write(`${dir}/streams/${slug(saved.name)}.md`, `${input.brief.trim()}\n`)
 
-    return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nInstructions: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` }
+    return { result: `- ${[saved.name, saved.repo, saved.session, saved.state, saved.summary].join(' | ')}\nNotes: ${path}${input.brief?.trim() ? ' (rewritten)' : ''}` }
   })
 
   on('tool.call', { tool: 'mcp__claudopus__recall' }, async ($, e) => {
@@ -11233,7 +11233,7 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
       >
         {waitsAtTop > 0 ? (
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 is' : `${waitsAtTop} are`} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
+          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop === 1 ? '1 thing is' : `${waitsAtTop} things are`} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} just finished` : ''}`}</ui.Text>
         ) : (
           <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} finished` : `${finishedAtTop.length} just finished`}, at the top of the panel`}</ui.Text>
         )}
@@ -13309,7 +13309,7 @@ const tabHooks = (on: On) => {
     const { Box, Text } = uiOf($, e)
     const kept = await read($, reports)
     const r = kept.find(one => paneOf(one) === e.requestId)
-    if (!r) return <Text dimColor>This result has been deleted.</Text>
+    if (!r) return <Text dimColor>This result is no longer available.</Text>
     if (!reportText.has(r.id)) reportText.set(r.id, await readOr($, `${reportPath(r)}/report.md`))
     const at = Math.min(Math.max(0, pictureAt.get(paneOf(r)) ?? 0), Math.max(0, r.files.length - 1))
     const file = r.files[at] ?? ''

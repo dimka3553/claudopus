@@ -3,10 +3,10 @@
 What changed in each version of Claudopus, newest first.
 
 ## 0.2.146 · 16 November 2026
-- Work that stopped mid-step with no report (the app restarted, the Mac slept, its run was cut off) is started again by Claudopus itself as soon as it is seen stuck, and the chat is told, instead of sitting until someone notices.
-- A lookup, and a small fix the work has proved itself, no longer waits for a second agent's check; the report says it was not checked by another. The second check starts as soon as what it checks exists, while tests and the release go on.
-- While working, work runs only the tests of the area it changed; every test runs once, in the release.
-- The chat answers what it can from what it knows or a few reads, and starts work at once for anything that needs more.
+- If a task stops partway through a step without a report (because the app restarted, the Mac slept or a command was interrupted), Claudopus restarts it as soon as it sees it stuck and tells the chat. Before, it sat there until someone noticed.
+- A lookup, or a small fix that Claude has proved with a test, no longer waits for a second agent to check it; the report says nobody else checked it. The second check starts as soon as there is something to check, while tests and the release carry on.
+- While Claude works on a task, it runs only the tests for the part it changed. Every test runs once, in the release.
+- The chat answers what it can from what it already knows or a few reads, and starts a task right away for anything that needs more.
 
 ## 0.2.145 · 16 November 2026
 - Every command on a card now has a short plain line under it. It says how far the command has got and what it is doing, and it updates as the command goes. If a command prints nothing for 10 seconds, the line says "nothing printed for 45s", in amber from one minute.

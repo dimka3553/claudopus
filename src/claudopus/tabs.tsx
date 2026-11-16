@@ -100,7 +100,7 @@ const tabHooks = (on: On) => {
     const { Box, Text } = uiOf($, e)
     const kept = await read($, reports)
     const r = kept.find(one => paneOf(one) === e.requestId)
-    if (!r) return <Text dimColor>This result has been deleted.</Text>
+    if (!r) return <Text dimColor>This result is no longer available.</Text>
     if (!reportText.has(r.id)) reportText.set(r.id, await readOr($, `${reportPath(r)}/report.md`))
     const at = Math.min(Math.max(0, pictureAt.get(paneOf(r)) ?? 0), Math.max(0, r.files.length - 1))
     const file = r.files[at] ?? ''

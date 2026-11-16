@@ -212,5 +212,5 @@ test("an ask's pictures are drawn small on its card, in the list and in Details,
   expect(await term.find({ type: 'Text', text: /Making its pictures small/ })).toBeUndefined()
   await term.unmount()
   // Only the ask's notice in the chat is logged: nothing failed
-  expect(logged.filter(line => !line.startsWith('The work "Pick a design" needs the person'))).toEqual([])
+  expect(logged.filter(line => !line.startsWith('"Pick a design" has a question for you'))).toEqual([])
 })

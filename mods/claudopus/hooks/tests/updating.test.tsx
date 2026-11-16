@@ -740,7 +740,7 @@ test('Update fetches the release and checks it against what the release publishe
   await until(() => panel.find({ type: 'Text', text: 'Claudopus 0.1.2 is out' }))
   await pressed(panel, 'update-download')
   await shownIn(panel, "Couldn't update Claudopus 0.1.2")
-  await shownIn(panel, "What was downloaded isn't what the release published, so it was thrown away. Nothing was changed: this chat still runs v0.1.0.")
+  await shownIn(panel, "What was downloaded isn't what the release published, so it was thrown away. Nothing changed: this chat still runs v0.1.0.")
   expect(await keyed(panel, 'update-install')).toBeUndefined()
   expect(gitRan).toContain('update-ref -d refs/claudopus/update')
   // A steps file that says it was downloaded, planted or left from before: the panel checks the download it names, finds it is not
@@ -812,9 +812,9 @@ test('Update pressed while a look reads the version page waits for the look to e
 const UPDATE_JARGON = /folder|checkout|fetch|forward|detached|brought|commit|\bmain\b|branch|worktree|\bgit\b|fingerprint|marketplace|~\/|\/Users\//i
 // Update never overwrites uncommitted work nor moves a main with commits of its own: it says why it could not move forward, and nothing moves
 const STAYS: { name: string; release: Release; said: string; isNewerAfterFetch?: boolean; title?: string }[] = [
-  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes of its own in files this version changes, so updating would lose them: ask a chat to set them aside, then press Try again. Nothing was changed: this chat still runs v0.1.0.' },
+  { name: 'uncommitted changes the move would overwrite', release: { ...RELEASE, overwrite: true }, said: 'Your copy of Claudopus has changes of its own in files this version changes, so updating would lose them: ask a chat to set them aside, then press Try again. Nothing changed: this chat still runs v0.1.0.' },
   { name: 'a newer version out between its fetch and its move', release: RELEASE, isNewerAfterFetch: true, title: 'Claudopus 0.1.3 is out', said: 'The bar shows the battery · and 3 more changes' },
-  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes of its own that this version doesn't have, so Update leaves it as it is. Nothing was changed: this chat still runs v0.1.0." },
+  { name: 'a main with commits of its own', release: { ...RELEASE, ownCommits: true }, said: "Your copy of Claudopus has changes of its own that this version doesn't have, so Update leaves it as it is. Nothing changed: this chat still runs v0.1.0." },
 ]
 for (const one of STAYS)
   test(`Update with ${one.name}: it says why it could not move forward, and nothing is overwritten or moved`, SLOW, async ($, on) => {

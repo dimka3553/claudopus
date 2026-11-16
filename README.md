@@ -102,7 +102,7 @@ The panel's header has these buttons (Results once there is a result):
 | --- | --- |
 | **Results** | What finished tasks found, newest first, with what's waiting for you at the top (each with Yes, No and Not now). Each one opens with its finding and pictures. |
 | **Stats** | Tokens, cost at API prices, tasks done and time saved, from Claude Code's own records. |
-| **Memory** | Opens the memory folder `~/.claude/claudopus`: your messages word for word, results, instructions for each topic, and a list of the keys you've given by name and where each is saved (never a value). |
+| **Memory** | Opens the memory folder `~/.claude/claudopus`: your messages word for word, results, notes on each topic, and a list of the keys you've given by name and where each is saved (never a value). |
 | **Config** | Every setting, and the rules (below). Each shows what is in force, and **Reset** puts it back to what shipped. |
 | **About** | What Claudopus is, the version this chat runs, what changed in each version, and links. |
 
@@ -145,7 +145,7 @@ More on each in the [guide](mods/claudopus/docs/guide.md#settings).
 ## Needs
 
 - macOS 12 or newer. Stats needs `jq`, which macOS 15 and later include.
-- Or Linux, with Claude Code in a terminal (there is no desktop app for Linux), with the same install lines. Keys are kept in files only you can read, an admin password is asked for in the panel each time, notifications need a desktop, there is no Open in Terminal, and small copies of pictures need ImageMagick. [What differs](mods/claudopus/docs/guide.md#on-linux)
+- Or Linux, with Claude Code in a terminal (there is no desktop app for Linux), with the same install lines. Keys are saved in files only you can read, an admin password is asked for in the panel each time, notifications need a desktop, there is no Open in Terminal, and small copies of pictures need ImageMagick. [What differs](mods/claudopus/docs/guide.md#on-linux)
 - Claude Code in a terminal or the desktop app. It is tested with 2.1.325; older versions may not draw everything.
 - Not under WSL, nor where your organization blocks mods. No panel in `claude -p` or cloud sessions.
 - Seen working in the macOS desktop app and in a terminal on Linux (Ubuntu 24.04); VS Code has not been tried yet. [More](mods/claudopus/docs/guide.md#needs)

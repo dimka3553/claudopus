@@ -1133,7 +1133,7 @@ test('work that reports with nothing of its own running finishes, though the eng
   // The chat, told of the press, passes the same answer on: it is not sent, so the ended work is not started a third time
   const sends = resumed.length
   const again = await $.tool.call({ tool: 'SendMessage', tool_use_id: 's1', to: 'a1', message: 'Release it' } as never)
-  expect(String((again as { deny?: unknown }).deny)).toContain('gave on that work\'s card')
+  expect(String((again as { deny?: unknown }).deny)).toContain('gave on that task\'s card')
   expect(resumed.length).toBe(sends)
   expect(await line()).toBeUndefined()
   // Words of the person's own that say something new still go
@@ -1270,7 +1270,7 @@ test('scrolled down, a finish at the top is pointed at in green above the prompt
   // With an ask waiting, the amber line says both
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't9', reason: 'answer', agentId: 'a9' } as never)
-  expect((await until(async () => band.find({ type: 'Text', text: /just finished/ })))?.text).toBe('↑ 1 is waiting for you at the top of the panel · 1 just finished')
+  expect((await until(async () => band.find({ type: 'Text', text: /just finished/ })))?.text).toBe('↑ 1 thing is waiting for you at the top of the panel · 1 just finished')
   await band.unmount()
   await down.unmount()
 })

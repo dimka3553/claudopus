@@ -137,7 +137,7 @@ test('a small card shows where the work is and a count of its to-dos; pressed, i
   expect((await pane.find({ type: 'Text', text: /^I am reading/ }))?.text).toBe('I am reading how the other model draws outlines.')
   // It hangs inside that card as one slim row of its own: its name, which opens it, joined to the card by a line that ends in a purple dot while it works
   expect((await keyed(pane, 'open-list-a2'))?.props.label).toBe('Search the docs')
-  expect((await pane.findAll({ type: 'Svg' })).filter(svg => String(svg.props.source).includes('M9 0V5Q9 10 14 10H22') && String(svg.props.source).includes('fill="#8A63F0"') && svg.props.alt === 'At work' && svg.props.isInteractive === true)).toHaveLength(1)
+  expect((await pane.findAll({ type: 'Svg' })).filter(svg => String(svg.props.source).includes('M9 0V5Q9 10 14 10H22') && String(svg.props.source).includes('fill="#8A63F0"') && svg.props.alt === 'Working' && svg.props.isInteractive === true)).toHaveLength(1)
   const plain = await $.ui.mount({ ...LIST, surface: 'terminal' } as never)
   expect((await plain.find({ type: 'Text', text: /^└─/ }))?.text).toBe('└───')
   await plain.unmount()
@@ -332,7 +332,7 @@ test('a steer is sent as written and the work is told it is one, the work is rem
   expect(String(noted.result)).toContain('call SendMessage (load it with ToolSearch if needed) with to "main"')
   expect(String(noted.result)).toContain('Start it as its own background task: Make a chart of the ears')
   expect(String(noted.result)).toContain('Also make me a chart of the ears.')
-  expect(String(noted.result)).toContain('do not do that task here')
+  expect(String(noted.result)).toContain("don't do that new one here")
   await clock.advance(10)
   expect(submitted).toHaveLength(0)
   for (let n = 0; n < 5; n += 1) await step('Bash')
@@ -363,7 +363,7 @@ test("only the person's words sent on by the chat are their steer: a helper's re
   expect(appended.at(-1)).toContain('a3: The message sent to you just now that begins "Count them again." is from the task that started you, not from the person')
   // One piece of work writes to another
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's3', to: 'a2', message: 'The nose is done, check the ears against it.', agentId: 'a1' } as never)
-  expect(appended.at(-1)).toContain('is from the work "Fix the nose", not from the person')
+  expect(appended.at(-1)).toContain('is from the task "Fix the nose", not from the person')
   // The chat's own note, which carries none of the person's words, is the chat's
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's4', to: 'a1', message: 'A fault seen from the chat: the card shows the wrong model.' } as never)
   expect(appended.at(-1)).toContain('is from the chat, not from the person')
@@ -384,7 +384,7 @@ test("only the person's words sent on by the chat are their steer: a helper's re
   expect(appended.at(-1)).toContain('a1: A message from the person is waiting for your decision')
   // The same words sent by a piece of work are still not the person's steer
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's6', to: 'a2', message: 'Make the left nostril a little wider than the right one.', agentId: 'a1' } as never)
-  expect(appended.at(-1)).toContain('is from the work "Fix the nose"')
+  expect(appended.at(-1)).toContain('is from the task "Fix the nose"')
   // Once the chat's turn is over, a message from it is its own again
   await $.turn.complete({ answer: 'Sent.', durationMs: 1, isAborted: false, turnId: 'turn-3', reason: 'answer' })
   await $.tool.call({ tool: 'SendMessage', tool_use_id: 's7', to: 'a2', message: 'Make the left nostril a little wider than the right one.' } as never)
@@ -600,7 +600,7 @@ test('work a safety flag would move to an older model is ended with a report tha
   // Where the handback does not end it, a step after is a plain last answer, and still nothing runs on the older model
   const again = await step(2, 'claude-opus-4-8')
   expect(stepped).toEqual(['claude-opus-5-5'])
-  expect(again.find(c => c.kind === 'text')?.text).toContain('an older model no work runs on')
+  expect(again.find(c => c.kind === 'text')?.text).toContain("an older model Claudopus doesn't run tasks on")
   expect((files.get(`${MEMORY}/log.md`) ?? '').split('work a1 was flagged and the app would send it to Opus 4.8').length).toBe(2)
 
   // A helper of an agent type that starts on Haiku runs on Sonnet 5.5; an older Sonnet the app moves it to is not run either

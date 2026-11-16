@@ -684,7 +684,7 @@ test('work that needs the person\'s hands asks: its card stands out first with t
   const asked = await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a2', text: 'Paste this code on the GitHub page that opened.', copy: 'ABCD-1234' } as never)
   expect(asked.result).toContain('Shown on your card')
   expect(played.length).toBeGreaterThan(0)
-  expect(notified).toContain('Check the ears needs you | Paste this code on the GitHub page that opened.')
+  expect(notified).toContain('Check the ears has a question for you | Paste this code on the GitHub page that opened.')
   const titles = (await list.findAll({ type: 'Text' })).filter(one => one.props.bold).map(one => one.text)
   expect(titles.indexOf('Check the ears')).toBeGreaterThan(-1)
   expect(titles.indexOf('Check the ears')).toBeLessThan(titles.indexOf('Hide the repo'))
@@ -1232,12 +1232,12 @@ test('every ask also shows in the chat as the mod\'s notice, never as the person
   await clock.advance(10)
   const inChat = (await until(async () => logged.find(line => line.includes('Which logo do you want?')))) ?? ''
   expect(submitted.some(line => line.includes('Which logo do you want?'))).toBe(false)
-  expect(inChat).toContain('The work "Redraw the logo" needs the person: Which logo do you want?')
+  expect(inChat).toContain('"Redraw the logo" has a question for you: Which logo do you want?')
   expect(inChat).toContain('Answers: A · B, or reply in your own words, here or on its card.')
   expect(inChat).toContain('Pictures: /w/shots/a.png, /w/shots/b.png')
   // The chat's model reads the ask, and how to pass an answer on, in a row the person does not see
   expect(inChat).not.toContain('SendMessage')
-  const relay = appended.find(line => line.startsWith('undefined: The background work "Redraw the logo" asked the person')) ?? ''
+  const relay = appended.find(line => line.startsWith('undefined: In the background task "Redraw the logo", Claude asked the person')) ?? ''
   expect(relay).toContain('Which logo do you want? (answers: A · B; pictures: /w/shots/a.png, /w/shots/b.png)')
   expect(relay).toContain('do not pass it on')
   expect(relay).toContain('SendUserFile')
@@ -1314,8 +1314,8 @@ test('an ask carries what it is about, whole, on the small card, in Details and 
   await clock.advance(10)
   const notice = (await until(async () => logged.find(line => line.includes('Release PR 54 to production?') && line.includes('What it is about')))) ?? ''
   expect(notice).toContain(`Release PR 54 to production?\nWhat it is about:\n${differences.replaceAll('**', '')}\nAnswers: Release it · Not now`)
-  const relay = [...appended].reverse().find(line => line.startsWith('undefined: The background work "Fix the wallet" asked the person') && line.includes('Release PR 54 to production?')) ?? ''
-  expect(relay).toContain(`what it is about, shown to the person whole with it on the card and in the notice: ${differences}`)
+  const relay = [...appended].reverse().find(line => line.startsWith('undefined: In the background task "Fix the wallet", Claude asked the person') && line.includes('Release PR 54 to production?')) ?? ''
+  expect(relay).toContain(`what it is about, which the person sees in full with it on the card and in the notice: ${differences}`)
   // The chat is told not to say it again: the person has just read it
   expect(relay).toContain('do not repeat what it is about')
   // A pressed answer still matches the ask that carries details
@@ -1529,7 +1529,7 @@ test('the box words what the runners ask from its fields: a key by name, a Mac b
   // A reason it does not know is left out
   expect(all).toContain("Claudopus needs OPENAI_KEY. It is saved only in this Mac's keychain. Claude uses it by name, and it is hidden in anything a command prints.")
   expect(all?.join('\n')).not.toContain('Apple')
-  expect(all).toContain('Name of the key to save, such as GITHUB_TOKEN. Work will use it by this name.')
+  expect(all).toContain('Name of the key to save, such as GITHUB_TOKEN. Claude will use it by this name.')
   await settle()
 })
 
@@ -1940,7 +1940,7 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect((await labelled(list, CLOSE)).length).toBe(1)
   expect((await labelled(list, OPEN)).length).toBe(0)
   // The panel scrolled away from its top with the box open: the bar still points at what waits there
-  const MARK = '↑ 1 is waiting for you at the top of the panel'
+  const MARK = '↑ 1 thing is waiting for you at the top of the panel'
   const scrolled = async (offset: number) => (await list.unmount(), (list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset, bodyRows: 20 } }, surface: 'desktop' } as never)))
   await scrolled(40)
   expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined()

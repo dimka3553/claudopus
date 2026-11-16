@@ -17,7 +17,7 @@ export const TEXTS: Text[] = [
 
 export const ROLES = [
   { key: 'work', name: 'Most tasks', shipped: 'opus' },
-  { key: 'legwork', name: 'Long legwork', shipped: 'sonnet' },
+  { key: 'legwork', name: 'Long searching and reading', shipped: 'sonnet' },
   { key: 'heavy', name: 'Heavy tasks', shipped: 'fable' },
 ] as const
 export type Role = (typeof ROLES)[number]['key']
@@ -235,7 +235,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
       {band(
         ui,
         'config-work',
-        'Work',
+        'Tasks',
         '',
         <Box flexDirection="column" gap={1}>
           {toggle('agents', 'Background tasks', 'Each message starts a task that Claude does in the background. Off, every chat does the task itself. Read when a chat starts.')}
@@ -260,7 +260,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
           {item(
             'config-admin-mode',
             'Ask before an admin command',
-            `Claude runs a command as administrator only after you allow it on the task's card: each time, or once for a task and its helpers until it ends. With Never ask, Claudopus runs them without asking on the card. Whatever you choose, each one also asks for the admin password, which is never kept: macOS asks in its own box on this Mac's screen, and the panel asks over SSH, on Linux or from another device.${shown.gate.unsealed ? ` config.json says "${shown.gate.unsealed}", but it was not chosen here, so every command asks.` : ''}`,
+            `Claude runs a command as administrator only after you allow it on the task's card: each time, or once for a task and its helpers until it ends. With Never ask, Claudopus runs them without asking on the card. Whatever you choose, each one also asks for the admin password, which is never saved: macOS asks in its own box on this Mac's screen, and the panel asks over SSH, on Linux or from another device.${shown.gate.unsealed ? ` config.json says "${shown.gate.unsealed}", but it was not chosen here, so every command asks.` : ''}`,
             <Select key="config-admin-mode-pick" options={ADMIN_MODES.map(one => ({ value: one.value, label: one.label }))} value={shown.gate.mode} onSelect={value => acts.gateMode(value as AdminMode)} />,
             shown.gate.mode !== 'each' || Boolean(shown.gate.unsealed),
             () => acts.gateMode('each'),
@@ -297,7 +297,7 @@ export function configView(ui: Ui, shown: ConfigShown, acts: ConfigActs, band: B
         '',
         <Box flexDirection="column" gap={1}>
           {toggle('sound', 'Sound', 'A short chime.')}
-          {toggle('notifications', 'Notifications', 'A notification naming the task, also when it was stopped or failed.')}
+          {toggle('notifications', 'Notifications', 'A notification naming the task, also when it is stopped or fails.')}
         </Box>,
       )}
       {band(

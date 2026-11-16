@@ -729,8 +729,8 @@ test('asked each time: the call is held, its card shows the exact command and th
   expect(await list.find({ type: 'Text', text: "Allow: it runs with admin rights. Deny: it doesn't run, and Claudopus tells Claude." })).toBeDefined()
   expect((await labels()).filter(one => ['Allow once', 'Always allow this command', 'Deny'].includes(one))).toEqual(['Allow once', 'Always allow this command', 'Deny'])
   // Said in the chat and as a notification; its Details tab has it at the top
-  expect(logged.some(line => line.includes('The work "Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts') && line.includes('Nothing typed in the chat allows it'))).toBe(true)
-  expect(notified).toContain('Fix the hosts file needs you | Wants to run an admin command on this Mac: chmod 644 /etc/hosts')
+  expect(logged.some(line => line.includes('The task "Fix the hosts file" wants to run an admin command on this Mac: chmod 644 /etc/hosts') && line.includes('Nothing typed in the chat allows it'))).toBe(true)
+  expect(notified).toContain('Fix the hosts file has a question for you | Wants to run an admin command on this Mac: chmod 644 /etc/hosts')
   const details = await $.ui.mount({ ...LIST, requestId: 'work-a1', surface: 'desktop' } as never)
   expect(await details.find({ type: 'Text', text: 'Needs you now' })).toBeDefined()
   await press('gate-b1-0-once')
@@ -862,9 +862,9 @@ test('work never reads or writes the allowed list, the grants or the key that se
     'security add-generic-password -U -s claudopus-admin-gate -a seal -w abc',
     'security delete-generic-password -s claudopus-admin-gate -a seal',
   ])
-    expect((await bash(`t${command.length}`, command)).deny).toContain('only Sam adds to them')
+    expect((await bash(`t${command.length}`, command)).deny).toContain('Only Sam adds to them')
   for (const tool of ['Write', 'Edit'])
-    for (const path of [ALLOWED, `${GRANTS}g.json`]) expect((await $.tool.call({ tool, tool_use_id: `w-${tool}-${path.length}`, file_path: path, content: '{}', agentId: 'a1' } as never)).deny).toContain('only Sam adds to them')
+    for (const path of [ALLOWED, `${GRANTS}g.json`]) expect((await $.tool.call({ tool, tool_use_id: `w-${tool}-${path.length}`, file_path: path, content: '{}', agentId: 'a1' } as never)).deny).toContain('Only Sam adds to them')
   expect(files.has(ALLOWED)).toBe(false)
   // The memory folder's other files are work's to write as before
   expect((await $.tool.call({ tool: 'Write', tool_use_id: 'w9', file_path: `${MEMORY}/streams/x.md`, content: 'x', agentId: 'a1' } as never)).deny).toBeUndefined()
@@ -945,7 +945,7 @@ test('never asked, as Config sealed it: the call goes through as it was made, wi
 
 test('with no panel to ask on, an admin command is refused, never run unasked', async ($, on) => {
   const { press, bash, admins } = await gated($, on, {}, { headless: true })
-  expect((await bash('b1', `${ADMIN} here 'id -u'`)).deny).toContain('no panel is drawn for this chat')
+  expect((await bash('b1', `${ADMIN} here 'id -u'`)).deny).toContain('this chat has no panel open')
   expect(admins).toEqual([])
 })
 
@@ -955,7 +955,7 @@ test('F-008 F-009 · no admin password is kept: Config has no setting to keep on
   expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').adminPassword === undefined ? true : undefined))).toBe(true)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   expect(await config.find({ type: 'Text', text: 'Admin password' })).toBeUndefined()
-  expect(await config.find({ type: 'Text', text: /each one also asks for the admin password, which is never kept/ })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: /each one also asks for the admin password, which is never saved/ })).toBeDefined()
   // Another Mac's admin command is held on its card as this Mac's is: its password is asked when it runs
   const call = bash('b2', `${ADMIN} m4 'id -u'`)
   expect(await held('b2')).toBeDefined()
@@ -1107,7 +1107,7 @@ test('scrolled down a long list, the line above the prompt says how many wait at
   const at = 1_700_000_000_000
   files.set(`${MEMORY}/live/chat-b.json`, longList(at, { w5: at - 2000, w6: at - 1000 }))
   await clock.advance(5000)
-  const MARK = '↑ 2 are waiting for you at the top of the panel'
+  const MARK = '↑ 2 things are waiting for you at the top of the panel'
   for (const surface of ['desktop', 'terminal']) {
     const down = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 40, bodyRows: 20 } }, surface } as never)
     expect(await until(async () => down.find({ type: 'Text', text: 'run step six' }))).toBeDefined()

@@ -704,7 +704,7 @@ test('Stats opens in front from its button beside Results, and adds up this chat
   expect(await value('10m')).toBe('time saved')
   expect(await value('Tasks done')).toBe('2')
   expect(await value('To-dos done')).toBe('2')
-  expect(await value('Work added up')).toBe('30m')
+  expect(await value('Task time added up')).toBe('30m')
   expect(await value('On the clock')).toBe('20m')
   expect(await value('Saved by running side by side')).toBe('10m')
   // From the person's message to the chat's last response or tool result before the next message: 20 seconds here

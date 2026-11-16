@@ -675,8 +675,8 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(first.context?.join('\n')).toContain('Topics so far')
   expect(first.context?.join('\n')).toContain(`This chat's saved words: ${MEMORY}/words/engine-id.md`)
   expect(first.context?.join('\n')).toContain('start a fresh agent')
-  expect(first.context?.join('\n')).toContain('Only a message about what a listed task is already doing')
-  expect(first.context?.join('\n')).toContain('A fault, a question or a new ask gets its own agent')
+  expect(first.context?.join('\n')).toContain('Only a message that changes what a listed task is already doing')
+  expect(first.context?.join('\n')).toContain('A fault, a question or a new request gets its own agent')
 
   // One sent while the chat is mid-turn is its own piece of work too
   const second = await $.prompt.submit({ text: 'and the nose', wait: false, origin: composer, turnId: 'turn-1' })
@@ -856,7 +856,7 @@ test('work never writes into the boxes folder or reads the boxes\' keychain serv
   expect(bin).not.toBe('')
   let n = 0
   const call = async (input: Record<string, unknown>, agentId = 'w1') => (await $.tool.call({ tool: 'Bash', tool_use_id: `b${n++}`, agentId, ...input } as never)).deny
-  const refused = async (command: string, agentId?: string) => expect([command, await call({ command }, agentId)]).toEqual([command, expect.stringContaining('theirs alone')])
+  const refused = async (command: string, agentId?: string) => expect([command, await call({ command }, agentId)]).toEqual([command, expect.stringContaining('Only the password and key runners use their boxes')])
   const runs = async (command: string) => expect([command, await call({ command })]).toEqual([command, undefined])
   // A direct command and redirections, in every spelling of the folder
   await refused(`echo '{"id":"x","kind":"admin","host":"here"}' > ~/.claude/claudopus/boxes/x.json`)
@@ -908,7 +908,7 @@ test('work never writes into the boxes folder or reads the boxes\' keychain serv
   await refused('bash /repo/plant.sh', 'helper-1')
   // A file written or edited into the folder
   for (const [tool, path] of [['Write', '/home/sam/.claude/claudopus/boxes/a.json'], ['Edit', '~/.claude/claudopus/boxes/b.json'], ['Write', '/home/sam/.claude/claudopus/./boxes'], ['Write', '/home/sam/.Claude/claudopus/Boxes/a.json'], ['Write', '/home/sam/.claude/plugins/cache/claudopus/claudopus/9.9.9/bin/secret']] as const)
-    expect([tool, path, (await $.tool.call({ tool, tool_use_id: `b${n++}`, agentId: 'w1', file_path: path, content: '{}', old_string: 'a', new_string: 'b' } as never)).deny]).toEqual([tool, path, expect.stringContaining('theirs alone')])
+    expect([tool, path, (await $.tool.call({ tool, tool_use_id: `b${n++}`, agentId: 'w1', file_path: path, content: '{}', old_string: 'a', new_string: 'b' } as never)).deny]).toEqual([tool, path, expect.stringContaining('Only the password and key runners use their boxes')])
   // The runners themselves, and what only looks near the folder or the service, still run
   files.set('keychain:API_KEY', 'sk-live-123456')
   await runs(`${bin}/secret API_KEY here 'curl -H "Authorization: Bearer $API_KEY" https://api.example.com'`)
@@ -989,7 +989,7 @@ test("a chat's own thread may only read, start agents and talk to them; an agent
   await $.session.start(start)
   const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
   expect(told.context?.join('\n')).toContain('Answer a question that a few reads settle here')
-  expect(told.context?.join('\n')).toContain('Anything that changes a file, runs a command or takes more than a few reads')
+  expect(told.context?.join('\n')).toContain('For anything that changes a file, runs a command or takes more than a few reads')
 
   const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'ls' } as never)
   expect(refused.deny).toContain('Start a fresh agent')
@@ -1145,7 +1145,7 @@ test('a chat the app runs on another Mac over ssh tells every conversation that 
   const ours = told.instructionFiles?.[0]?.content ?? ''
   expect(ours.startsWith(PRINCIPLES.trimEnd())).toBe(true)
   expect(ours).toContain('## This chat runs on another Mac')
-  expect(ours).toContain('a sign-in by device code or a link that works opened on my device, never a browser, window, dialog or keychain prompt on this Mac')
+  expect(ours).toContain('a sign-in by device code, or a link that works when I open it on my device. Never a browser, window, dialog or keychain prompt on this Mac')
   expect(ours).not.toContain('{name}')
   // A second copy of the mod that already added them, rule and all, does not make them go out twice
   const twice = await $.prompt.context({ blocks: [], instructionFiles: [{ path: '/other/copy/rules/CLAUDE.md', kind: 'user', content: ours }] })

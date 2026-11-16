@@ -61,10 +61,10 @@ test('in the copy kept on this Mac, work Claude Code started again itself is onl
   const lines = await cardText($ as never, /^Interrupted at /)
   const said = (end: string) => lines.find(one => one.text?.endsWith(end))
   expect(lines.map(one => one.text?.replace(/\d\d:\d\d/g, 'hh:mm')).sort()).toEqual([
-    "Interrupted at hh:mm because the chat's process ended; running again since hh:mm.",
     "Interrupted at hh:mm because the chat's process ended; it couldn't be restarted.",
+    "Interrupted at hh:mm because the chat's process ended; running again since hh:mm.",
   ])
-  expect(said('could not be started again.')?.color).toBe('#E5A50A')
+  expect(said("it couldn't be restarted.")?.color).toBe('#E5A50A')
   expect(lines.find(one => one.text?.includes('running again'))?.color).toBeUndefined()
   expect(logged.some(line => line.includes('has been running on this Mac by itself') && line.includes("couldn't be restarted"))).toBe(true)
 })

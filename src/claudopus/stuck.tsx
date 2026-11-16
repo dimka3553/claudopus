@@ -133,7 +133,7 @@ const stuckLine = (list: Todo[], one: Todo, at: number) => {
   const helpers = underOf(list, one.id).filter(kid => kid.status === 'working')
   const tail = helpers.length
     ? helpers.every(isLong) ? ` ${helpers.length === 1 ? 'Its helper is still' : helpers.length === 2 ? 'Both helpers are still' : `All ${helpers.length} helpers are still`} waiting.` : ''
-    : isLong(one) ? ` One command has been running for ${took(at - (one.running?.at ?? at))}.` : ''
+    : isLong(one) ? ` One step has been running for ${took(at - (one.running?.at ?? at))}.` : ''
   return `No progress for ${mins} min.${tail}`
 }
 

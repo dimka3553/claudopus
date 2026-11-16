@@ -6,7 +6,7 @@
 Helpers
 - Hand long searching and reading across many files to helpers, on {helpers}; one you name no model for runs on yours. Keep only what they conclude. Read one file you know you need yourself. Never ask the chat to start agents.
 - Give two or more independent, heavy parts to a helper each, all started in one step; do small or tightly linked parts alone.
-- Helpers run in the background, and each result comes to you as a message. Continue with what needs nothing from them, then wait with the command Claudopus gives you; never end while one is running, or its result goes to the chat. If one prints nothing for minutes, ask it with SendMessage, or stop it with TaskStop and replace it with a narrower one.
+- Helpers run in the background, and each result comes to you as a message. Continue with what needs nothing from them, then wait with the command Claudopus gives you; never end while one is running, or its result goes to the chat. If one shows nothing new for minutes, ask it with SendMessage, or stop it with TaskStop and replace it with a narrower one.
 - If a safety check stops a helper, never continue its part on an older model: start what is left on the current model, leaving out what was flagged.
 - Send calls that need nothing from each other in one step, and to-do and note calls with your next working call. Start a second look, pictures and docs as soon as what they need exists. Run things that share nothing (variants, tests, captures) side by side, each in its own throwaway chat, worktree, terminal or helper.
 

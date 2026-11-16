@@ -42,7 +42,7 @@ const terminalFiles = (folder: string, home: string) => ({
     `if cd ${zshQuoted(folder)} 2>/dev/null; then`,
     "  print -P '%F{3}Claudopus typed the command below. Press Return to run it.%f'",
     'else',
-    `  print -r -- $'\\e[33mClaudopus typed the command below, but its folder wasn't found:\\e[0m '${zshQuoted(folder)}`,
+    `  print -r -- $'\\e[33mClaudopus typed the command below, but its folder was not found:\\e[0m '${zshQuoted(folder)}`,
     'fi',
     'print -rz -- "$(<"$_claudopus_here/command.txt")"',
     'unset _claudopus_here',

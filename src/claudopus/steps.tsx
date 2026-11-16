@@ -31,7 +31,7 @@ const LOOKUP_RUN = (n: number) =>
 const SERIAL_RUNS = (what: string) =>
   `Two long commands of one kind (${what}) ran one after the other, each alone in its step. When they don't depend on each other, run them side by side: each in its own throwaway chat, worktree, terminal session or background command, or each as a helper, all started in one step.`
 const BOOK_ALONE =
-  'That step held only to-do and note calls. They cost a turn of their own: send them in the same step as your next call.'
+  'That step held only to-do and note calls. They cost a turn of their own: send them in the same step as your next working call.'
 const LOOK_NOW =
   'You committed. The second look, the pictures and the docs need nothing more than this: start them now, as helpers in the same step as your next calls, not after the rest is done.'
 
