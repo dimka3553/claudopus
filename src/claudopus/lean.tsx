@@ -14,7 +14,7 @@ const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEd
 const KINDS = {
   task: { description: 'A background task the chat starts: builds, fixes, researches, releases. Starts with only its working tools.', tools: WORK_TOOLS, prompt: AGENT_HEAD },
   quick: {
-    description: 'A fresh task for a clearly stated job: a change described exactly, a push and a look at the build, a merge, a look-up. Starts small, on Sonnet.',
+    description: 'A fresh task for a clearly stated job: a change described exactly, a push and a look at the build, a merge, a look-up. Starts small, on the model for clearly stated jobs.',
     tools: WORK_TOOLS,
     prompt: `${AGENT_HEAD}\nThis is a clearly stated job: do what the instructions say, in as few steps as it takes.`,
   },
@@ -44,7 +44,7 @@ const registerKinds = async ($: EngineInterface) => {
       .catch(err => log($, `agent kind ${name} not registered: ${String(err)}`))
 }
 // What a start of one of the mod's kinds becomes: a reader on the legwork model (Sonnet as shipped); a check on a model never weaker than
-// what built it, nor below Opus; a quick task on the legwork model unless the chat named one
+// what built it, nor below Opus; a quick task always on the model for clearly stated jobs, whatever the chat named
 const kindStart = (e: { subagentType?: string; model?: string; parentModel?: string; fork: boolean; workflow?: unknown; resume?: unknown }): { subagentType?: string; model?: string } => {
   if (e.fork || e.workflow || e.resume) return {}
   const kind = KIND_OF(e.subagentType ?? '')
@@ -56,8 +56,9 @@ const kindStart = (e: { subagentType?: string; model?: string; parentModel?: str
     const least = rankOf(parent) >= RANK.Opus! ? parent : (newestModel('Opus') ?? 'opus')
     return { model: asked && asked !== 'inherit' && rankOf(rightModel(asked) ?? asked) >= rankOf(least) ? asked : least }
   }
-  // never the chat's own model by `inherit`: a quick task started so in a Fable chat would cost four times as much
-  if (kind === 'quick') return { model: asked && asked !== 'inherit' ? asked : modelsIn(models, lean).legwork }
+  // never the chat's own model or another it names: a quick task on Fable in a Fable chat costs four times as much (judgment work is a
+  // claudopus:task, on the model the chat names)
+  if (kind === 'quick') return { model: clearModel(models, lean) }
   return {}
 }
 
@@ -196,7 +197,7 @@ const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['as
     `Do the last step of the task "${titleOf(one)}", which {name} just gave the go-ahead for by pressing "${said}" (to: ${ask.text}): ${step}\nWork in ${folder}${branch && branch !== 'HEAD' ? `, on its branch ${branch}` : ''}. It is this one step: do only that, then report in one or two lines what happened. If it fails in a way that needs what the task that built it knows (a merge conflict, a failing check, a question only it can answer), send that task, "${one.id}", a message with SendMessage saying what failed and the last lines of the output, and end; do not fix it yourself.`,
   )
   await stepLine($, one.id, `On your "${said}", a small fresh task does the last step: ${cut(step, 160)}`)
-  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: modelsIn(models, lean).legwork, cwd: folder } }
+  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } }
   wakes.push(wake)
   void $.clock.after(WAKE_WAIT, () => {
     const at = wakes.indexOf(wake)

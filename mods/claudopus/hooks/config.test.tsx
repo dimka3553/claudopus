@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { fillModels, modelsOf, parse, sectionsOf } from './config'
+import { fillModels, leanOf, modelsOf, modelsShort, parse, sectionsOf } from './config'
 
 test('as shipped, the models rule says what the chat was told before Config existed, with clearly stated jobs on Sonnet', async () => {
   const m = modelsOf({})
@@ -24,6 +24,17 @@ test('as shipped, the models rule says what the chat was told before Config exis
   expect(fillModels('{helpers}', picked)).toBe('Haiku 5.5, `model: "haiku"`, and never on an older model')
   expect(picked.heavy).toBe('fable')
   expect(parse('{ broken')).toEqual({})
+})
+
+test('the chat hands a clearly stated job to a quick task on Sonnet, on Fable only when every task runs on it, and never to a copy of itself', async () => {
+  const m = modelsOf({})
+  const shipped = fillModels('{lanes}\n{models}', m)
+  expect(shipped).toContain('`subagent_type: "claudopus:quick"` and `model: "sonnet"`')
+  expect(shipped).toContain('Never start a copy of this chat')
+  const all = fillModels('{lanes}\n{models}', m, leanOf({ lean: { fable: 'all' } }))
+  expect(all).toContain('`subagent_type: "claudopus:quick"` and `model: "fable"`')
+  expect(all).not.toContain('A clearly stated job, and long legwork such as indexing, runs on Sonnet')
+  expect(modelsShort(m)).toContain('"sonnet" for a clearly stated job (subagent_type "claudopus:quick")')
 })
 
 test('the principles read by their parts, numbered or bulleted', async () => {

@@ -302,7 +302,7 @@ const flaggedSteps = new Map<string, number>()
 // Work a safety check flagged once: its steps on an older model are never sent to a newer one, whatever it was started on
 const flaggedOnce = new Set<string>()
 // The model an agent is started on in place of the one asked, or why it is not started; nothing when it may start as asked
-const startModel = (e: { model?: string; parentModel?: string; parentAgentId?: string; description?: string; fork: boolean; workflow?: unknown }): { model?: string; deny?: string } => {
+const startModel = (e: { model?: string; subagentType?: string; parentModel?: string; parentAgentId?: string; description?: string; fork: boolean; workflow?: unknown }): { model?: string; deny?: string } => {
   const parentModel = String(e.parentModel ?? '')
   // A copy runs on its parent's model, which no hook changes
   if (e.fork) return rightModel(parentModel) ? { deny: WRONG_MODEL(parentModel) } : {}
@@ -310,8 +310,9 @@ const startModel = (e: { model?: string; parentModel?: string; parentAgentId?: s
   const parent = rightModel(parentModel) ?? parentModel
   // An alias or `inherit` the engine resolves to the newest, or the parent's; an older id or Haiku goes to its family's newest
   let model = asked && asked !== 'inherit' ? (rightModel(asked) ?? '') : rightModel(parentModel) && (!asked || asked === 'inherit') ? parent : ''
-  // A check of what was built never runs weaker than what started it, nor below Opus
-  if (isChecker(e.description ?? '')) {
+  // A check of what was built never runs weaker than what started it, nor below Opus. A quick task is a clearly stated job, however its
+  // title reads ("Push and check the build"), and keeps its kind's model
+  if (e.subagentType !== 'claudopus:quick' && isChecker(e.description ?? '')) {
     const runs = model || (asked && asked !== 'inherit' ? asked : parent)
     const least = rankOf(parent) >= RANK.Opus! ? parent : (newestModel('Opus') ?? 'opus')
     if (rankOf(runs) < rankOf(least)) model = least

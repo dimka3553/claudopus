@@ -145,6 +145,7 @@ declare global {
   export import stuckOf = M5.stuckOf
   export import Answer = M5.Answer
   export import Off = M5.Off
+  export import clearModel = M6.clearModel
   export import configView = M6.configView
   export import editing = M6.editing
   export import fillModels = M6.fillModels

@@ -136,7 +136,7 @@ const panelHooks = (on: On) => {
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
     const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD))
-    // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of the chat always does.
+    // A piece of work's context window is this chat's when it runs on this chat's model, as a copy (of a task's) always does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)

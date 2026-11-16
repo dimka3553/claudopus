@@ -63,8 +63,8 @@ Claudopus never updates by itself. Every hour (or as often as Config says), it c
 
 - You send a message. The chat answers in one line and starts a background task for it. Then the chat is free for your next message.
 - If your message is about a task that's already running, the chat sends it to that task.
-- If a few files can answer your question, the chat reads them and answers it itself. The chat changes no file. It runs only a single command that changes nothing (a push of its branch, a fetch, a look with git or gh), in the background. Tasks do the rest.
-- A job the chat can state clearly (a described change, a push and a look at the build, a merge, a look-up) goes to a fresh task on Sonnet with written instructions. Work that needs judgment goes to a fresh task on Opus. The chat never hands a job to a copy of itself: measured on 108 jobs, a copy cost 1.3 to 5.8 times as much and was no faster.
+- If a few files can answer your question, the chat reads them and answers it itself. The chat changes no file. It runs only a single command that changes no file (a push of its branch, a fetch, a look with git or gh), in the background. Tasks do the rest.
+- A job the chat can state clearly (a described change, a push and a look at the build, a merge, a look-up) goes to a fresh task on Sonnet with written instructions. Work that needs judgment goes to a fresh task on Opus. The chat never hands a job to a copy of itself: measured on 108 jobs, a copy cost 1.4 to 5.9 times as much as the Sonnet task, which was fastest in 32 of 36 cases and within 9 seconds in the rest.
 - For long searching and reading, Claude starts helpers: more agents that run alongside it. Claude keeps going while they run.
 
 ### The panel and its cards

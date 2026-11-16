@@ -9,7 +9,7 @@ import type { Cache, FileSum, Meta, MemoryPart, Run, Scope } from './stats'
 import { broughtBackBy, isResultId, marksOf, merged, markThere, parsedMeta, PLACE, PULL, pullThere, PUSH, PUSH_THERE, rehome, RESULTS_A_TRIP, RESULTS_EVERY, RESULTS_LOOK, resultsOf } from './results'
 import { ANSWER_KEPT, ANSWERS, answerOf, APP_ID, BEAT, BRIDGE_ID, remoteId, cardsOf, helpersOf, chatName, chatSide, clockOf, FETCH_EVERY, fetchedOf, fetchedOpen, openChatOf, headLine, headMood, isKey, isMac, keyOf, linkOf, LIVE_DIR, LOOK_EVERY, OPEN_EVERY, openTake, opensOf, MACS, macName, openUrl, ordered, OUTBOX, PUSHED, pushHead, pushOf, shareable, shareableHelpers, sharedOf, signOf, STALE, trip, tripOf, OFF_LOOK, offOf, APP_LOG_LOOK, stuckOf } from './shared'
 import type { Answer, Off } from './shared'
-import { configView, editing, fillModels, leanOf, modelsIn, modelsOf, modelsShort, parse, TEXTS } from './config'
+import { clearModel, configView, editing, fillModels, leanOf, modelsIn, modelsOf, modelsShort, parse, TEXTS } from './config'
 import type { Config, ConfigShown, Lean, LeanKey, Models, Role } from './config'
 import type { Fail, LookIo, Notice, Published, Source, Steps } from './update'
 import { copyOf, download, FAILS, folderMarketplace, folderReady, install, installedFrom, isNewer, isUpdateDue, isVersion, lookEveryOf, LOOK_EVERY_HOURS, missedOn, noticeOf, publishedOf, RELOAD_AGAIN, RELOAD_EVERY, scopeOf, sizeText, stampOf, stepsOf, UPDATE_AFTER, UPDATE_LOOK, updatedArt, updatedFrom, updatedLook, UPDATED_FOR, UPDATED_LATE, UPDATED_SAYS, VERSION_PAGE, VERSION_WAIT, versionOnPage } from './update'
@@ -329,7 +329,7 @@ const flaggedSteps = new Map<string, number>()
 // Work a safety check flagged once: its steps on an older model are never sent to a newer one, whatever it was started on
 const flaggedOnce = new Set<string>()
 // The model an agent is started on in place of the one asked, or why it is not started; nothing when it may start as asked
-const startModel = (e: { model?: string; parentModel?: string; parentAgentId?: string; description?: string; fork: boolean; workflow?: unknown }): { model?: string; deny?: string } => {
+const startModel = (e: { model?: string; subagentType?: string; parentModel?: string; parentAgentId?: string; description?: string; fork: boolean; workflow?: unknown }): { model?: string; deny?: string } => {
   const parentModel = String(e.parentModel ?? '')
   // A copy runs on its parent's model, which no hook changes
   if (e.fork) return rightModel(parentModel) ? { deny: WRONG_MODEL(parentModel) } : {}
@@ -337,8 +337,9 @@ const startModel = (e: { model?: string; parentModel?: string; parentAgentId?: s
   const parent = rightModel(parentModel) ?? parentModel
   // An alias or `inherit` the engine resolves to the newest, or the parent's; an older id or Haiku goes to its family's newest
   let model = asked && asked !== 'inherit' ? (rightModel(asked) ?? '') : rightModel(parentModel) && (!asked || asked === 'inherit') ? parent : ''
-  // A check of what was built never runs weaker than what started it, nor below Opus
-  if (isChecker(e.description ?? '')) {
+  // A check of what was built never runs weaker than what started it, nor below Opus. A quick task is a clearly stated job, however its
+  // title reads ("Push and check the build"), and keeps its kind's model
+  if (e.subagentType !== 'claudopus:quick' && isChecker(e.description ?? '')) {
     const runs = model || (asked && asked !== 'inherit' ? asked : parent)
     const least = rankOf(parent) >= RANK.Opus! ? parent : (newestModel('Opus') ?? 'opus')
     if (rankOf(runs) < rankOf(least)) model = least
@@ -661,7 +662,7 @@ const recorderHooks = (on: On) => {
 const BRIEF =
   'Answer a question that a few reads settle here, with Read, Grep and Glob. For anything that changes a file, runs a command or takes more than a few reads: answer this message in one line and, in the same turn, start a fresh agent: Agent, subagent_type "claudopus:task", the model the rule names, and the task\'s instructions as the prompt, unless the chat\'s rules send it another way (a single command, a small job). Only a message that changes what a listed task is already doing (a change, an answer Claude is waiting for, a stop) goes to that task with SendMessage, in their words. A fault, a question or a new request gets its own agent, even when it is about the same code or card as a running task.'
 const REFUSED =
-  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this: the Agent tool with subagent_type "claudopus:task", the model named, and the task\'s instructions as the prompt.'
+  'This chat\'s own thread only reads (Read, Grep, Glob), and runs only a single command its rules allow, if any; it changes no file. Start a fresh agent for this, with the task\'s instructions as the prompt: the Agent tool with subagent_type "claudopus:quick" for a clearly stated job, else "claudopus:task", and the model named.'
 const NO_COPY = () =>
   `Claudopus never starts a task as a copy of this chat. Start a fresh agent instead: subagent_type "claudopus:quick" for a clearly stated job, "claudopus:task" for the rest, the model named (${modelsShort(models)}), and the task's instructions as the prompt.`
 // A command that would print a password or key the keychain keeps (on Linux, the files bin/keyring keeps). Work uses a kept key only through `bin/secret`, which reads it itself
@@ -8456,7 +8457,7 @@ const WORK_TOOLS = ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'NotebookEd
 const KINDS = {
   task: { description: 'A background task the chat starts: builds, fixes, researches, releases. Starts with only its working tools.', tools: WORK_TOOLS, prompt: AGENT_HEAD },
   quick: {
-    description: 'A fresh task for a clearly stated job: a change described exactly, a push and a look at the build, a merge, a look-up. Starts small, on Sonnet.',
+    description: 'A fresh task for a clearly stated job: a change described exactly, a push and a look at the build, a merge, a look-up. Starts small, on the model for clearly stated jobs.',
     tools: WORK_TOOLS,
     prompt: `${AGENT_HEAD}\nThis is a clearly stated job: do what the instructions say, in as few steps as it takes.`,
   },
@@ -8486,7 +8487,7 @@ const registerKinds = async ($: EngineInterface) => {
       .catch(err => log($, `agent kind ${name} not registered: ${String(err)}`))
 }
 // What a start of one of the mod's kinds becomes: a reader on the legwork model (Sonnet as shipped); a check on a model never weaker than
-// what built it, nor below Opus; a quick task on the legwork model unless the chat named one
+// what built it, nor below Opus; a quick task always on the model for clearly stated jobs, whatever the chat named
 const kindStart = (e: { subagentType?: string; model?: string; parentModel?: string; fork: boolean; workflow?: unknown; resume?: unknown }): { subagentType?: string; model?: string } => {
   if (e.fork || e.workflow || e.resume) return {}
   const kind = KIND_OF(e.subagentType ?? '')
@@ -8498,8 +8499,9 @@ const kindStart = (e: { subagentType?: string; model?: string; parentModel?: str
     const least = rankOf(parent) >= RANK.Opus! ? parent : (newestModel('Opus') ?? 'opus')
     return { model: asked && asked !== 'inherit' && rankOf(rightModel(asked) ?? asked) >= rankOf(least) ? asked : least }
   }
-  // never the chat's own model by `inherit`: a quick task started so in a Fable chat would cost four times as much
-  if (kind === 'quick') return { model: asked && asked !== 'inherit' ? asked : modelsIn(models, lean).legwork }
+  // never the chat's own model or another it names: a quick task on Fable in a Fable chat costs four times as much (judgment work is a
+  // claudopus:task, on the model the chat names)
+  if (kind === 'quick') return { model: clearModel(models, lean) }
   return {}
 }
 
@@ -8638,7 +8640,7 @@ const lastStep = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['as
     `Do the last step of the task "${titleOf(one)}", which {name} just gave the go-ahead for by pressing "${said}" (to: ${ask.text}): ${step}\nWork in ${folder}${branch && branch !== 'HEAD' ? `, on its branch ${branch}` : ''}. It is this one step: do only that, then report in one or two lines what happened. If it fails in a way that needs what the task that built it knows (a merge conflict, a failing check, a question only it can answer), send that task, "${one.id}", a message with SendMessage saying what failed and the last lines of the output, and end; do not fix it yourself.`,
   )
   await stepLine($, one.id, `On your "${said}", a small fresh task does the last step: ${cut(step, 160)}`)
-  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: modelsIn(models, lean).legwork, cwd: folder } }
+  const wake = { target: one.id, text: wakeText, answers: [], spawn: { prompt, description: `${cut(titleOf(one), 50)}: last step`, subagentType: 'claudopus:quick', model: clearModel(models, lean), cwd: folder } }
   wakes.push(wake)
   void $.clock.after(WAKE_WAIT, () => {
     const at = wakes.indexOf(wake)
@@ -11454,7 +11456,7 @@ const workHooks = (on: On) => {
     // Every agent starts on a current model: one named an older model or Haiku on its family's newest, a copy of an agent on an
     // older model not at all, and one left to its parent's model, when that is older, on that family's newest. A check of what was
     // built, by a helper or a workflow's agent, runs on a model never weaker than its parent's, and at least on Opus
-    // One of the mod's own kinds starts as the settings say: everything, or only its tools, and on the model its kind runs on
+    // One of the mod's own kinds starts with only its tools, on the model its kind runs on
     const kinded = isOff ? {} : kindStart(asked)
     if (kinded.subagentType || kinded.model) await log($, `an agent of kind ${asked.subagentType} starts${kinded.subagentType ? ` as ${kinded.subagentType}` : ''}${kinded.model ? ` on ${modelName(kinded.model) || kinded.model}` : ''}`)
     const start = isOff || asked.resume ? undefined : startModel({ ...asked, ...kinded })
@@ -12425,7 +12427,7 @@ const panelHooks = (on: On) => {
     const working = own.filter(one => one.status === 'working').sort((a, b) => a.startedAt - b.startedAt)
     // The running cards, with work that has just ended kept in its place for its pause; the header counts only work under way
     const shownWork = own.filter(one => one.status === 'working' || isLingering(one, at) || one.ask || one.admins?.length || one.leftSince || (one.cutAt && !one.backAt && at - one.cutAt < CUT_OLD))
-    // A piece of work's context window is this chat's when it runs on this chat's model, as a copy of the chat always does.
+    // A piece of work's context window is this chat's when it runs on this chat's model, as a copy (of a task's) always does.
     // On another model it is not known, and the card gives the tokens alone. The time comes last, so its ticking moves nothing else
     const ours = modelName(await $.session.model().catch(() => ''))
     const windowOf = (one: Todo) => (!one.chat && (one.isFork || (ours && modelName(one.model ?? '') === ours)) ? chat.window : 0)

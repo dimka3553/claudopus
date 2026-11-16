@@ -803,7 +803,9 @@ test("the mod's own kinds start the cheapest measured way: a reader and a quick 
     ['claudopus:check', { model: 'fable' }, ['fable', 'claudopus:check']],
     ['claudopus:quick', {}, ['sonnet', 'claudopus:quick']],
     ['claudopus:quick', { model: 'inherit', parentModel: 'claude-fable-5-2' }, ['sonnet', 'claudopus:quick']],
-    ['claudopus:quick', { model: 'opus' }, ['opus', 'claudopus:quick']],
+    ['claudopus:quick', { model: 'opus' }, ['sonnet', 'claudopus:quick']],
+    // a title that reads like a check (16 Nov second look: "Push and check the build" went to the parent's Fable)
+    ['claudopus:quick', { model: 'fable', description: 'Push and check the build', parentModel: 'claude-fable-5-2' }, ['sonnet', 'claudopus:quick']],
     ['claudopus:quick', { model: 'sonnet' }, ['sonnet', 'claudopus:quick']],
     ['claudopus:task', { model: 'opus' }, ['opus', 'claudopus:task']],
   ]

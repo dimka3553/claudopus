@@ -617,7 +617,7 @@ const workHooks = (on: On) => {
     // Every agent starts on a current model: one named an older model or Haiku on its family's newest, a copy of an agent on an
     // older model not at all, and one left to its parent's model, when that is older, on that family's newest. A check of what was
     // built, by a helper or a workflow's agent, runs on a model never weaker than its parent's, and at least on Opus
-    // One of the mod's own kinds starts as the settings say: everything, or only its tools, and on the model its kind runs on
+    // One of the mod's own kinds starts with only its tools, on the model its kind runs on
     const kinded = isOff ? {} : kindStart(asked)
     if (kinded.subagentType || kinded.model) await log($, `an agent of kind ${asked.subagentType} starts${kinded.subagentType ? ` as ${kinded.subagentType}` : ''}${kinded.model ? ` on ${modelName(kinded.model) || kinded.model}` : ''}`)
     const start = isOff || asked.resume ? undefined : startModel({ ...asked, ...kinded })
