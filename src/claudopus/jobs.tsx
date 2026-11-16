@@ -360,7 +360,7 @@ const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: 
     const several = left.filter(l => l.span === one.span).length > 1
     const what = several || !span.what ? leftName(one.top.command) : span.what
     adopted.add(one.top.pid)
-    added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true }])
+    added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true, ...(span.bgId ? { from: span.bgId } : {}) }])
   }
   if (!added.size) return
   await changeTodos($, cards => cards.map(one => (added.has(one.id) ? { ...one, detached: [...(one.detached ?? []).filter(d => !added.get(one.id)?.some(a => a.id === d.id)), ...(added.get(one.id) ?? [])].slice(-BG_KEPT) } : one)))

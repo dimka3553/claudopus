@@ -110,11 +110,12 @@ export type Todo = {
   // What it started detached (with nohup or setsid, its output to a log): its own words for it, since when, the command, the log
   // it writes and its process, while that runs. Kept past its end, as such a job outlives it
   // A run a command left going however it was started (a launcher's children, a job sent off with &, a pool), found by the
-  // process group its command's shell led: `isLeft`, with its log only where its output goes to a file
+  // process group its command's shell led: `isLeft`, with its log only where its output goes to a file, and `from` the background
+  // command that left it, when one did
   // The rules it was last handed after its brief, by their text's hash, and whether a compaction has taken them from its context
   rulesSent?: string
   rulesDue?: boolean
-  detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string; isLeft?: boolean }[]
+  detached?: { id: string; what: string; at: number; cmd: string; log: string; pid?: string; isLeft?: boolean; from?: string }[]
   // Work whose turn ended while what it started in the background still runs and that has not finished: since when it has waited
   // so. It is still at work, and its card says what it waits for
   waitsSince?: number
