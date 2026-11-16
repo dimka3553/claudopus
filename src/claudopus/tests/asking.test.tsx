@@ -1568,6 +1568,9 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   // button is small")
   const shape = async () => (await bar.findAll({ type: 'Button' })).filter(b => ['Send', 'Close'].includes(String(b.props.label))).map(b => [b.props.label, b.props.variant ?? null, b.props.plain ?? null])
   expect(await shape()).toEqual([['Send', 'primary', null], ['Close', null, true]])
+  // and Send is the only send: a submitLabel on the box is drawn by the desktop app as a second, small send button beside it
+  // (17 Nov, the person: "there are two send buttons. Can you remove the small send button and just keep the big one?")
+  expect('submitLabel' in ((await boxesIn(bar))[0]?.props ?? {})).toBe(false)
   expect((await boxesIn(list)).length + (await boxesIn(details)).length).toBe(0)
   expect(await says(list, /^✎ Type it in the box above the chat$/)).toBe(true)
   expect((await labelled(list, CLOSE)).length).toBe(1)

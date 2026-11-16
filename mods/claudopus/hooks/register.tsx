@@ -12496,7 +12496,8 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
     </ui.Box>
   ) : null
 // The reply box the person opened from a card (asking.tsx, openReply), in the bar above the prompt: one row, the work the reply goes
-// to, the box, Send, the big one, and Close, small, which takes the row away again with what was typed kept for its card. Nothing in the row follows the
+// to, the box, Send, the big one, and Close, small, which takes the row away again with what was typed kept for its card. The box
+// names no submitLabel: the desktop app draws one as a second, small send button beside it, and Enter sends without it. Nothing in the row follows the
 // panel's scrolling. The box is the card's own: the same answer, and the same box through a new question of its work, until the
 // person closes or moves it. It takes the cursor when the person clicks anywhere in the bar (autoFocus)
 const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
@@ -12513,7 +12514,6 @@ const barReply = ($: EngineInterface, ui: Ui, one: Todo) => {
             key={barBoxKey(one.id)}
             placeholder="Type your reply"
             value={draftDrawn(draft)}
-            submitLabel="send"
             autoFocus
             onInput={value => void (drafts.set(draft, value), keepDraft($, draft, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
             onSubmit={send}
