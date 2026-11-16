@@ -5770,32 +5770,49 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
 // card then waits on the person again). An answer that did a last step, such as a release, has no way back
 const canTakeBack = (one: Todo, now: number) => {
   const sent = heldAnswer(one, now)
-  return Boolean(sent?.asked && !sent.isHeld && sent.to !== 'other' && sent.to !== 'sending' && !one.ask && !one.chat)
+  // Only while the card still says it (sentLine), never for an answer left in the chat, whose model has it already, nor for a last
+  // step such as a release, which the work cannot undo
+  return Boolean(sent?.asked && !sent.isHeld && !sent.asked.lastStep && !['other', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now))
 }
-const takeBack = async ($: EngineInterface, one: Todo) => {
+// (at: the answer the button was drawn for: a click on a drawing held from before takes back nothing newer)
+const takeBack = ($: EngineInterface, one: Todo, at: number) => {
+  const run = takeBackNow($, one, at)
+  // The press hook sends the wakes that wait only once this is done (sendWakes), so the answer taken back is never sent
+  answersOnWay.add(run)
+  void run.finally(() => answersOnWay.delete(run)).catch(() => undefined)
+  return run
+}
+const takeBackNow = async ($: EngineInterface, one: Todo, shownAt: number) => {
   const sent = sentReplies.get(one.id)
   const ask = sent?.asked
-  if (!sent || !ask || !canTakeBack(one, await $.clock.now())) return
-  sentReplies.delete(one.id)
-  answeredAsks.delete(`${one.id}:${ask.at}:${ask.text}`)
-  if (answeredAt.get(one.id) === ask.at) answeredAt.delete(one.id)
+  if (!sent || !ask || sent.at !== shownAt) return
   const target = sent.target ?? one.id
-  if (pending.get(target) === one.id) pending.delete(target)
-  for (const key of startedBy) if (key === `${one.id}:${sent.at}`) startedBy.delete(key)
-  const at = await $.clock.now()
-  await changeTodos($, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: [...card.entries, { at, kind: 'steer' as const, text: `took back “${sent.text}”` }].slice(-ENTRIES_KEPT) } : card)))
-  redraw($)
-  void log($, `answer "${cut(sent.text, 40)}" for ${one.id} taken back`)
-  // A message still waiting to start the work again loses this answer; one that carries only this answer goes
+  // Before anything is awaited: a message still waiting to start the work again loses this answer; one that carries only it goes
   const waiting = wakes.find(w => w.target === target && w.answers.some(a => a.one.id === one.id && a.sent.at === sent.at))
   if (waiting) {
     waiting.answers = waiting.answers.filter(a => !(a.one.id === one.id && a.sent.at === sent.at))
-    if (!waiting.answers.length && !waiting.spawn) return void wakes.splice(wakes.indexOf(waiting), 1)
-    waiting.text = `${waiting.text}\n\n${TAKEN_BACK(sent.text, ask.text)}`
-    return
+    if (!waiting.answers.length && !waiting.spawn) wakes.splice(wakes.indexOf(waiting), 1)
+    else waiting.text = `${waiting.text}\n\n${TAKEN_BACK(sent.text, ask.text)}`
   }
-  const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
-  if (working) await tell($, target, TAKEN_BACK(sent.text, ask.text)).catch(err => log($, `work not told of an answer taken back: ${String(err)}`))
+  if (!canTakeBack(one, await $.clock.now())) return
+  sentReplies.delete(one.id)
+  answeredAsks.delete(`${one.id}:${ask.at}:${ask.text}`)
+  if (answeredAt.get(one.id) === ask.at) answeredAt.delete(one.id)
+  if (pending.get(target) === one.id) pending.delete(target)
+  for (const key of startedBy) if (key === `${one.id}:${sent.at}`) startedBy.delete(key)
+  const at = await $.clock.now()
+  let isBack = false
+  await changeTodos($, list => ((isBack = false), list).map(card => (card.id === one.id && !card.ask ? ((isBack = true), { ...card, ask, entries: [...card.entries, { at, kind: 'steer' as const, text: `took back “${sent.text}”` }].slice(-ENTRIES_KEPT) }) : card)))
+  redraw($)
+  void log($, `answer "${cut(sent.text, 40)}" for ${one.id} taken back`)
+  // The chat was told it was answered: it is told it was taken back, and shown the question again
+  if (isBack) {
+    await sayInChat($, named(`${who(true)} took back their answer “${cut(sent.text, 120)}” to "${titleOf(one)}": the question is open again on its card.`), `You took back your answer “${cut(sent.text, 120)}” to "${titleOf(one)}". The question is open again on its card.`)
+    inChat.delete(one.id)
+    void askInChat($, { ...one, ask })
+  }
+  // Work at work, or started again by this answer a moment ago, is told not to act on it; a message that still waits carries it already
+  if (!waiting) await tell($, target, TAKEN_BACK(sent.text, ask.text)).catch(err => log($, `work not told of an answer taken back: ${String(err)}`))
 }
 const TAKEN_BACK = (said: string, asked: string) =>
   `${who(true)} took back their answer "${said}" to your question ("${asked}"): it was pressed by mistake. Do not act on it, and undo what you already did on it if you can. The question is on your card again, and their answer comes to you as a message.`
@@ -12396,6 +12413,11 @@ const listOffsets = new Map<string, number>()
 let waitsAtTop = 0
 // The last drawing made of each pane on each surface, what a press under way keeps on screen (isPressHeld)
 const lastShown = new Map<string, unknown>()
+// Each pane's drawings made afresh are numbered as they are asked for: one that finishes after a newer one (the engine dropped its
+// reply, as a newer ask overtook it) is never kept as the one on screen. Kept anyway, a press hold or the gap gave that stale
+// drawing again, and an answered card came back and went under the pointer (16 Nov recording: 4 drawings late, 5 flips back)
+const shownAsked = new Map<string, number>()
+const shownKept = new Map<string, number>()
 // The surface the list was last drawn on: the focus says none, and only the desktop's clicks are held for (isPressHeld)
 let listSurface = ''
 const panelHooks = (on: On) => {
@@ -12445,6 +12467,8 @@ const panelHooks = (on: On) => {
     if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
     // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
     freshBegins(shownKey)
+    const askedNo = (shownAsked.get(shownKey) ?? 0) + 1
+    shownAsked.set(shownKey, askedNo)
     // (how long it takes by the wall clock: the engine's clock in a test stands still while a drawing is made)
     const madeFrom = Date.now()
     let isMade = false
@@ -12869,7 +12893,7 @@ const panelHooks = (on: On) => {
             {/* A button's answer, while the card says it: a press to take it back, the question back on the card */}
             {canTakeBack(one, at) ? (
               <Box key={`take-back-${one.id}`} paddingLeft={lead} flexDirection="row">
-                <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
+                <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
               </Box>
             ) : null}
             {/* Finished, with something it started still running: what, how long, and a way to stop it */}
@@ -13741,7 +13765,7 @@ const panelHooks = (on: On) => {
             <Box key="part-answered" flexDirection="row" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               <Box flexDirection="column" gap={1} minWidth={0}>
                 <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
-                {canTakeBack(one, at) ? <Button key={`take-back-big-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one).catch(err => log($, `answer not taken back: ${String(err)}`)))} /> : null}
+                {canTakeBack(one, at) ? <Button key={`take-back-big-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} /> : null}
               </Box>
             </Box>
           ) : null}
@@ -14175,6 +14199,9 @@ const panelHooks = (on: On) => {
     // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
     // ones the engine holds, and this one is made again once the click is over (holdForPress)
     if (recent && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
+    // Overtaken by a newer drawing that is already made: not kept, and the newer one is given in its place
+    if ((shownKept.get(shownKey) ?? 0) > askedNo && recent !== undefined) return lastShown.get(shownKey) as Awaited<ReturnType<typeof next>>
+    shownKept.set(shownKey, askedNo)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
     lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })

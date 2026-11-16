@@ -21,6 +21,11 @@ const listOffsets = new Map<string, number>()
 let waitsAtTop = 0
 // The last drawing made of each pane on each surface, what a press under way keeps on screen (isPressHeld)
 const lastShown = new Map<string, unknown>()
+// Each pane's drawings made afresh are numbered as they are asked for: one that finishes after a newer one (the engine dropped its
+// reply, as a newer ask overtook it) is never kept as the one on screen. Kept anyway, a press hold or the gap gave that stale
+// drawing again, and an answered card came back and went under the pointer (16 Nov recording: 4 drawings late, 5 flips back)
+const shownAsked = new Map<string, number>()
+const shownKept = new Map<string, number>()
 // The surface the list was last drawn on: the focus says none, and only the desktop's clicks are held for (isPressHeld)
 let listSurface = ''
 const panelHooks = (on: On) => {
@@ -70,6 +75,8 @@ const panelHooks = (on: On) => {
     if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
     // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
     freshBegins(shownKey)
+    const askedNo = (shownAsked.get(shownKey) ?? 0) + 1
+    shownAsked.set(shownKey, askedNo)
     // (how long it takes by the wall clock: the engine's clock in a test stands still while a drawing is made)
     const madeFrom = Date.now()
     let isMade = false
@@ -494,7 +501,7 @@ const panelHooks = (on: On) => {
             {/* A button's answer, while the card says it: a press to take it back, the question back on the card */}
             {canTakeBack(one, at) ? (
               <Box key={`take-back-${one.id}`} paddingLeft={lead} flexDirection="row">
-                <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
+                <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
               </Box>
             ) : null}
             {/* Finished, with something it started still running: what, how long, and a way to stop it */}
@@ -1366,7 +1373,7 @@ const panelHooks = (on: On) => {
             <Box key="part-answered" flexDirection="row" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
               <Box flexDirection="column" gap={1} minWidth={0}>
                 <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
-                {canTakeBack(one, at) ? <Button key={`take-back-big-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one).catch(err => log($, `answer not taken back: ${String(err)}`)))} /> : null}
+                {canTakeBack(one, at) ? <Button key={`take-back-big-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one, heldAnswer(one, at)?.at ?? 0).catch(err => log($, `answer not taken back: ${String(err)}`)))} /> : null}
               </Box>
             </Box>
           ) : null}
@@ -1800,6 +1807,9 @@ const panelHooks = (on: On) => {
     // A click begun while this drawing was made: the drawing on screen is given instead, so the buttons under the pointer stay the
     // ones the engine holds, and this one is made again once the click is over (holdForPress)
     if (recent && paneId === LIST && isPressHeld(await $.clock.now())) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
+    // Overtaken by a newer drawing that is already made: not kept, and the newer one is given in its place
+    if ((shownKept.get(shownKey) ?? 0) > askedNo && recent !== undefined) return lastShown.get(shownKey) as Awaited<ReturnType<typeof next>>
+    shownKept.set(shownKey, askedNo)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
     lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
