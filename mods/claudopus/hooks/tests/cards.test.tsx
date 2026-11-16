@@ -1523,6 +1523,52 @@ test('work the engine runs is listed even when the mod never saw it start, and w
   await pane.unmount()
 })
 
+test('a helper, and the work waiting on it, that ended while the mod was out are ended on their cards from their saved record, the work passed its result first, never drawn at work or warned about as stuck (16 Nov a second look that ended unheard was drawn at work for 47 minutes)', async ($, on) => {
+  const agents: Record<string, string> = {}
+  const { clock, files, resumed, appended } = world(on, { agents })
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Second look', prompt: 'go', parentAgentId: 'a1' } as never)
+  await $.agent.spawn({ subagentType: 'general-purpose', background: true, description: 'Picture', prompt: 'go', parentAgentId: 'a1' } as never)
+  // The work ends its step to wait on its helper: it is still at work
+  await $.turn.complete({ answer: 'Waiting on the second look.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await pane.find({ type: 'Text', text: /^Working on/ }))?.text).toBe('Working on 1 thing')
+  // The helper hands back its report while the mod is out: no end is heard, and the engine no longer lists either of them
+  const folder = `${HOME}/.claude/projects/-repo/engine-id/subagents`
+  const handback = (text: string) => JSON.stringify({ timestamp: '2026-11-16T13:25:13Z', type: 'assistant', message: { content: [{ type: 'tool_use', name: 'SubagentHandback', input: { message: text } }] } })
+  files.set(`${folder}/agent-a2.meta.json`, JSON.stringify({ description: 'Second look', spawnDepth: 2, parentAgentId: 'a1', finished: true }))
+  files.set(`${folder}/agent-a2.jsonl`, handback('Nothing wrong found.'))
+  files.set(`${folder}/agent-a1.meta.json`, JSON.stringify({ description: 'Fix the nose', spawnDepth: 1, finished: true }))
+  const saved = () => {
+    const kept = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}') as { cards?: Todo[]; helpers?: Todo[]; ended?: Todo[] }
+    return [...(kept.cards ?? []), ...(kept.helpers ?? []), ...(kept.ended ?? [])]
+  }
+  // The helper ends on its card with its report, and the work that waited on it is passed that report and started again, not ended
+  await clock.advance(70_000)
+  expect(await until(async () => resumed.find(one => one.startsWith('a1: From Claudopus: your helper "Second look" has finished') && one.endsWith('Nothing wrong found.')))).toBeDefined()
+  expect(saved().find(one => one.id === 'a2')).toMatchObject({ status: 'done', answer: 'Nothing wrong found.' })
+  expect(saved().find(one => one.id === 'a1')?.status).toBe('working')
+  // Started again, it runs (its record no longer says finished); its other helper's unheard end reaches it at its next step
+  agents.a1 = 'running'
+  files.set(`${folder}/agent-a1.meta.json`, JSON.stringify({ description: 'Fix the nose', spawnDepth: 1 }))
+  files.set(`${folder}/agent-a3.meta.json`, JSON.stringify({ description: 'Picture', spawnDepth: 2, parentAgentId: 'a1', finished: true }))
+  files.set(`${folder}/agent-a3.jsonl`, handback('The picture is drawn.'))
+  await clock.advance(2 * 60_000)
+  expect(await until(async () => appended.find(one => one.startsWith('a1: From Claudopus: your helper "Picture" has finished') && one.endsWith('The picture is drawn.')))).toBeDefined()
+  // then hands back its own report while the mod is out once more: its card ends with that report
+  expect(saved().find(one => one.id === 'a1')?.status).toBe('working')
+  delete agents.a1
+  files.set(`${folder}/agent-a1.meta.json`, JSON.stringify({ description: 'Fix the nose', spawnDepth: 1, finished: true }))
+  files.set(`${folder}/agent-a1.jsonl`, handback('The fix is released.'))
+  await clock.advance(31 * 60_000)
+  expect((await until(() => pane.find({ type: 'Text', text: /^Nothing/ })))?.text).toBe('Nothing is running')
+  expect(await pane.find({ type: 'Text', text: /No progress|quiet/ })).toBeUndefined()
+  expect(saved().filter(one => one.status === 'working').map(one => one.id)).toEqual([])
+  expect(saved().find(one => one.id === 'a1')?.answer).toBe('The fix is released.')
+  await pane.unmount()
+})
+
 test('work the chat started that was running before the mod loaded, as after a rename, is a card of its own, not a helper', async ($, on) => {
   const agents: Record<string, string> = { w5: 'running' }
   const kinds: Record<string, string> = { w5: 'general-purpose' }
