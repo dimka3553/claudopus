@@ -5,7 +5,7 @@
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; mem?: string; isUntold?: boolean; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; mem?: string; isUntold?: boolean; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -26,6 +26,9 @@ let tasksMissedAt = 0
 const callFiles = new Map<string, { file: string; at: number }>()
 // The file each row's output was last read from, by its id, so a press on the row can show it whole
 const jobFiles = new Map<string, string>()
+// A command held open is a row of its own once it has run this long, so no command runs past ten seconds without a line that
+// says how it goes (it was two minutes, and on 16 Nov commands ran for minutes with nothing on their card)
+const ROW_SHOWN = 10_000
 
 // A job as its row shows it, from its command and words: a command that only waits is a wait, with what it waits for
 const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = false, theirs?: Seen): Job => {
@@ -41,7 +44,7 @@ const jobsOf = (one: Todo, at: number): Job[] =>
   foldJobs([
     ...(one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id])),
     ...(one.detached ?? []).map(d => jobOf(d.id, d.what, d.cmd, d.at, false, one.seenJobs?.[d.id])),
-    ...(one.status === 'working' && one.running?.cmd && !isWaitOnly(one.running.cmd) && at - one.running.at >= RUNNING_SHOWN
+    ...(one.status === 'working' && one.running?.cmd && at - one.running.at >= ROW_SHOWN
       ? [jobOf(`call-${one.id}`, one.running.label ?? '', one.running.cmd, one.running.at)]
       : []),
   ])
@@ -101,7 +104,7 @@ const lookJobs = async ($: EngineInterface) => {
   jobsLookedAt = now
   const list = await read($, todos)
   // Held open: a command a card has waited on long enough to be a row of its own
-  const held = list.flatMap(one => (one.status === 'working' && one.running?.cmd && now - one.running.at >= RUNNING_SHOWN ? [{ owner: one.id, id: `call-${one.id}`, cmd: one.running.cmd, at: one.running.at }] : []))
+  const held = list.flatMap(one => (one.status === 'working' && one.running?.cmd && now - one.running.at >= ROW_SHOWN ? [{ owner: one.id, id: `call-${one.id}`, cmd: one.running.cmd, at: one.running.at }] : []))
   // A row's command that changed (another held call of the same card ran longest) starts afresh
   for (const [id, was] of callFiles) if (!held.some(h => h.id === id && h.at === was.at)) (callFiles.delete(id), jobLog.delete(id))
   const owned = [
@@ -150,7 +153,8 @@ const lookJobs = async ($: EngineInterface) => {
     return wait ? [{ id: j.id, wait }] : []
   }))
   const targets = waits.flatMap(w => (w.wait.file ? [w.wait.file] : []))
-  const isPs = now - jobProcsAt >= JOB_PS
+  // (sooner while a command held open is not yet found, so its row reads its output within seconds)
+  const isPs = now - jobProcsAt >= JOB_PS || (unfound.length > 0 && now - jobProcsAt >= JOB_LOOK)
   // One kept before process numbers were checked, such as 000, is never asked after: it counts as ended, and leaves its card
   const pids = owned.flatMap(o => (o.pid && isPid(o.pid) ? [o.pid] : []))
   // One go: the end of each output with when it last changed, when each polled file last changed, which detached processes still
@@ -204,7 +208,7 @@ const lookJobs = async ($: EngineInterface) => {
       if (runs.some(p => treeOf(jobProcs, p.pid).some(isPausedProc))) return 'what it waits for is paused'
     }
     const at = wait.file ? changed.get(wait.file) : undefined
-    return at && now - at >= JOB_QUIET ? `${wait.file?.split('/').at(-1)} unchanged ${shortAgo(now - at)}` : ''
+    return at && now - at >= JOB_QUIET ? `what it waits on has not changed for ${shortAgo(now - at)}` : ''
   }
   const parts = body.split(/\n@@JOB@@ ([^\n]*)\n/)
   let isChanged = false
@@ -226,7 +230,7 @@ const lookJobs = async ($: EngineInterface) => {
     // The work's own progress line, once seen, stands until a newer one or other progress comes, however much it writes between
     const kept = !seen.pct && !seen.done && was?.isOwn ? { pct: was.pct, done: was.done, total: was.total, isOwn: true, isEarlier: true } : {}
     const next: Seen = { ...seen, ...memSeen(job?.pid), tail: tailOf(text), ...kept, ...(m ? { wroteAt: m } : {}), ...(states.has(id) ? { isPaused: states.get(id) } : was?.isPaused ? { isPaused: true } : {}), ...(wait ? { target: targetOf(wait.wait) } : {}) }
-    const isSame = was?.latest === next.latest && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
+    const isSame = was?.latest === next.latest && was?.words === next.words && was?.pct === next.pct && was?.done === next.done && was?.total === next.total && was?.rate === next.rate && was?.left === next.left && was?.isEmpty === next.isEmpty && was?.isEarlier === next.isEarlier && was?.wroteAt === next.wroteAt && was?.isPaused === next.isPaused && was?.target === next.target && was?.tail?.join('\n') === next.tail?.join('\n')
     // Memory alone moving (a MB or so at each look) is kept for the next drawing, never a reason to draw the panel afresh under the pointer
     if (isSame) {
       if (was?.mem !== next.mem) jobLog.set(id, next)

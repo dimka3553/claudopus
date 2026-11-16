@@ -52,14 +52,14 @@ const shareMine = async ($: EngineInterface) => {
     const seen = Object.fromEntries(
       [...(one.bg ?? []), ...(one.detached ?? [])].flatMap(job => {
         const s = jobLog.get(job.id)
-        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}) }]] : []
+        return s ? [[job.id, { latest: s.latest, ...(s.pct ? { pct: s.pct } : {}), ...(s.done ? { done: s.done } : {}), ...(s.total ? { total: s.total } : {}), ...(s.wroteAt ? { wroteAt: s.wroteAt } : {}), ...(s.tail?.length ? { tail: s.tail } : {}), ...(s.words ? { words: s.words } : {}), ...(s.isOwn ? { isOwn: true } : {}), ...(s.isEarlier ? { isEarlier: true } : {}), ...(s.isEmpty ? { isEmpty: true } : {}), ...(s.target ? { target: s.target } : {}) }]] : []
       }),
     )
     return Object.keys(seen).length ? { ...one, seenJobs: seen } : one
   }
   const cards = shareable(list, now).map(withSeen)
   const helpers = shareableHelpers(list, cards).map(withSeen)
-  const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}`).join('|')).join(' ')
+  const jobsSign = [...cards, ...helpers].map(one => Object.values(one.seenJobs ?? {}).map(s => `${s.latest}:${s.tail?.at(-1) ?? ''}:${Math.floor((s.wroteAt ?? 0) / 30_000)}:${s.target ?? ''}`).join('|')).join(' ')
   const shareOf = ({ tool: _tool, agent: _agent, snippet: _snippet, seen: _seen, isTold: _told, input: _input, ...p }: Waiting): Prompt => p
   const prompts: Prompt[] = waiting.map(shareOf)
   // Answered prompts go apart, so a chat of an older version, which reads only `prompts`, never shows one as still open

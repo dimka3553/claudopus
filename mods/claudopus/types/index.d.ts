@@ -104,7 +104,7 @@ export type Todo = {
   endedRuns?: { id: string; what: string; at: number; endedAt: number; how: 'finished' | 'failed' | 'killed' | 'timed out' | 'stopped' | 'ended'; code?: string }[]
   // In another chat's file only: how each of its jobs stands as that chat last read it (its latest line, how far, its last lines),
   // by the job's id, so its Details shows them as that chat's own does
-  seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[] }>
+  seenJobs?: Record<string, { latest: string; pct?: string; done?: string; total?: string; wroteAt?: number; tail?: string[]; words?: string; isOwn?: boolean; isEarlier?: boolean; isEmpty?: boolean; target?: string }>
   // What it started detached (with nohup or setsid, its output to a log): its own words for it, since when, the command, the log
   // it writes and its process, while that runs. Kept past its end, as such a job outlives it
   // A run a command left going however it was started (a launcher's children, a job sent off with &, a pool), found by the

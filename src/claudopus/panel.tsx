@@ -611,26 +611,32 @@ const panelHooks = (on: On) => {
       const fresh = left ? timeLeftText(Math.max(ran / 1000, printedAt / 1000 + left))?.replace(/ left$/, '') : undefined
       return fresh ? { time: `${took(ran)} of ~${fresh}`, isPast: false } : { time: `${took(ran)} · past ~${job.expectText}`, isPast: true }
     }
+    // Every run's second line has the one shape plainOf describes: how far, a few plain words, and its sign of life, which changes
+    // as time goes so the line never stands still while the run goes on. Nothing raw is shown: a line that is not plain words is
+    // left out, and a run that has given no word says so and for how long, in amber past a few minutes
     const jobStand = (job: Job, width: number) => {
       const pct = job.pct ? [job.pct] : []
-      const quiet = job.wroteAt ? at - job.wroteAt : 0
+      const quiet = job.wroteAt && !job.isEmpty ? at - job.wroteAt : undefined
       const ran = at - job.at
+      // (to ten seconds past a minute, so the line moves at each drawing however long it has been)
+      const ago = (ms: number) => {
+        const all = Math.max(0, Math.floor(ms / 1000))
+        return all < 60 || all >= 3600 ? shortAgo(ms) : `${Math.floor(all / 60)}m ${String(Math.floor((all % 60) / 10) * 10).padStart(2, '0')}s`
+      }
       const [state, short, isWarn]: [string, string, boolean] =
         job.isPaused ? ['paused', 'paused', true]
-        : job.kind === 'wait' && (job.target || !job.wroteAt || job.isEmpty) ? (job.target ? [job.target, job.target.replace(/^what it waits for (is|has) /, '').replace(/ unchanged /, ' still '), true] : ['waiting', 'waiting', false])
-        : job.kind === 'watch' ? (job.wroteAt && !job.isEmpty ? [`last event ${shortAgo(quiet)} ago`, `event ${shortAgo(quiet)} ago`, false] : ['no event yet', 'no event', false])
-        // A run left going whose output goes to no file: it runs, and gives no progress (nothing is warned of, as it was never told)
-        : job.isUntold ? ['running, no progress given', 'no progress given', false]
-        : job.isEmpty ? (ran >= JOB_QUIET ? [`nothing printed in ${shortAgo(ran)}`, `silent ${shortAgo(ran)}`, true] : ['nothing printed yet', 'silent', false])
-        // (a server prints only when asked, so its quiet is no warning)
-        : job.wroteAt && quiet >= JOB_QUIET && job.kind !== 'server' ? [`quiet for ${shortAgo(quiet)}`, `quiet ${shortAgo(quiet)}`, true]
-        : job.wroteAt ? ['', '', false]
-        // A job whose output cannot be found says so, so a blank row is never taken for one that moves
-        : !job.id.startsWith('call-') && at - job.at >= JOB_UNREAD ? ['output not found', 'no output', true]
-        : ['', '', false]
-      const warn = isWarn && Boolean(state)
+        : job.target ? [job.target, job.target.replace(/^what it waits (?:for|on) (?:is|has) /, '').replace(/^not changed for /, 'still for '), true]
+        // (a run left going whose output goes to no file is one that gives no word, as any other)
+        : quiet === undefined ? [`no word from it in ${ago(ran)}`, `silent ${ago(ran)}`, ran >= JOB_QUIET]
+        // (a server speaks only when asked, so its quiet is no warning)
+        : quiet >= JOB_QUIET && job.kind !== 'server' ? [`no word from it for ${ago(quiet)}`, `silent ${ago(quiet)}`, true]
+        : job.kind === 'watch' ? [`last event ${ago(quiet)} ago`, `event ${ago(quiet)} ago`, false]
+        : job.kind === 'wait' ? [`checked ${ago(quiet)} ago`, `${ago(quiet)} ago`, false]
+        : job.kind === 'server' && quiet >= 60_000 ? [`serving, last asked ${ago(quiet)} ago`, `serving ${ago(quiet)}`, false]
+        : [`active ${ago(quiet)} ago`, `${ago(quiet)} ago`, false]
+      const warn = isWarn
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
-      const isFresh = !warn && Boolean(job.wroteAt) && quiet < 60_000
+      const isFresh = !warn && quiet !== undefined && quiet < 60_000
       const guess = guessLeft(job, ran)
       const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
@@ -638,9 +644,18 @@ const panelHooks = (on: On) => {
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []
       // a count without its unit, for the narrowest line, so how far it is stays beside how long is left
       const bare = job.done && job.total && /^[\d.,]+$/.test(job.done) ? [`${job.done}/${job.total.split(' ')[0]}`] : compact
-      // the memory it holds, where it is known, until the line has no room for it
-      const mem = job.mem ? [job.mem] : []
-      const text = firstFit([[...full, ...pct, ...rate, ...left, state, ...mem], [...full, ...pct, ...rate, ...left, short, ...mem], [...full, ...pct, ...left, short, ...mem], [...compact, ...pct, ...left, short, ...mem], [...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
+      // The memory it holds only where it is a gigabyte or more, said as memory, as it counts against what this Mac may hold; a few
+      // megabytes say nothing to a person (16 Nov a row led with "35 MB"), and it goes first when the line has no room
+      const mem = job.mem && /\b[GT]B\b/.test(job.mem) ? [`${job.mem} memory`] : []
+      const far = firstFit([[...full, ...pct, ...rate, ...left, state, ...mem], [...full, ...pct, ...left, short, ...mem], [...compact, ...pct, ...left, short, ...mem], [...full, ...pct, ...rate, ...left, state], [...full, ...pct, ...rate, ...left, short], [...full, ...pct, ...left, short], [...compact, ...pct, ...left, short], ...(left.length ? [[...compact, ...left, short], [...compact, ...left], [...bare, ...left]] : []), [...compact, ...pct, short], [...compact, ...pct], [...bare, ...pct], [...pct, short], [short]], width)
+      // Its own plain words go before its sign of life, cut to the room left; a watch's are its last event
+      // (none once it has been quiet for minutes: they would be old news)
+      const words = warn ? '' : plainOf(job.isOwn && !job.isEarlier ? job.words : job.latest, `${job.label} ${job.waitsFor ?? ''}`)
+      const parts = far.split(' · ')
+      const end = parts.at(-1) === state || parts.at(-1) === short ? parts.length - 1 : parts.length
+      const room = width - far.length - 3
+      const said = words && room >= 12 ? (words.length <= room ? words : `${words.slice(0, room - 1).replace(/\s+\S*$/, '')}…`) : ''
+      const text = said ? [...parts.slice(0, end), said, ...parts.slice(end)].join(' · ') : far
       return { text, isWarn: warn }
     }
     // A job's two lines: what it is, in the work's own words, with its time; and under it how it stands, then the latest line it
@@ -673,12 +688,8 @@ const panelHooks = (on: On) => {
       const { text: stand, isWarn } = jobStand(job, width)
       // Its percent, in blue, where the line says it as a part of its own
       const pctAt = job.pct && !isWarn ? (stand.startsWith(`${job.pct} · `) || stand === job.pct ? 0 : stand.includes(` · ${job.pct}`) ? stand.indexOf(` · ${job.pct}`) + 3 : -1) : -1
-      // The latest line, unless it is only a progress bar its percent already says; a wait says the work's own words for it.
-      // A run read from a progress line above its last still shows the last, such as an error after it
-      const latest = job.kind === 'wait' && job.waitsFor ? (job.isNamed && !isKindSaid(job.label) ? job.label : '') : job.done && !job.isEarlier ? '' : job.latest && job.latest.replace(/[#=>|\-█▉▊▋▌▍▎▏░▒▓\s\d.%]/g, '').length >= 3 ? job.latest : ''
-      const rest = width - stand.length - (stand ? 3 : 0)
-      const detail = latest && rest >= 10 ? cut(latest, rest) : ''
-      if (!stand && !detail) return head
+      // (its plain words are in the line itself, which every run has)
+      const detail = ''
       return (
         <Box key={`job-${key}`} flexDirection="column" flexShrink={0}>
           {head}
@@ -1046,8 +1057,8 @@ const panelHooks = (on: On) => {
     const underTwig = (t: Twig) => {
       const pad = t.depth * 2 + 4
       if (t.job) {
-        // the line its row already says is not said again
-        const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).filter(line => line.trim() !== (t.job?.latest ?? '').trim()).slice(-OUTPUT_LINES)
+        // (its row says it in plain words, so the last line is here as it was printed too)
+        const tail = t.job.id.startsWith('more-') ? [] : (t.job.tail ?? []).slice(-OUTPUT_LINES)
         if (!tail.length) return null
         return (
           <Box key={`tail-${t.job.id}`} flexDirection="row" paddingLeft={pad} flexShrink={0}>

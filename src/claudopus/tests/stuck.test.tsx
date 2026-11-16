@@ -61,7 +61,8 @@ test('a step that runs for minutes says so on its row, with its time, and the fl
     await pane.unmount()
     return r
   }
-  await clock.advance(90_000)
+  // (a row from ten seconds on: it was two minutes, and commands ran with nothing shown)
+  await clock.advance(5_000)
   expect(await rows()).toEqual([])
   await clock.advance(70_000)
   expect(await rows()).toEqual(['Command · hold search'])

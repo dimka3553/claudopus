@@ -1,0 +1,4 @@
+- Every run on a card now has a second line in plain words, refreshed as it goes: how far it is, what it is doing, and when it last gave a sign of life, or for how long it has given no word.
+- Raw output is no longer shown there: paths, file names, web addresses, log times, state codes, settings, memory sizes and program names are left out, and so is any line naming a password, key or token.
+- A command held open shows as a row after ten seconds instead of two minutes.
+- A long wait or script that would give no progress is not started: work is told in one sentence how to add a progress line.

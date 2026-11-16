@@ -1722,7 +1722,7 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   expect(await until(async () => ((await texts()).includes('460 MB of 1 GB · ') || undefined))).toBe(true)
   const shown = await texts()
   expect(shown).toContain('45%')
-  expect(shown).toContain(' · 10.5 MB/s · 55s left')
+  expect(shown.some(text => text.startsWith(' · 10.5 MB/s · 55s left · active '))).toBe(true)
   // In a narrower panel its speed gives way first
   expect((await texts(100)).some(text => /^460 MB(\/| of )1 GB · $/.test(text))).toBe(true)
   // The work's own line, as its scripts are told to print it
@@ -1733,7 +1733,20 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   // Quiet for long, in words
   wroteAt = now - 15 * 60_000
   await advance(20_000)
-  expect(await until(async () => ((await texts()).some(text => /quiet (for )?1[5-9]m/.test(text)) || undefined))).toBe(true)
+  expect(await until(async () => ((await texts()).some(text => /no word from it for 1[5-9]m|silent 1[5-9]m/.test(text)) || undefined))).toBe(true)
+  // A raw line in plain words, with its log time and state code left out, then its sign of life; 16 Nov the row read
+  // "35 MB · [run 11:27:50] waiting for the machine to start (Running)"
+  output = 'starting\n[run 11:27:50] waiting for the machine to start (Running)\n'
+  wroteAt = now
+  await advance(20_000)
+  const plain = await until(async () => (await texts()).find(text => text.includes('waiting for the machine to start · active ')))
+  expect(plain).toBeDefined()
+  expect((await texts()).some(text => /\[run|Running\)|\d MB ·/.test(text))).toBe(false)
+  // A wait's count of tries is how far it is, its words that say its name again are left out, and when it last tried changes
+  output = 'progress: 6 tries waiting for the CT scans\nprogress: 7 tries waiting for the CT scans\n'
+  wroteAt = now - 4_000
+  await advance(20_000)
+  expect(await until(async () => (await texts()).find(text => /^7 tries · active \d+s ago$/.test(text)))).toBeDefined()
 })
 
 test('a run whose output cannot be found says so after a minute, so a blank row is never taken for one that moves', async ($, on) => {
@@ -1748,7 +1761,7 @@ test('a run whose output cannot be found says so after a minute, so a blank row 
   const shown = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
   // Its name, its kind already said in the work's own words
   expect(shown.some(text => /^Fetch the CT scans/.test(text))).toBe(true)
-  expect(shown.some(text => /^output not found$/.test(text))).toBe(true)
+  expect(shown.some(text => /^no word from it in 1m [01]0s$/.test(text))).toBe(true)
   await list.unmount()
 })
 
@@ -1784,10 +1797,20 @@ test('every run under a card says how it stands: a command held open shows its p
   // The mod takes as the command held open only a shell started within 20 s of when the call began, as its hook saw it: the clock
   // moves only once the call is running, else on a slow machine (GitHub's) the hook ran a few steps late and no shell matched
   expect(await until(async () => held.has('dl') || undefined)).toBe(true)
+  // Within seconds of ten it is a row of its own with how it goes (it took two minutes, and commands ran with nothing shown)
+  for (let n = 0; n < 3; n++) await advance(5_000)
+  const early = await until(async () => {
+    const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
+    const all = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
+    await list.unmount()
+    return all.includes('Download the CT scans') && all.some(text => /^460 MB of 1 GB|^no word from it in 1\ds$/.test(text)) ? all : undefined
+  })
+  expect(early).toBeDefined()
   // Five minutes, past the 1.5 times its three minutes where it turns amber, in steps of 5 s: the stand-in ps ages the shell from
   // `now`, which runs a step ahead of the clock while a step's timers fire. No longer: each second the clock moves runs the
   // panel's every-second look, and on GitHub's Mac nine minutes took past the time the kit lets a held call run, which ended it
-  for (let n = 0; n < 60; n++) await advance(5_000)
+  // (57 steps here, as three were taken above for its row at ten seconds)
+  for (let n = 0; n < 57; n++) await advance(5_000)
   const texts = async () => {
     const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
     // (a run's name is a button, as a press opens its output)
@@ -1805,15 +1828,16 @@ test('every run under a card says how it stands: a command held open shows its p
   // past it, the run's own time left makes a fresh expectation, never the old figure as if it held
   expect(shown).toContain('5m 00s of ~5m 53s')
   expect(shown.some(text => /of ~3m/.test(text))).toBe(false)
-  expect(shown).toContain(' · 10.5 MB/s · 55s left')
+  expect(shown.some(text => text.startsWith(' · 10.5 MB/s · 55s left · active '))).toBe(true)
   // The script that printed nothing says so and for how long, never that it was updated
   expect(shown.some(text => /^Command · Redraw all pictures/.test(text))).toBe(true)
-  expect(shown.some(text => /^nothing printed in 5m$/.test(text))).toBe(true)
+  expect(shown.some(text => /^no word from it in 5m 00s$/.test(text))).toBe(true)
   expect(shown.some(text => /updated/.test(text))).toBe(false)
   // The watch, its last event and when it came
   expect(shown.some(text => /^Watch · Azure jobs finishing/.test(text))).toBe(true)
     expect(shown).toContain('last event 30s ago')
-  expect(shown).toContain(' · wrote vsd-02.png')
+  // its event's file name is never shown
+  expect(shown.some(text => /vsd-02/.test(text))).toBe(false)
   // A press on a run's name shows its output whole in a Terminal window, as it goes on
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 160 }, surface: 'terminal' } as never)
   const before = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Command · Redraw all pictures')?.key ?? ''
@@ -1854,7 +1878,7 @@ test('only runs really running are listed: a watch the engine killed at its time
   await watch('m1')
   await watch('m2')
   const bg = (id: string, command: string, description: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command, description, run_in_background: true } as never)
-  await bg('w1', 'until grep -q "pass 1 done" /s/screen.log; do sleep 20; done; tail -2 /s/screen.log', 'Wait for the details screening to finish (about 55 min)')
+  await bg('w1', 'until grep -q "pass 1 done" /s/screen.log; do n=$((n+1)); echo "progress: $n tries"; sleep 20; done; tail -2 /s/screen.log', 'Wait for the details screening to finish (about 55 min)')
   await bg('f1', 'python3 fetch.py', 'Run the fetch of the list')
   await bg('k1', 'python3 tidy.py', 'Run the tidy up')
   await bg('p1', 'python3 fit.py', 'Run the fit (about 20 min)')
