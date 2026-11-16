@@ -20,7 +20,7 @@ var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
     return to.concat(ar || Array.prototype.slice.call(from));
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.capOf = exports.titleOfFlow = exports.rowsOf = exports.endOf = exports.castOf = exports.firstFit = exports.fitWords = exports.doing = exports.SQUARE_GLYPH = exports.squaresSvg = exports.squaresWidth = exports.SQUARE_COLOR = exports.squaresOf = exports.stageOf = exports.roundsOf = exports.withJournal = exports.outcomeOf = exports.journalOf = exports.metaOf = exports.flowPaneOf = exports.FLOW_PANE = exports.FLOW = void 0;
+exports.capOf = exports.titleOfFlow = exports.rowsOf = exports.endOf = exports.castOf = exports.firstFit = exports.fitWords = exports.doing = exports.SQUARE_GLYPH = exports.squaresBefore = exports.squaresKept = exports.SQUARES_MOST = exports.squaresSvg = exports.squaresWidth = exports.SQUARE_COLOR = exports.squaresOf = exports.stageOf = exports.roundsOf = exports.withJournal = exports.outcomeOf = exports.journalOf = exports.metaOf = exports.flowPaneOf = exports.FLOW_PANE = exports.FLOW = void 0;
 // The panel's blue, for work that runs as a workflow: the purple of other work moved round to blue, as light and as strong
 exports.FLOW = '#4E93EF';
 // A workflow's Details is a tab of its own, as a piece of work's is
@@ -202,6 +202,26 @@ var squaresSvg = function (groups, height) {
     return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"".concat(width, "\" height=\"").concat(height, "\" viewBox=\"0 0 ").concat(width, " ").concat(height, "\">").concat(shapes.join(''), "</svg>");
 };
 exports.squaresSvg = squaresSvg;
+// The most squares one drawing holds: the app refuses an Svg over 131,072 characters, and a running square, the longest, takes
+// about 165, so 600 stay under it with room. A longer run draws its last rounds that fit, and says how many came before
+exports.SQUARES_MOST = 600;
+var squaresKept = function (groups) {
+    var _a, _b, _c, _d, _e;
+    var _f = [0, groups.length], n = _f[0], from = _f[1];
+    while (from > 0 && n + ((_b = (_a = groups[from - 1]) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0) <= exports.SQUARES_MOST)
+        n += (_d = (_c = groups[--from]) === null || _c === void 0 ? void 0 : _c.length) !== null && _d !== void 0 ? _d : 0;
+    // One round alone with more steps than that still draws its last steps, and says how many of its steps came before
+    var last = (_e = groups.at(-1)) !== null && _e !== void 0 ? _e : [];
+    if (from === groups.length && groups.length)
+        return { groups: [last.slice(-exports.SQUARES_MOST)], earlier: groups.length - 1, steps: last.length - exports.SQUARES_MOST };
+    return { groups: groups.slice(from), earlier: from, steps: 0 };
+};
+exports.squaresKept = squaresKept;
+// What came before the squares drawn, in words: '' when nothing did
+var squaresBefore = function (kept) {
+    return [kept.earlier ? "".concat(kept.earlier, " earlier round").concat(kept.earlier === 1 ? '' : 's') : '', kept.steps ? "".concat(kept.steps, " earlier step").concat(kept.steps === 1 ? '' : 's') : ''].filter(Boolean).join(', ');
+};
+exports.squaresBefore = squaresBefore;
 // The squares for a surface that draws no pictures: one letter each, grouped by round
 exports.SQUARE_GLYPH = { done: '■', running: '■', waiting: '□', passed: '■', failed: '■', broke: '□' };
 // A stage's name as what is being done: Make is Making, Check is Checking

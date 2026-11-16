@@ -636,17 +636,24 @@ const panelHooks = (on: On) => {
         // A server or a watch speaks only when there is something to say, so its quiet is no fault
         : job.kind === 'server' ? ['serving', 'serving', false]
         : job.kind === 'watch' ? ['watching', 'watching', false]
-        // Any other run gives word at least every 10 seconds: past that it is silent, and from a minute that is a fault, in amber.
-        // While it gives word nothing is said of when (a run is never to be anything but active)
+        // Any other run gives word often; one quiet for three minutes says so, in amber. Before that nothing is said of when: a
+        // count of seconds beside a still percent told nothing, and runs quiet for a minute or two were all fine (16 Nov)
         // (one whose output has not been read yet is not known to be silent until a minute has passed)
         : quiet === undefined && !job.isEmpty && ran < SILENT_WARN ? ['', '', false]
         : (quiet ?? ran) >= SILENT_AFTER ?[`nothing printed for ${ago(quiet ?? ran)}`, `nothing printed ${ago(quiet ?? ran)}`, (quiet ?? ran) >= SILENT_WARN]
         : ['', '', false]
       const warn = isWarn
       // its speed and time left only while it prints: a minute old, they are no longer how it goes
-      const isFresh = quiet !== undefined && quiet < SILENT_AFTER
-      const guess = guessLeft(job, ran)
-      const left = isFresh ? (job.left ? [job.left] : guess ? [`~${guess}`] : []) : []
+      const isFresh = quiet !== undefined && quiet < SILENT_WARN
+      // the time left as of when it was printed, less the time since, so a run quiet for a while counts down, never up
+      const since = Math.max(0, quiet ?? 0) / 1000
+      const leftNow = (text: string | undefined) => {
+        const sec = leftSeconds(text)
+        return sec !== undefined && sec - since > 0 ? timeLeftText(sec - since) : undefined
+      }
+      const own = leftNow(job.left)
+      const guess = leftNow(guessLeft(job, ran - (quiet ?? 0)))
+      const left = isFresh ? (own ? [own] : guess ? [`~${guess}`] : []) : []
       const rate = job.rate && isFresh ? [job.rate] : []
       const full = job.done ? [job.total ? `${job.done} of ${job.total}` : job.done] : []
       const compact = job.done ? [job.total ? `${job.done}/${job.total}` : job.done] : []

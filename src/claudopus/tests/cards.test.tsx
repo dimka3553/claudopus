@@ -1065,6 +1065,17 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   expect(shown.some(text => /active|ago/.test(text))).toBe(false)
   // In a narrower panel its speed gives way first
   expect((await texts(100)).some(text => /^460 MB(\/| of )1 GB · $/.test(text))).toBe(true)
+  // Its percent moves up within seconds of curl rewriting it, not only as the list is followed every 20 seconds, and a
+  // still percent between two looks says nothing of quiet (16 Nov: "nothing printed for 5 seconds, 10 seconds")
+  output += '\r 52 1024M   52  532M    0     0  10.2M      0  0:01:40  0:00:52  0:00:48 10.5M'
+  wroteAt = now + 1_000
+  await advance(8_000)
+  const moved = await texts()
+  expect(moved).toContain('52%')
+  expect(moved.some(text => /nothing printed/.test(text))).toBe(false)
+  // and the 48 seconds curl said were left count down from when it said them, never standing still or rising while it is quiet
+  expect(moved.some(text => /· 4[0-7]s left$/.test(text))).toBe(true)
+  await advance(12_000)
   // The work's own line, as its scripts are told to print it
   output = 'loading\nprogress: 3/6 steps fitting\nframe 12 done\n'
   wroteAt = now
@@ -1089,10 +1100,15 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   wroteAt = now + 19_000
   await advance(20_000)
   expect(await until(async () => (await texts()).find(text => /^7 tries$/.test(text)))).toBeDefined()
-  // Silent past ten seconds it says so, plainly, and Stop on its row ends its process and tells the work it was stuck
-  wroteAt = now - 25_000
+  // Quiet for a minute or two it says nothing of it: tests, builds and installs go that quiet and are fine
+  wroteAt = now - 100_000
   await advance(20_000)
-  expect(await until(async () => (await texts()).find(text => /^7 tries · nothing printed for 4\ds$/.test(text)))).toBeDefined()
+  expect(await until(async () => (await texts()).find(text => /^7 tries$/.test(text)))).toBeDefined()
+  expect((await texts()).some(text => /nothing printed/.test(text))).toBe(false)
+  // Silent for three minutes it says so, plainly, and Stop on its row ends its process and tells the work it was stuck
+  wroteAt = now - 185_000
+  await advance(20_000)
+  expect(await until(async () => (await texts()).find(text => /^7 tries · nothing printed for 3m [1-3]0s$/.test(text)))).toBeDefined()
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
   const stop = (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Stop' && String(b.key ?? '').startsWith('stop-list-job-'))
   expect(stop).toBeDefined()
@@ -1106,19 +1122,19 @@ test('a long run shows how far it is from what it prints: how much of how much, 
   expect(await until(async () => ((await texts()).every(text => !/^Fetch the CT scans/.test(text) || text === 'Fetch the CT scans was stopped') || undefined))).toBe(true)
 })
 
-test('a run whose output cannot be found says so after a minute, so a blank row is never taken for one that moves', async ($, on) => {
+test('a run whose output cannot be found says so after three minutes, so a blank row is never taken for one that moves', async ($, on) => {
   const { clock } = world(on)
   on('session.cwd', () => ({ value: '/repo' }) as never)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fetch the scans', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Fetch the scans', prompt: 'fetch the scans' } as never)
   await $.tool.call({ tool: 'Bash', tool_use_id: 'n1', agentId: 'a1', command: 'cd /w && nohup curl -L -o scans.zip https://example.com/scans.zip > fetch.log 2>&1 & echo $!', description: 'Fetch the CT scans' } as never)
-  await clock.advance(70_000)
+  await clock.advance(190_000)
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 100 }, surface: 'terminal' } as never)
   const shown = [...(await list.findAll({ type: 'Text' })).map(one => one.text), ...(await list.findAll({ type: 'Button' })).map(one => String(one.props.label))]
   // Its name, its kind already said in the work's own words
   expect(shown.some(text => /^Fetch the CT scans/.test(text))).toBe(true)
-  expect(shown.some(text => /^nothing printed for 1m [01]0s$/.test(text))).toBe(true)
+  expect(shown.some(text => /^nothing printed for 3m [01]0s$/.test(text))).toBe(true)
   await list.unmount()
 })
 

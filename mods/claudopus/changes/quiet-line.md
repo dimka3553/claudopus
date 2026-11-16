@@ -1,0 +1,2 @@
+- A command's line no longer counts "nothing printed for 10s, 15s…" while it is quiet for a few seconds. It says "nothing printed for 3m 00s", in amber, only once three minutes have passed with nothing new: of the commands that went quiet for a minute on 16 Nov, none was stuck. Claude is still told to look at a command quiet for a minute.
+- A command's percent, size and speed now move up on its line every few seconds as the command prints them. They were read only every 20 seconds, so a download rewriting its percent each second sat still and read as quiet.
