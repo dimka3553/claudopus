@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.157 · 16 November 2026
+- When you answer in your own words above the chat, or paste a key or give a response there, Send is now the big button and Close the small one beside it.
+
 ## 0.2.156 · 16 November 2026
 - Every background task, small task and helper now has the tool to ask Claudopus to wake it for a file, a page or a time: tasks started as Claudopus's own kinds had been told to use it without having it.
 - A task whose own detached command is still at work is no longer pressed again and again to hand back its report: it ends its step and is started again when the command ends.

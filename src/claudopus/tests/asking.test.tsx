@@ -835,7 +835,10 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
   await press(list, 'Give a response instead')
   const words = await until(async () => (await fieldsIn(bar, said))[0])
   const kept = keychain.length
-  await bar.input({ key: words?.key ?? '', text: 'It is already in /Users/sam/Documents/GitHub/3d-sandbox/.env.local as AI_GATEWAY_API_KEY, in the faceiq-labs branch too' })
+  // Sent with the row's Send, the big button first, Close the small one after it
+  expect((await bar.findAll({ type: 'Button' })).filter(b => ['Send', 'Close'].includes(String(b.props.label))).map(b => [b.props.label, b.props.variant ?? null, b.props.plain ?? null])).toEqual([['Send', 'primary', null], ['Close', null, true]])
+  await bar.input({ key: words?.key ?? '', text: 'It is already in /Users/sam/Documents/GitHub/3d-sandbox/.env.local as AI_GATEWAY_API_KEY, in the faceiq-labs branch too', kind: 'change' } as never)
+  await press(bar, 'Send')
   expect(await until(async () => files.get(`${MEMORY}/boxes/${said}.reply`))).toBe('The person answered in the Claudopus panel instead of giving GITHUB_TOKEN, in their own words: It is already in /Users/sam/Documents/GitHub/3d-sandbox/.env.local as AI_GATEWAY_API_KEY, in the faceiq-labs branch too\n')
   expect(await until(async () => (files.has(`${MEMORY}/boxes/${said}.json`) ? undefined : true))).toBe(true)
   expect(keychain.length).toBe(kept)
@@ -1376,7 +1379,10 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
   expect(await until(async () => ((await boxesIn(bar)).length === 1 ? true : undefined))).toBe(true)
   expect(await says(bar, /^↳ Your reply to “Check the ears”$/)).toBe(true)
-  expect((await labelled(bar, 'Close')).length).toBe(1)
+  // Send is the big button, first, and Close the small one after it (16 Nov, the person: "the send button is big but the cancel
+  // button is small")
+  const shape = async () => (await bar.findAll({ type: 'Button' })).filter(b => ['Send', 'Close'].includes(String(b.props.label))).map(b => [b.props.label, b.props.variant ?? null, b.props.plain ?? null])
+  expect(await shape()).toEqual([['Send', 'primary', null], ['Close', null, true]])
   expect((await boxesIn(list)).length + (await boxesIn(details)).length).toBe(0)
   expect(await says(list, /^✎ Type it in the box above the chat$/)).toBe(true)
   expect((await labelled(list, CLOSE)).length).toBe(1)
@@ -1431,8 +1437,10 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   await list.press({ key: (await labelled(list, OPEN))[0]?.key ?? '' })
   expect(await until(async () => ((await says(bar, /^↳ Your reply to “Check the ears”$/)) ? true : undefined))).toBe(true)
   expect((await boxesIn(bar))[0]?.props.value).toBe('The left, but ke')
-  // Sent from the bar: it reaches the work in the person's own words, and the box goes with the ask, on to no other card
-  await bar.input({ key: (await boxesIn(bar))[0]?.key ?? '', text: 'The left, but keep the scan' })
+  // Sent from the bar with its Send button: it reaches the work in the person's own words, and the box goes with the ask, on to no
+  // other card
+  await bar.input({ key: (await boxesIn(bar))[0]?.key ?? '', text: 'The left, but keep the scan', kind: 'change' } as never)
+  await bar.press({ key: (await labelled(bar, 'Send'))[0]?.key ?? '' })
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('in their own words: The left, but keep the scan')))).toBeDefined()
   expect(await until(async () => ((await boxesIn(bar)).length === 0 ? true : undefined))).toBe(true)
   expect((await labelled(list, OPEN)).length).toBe(1)
