@@ -867,7 +867,7 @@ test('a helper, and the work waiting on it, that ended while the mod was out are
   files.set(`${folder}/agent-a2.jsonl`, handback('Nothing wrong found.'))
   files.set(`${folder}/agent-a1.meta.json`, JSON.stringify({ description: 'Fix the nose', spawnDepth: 1, finished: true }))
   const saved = () => {
-    const kept = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}') as { cards?: Todo[]; helpers?: Todo[]; ended?: Todo[] }
+    const kept = JSON.parse(files.get(`${MEMORY}/live/engine-id.json`) ?? '{}') as Record<'cards' | 'helpers' | 'ended', { id: string; status: string; answer: string }[] | undefined>
     return [...(kept.cards ?? []), ...(kept.helpers ?? []), ...(kept.ended ?? [])]
   }
   // The helper ends on its card with its report, and the work that waited on it is passed that report and started again, not ended
