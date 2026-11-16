@@ -190,6 +190,8 @@ let isOff = false
 let person = ''
 // config.json can say which model does which work; the chat's and the work's rules name them
 let models: Models = modelsOf({})
+// config.json's choices of how work is handed out and how big it starts (Config's Tasks band)
+let lean: Lean = leanOf({})
 // The settings read again: at a session's start, and after a change in the Config tab
 const loadSettings = async ($: EngineInterface) => {
   // A change to the person's settings or texts made while no chat watched is put back before anything reads them
@@ -200,6 +202,7 @@ const loadSettings = async ($: EngineInterface) => {
   void forgetKeptPasswords($).catch(() => undefined)
   person = typeof config.name === 'string' ? config.name.trim() : ''
   models = modelsOf(config)
+  lean = leanOf(config)
   macs = (Array.isArray((config as { macs?: unknown }).macs) ? ((config as { macs: unknown[] }).macs) : []).filter(isMac).slice(0, 4)
   return config
 }

@@ -414,6 +414,13 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
   const working = (await read($, todos)).find(card => card.id === one.id)?.status === 'working'
+  // A go-ahead to finish, on work that has ended, does its last step without starting the work again
+  if (!working && !isReply && ask.lastStep && ask.folder && ask.choices?.[0] === said) {
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'other', at, line, isCard: true, askAt: ask.at })
+    redraw($)
+    void lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
+    return void askGone($, one, said)
+  }
   const to = isReply ? `${who(true)} replied to your question ("${ask.text}"), in their own words: ${said}` : `${who(true)} pressed "${said}" in answer to your question: ${ask.text}`
   // Work whose run ended a moment ago refuses the line: the chat, which carries it on, gets it instead
   // Marked on its way once written, so a step that began before it never counts as reading it
@@ -473,7 +480,7 @@ const holdAsk = async ($: EngineInterface, one: Todo, ask: NonNullable<Todo['ask
 // holds goes to the chat instead: a notice the person sees and a row its model reads, with no turn of its own
 const WAKE_WAIT = 4000
 // Each wake carries every answer joined into it, so each card's line and the chat's notice are settled for every one
-const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[] }[] = []
+const wakes: { target: string; text: string; answers: { one: Todo; sent: Omit<Sent, 'to'> }[]; spawn?: { prompt: string; description: string; subagentType: string; model: string; cwd: string } }[] = []
 const toEnded = async ($: EngineInterface, one: Todo, target: string, text: string, sent: Omit<Sent, 'to'>) => {
   // Marked on its way before it is sent, so a run that starts before the send resolves counts as reading it
   pending.set(target, one.id)
@@ -503,6 +510,13 @@ const sendWakes = async ($: EngineInterface, isAnswering = false) => {
   }
 }
 const sendWake = async ($: EngineInterface, wake: (typeof wakes)[number]) => {
+  // A small fresh task for a last step, started from inside a hook so it keeps the mod's own tools and guards
+  if (wake.spawn) {
+    const r = await $.agent.spawn(wake.spawn).catch(err => ({ deny: String(err) }) as { deny: string })
+    if (!r.deny) return void (await log($, `a small task ${(r as { agentId?: string }).agentId ?? ''} does the last step of ${wake.target}`))
+    await log($, `the last step's small task not started (${r.deny}): its work is started again instead`)
+    return sendWake($, { ...wake, spawn: undefined })
+  }
   // Work the person stopped is not woken by an answer that was on its way
   if (isHeld((await read($, todos)).find(one => one.id === wake.target))) return void (await log($, `work ${wake.target} not started again with an answer: the person stopped it`))
   const r = (await isReplaced($))

@@ -1,0 +1,8 @@
+- Tasks, checks and helpers now start with only the tools their work takes, so each starts several times smaller; a task that needs a connector, a skill or the browser is still started with everything.
+- The chat runs a single command such as a push itself, always in the background with a 10-minute limit, and gets back only how it ended and its last 3 lines.
+- A small job that builds on what you just discussed goes to a copy of the chat for up to about 10 steps; past that, the copy hands what is left to a fresh task.
+- On your go-ahead to finish (Release it), the task's last step is done without waking the task: Claudopus releases a repo that has a release file itself, after the same allow box, and a small fresh task does any other last step. The task is woken only if the step fails in a way that needs it.
+- The repeated "task finished" notice no longer wakes the chat when the task's report has already come.
+- Helpers that only search and read run on Sonnet 5.5; helpers that build parts keep the task's model.
+- Checks are their own kind of agent, so a check never runs on a weaker model than what built the thing.
+- Seven new settings in Config, under Tasks: Fable 5.2 for, Small jobs, Quick task model, Tasks start with, Second check, Checker model, Helpers that only read.

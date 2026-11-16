@@ -64,7 +64,7 @@ const toolHooks = (on: On) => {
 
   // Work that needs the person's hands now: its card stands out with the ask and its Copy, until they answer or the work clears it
   on('tool.call', { tool: 'mcp__claudopus__ask' }, async ($, e) => {
-    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown }
+    const input = e as unknown as { text?: unknown; details?: unknown; copy?: unknown; choices?: unknown; command?: unknown; cwd?: unknown; pictures?: unknown; last_step?: unknown; folder?: unknown }
     if (e.agentId === undefined) return { result: `Only a background task asks through the panel; the chat asks ${who()} in its reply.` }
     // The question is one line; what it is about goes with it, whole, so the person never answers an ask whose reason has not reached
     // them yet (a report reaches the chat only after the work ends). A question too long for one line is cut at a word on the card and
@@ -97,7 +97,12 @@ const toolHooks = (on: On) => {
     const at = await $.clock.now()
     const before = await read($, todos)
     const was = before.find(one => one.id === topOf(before, e.agentId ?? ''))?.ask
-    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined }))
+    // The step a go-ahead finishes with, which Claudopus does on the first choice without starting the task again: only a task's own
+    // ask with buttons, in a folder that is there
+    const stepGiven = typeof input.last_step === 'string' ? oneLine(input.last_step).slice(0, 400) : ''
+    const stepFolder = typeof input.folder === 'string' ? input.folder.trim() : ''
+    const isStepped = Boolean(stepGiven && choices.length && stepFolder.startsWith('/') && !before.find(one => one.id === e.agentId)?.parentId && (await $.fs.stat(stepFolder).catch(() => undefined))?.kind === 'dir')
+    await change($, e.agentId, one => ({ ...one, ask: text ? { text, ...(isStepped ? { lastStep: stepGiven, folder: stepFolder } : {}), ...(details ? { details } : {}), ...(copy ? { copy } : {}), ...(command ? { isCommand: true, cwd: folder } : {}), ...(choices.length ? { choices, from: e.agentId } : {}), ...(pictures.length ? { pictures } : {}), at } : undefined }))
     const list = await read($, todos)
     const card = list.find(one => one.id === topOf(list, e.agentId ?? ''))
     if (!text) {

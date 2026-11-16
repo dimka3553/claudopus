@@ -174,6 +174,8 @@ const chatHooks = (on: On) => {
           command: { type: 'string', description: 'A command only they can run, never one you can run yourself: one line, whole, shown with a Copy button' },
           cwd: { type: 'string', description: 'The full path of the folder the command runs in, when it has relative paths' },
           pictures: { type: 'array', items: { type: 'string' }, description: 'Full paths of the pictures the question is about, shown with it on the card and in the chat' },
+          last_step: { type: 'string', description: 'For a go-ahead to finish (the first choice, such as Release it): what you would do on it, in one sentence for this repo, or `release` for the release runner. Claudopus does it on the press without starting you again' },
+          folder: { type: 'string', description: 'With last_step: the full path of your worktree, where it is done' },
         },
         required: ['text'],
       },
@@ -327,6 +329,14 @@ const chatHooks = (on: On) => {
         for (const one of held) stopLeft.delete(one.id)
         return next({ ...e, context: [...(e.context ?? []), ...told] })
       }
+      // The chat's own command ended: how it ended and its last lines go with the notice
+      const ended = await chatCommandEnded($, e.text).catch(() => [] as string[])
+      if (ended.length) return next({ ...e, context: [...(e.context ?? []), ...ended] })
+      // A notice that a task whose report already came has stopped says nothing new: it is left out, so the chat takes no turn for it
+      if (isRepeatOnly(e.text)) {
+        await log($, 'left out the notice that repeats a report already given')
+        return { drop: "Left out a repeat notice: that task's report already came." }
+      }
     }
     if (e.isMeta || e.command || !dir) return next(e)
     // A message the mod sent from a press or reply in the panel starts work as a message of the person's does
@@ -345,7 +355,7 @@ const chatHooks = (on: On) => {
 
     if (!isOff) {
       // The role goes out with the person's first message, after a compaction, and again when its text has changed
-      const role = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models))
+      const role = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/chat.md')).text, models, lean))
       const roleSent = mark(role)
       if (!m.isChat || m.needsContext || roleSent !== m.roleSent) {
         // Each subject with the path of its brief, so a brief for work on it can name that path without a search

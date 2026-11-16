@@ -688,12 +688,19 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
   expect(words).toContain('and the nose')
 })
 
-test('work never starts as a copy of the chat: a fork or an agent with no model is refused, and a brief gets the rules for the work', async ($, on) => {
-  const { files } = world(on, { tokens: 400_000 })
+test('work starts as a copy of the chat only for a small job and as the settings allow: else a fork or an agent with no model is refused, and a brief gets the rules for the work', async ($, on) => {
+  const { files } = world(on, { tokens: 400_000, chatRole: 'CHAT ROLE {lanes}' })
   await $.session.start(start)
 
+  // As shipped, a small job goes to a copy of the chat, which is told it is a task now and how long it may go
+  const shipped = await $.prompt.submit({ text: 'push it', wait: false, origin: composer })
+  expect(shipped.context?.join('\n')).toContain('subagent_type: "fork"')
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a0', prompt: 'push it', subagent_type: 'fork' } as never)).deny).toBeUndefined()
+  // With everything as a full task, never a copy
+  ownSet(files, 'config.json', JSON.stringify({ lean: { small: 'full' } }))
+  await $.session.start(start)
   const r = await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
-  expect(r.context?.join('\n')).not.toContain('fork')
+  expect(r.context?.join('\n')).not.toContain('subagent_type: "fork"')
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a1', prompt: 'fix the nose', subagent_type: 'fork' } as never)).deny).toContain('never starts a task as a copy')
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a2', prompt: 'fix the nose', subagent_type: 'general-purpose' } as never)).deny).toContain('the model named')
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'a3', prompt: 'fix the nose', subagent_type: 'general-purpose', model: 'opus' } as never)).deny).toBeUndefined()
@@ -984,16 +991,21 @@ test('a large paste is saved to a file and left out of the chat', async ($, on) 
   expect((await $.tool.call({ tool: 'Read', tool_use_id: 'p3', file_path: saved?.[0], agentId: 'w1' } as never)).deny).toBeUndefined()
 })
 
-test("a chat's own thread may only read, start agents and talk to them; an agent may do the work", async ($, on) => {
+test("a chat's own thread may only read, run a single command in the background, start agents and talk to them; an agent may do the work", async ($, on) => {
   const { files } = world(on)
   await $.session.start(start)
   const told = await $.prompt.submit({ text: 'what does this function do', wait: false, origin: composer })
   expect(told.context?.join('\n')).toContain('Answer a question that a few reads settle here')
   expect(told.context?.join('\n')).toContain('For anything that changes a file, runs a command or takes more than a few reads')
 
-  const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'ls' } as never)
+  // A single command it runs itself, always in the background; reading a file, more than one command, or a runner is not that
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1', command: 'git push' } as never)).deny).toBeUndefined()
+  expect(files.get(`${MEMORY}/log.md`)).toContain("the chat's own command started in the background (bg-t1)")
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1b', command: 'git add -A && git commit -m x' } as never)).deny).toContain('only a single command')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1c', command: 'git log > /tmp/x' } as never)).deny).toContain('only a single command')
+  const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1d', command: '/plug/claudopus/bin/release' } as never)
   expect(refused.deny).toContain('Start a fresh agent')
-  expect(refused.deny).toContain('changes no file and runs no command')
+  expect(refused.deny).toContain('changes no file')
   expect(files.get(`${MEMORY}/log.md`)).toContain('refused Bash')
 
   // It reads for itself: any file, a search, a list of names
