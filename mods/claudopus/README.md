@@ -26,9 +26,9 @@ Each message you send becomes a piece of work that runs in the background, and t
 
 Pieces of work running at once each spend their own tokens: five at a time spend about five times as fast as one. On a subscription that uses up your limits sooner; with an API key or other metered billing, it multiplies what you pay in that time.
 
-![A chat beside the Claudopus panel: three asks become three cards, one stops to ask a question, one finishes green and the octopus cheers](art/panel.gif)
+![The Claudopus panel beside a chat: a card at the top asks a question, one just finished is outlined green, three run with their steps, a helper and a command, and the bar above the prompt shows the machine's figures](art/panel.png)
 
-<p align="center"><em>The panel, redrawn. The work is made up.</em></p>
+<p align="center"><em>The panel, drawn from Claudopus's own code with made-up work.</em></p>
 
 ## Install
 
