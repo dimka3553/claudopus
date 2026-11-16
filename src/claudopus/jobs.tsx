@@ -505,12 +505,6 @@ const tellSilent = async ($: EngineInterface, list: Todo[], now: number) => {
   for (const id of silentTold) if (jobLog.get(id)?.wroteAt && now - (jobLog.get(id)?.wroteAt ?? 0) < RUN_SILENT_TOLD) silentTold.delete(id)
 }
 
-// The runs a card has going that end of themselves, as a wait for one names it: a background command, or one left detached by its
-// process (not a server, which is not waited on to end)
-const ownRunsOf = (one: Todo | undefined): OwnRun[] =>
-  [...(one?.bg ?? []).filter(b => !b.isWatch).map(b => ({ id: b.id, what: b.what, cmd: b.cmd ?? '' })), ...(one?.detached ?? []).map(d => ({ id: d.id, what: d.what, cmd: d.cmd, ...(d.pid ? { pid: d.pid } : {}) }))].filter(
-    run => !SERVER_CMD.test(run.cmd) && describedOf(run.what).kind !== 'server',
-  )
 // The detached runs a piece of work stopped itself with a kill naming its process: their end wakes no one
 const killedByWork = new Set<string>()
 const noteKills = (one: Todo | undefined, command: string) => {

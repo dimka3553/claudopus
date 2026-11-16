@@ -1914,18 +1914,13 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
   await list.unmount()
 })
 
-test('a reply never waits behind a long command: one that may run for minutes goes to the background, a wait for the person is refused, a short one held open is named on the card while the reply waits, and the wait on helpers comes back', async ($, on) => {
-  const { keep, settle, clock, held, files } = world(on)
+test('a reply never waits behind a long command: one that may run for minutes goes to the background, a wait for the person is refused, and a short one held open is named on the card while the reply waits', async ($, on) => {
+  const { keep, settle, clock, held } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'try the reply box', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Reply box that never drags the panel', prompt: 'try the reply box' } as never)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Try the new reply box and tell me how it feels.', choices: ['It feels right', 'Still wrong'] } as never)
-  // A mark an earlier copy of the mod left (before a reload) goes at the work's first step here, so no later wait on helpers comes
-  // back for a message that is not there
-  files.set(`${MEMORY}/helpers/a1.txt.reply`, '1700000000000\n')
-  for await (const _ of $.turn.step({ turnId: 'turn-1', index: 0, model: 'claude-opus-5-5', messageCount: 1, agentId: 'a1' })) void _
-  expect(await until(async () => files.get(`${MEMORY}/helpers/a1.txt.reply`) === '')).toBe(true)
   // Waits that only mention the person, or come with no question open, are no waits for them
   for (const [n, description] of ['Wait for the preview to come up, then open it for you (30 s)', 'Wait until the page has loaded for you to see', 'Wait for your answer key upload to finish', 'Poll your decision tree training (about 1 min)', 'Wait for your CT scans to download'].entries()) {
     const r = (await $.tool.call({ tool: 'Bash', tool_use_id: `ok${n}`, agentId: 'a1', command: 'true', description } as never)) as { deny?: string }
@@ -1953,12 +1948,9 @@ test('a reply never waits behind a long command: one that may run for minutes go
   const box = (await list.findAll({ type: 'Input' } as never)).find(one => /-reply-/.test(one.key ?? ''))
   await list.input({ key: box?.key ?? '', text: 'Yep, looks good' })
   expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => one.text.startsWith('✓ You replied “Yep, looks good” · waiting: Claude will see it when “Run the build” ends (running 1')))).toBeDefined()
-  // and the wait on helpers comes back at once while it waits, since the mod marks it beside that wait's file
-  expect(await until(async () => [...files].find(([path, text]) => path.endsWith('/helpers/a1.txt.reply') && text.trim() !== ''))).toBeDefined()
   held.get('build')?.('built')
   for await (const _ of $.turn.step({ turnId: 'turn-2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' })) void _
   expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Yep, looks good” · Claude is working on it' }))).toBeDefined()
-  expect(await until(async () => [...files].find(([path, text]) => path.endsWith('/helpers/a1.txt.reply') && text === ''))).toBeDefined()
   await settle()
 })
 test("where the bar above the prompt takes a box, a card's answers end with Reply in your own words, which opens the reply box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time", async ($, on) => {

@@ -455,6 +455,12 @@ const panelHooks = (on: On) => {
                 <Text dimColor={!one.lookedIn?.quiet} color={one.lookedIn?.quiet ? NEEDS : undefined} wrap="wrap">{lookedInLine(one, at)}</Text>
               </Box>
             ) : null}
+            {/* What it asked Claudopus to start it again for, in place of a command that would only wait */}
+            {wakeLine(one) && !one.chat ? (
+              <Box key={`wake-${one.id}`} paddingLeft={lead}>
+                <Text dimColor wrap="wrap">{wakeLine(one)}</Text>
+              </Box>
+            ) : null}
             <Box flexDirection="row" alignItems="flex-start" gap={1} height={one.ask ? 1 : 2} overflow="hidden" paddingLeft={lead}>
               {one.status === 'working' ? live(`live-${one.id}`) : null}
               <Box flexGrow={1} flexShrink={1} minWidth={0}>

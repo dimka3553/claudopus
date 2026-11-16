@@ -247,12 +247,12 @@ declare global {
   export import reportsOf = M10.reportsOf
   export import SILENT_AFTER = M10.SILENT_AFTER
   export import SILENT_WARN = M10.SILENT_WARN
-  export import ownWaitOf = M10.ownWaitOf
+  export import waitingOf = M10.waitingOf
   export import watcherOf = M10.watcherOf
   export import OpenCall = M10.OpenCall
-  export import OwnRun = M10.OwnRun
   export import Proc = M10.Proc
   export import Span = M10.Span
+  export import WaitKind = M10.WaitKind
   export import Job = M10.Job
   export import JobKind = M10.JobKind
   export import TabMove = M9.TabMove

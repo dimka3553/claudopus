@@ -180,6 +180,24 @@ const chatHooks = (on: On) => {
       isDeferred: false,
     })
     await $.tool.register({
+      name: 'wake_me',
+      description: named(
+        'For a file, a page or a time that nothing of yours makes (a file another program writes, a page that comes up, a moment to look again): Claudopus looks for it and starts you again the moment it is there, so you end your step instead of waiting with a command. Your own commands, in the background or detached, and your helpers wake you by themselves: never use this for them. Name a file, a line in it, a page, or only minutes. A new call replaces the last one.',
+      ),
+      inputSchema: {
+        type: 'object',
+        properties: {
+          what: { type: 'string', description: 'What you wait for, in a few plain words read at a glance on your card' },
+          file: { type: 'string', description: 'The full path of a file to appear (with `text`, a file to hold that text)' },
+          text: { type: 'string', description: 'A line of text to appear in `file`' },
+          url: { type: 'string', description: 'A page to answer without an error' },
+          minutes: { type: 'number', description: 'With nothing else: start you after this many minutes. With a file or page: the longest to look, after which you are started with word that it never came (60 when left out, at most 360)' },
+        },
+        required: ['what'],
+      },
+      isDeferred: false,
+    })
+    await $.tool.register({
       name: 'waits',
       description: named(
         "For background tasks, before you finish: records what in your report waits on {name}, each as one short line {name} can answer yes or no. The panel shows each with Yes / No / Not now. Only what needs {name}'s own decision or hands; not what you could do yourself, and not what you did not check. It replaces what was recorded before; do not call it when nothing waits.",
@@ -448,9 +466,9 @@ const chatHooks = (on: On) => {
       // Work a message of the person's started that has finished leaves its report for good; a helper's answer is no report. Work
       // held on its own background work leaves it once it ends (keepStoppedReports)
       const card = (await read($, todos)).find(one => one.id === id)
-      // A helper that has ended lets the work waiting on it go at once, not at the next look round
-      if (card?.parentId && card.status !== 'working') await writeRolls($, true).catch(err => log($, `helpers not written: ${String(err)}`))
       const report = (e.answer ?? '').trim() || answer
+      // A helper that has ended while its work had ended its step: its result is passed on to that work, which starts again with it
+      if (card?.parentId && card.status !== 'working') await passOnHelper($, id, report, card.status).catch(err => log($, `helper's result not passed on: ${String(err)}`))
       if (card && !card.parentId && card.status === 'done' && card.endedAt === now && how === 'done' && report) {
         $.clock.after(5, () => void saveReport($, card, report).catch(err => log($, `report of ${id} not kept: ${String(err)}`)))
       }
