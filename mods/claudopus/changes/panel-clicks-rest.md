@@ -1,2 +1,4 @@
 - An answer pressed on a card by mistake can be taken back while the card still says it: "Take back" puts the question back with its buttons, and the task is told not to act on that answer
 - The bar above the prompt holds still for clicks too: on the desktop it is drawn afresh at most about once a second, and not at all from the start of a click on one of its buttons until the click lands
+- Scrolled down in the panel, the cards above where you point no longer grow or shrink under you while you use it: what work writes waits until you have left the panel alone for 15 seconds, and your own presses and new questions still show at once. At the list's end the view no longer snaps up and swings back
+- Buttons in Settings, About and the other tabs hold still for clicks under load as the panel's do, so Reset and the rest take their click

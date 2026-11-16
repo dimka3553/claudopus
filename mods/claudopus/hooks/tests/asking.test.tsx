@@ -909,7 +909,7 @@ test('while drawings of the panel are slow, as under seven tasks and their comma
   expect(await until(async () => list.find({ type: 'Text', text: 'Find more scans' }))).toBeDefined()
 })
 
-test('the bar above the prompt on the desktop, drawn as often as the panel under load, is given again as it was for a second after each drawing made afresh, so a click on its buttons names one still there, and is then drawn afresh by itself', async ($, on) => {
+test('the bar above the prompt on the desktop, drawn as often as the panel under load, is given again as it was for a second after each drawing made afresh, and a tab of the mod\'s through a click on its buttons, so a click names one still there; both are then drawn afresh by themselves', async ($, on) => {
   const { clock, files } = world(on)
   // Each drawing of the panel takes 300 ms, as on 16 Nov with seven tasks at work; the bar's own stay quick
   const slow = { isOn: false }
@@ -918,6 +918,8 @@ test('the bar above the prompt on the desktop, drawn as often as the panel under
     while (Date.now() < until);
     return { value: 'claude-opus-5-5' } as never
   })
+  // (written before the chat starts, as the person's own settings: one written after is not believed)
+  files.set(`${MEMORY}/config.json`, JSON.stringify({ name: 'Sam' }))
   await $.session.start(start)
   await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix' } as never)
   files.set(`${MEMORY}/record-panel.on`, '')
@@ -940,6 +942,29 @@ test('the bar above the prompt on the desktop, drawn as often as the panel under
   // and once the second is over, drawn afresh
   expect(renders.some((one, n) => n > 0 && renders[n - 1]?.held && !one.held)).toBe(true)
   await bar.unmount()
+  // So is a tab of the mod's, Settings here, which every drawing of the panel draws again too (16 Nov: its Reset pressed, never
+  // reaching the mod). What it shows of the last look for an update tells a drawing made afresh from one given again
+  const looked = (min: number) => files.set(`${MEMORY}/update-seen.json`, JSON.stringify({ at: clock.now() - min * 60_000, version: '0.0.1', result: 'seen' }))
+  looked(5)
+  const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
+  const says = async () => {
+    await config.redraw()
+    return (await config.findAll({ type: 'Text' })).map(one => one.text ?? '').map(text => /Last looked (\d+ min)/.exec(text)?.[1]).find(Boolean)
+  }
+  expect(await says()).toBe('5 min')
+  // From the focus on one of its buttons until the press, the drawing on screen stays, so the press names that button
+  const reset = (await config.findAll({ type: 'Button' })).find(one => one.props.label === 'Reset')
+  expect(reset).toBeDefined()
+  await ($.ui as any).focus({ component: 'Pane', requestId: 'config', plugin: 'claudopus', element: reset?.key, isHeld: true, origin: { kind: 'person' } }).catch(() => undefined)
+  looked(20)
+  await clock.advance(1200)
+  expect(await says()).toBe('5 min')
+  expect((await config.findAll({ type: 'Button' })).some(one => one.key === reset?.key)).toBe(true)
+  // and once the click is over, drawn afresh
+  await clock.advance(1000)
+  expect(await says()).toBe('20 min')
+  await config.unmount()
+  await list.unmount()
 })
 
 test("while the person types into a card's reply box the list's running times stand still, and move again once they stop", async ($, on) => {
@@ -1272,11 +1297,16 @@ test('a button answer pressed by mistake is taken back from its card while the c
   await press('Use it')
   expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Use it"')))).toBeDefined()
   expect(await until(async () => ((await labels()).includes('↶ Take back “Use it”') ? true : undefined))).toBe(true)
-  // The work asks something else: the old answer can no longer be taken back
+  // The work asks something else: the old answer can no longer be taken back, not even from a drawing still showing its button
+  const stale = (await list.findAll({ type: 'Button' })).find(b => String(b.props.label) === '↶ Take back “Use it”')?.key ?? ''
   await clock.advance(1000)
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Upload it now?', choices: ['Upload', 'Not now'] } as never)
   expect(await until(async () => ((await labels()).includes('Upload') ? true : undefined))).toBe(true)
   expect(await labels()).not.toContain('↶ Take back “Use it”')
+  await list.press({ key: stale }).catch(() => undefined)
+  await clock.advance(1000)
+  expect(appended.some(line => line.includes('took back their answer "Use it"'))).toBe(false)
+  expect(await list.find({ type: 'Text', text: 'Upload it now?' })).toBeDefined()
   await list.unmount()
 })
 
@@ -1981,7 +2011,8 @@ test('while the person uses the panel its running times stand still, and move ag
   await $.prompt.submit({ text: 'two pieces of work', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' } as never)
   await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' } as never)
-  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  // (scrolled down: at the top only the running times stand still)
+  const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, scroll: { offset: 20, bodyRows: 50 } }, surface: 'desktop' } as never)
   await clock.advance(12_000)
   await list.findAll({ type: 'Text' })
   // A press in the panel: drawn once for what it did, then still while the person is at it
@@ -1989,16 +2020,28 @@ test('while the person uses the panel its running times stand still, and move ag
   expect(title).toBeDefined()
   await list.press({ key: title?.key ?? '' })
   await list.findAll({ type: 'Text' })
+  // Scrolled down by the person, who the app says sees a list 90 rows tall: drawn at least that tall while they use it, so a card
+  // that shrinks never snaps the view up under them
+  await ($.ui as any).scroll({ component: 'Pane', requestId: LIST.requestId, offset: 20, by: 20, bodyRows: 50, contentRows: 90, origin: { kind: 'person' } }).catch(() => undefined)
+  const tall = async () => Number((await list.find({ type: 'Box' }))?.props.minHeight ?? 0)
   counting.isOn = true
   const still = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
+  // Work writes a line and new work starts while the person is at it: nothing above the pointer moves (16 Nov, the button under it
+  // moved by up to 184 px as cards grew and shrank)
+  await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'Halfway through the ears.' } as never)
+  await $.agent.spawn({ ...spawn, description: 'Check the chin', prompt: 'chin' } as never)
   for (let i = 0; i < 13; i++) (await clock.advance(1000), expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).toBe(still))
   // An ask comes: shown at once all the same
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a2', text: 'May I go on?', choices: ['Approve', 'Not now'] } as never)
   expect(await list.find({ type: 'Text', text: 'May I go on?' })).toBeDefined()
+  expect(await tall()).toBeGreaterThanOrEqual(90)
   // Left alone, the times move again
   const asked = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))
   await clock.advance(30_000)
   expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).not.toBe(asked)
+  // with what came meanwhile, and its own height again
+  expect(await until(async () => list.find({ type: 'Text', text: 'Check the chin' }))).toBeDefined()
+  expect(await tall()).toBeLessThan(90)
   await list.unmount()
 })
 

@@ -26,6 +26,13 @@ const lastShown = new Map<string, unknown>()
 // drawing again, and an answered card came back and went under the pointer (16 Nov recording: 4 drawings late, 5 flips back)
 const shownAsked = new Map<string, number>()
 const shownKept = new Map<string, number>()
+// What waited on the person and how often they had pressed, as each pane's drawing on screen was made (personSign), and when the
+// drawing held for their use is next drawn afresh
+const shownSigns = new Map<string, string>()
+const shownAts = new Map<string, number>()
+// The mod's tabs drawn on the desktop, whose buttons a click holds the drawing for (holdForPress)
+const heldTabs = new Set<string>()
+let usedUntil = 0
 // The surface the list was last drawn on: the focus says none, and only the desktop's clicks are held for (isPressHeld)
 let listSurface = ''
 const panelHooks = (on: On) => {
@@ -37,6 +44,34 @@ const panelHooks = (on: On) => {
     // Every ask for a tab's drawing passes here first, and is noted (watchTabs)
     await noteTabAsked($, id)
     const isTab = [REPORTS_PANE, STATS_PANE, CONFIG_PANE, ABOUT_PANE, CHANGELOG_PANE, PICTURE_PANE, PANE].includes(id) || [WORK_PANE, FLOW_PANE, MEMORY_PANE, 'report-'].some(start => id.startsWith(start))
+    // A tab of the mod's on the desktop, Settings, About, Results and the rest, but for a work's or a workflow's Details, which are
+    // drawn with the panel below: every drawing of the panel draws it again too, so under load its buttons went as the panel's did
+    // (16 Nov: Settings' Reset pressed, never reached the mod). Held the same way: given again through a click, and while its
+    // drawings are slow at most every FRESH_GAP; an older drawing that finishes after a newer one is never the one on screen
+    if (e.surface === 'desktop' && isTab && !id.startsWith(WORK_PANE) && !id.startsWith(FLOW_PANE)) {
+      heldTabs.add(id)
+      const key = `${id}|${e.surface}|${e.props.scroll.bodyRows}|${(e.props as { bodyColumns?: number }).bodyColumns ?? ''}|${e.props.scroll.offset > 0 ? 1 : 0}`
+      const at = await $.clock.now()
+      const recent = lastShown.get(key)
+      if (recent && isPressHeld(at)) return ((isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
+      // (a tab is often quick to draw on its own: slow or not, it is given again while the panel's drawings are slow, as the bar is)
+      if (recent && !isTyping && isFreshTooSoon($, key, at, isPanelSlow(at))) return recent as Awaited<ReturnType<typeof next>>
+      freshBegins(key)
+      const askedNo = (shownAsked.get(key) ?? 0) + 1
+      shownAsked.set(key, askedNo)
+      const madeFrom = Date.now()
+      let made: { at: number; ms: number; fresh: number } | undefined
+      try {
+        const drawing = await next(e)
+        if ((shownKept.get(key) ?? 0) > askedNo && lastShown.has(key)) return lastShown.get(key) as typeof drawing
+        shownKept.set(key, askedNo)
+        lastShown.set(key, drawing)
+        made = { at, ms: Date.now() - madeFrom, fresh: freshness }
+        return drawing
+      } finally {
+        freshEnds($, key, made)
+      }
+    }
     if (e.surface !== 'terminal' || !isTab) return next(e)
     const { Box, Button, Text } = uiOf($, e)
     const body = await next({ ...e, props: { ...e.props, scroll: { ...e.props.scroll, bodyRows: Math.max(1, e.props.scroll.bodyRows - 2) } } } as typeof e)
@@ -72,6 +107,14 @@ const panelHooks = (on: On) => {
     // (of this size and place: a pane resized or scrolled meanwhile is drawn afresh). Given before anything is read, so it is
     // answered at once: given after the pane's reads, it came too late under load and a newer ask dropped it
     if (recent && paneId === LIST && isPressHeld(heldAt)) return ((listHeldAt = heldAt), (isPressMissed = true), recent as Awaited<ReturnType<typeof next>>)
+    // In use on the desktop: the drawing on screen, but for the person's own presses and what newly waits on them (isInUse)
+    const sign = paneId === LIST && e.surface === 'desktop' ? await personSign($) : ''
+    // (only a drawing made during this use: one kept from before, as of a scroll down after minutes at the top, is long out of date)
+    if (recent && sign && !isTyping && isInUse(heldAt, e.props.scroll.offset) && shownSigns.get(shownKey) === sign && heldAt - (shownAts.get(shownKey) ?? 0) < ENGAGED) {
+      const until = engagedAt + ENGAGED
+      if (usedUntil !== until) ((usedUntil = until), $.clock.after(until - heldAt + 20, () => void (usedUntil === until && drawFresh($))))
+      return ((listHeldAt = heldAt), recent as Awaited<ReturnType<typeof next>>)
+    }
     if (recent && !isTyping && isFreshTooSoon($, shownKey, heldAt)) return ((paneId === LIST && (listHeldAt = heldAt)), recent as Awaited<ReturnType<typeof next>>)
     // (counted from the drawing's end: a call for a drawing it made itself, as its own count of what waits at the top, is in it)
     freshBegins(shownKey)
@@ -1731,7 +1774,7 @@ const panelHooks = (on: On) => {
     const outCard = alone ? null : (await noticeCard($, ui, await noticeNow($, versions.version, versions.installed).catch(() => undefined), versions.version).catch(() => null)) ?? screen ?? null
 
     return (
-      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={e.props.scroll.bodyRows}>
+      <Box flexDirection="column" gap={isInline ? 0 : 1} minHeight={Math.max(e.props.scroll.bodyRows, paneId === LIST && e.surface === 'desktop' && isInUse(at, e.props.scroll.offset) ? usedRows : 0)}>
         {!alone ? (
           // The mark and its lines across the whole width, so the chat's size is read whole; the buttons on a row of their own under
           // them, which wraps onto a second row in a narrow pane rather than cutting anything off
@@ -1810,6 +1853,8 @@ const panelHooks = (on: On) => {
     // Overtaken by a newer drawing that is already made: not kept, and the newer one is given in its place
     if ((shownKept.get(shownKey) ?? 0) > askedNo && recent !== undefined) return lastShown.get(shownKey) as Awaited<ReturnType<typeof next>>
     shownKept.set(shownKey, askedNo)
+    shownSigns.set(shownKey, sign)
+    shownAts.set(shownKey, heldAt)
     heldDrawings.set(heldKey, { shape, content, at: heldAt, fresh: freshness, drawing })
     lastShown.set(shownKey, drawing)
     drawnPanes.set(paneId, { shape, content, at: heldAt, side: sideSign() })
