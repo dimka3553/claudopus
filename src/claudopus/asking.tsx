@@ -537,7 +537,6 @@ const startedBy = new Set<string>()
 // An answer written into work under way, which reads it at a step of its own: an earlier wake's run no longer covers this card
 const writtenIn = ($: EngineInterface, target: string, card: string) => {
   pending.set(target, card)
-  void replyWaiting($, target)
   for (const key of startedBy) if (key.startsWith(`${card}:`)) startedBy.delete(key)
 }
 // Work an answer or the person's message started again is at work from then: its card is back among the running cards, not under
@@ -624,24 +623,6 @@ const replyRead = ($: EngineInterface, agentId: string) => {
   pending.delete(agentId)
   const sent = sentReplies.get(card)
   if (sent?.to === 'work') (sentReplies.set(card, { ...sent, to: 'read' }), redraw($))
-}
-// The person's words written into work under way are marked beside the file its wait on helpers reads, so that wait comes back at
-// once and the work reads them; the mark goes at the work's next step, which reads them
-const replyMarked = new Set<string>()
-// (a mark an earlier copy of the mod left, before a reload, is looked for once at each work's first step here)
-const replyLooked = new Set<string>()
-const replyWaiting = async ($: EngineInterface, agentId: string) => {
-  if (!dir) return
-  const at = await $.clock.now()
-  await $.fs.write(`${rollPath(agentId)}.reply`, `${at}\n`).catch(err => log($, `reply mark for ${agentId} not written: ${String(err)}`))
-  replyMarked.add(agentId)
-}
-const replyTaken = async ($: EngineInterface, agentId: string) => {
-  if (!dir) return
-  const isFirst = !replyLooked.has(agentId)
-  replyLooked.add(agentId)
-  if (!replyMarked.delete(agentId) && !(isFirst && (await readOr($, `${rollPath(agentId)}.reply`)).trim())) return
-  await $.fs.write(`${rollPath(agentId)}.reply`, '').catch(() => undefined)
 }
 // Work whose run ended with an answer written in but never read is started again with it
 const replyUnread = async ($: EngineInterface, agentId: string) => {

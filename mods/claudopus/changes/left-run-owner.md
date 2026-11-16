@@ -1,1 +1,2 @@
 - A run one task leaves going is shown on the card of the task whose command started it, never on another task's command that ran at the same moment: a code search's row no longer shows another task's "0 of 2 heads" and its memory. A run that no command names, started while two tasks' commands ran, is shown on neither.
+- The Mac's own file indexer, which ps lists in brackets as it ends, no longer shows up as runs under your tasks.

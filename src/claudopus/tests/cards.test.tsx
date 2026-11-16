@@ -1166,7 +1166,7 @@ test('a run whose output cannot be found says so after three minutes, so a blank
   await list.unmount()
 })
 
-test('a run of a work\'s own wakes it the moment it ends: a wait on it is refused in one sentence, the work is told it ended, and its card no longer says how far it was (16 Nov an upload read 100% beside "about 40% done")', SLOW, async ($, on) => {
+test('a run of a work\'s own wakes it the moment it ends: any command that only waits, the work\'s or its helper\'s, is refused in one sentence, the work is told it ended, and its card no longer says how far it was (16 Nov an upload read 100% beside "about 40% done"; a helper polled for a file its own script wrote)', SLOW, async ($, on) => {
   let isAlive = true
   const { clock, appended, resumed, stopped } = world(on, { jobs: { output: () => 'progress: 8/8 GB uploading\n', wroteAt: () => 1_700_000_000_000, alive: () => isAlive } })
   on('session.cwd', () => ({ value: '/repo' }) as never)
@@ -1179,14 +1179,14 @@ test('a run of a work\'s own wakes it the moment it ends: a wait on it is refuse
   // A wait on it, by its process or its log, does not run
   for (const command of ['for i in $(seq 1 55); do kill -0 48213 2>/dev/null || break; echo "progress: $i/55 tries waiting for the upload"; sleep 10; done; grep -E "ERROR|Copied" /w/upload.log | tail -5', "until ! pgrep -f 'curl -T zips.zip' >/dev/null; do echo \"progress: 1 tries\"; sleep 10; done"]) {
     const r = (await $.tool.call({ tool: 'Bash', tool_use_id: 'w1', agentId: 'a1', command, description: 'Wait for the upload to finish (about 9 min)', run_in_background: true } as never)) as { deny?: string }
-    expect(r.deny).toBe('Not run: this only waits for your own command "Upload both zips to the folder" to end, and you are woken the moment it ends, so carry on with what needs nothing from it or end your step now.')
+    expect(r.deny).toMatch(/^Not run: this command only waits, and nothing you start may only wait\. Your own commands, in the background or detached, wake you the moment they end/)
   }
-  // A Monitor that only waits for it to end, as a helper's would, is refused the same
-  expect(((await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'while kill -0 48213; do sleep 10; done', description: 'Wait for the upload' } as never)) as { deny?: string }).deny).toMatch(/^Not run: this only waits for your own command "Upload both zips to the folder" to end/)
+  // A Monitor that only waits for it to end is refused the same
+  expect(((await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'while kill -0 48213; do sleep 10; done', description: 'Wait for the upload' } as never)) as { deny?: string }).deny).toMatch(/^Not run: this command only waits/)
   // A sifter left going beside it, which ends with nothing: let through while the upload goes
   expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'g1', agentId: 'a1', command: 'ugrep --line-buffered wrote', description: 'Run a look for written files', run_in_background: true } as never)) as { deny?: string }).deny).toBeUndefined()
-  // A tail that waits for one line ends with it, and runs
-  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'w4', agentId: 'a1', command: 'tail -f /w/upload.log | grep -m1 Copied', description: 'Wait for the first file copied', run_in_background: true } as never)) as { deny?: string }).deny).toBeUndefined()
+  // A tail that waits for one line is a wait for that line
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'w4', agentId: 'a1', command: 'tail -f /w/upload.log | grep -m1 Copied', description: 'Wait for the first file copied', run_in_background: true } as never)) as { deny?: string }).deny).toMatch(/^Not run: this command only waits/)
   // A tail that follows its log never ends and tells the work nothing
   expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'w3', agentId: 'a1', command: 'tail -f /w/upload.log | grep --line-buffered ERROR', description: 'Watch the upload for errors', run_in_background: true } as never)) as { deny?: string }).deny).toMatch(/^Not run: this only follows a log and would never end/)
   // A wait for a line in its log, or a look once, still runs
@@ -1222,6 +1222,19 @@ test('a run of a work\'s own wakes it the moment it ends: a wait on it is refuse
   isAlive = false
   await clock.advance(20_000)
   expect(await until(async () => resumed.find(one => one === 'a1: Your command "Upload the rest" has ended. Look at how it ended in its log, /w/rest.log, and carry on with the next step now.'))).toBeDefined()
+  // So is a helper's, whatever it waits for: the 16 Nov helper's waits on its own script's output and process, a page, a time
+  await $.agent.spawn({ ...spawn, description: 'Loaders for every open head set', prompt: 'load', parentAgentId: 'a1' } as never)
+  const O = '/private/tmp/claude-501/x/tasks'
+  for (const command of [
+    `n=0; until grep -q "Counter" ${O}/b1it4kmrm.output; do n=$((n+1)); echo "progress: $n tries waiting for fit timing"; sleep 8; [ $n -gt 60 ] && break; done; cat ${O}/b1it4kmrm.output | tail -12`,
+    `n=0; while pgrep -f "sets.py" >/dev/null; do n=$((n+1)); echo "progress: $n tries waiting for sheets"; sleep 8; [ $n -gt 60 ] && break; done; ls -la ~/sets | head; cat ${O}/bg253ddbk.output`,
+    'until curl -s localhost:3000 >/dev/null; do echo "progress: 1 tries"; sleep 2; done',
+    'sleep 300; cat out.log',
+  ]) expect([command, ((await $.tool.call({ tool: 'Bash', tool_use_id: 'h1', agentId: 'a2', command, description: 'Wait for the sheets', run_in_background: true } as never)) as { deny?: string }).deny?.slice(0, 32)]).toEqual([command, 'Not run: this command only waits'])
+  // and the wait the old rules gave for helpers, said for what it waits on
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'h2', agentId: 'a1', command: "'/x/mods/claudopus/bin/helpers' '/x/helpers/a1.txt'", description: 'Wait for the three builders' } as never)) as { deny?: string }).deny).toMatch(/^Not run: this command only waits for your helpers, .*even after you end your step/)
+  // A helper's real work runs
+  expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'h3', agentId: 'a2', command: 'cd /w && python sets.py', description: 'Run the sheets' } as never)) as { deny?: string }).deny).toBeUndefined()
 })
 
 test('every run under a card says how it stands: a command held open shows its progress, one that printed nothing says so, a watch its last event; 15 Nov rows said only "updated 9m ago"', SLOW, async ($, on) => {
@@ -1333,11 +1346,11 @@ test('only runs really running are listed: a watch the engine killed at its time
   await $.session.start(start)
   await $.prompt.submit({ text: 'save the videos', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, description: 'Save the videos', prompt: 'go' } as never)
-  const watch = (id: string) => $.tool.call({ tool: 'Monitor', tool_use_id: id, agentId: 'a1', command: 'until grep -q "pass 1 done" /s/screen.log; do sleep 20; done', description: 'Wait for first screening pass (about 35 min)', timeout_ms: 3_000_000, persistent: false } as never)
+  const watch = (id: string) => $.tool.call({ tool: 'Monitor', tool_use_id: id, agentId: 'a1', command: 'tail -f /s/screen.log | grep --line-buffered "pass 1 done"', description: 'Wait for first screening pass (about 35 min)', timeout_ms: 3_000_000, persistent: false } as never)
   await watch('m1')
   await watch('m2')
   const bg = (id: string, command: string, description: string) => $.tool.call({ tool: 'Bash', tool_use_id: id, agentId: 'a1', command, description, run_in_background: true } as never)
-  await bg('w1', 'until grep -q "pass 1 done" /s/screen.log; do n=$((n+1)); echo "progress: $n tries"; sleep 20; done; tail -2 /s/screen.log', 'Wait for the details screening to finish (about 55 min)')
+  await bg('w1', 'python3 screen.py --details', 'Wait for the details screening to finish (about 55 min)')
   await bg('f1', 'python3 fetch.py', 'Run the fetch of the list')
   await bg('k1', 'python3 tidy.py', 'Run the tidy up')
   await bg('p1', 'python3 fit.py', 'Run the fit (about 20 min)')
