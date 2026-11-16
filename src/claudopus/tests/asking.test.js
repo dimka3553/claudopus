@@ -178,7 +178,7 @@ test('while the person types into an ask the panel holds its drawing whole, as o
         expect(await until(async () => list.find({ type: 'Text', text: `Find more scans ${surface}` }))).toBeDefined();
         expect((await list.findAll({ type: 'Input' })).find(one => /^ask-a1-reply-/.test(one.key ?? ''))?.props.value).toBe('');
         // Typing stopped: the panel moves on, with the other card's new line, and the box holds what was typed
-        await clock.advance(31000);
+        await clock.advance(31_000);
         expect(await until(async () => list.find({ type: 'Text', text: `I am measuring the left ear on the ${surface}.` }))).toBeDefined();
         expect((await list.findAll({ type: 'Input' })).find(one => /^ask-a1-reply-/.test(one.key ?? ''))?.props.value).toBe('Non-Asian');
         // A press is the person's own move: it lets the panel go at once
@@ -189,6 +189,47 @@ test('while the person types into an ask the panel holds its drawing whole, as o
         await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${surface}`, agentId: 'a1', text: 'Which source next?', choices: ['Kaggle', 'TCIA', 'Not now'] });
         await Promise.all([list.unmount(), ears.unmount()]);
     }
+});
+test('while drawings of the panel are slow, as under seven tasks and their commands, one drawn afresh moments ago is given again as it was, buttons and all, until the gap is over, so a click amid a stream of changes names a button still there; a quick drawing and a press are drawn at once', async ($, on) => {
+    const { clock } = world(on);
+    // Each drawing of the panel takes 300 ms, as on 16 Nov with seven tasks at work
+    const slow = { isOn: false, n: 0 };
+    on('session.model', () => {
+        slow.n += 1;
+        const until = Date.now() + (slow.isOn ? 300 : 0);
+        while (Date.now() < until)
+            ;
+        return { value: 'claude-opus-5-5' };
+    });
+    await $.session.start(start);
+    await $.agent.spawn({ ...spawn, description: 'Fix the nose', prompt: 'fix' });
+    await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'ears' });
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    await clock.advance(2000);
+    // Quick drawings: every change is drawn at once
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'q0', agentId: 'a2', text: 'Quick step of the ears.' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'Quick step of the ears.' }))).toBeDefined();
+    slow.isOn = true;
+    await clock.advance(2000);
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f0', agentId: 'a2', text: 'Step 0 of the ears.' });
+    expect(await until(async () => list.find({ type: 'Text', text: 'Step 0 of the ears.' }))).toBeDefined();
+    const keys = async () => (await list.findAll({ type: 'Button' })).map(b => b.key).join(' ');
+    const before = await keys();
+    // Work writing faster than a drawing reaches the app: each ask for the panel within the gap gets the drawing on screen
+    for (const n of [1, 2]) {
+        await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `f${n}`, agentId: 'a2', text: `Step ${n} of the ears.` });
+        expect(await list.find({ type: 'Text', text: 'Step 0 of the ears.' })).toBeDefined();
+        expect(await keys()).toBe(before);
+    }
+    // The gap over, it is drawn afresh by itself, with the newest line
+    await clock.advance(1500);
+    expect(await until(async () => list.find({ type: 'Text', text: 'Step 2 of the ears.' }))).toBeDefined();
+    // A press of the person's is drawn at once, whatever the gap
+    await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'f3', agentId: 'a2', text: 'Step 3 of the ears.' });
+    await $.agent.spawn({ ...spawn, description: 'Find more scans', prompt: 'more' });
+    expect(await list.find({ type: 'Text', text: 'Find more scans' })).toBeUndefined();
+    await pressed(list, 'stats-open');
+    expect(await until(async () => list.find({ type: 'Text', text: 'Find more scans' }))).toBeDefined();
 });
 test("while the person types into a card's reply box the list's running times stand still, and move again once they stop", async ($, on) => {
     const { clock } = world(on);
@@ -206,7 +247,7 @@ test("while the person types into a card's reply box the list's running times st
     await clock.advance(5000);
     expect(await time()).toBe(before);
     // Typing stopped for half a minute: the times move again, and the draft is still in the box
-    await clock.advance(31000);
+    await clock.advance(31_000);
     expect(await until(async () => ((await time()) !== before ? true : undefined))).toBe(true);
     expect((await list.findAll({ type: 'Input' })).find(one => /-reply-/.test(one.key ?? ''))?.props.value).toBe('The le');
     await list.unmount();
@@ -228,7 +269,7 @@ test('with work running and nobody typing, the panel is drawn again at once for 
     expect(await until(async () => list.find({ type: 'Text', text: 'I am looking at the left ear.' }))).toBeDefined();
     // and its time moves again within ten seconds
     const after = await texts();
-    await clock.advance(11000);
+    await clock.advance(11_000);
     expect(await until(async () => ((await texts()) !== after ? true : undefined))).toBe(true);
     // A press shows what it did at once
     await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Approve')?.key ?? '' });
@@ -236,7 +277,7 @@ test('with work running and nobody typing, the panel is drawn again at once for 
     // and so does one that only opens a part of the panel, Finished, with work ended and other work running
     await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' });
     await $.turn.complete({ answer: 'Nose checked.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a2' });
-    await clock.advance(12000);
+    await clock.advance(12_000);
     const shut = await texts();
     await pressed(list, 'finished-fold');
     expect(await until(async () => ((await texts()) !== shut ? true : undefined))).toBe(true);
@@ -249,7 +290,7 @@ test('a key box keeps what is typed in it without drawing it back, and holds the
     await $.agent.spawn({ ...spawn, description: 'Get the data', prompt: 'data' });
     void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret SAMPLE_USER here fetch' }));
     const id = '3f1e2d3c-4b5a-4987-a654-3210fedcba98';
-    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'SAMPLE_USER', chat: 'engine-id', at: 1700000000000 }));
+    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'SAMPLE_USER', chat: 'engine-id', at: 1_700_000_000_000 }));
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     await clock.advance(1000);
     const field = await until(async () => (await list.findAll({ type: 'Input' })).find(one => (one.key ?? '').startsWith(`box-${id}-field`)));
@@ -276,7 +317,7 @@ test('an ask outlives the work that made it: amber after the work ends, with or 
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Run this to restart that chat yourself.', command: 'ssh m4 tmux respawn-pane -k -t claude' });
     await $.turn.complete({ answer: 'I could not restart it; the command is on your card.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' });
     // Long after it finished, the ask is still there, amber, with its Done and Not now and its button for Terminal
-    await clock.advance(10 * 60000);
+    await clock.advance(10 * 60_000);
     expect((await until(async () => list.find({ type: 'Text', text: 'Run this to restart that chat yourself.' })))?.props.color).toBe('#E5A50A');
     const labels = (await list.findAll({ type: 'Button' })).map(b => b.props.label);
     expect(labels).toContain('Done');
@@ -300,7 +341,7 @@ test('a press on one ended work\'s ask leaves the other asks\' buttons where the
         await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: `k-${id}`, agentId: id, text, choices: ['Release it', 'Not now'] });
         await $.turn.complete({ answer: 'Waits for your Release it.', durationMs: 1, isAborted: false, turnId: `turn-${id}`, reason: 'answer', agentId: id });
     }
-    await clock.advance(60000);
+    await clock.advance(60_000);
     // The keys as the late surface last drew them, both cards amber with their buttons
     const drawn = await until(async () => {
         const releases = (await list.findAll({ type: 'Button' })).filter(b => b.props.label === 'Release it');
@@ -341,7 +382,7 @@ test('a go-ahead to finish on ended work does its last step without waking it: a
     await ask('a2', 'Merge the PR and look at the build', '/repo/plain');
     await ask('a3', 'release', '/repo/wt');
     await ask('a4', 'release', '/repo/wt');
-    await clock.advance(60000);
+    await clock.advance(60_000);
     // Release it: the card holds the release's allow box for the branch, and the work is not started again
     await press('a1', 'Release it');
     expect(await until(async () => (await list.findAll({ type: 'Button' })).find(b => /^gate-step-a1-.*once/.test(String(b.key ?? ''))))).toBeDefined();
@@ -385,7 +426,7 @@ test('a reply in words that does not settle an ask keeps it, and the card active
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Release it', 'Not now'] });
     await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'h1', agentId: 'a1', message: 'Release it? (Answers: Release it / Not now.) Built, tested and checked; nothing is released.' });
     await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' });
-    await clock.advance(60000);
+    await clock.advance(60_000);
     expect(await until(async () => list.find({ type: 'Text', text: ASK }))).toBeDefined();
     expect(await labels()).toContain('Release it');
     // The person replies in their own words, asking for something first: the work is started again with it and told the ask stays
@@ -405,7 +446,7 @@ test('a reply in words that does not settle an ask keeps it, and the card active
     // Its ask stays open and its card active, now with its answers back as it waits on the person again; it is not started a second
     // time with the same reply
     await $.turn.complete({ answer: 'Release it? (Answers: Release it / Not now.) Here are the images.', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' });
-    await clock.advance(60000);
+    await clock.advance(60_000);
     expect(await list.find({ type: 'Text', text: ASK })).toBeDefined();
     expect(await labels()).toContain('Release it');
     expect((await list.findAll({ type: 'Input' })).some(one => /-reply-/.test(one.key ?? ''))).toBe(true);
@@ -420,14 +461,14 @@ test('a reply in words that does not settle an ask keeps it, and the card active
     await list.input({ key: box2?.key ?? '', text: 'And the narrow window too, please.' });
     expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('the narrow window too')))).toBeDefined();
     await $.turn.complete({ answer: 'Here is the narrow window.', durationMs: 1, isAborted: false, turnId: 'turn-3', reason: 'answer', agentId: 'a1' });
-    await clock.advance(60000);
+    await clock.advance(60_000);
     expect(await list.find({ type: 'Text', text: ASK })).toBeDefined();
     await list.press({ key: (await list.findAll({ type: 'Button' })).find(b => b.props.label === 'Release it')?.key ?? '' });
     expect(await until(async () => resumed.find(line => line.startsWith('a1: ') && line.includes('pressed "Release it"')))).toBeDefined();
     expect(await until(async () => ((await list.find({ type: 'Text', text: ASK })) ? undefined : true))).toBe(true);
     expect((await until(async () => ((await isFinished()) ? undefined : true))) ?? JSON.stringify([...(await labels()), ...(await texts())])).toBe(true);
     await $.turn.complete({ answer: 'Released as 0.2.77.', durationMs: 1, isAborted: false, turnId: 'turn-4', reason: 'answer', agentId: 'a1' });
-    await clock.advance(60000);
+    await clock.advance(60_000);
     expect(await until(async () => ((await isFinished()) ? true : undefined))).toBe(true);
     await list.unmount();
 });
@@ -490,6 +531,35 @@ test('once the person has answered, by a button or in their own words, the card 
     expect((await inputs()).length).toBe(1);
     await list.unmount();
 });
+test('a button answer pressed by mistake is taken back from its card while the card says it: the question comes back with its buttons, the work is told not to act on it, and the next press answers; gone once the work asks again: the 16 Nov "Not now" pressed while reaching for the picture', async ($, on) => {
+    const { appended, clock } = world(on);
+    await $.session.start(start);
+    await $.agent.spawn({ ...spawn, description: 'Make the banner', prompt: 'banner' });
+    const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
+    const ASK = 'Use banner 5 on your page?';
+    const labels = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label));
+    const press = async (label) => list.press({ key: (await list.findAll({ type: 'Button' })).find(b => String(b.props.label) === label)?.key ?? '' });
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Use it', 'Not now'] });
+    expect(await until(async () => ((await labels()).includes('Not now') ? true : undefined))).toBe(true);
+    await press('Not now');
+    expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Not now"')))).toBeDefined();
+    expect(await until(async () => ((await labels()).includes('↶ Take back “Not now”') ? true : undefined))).toBe(true);
+    await press('↶ Take back “Not now”');
+    expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('took back their answer "Not now"')))).toBeDefined();
+    expect(await until(async () => ((await labels()).includes('Use it') ? true : undefined))).toBe(true);
+    expect(await labels()).not.toContain('↶ Take back “Not now”');
+    expect(await list.find({ type: 'Text', text: ASK })).toBeDefined();
+    // Answered again, it goes as any answer
+    await press('Use it');
+    expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Use it"')))).toBeDefined();
+    expect(await until(async () => ((await labels()).includes('↶ Take back “Use it”') ? true : undefined))).toBe(true);
+    // The work asks something else: the old answer can no longer be taken back
+    await clock.advance(1000);
+    await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Upload it now?', choices: ['Upload', 'Not now'] });
+    expect(await until(async () => ((await labels()).includes('Upload') ? true : undefined))).toBe(true);
+    expect(await labels()).not.toContain('↶ Take back “Use it”');
+    await list.unmount();
+});
 test('work acting on a reply in words to an ask it keeps open is purple, in the panel and the terminal, with its question and no buttons; stopped again it is amber with them: the 13 Nov "Explain to me the exact differences first." to "Release PR 54 to production?"', async ($, on) => {
     // What the engine lists of the work, as the terminal's engine does: running while it waits on a command it left running
     const agents = {};
@@ -523,7 +593,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
     });
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Release it', 'Not now'] });
     await $.turn.complete({ answer: 'Release PR 54 to production? (Answers: Release it / Not now.)', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' });
-    await clock.advance(60000);
+    await clock.advance(60_000);
     // Before the reply: it waits on the person, amber everywhere
     const before = await until(async () => {
         const l = await look();
@@ -553,7 +623,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
     // and stays purple
     agents.a1 = 'running';
     await $.turn.complete({ answer: 'Writing up the differences.', durationMs: 1, isAborted: false, turnId: 'turn-2a', reason: 'answer', agentId: 'a1' });
-    await clock.advance(20000);
+    await clock.advance(20_000);
     const held = await look();
     expect([isPurple(held.desk), isPurple(held.term), isPurple(held.band), held.heading]).toEqual([true, true, true, 'acting']);
     agents.a1 = 'completed';
@@ -565,7 +635,7 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
     await $.turn.complete({ answer: 'Release PR 54 to production? (Answers: Release it / Not now.) The differences are…', durationMs: 1, isAborted: false, turnId: 'turn-2', reason: 'answer', agentId: 'a1' });
     // Listed as idle after, as the engine lists some ended work
     agents.a1 = 'idle';
-    await clock.advance(2000);
+    await clock.advance(2_000);
     const after = await until(async () => {
         const l = await look();
         return l.desk === AMBER && l.term === AMBER && l.band === AMBER && l.heading === 'needs' && !l.deskEdges.some(isPurple) && !l.termEdges.some(isPurple) ? l : undefined;
@@ -587,11 +657,11 @@ test('work acting on a reply in words to an ask it keeps open is purple, in the 
     // Releasing in the background, its turn ends with the engine still holding it: at work, purple, until it is done
     agents.a1 = 'running';
     await $.turn.complete({ answer: 'Releasing in the background.', durationMs: 1, isAborted: false, turnId: 'turn-3a', reason: 'answer', agentId: 'a1' });
-    await clock.advance(20000);
+    await clock.advance(20_000);
     expect((await edges(desk)).some(isPurple)).toBe(true);
     agents.a1 = 'completed';
     await $.turn.complete({ answer: 'Released PR 54.', durationMs: 1, isAborted: false, turnId: 'turn-3', reason: 'answer', agentId: 'a1' });
-    await clock.advance(60000);
+    await clock.advance(60_000);
     expect(await until(async () => ((await edges(desk)).some(isPurple) ? undefined : true))).toBe(true);
     for (const pane of [desk, details])
         await pane.unmount();
@@ -742,7 +812,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
     // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
     void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' }));
     const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98';
-    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1700000000000 }));
+    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }));
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     await clock.advance(1000);
     // The chat is told only the name, and where to type it
@@ -760,7 +830,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
     expect([...files.values()].some(text => text.includes('s3cret'))).toBe(false);
     // A curly quote from a phone's keyboard, which security would give back as hex, is not sent, and the box says why
     const third = '2f1e2d3c-4b5a-4987-a654-3210fedcba98';
-    files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, kind: 'secret', name: 'NPM_TOKEN', chat: 'engine-id', at: 1700000000000 }));
+    files.set(`${MEMORY}/boxes/${third}.json`, JSON.stringify({ id: third, kind: 'secret', name: 'NPM_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }));
     await clock.advance(1000);
     const curly = await until(async () => (await list.findAll({ type: 'Input' })).find(one => (one.key ?? '').startsWith(`box-${third}-field`)));
     const before = keychain.length;
@@ -774,7 +844,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
     expect(keychain.length).toBe(before);
     // A box cancelled removes its request, which the runner takes as cancelled
     const other = '1f1e2d3c-4b5a-4987-a654-3210fedcba98';
-    files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, kind: 'admin', host: 'here', key: BOX_PUBLIC, chat: 'engine-id', at: 1700000000000 }));
+    files.set(`${MEMORY}/boxes/${other}.json`, JSON.stringify({ id: other, kind: 'admin', host: 'here', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }));
     await clock.advance(1000);
     const cancel = await until(async () => (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith(`box-${other}-cancel`)));
     await list.press({ key: cancel?.key ?? '' });
@@ -782,7 +852,7 @@ test('in a chat the app runs on another Mac over ssh, a password or key the runn
     // Its place says what was done, for a minute
     expect(await until(async () => list.find({ type: 'Text', text: 'You cancelled · nothing was saved, and what asked for it stops without it' }))).toBeDefined();
     expect(await list.find({ type: 'Text', text: 'The admin password of this Mac' })).toBeDefined();
-    await clock.advance(61000);
+    await clock.advance(61_000);
     expect(await until(async () => ((await list.find({ type: 'Text', text: 'The admin password of this Mac' })) ? undefined : true))).toBe(true);
     await settle();
 });
@@ -795,7 +865,7 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
     const fieldsIn = async (site, id) => (await site.findAll({ type: 'Input' })).filter(one => (one.key ?? '').includes(id));
     const labelled = async (site, label) => (await site.findAll({ type: 'Button' })).filter(b => b.props.label === label);
     const press = async (site, label) => site.press({ key: (await until(async () => (await labelled(site, label))[0]))?.key ?? '' });
-    const ask = async (id) => (files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1700000000000 })), await clock.advance(1000));
+    const ask = async (id) => (files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 })), await clock.advance(1000));
     // The key: no field in the panel, two buttons and Cancel; Paste the key opens the field in the bar, and the box says where it is
     const key = '0a1e2d3c-4b5a-4987-a654-3210fedcba98';
     await ask(key);
@@ -837,7 +907,7 @@ test("where the bar above the prompt takes a box, a key box has no field in the 
     expect(files.has(`${MEMORY}/boxes/${slip}.reply`)).toBe(false);
     // and an admin password box keeps its own field
     const admin = '3a1e2d3c-4b5a-4987-a654-3210fedcba98';
-    files.set(`${MEMORY}/boxes/${admin}.json`, JSON.stringify({ id: admin, kind: 'admin', host: 'here', key: BOX_PUBLIC, chat: 'engine-id', at: 1700000000000 }));
+    files.set(`${MEMORY}/boxes/${admin}.json`, JSON.stringify({ id: admin, kind: 'admin', host: 'here', key: BOX_PUBLIC, chat: 'engine-id', at: 1_700_000_000_000 }));
     await clock.advance(1000);
     expect(await until(async () => (await fieldsIn(list, admin))[0])).toBeDefined();
     await list.unmount();
@@ -850,7 +920,7 @@ test('a chat on this Mac\'s own screen asks in the panel the same way, and opens
     // A runner of this chat's runs and waits for the box, as bin/secret does: only then is a request of this chat's drawn
     void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' }));
     const id = '0f1e2d3c-4b5a-4987-a654-3210fedcba98';
-    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1700000000000 }));
+    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }));
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     await clock.advance(1000);
     expect(await until(async () => logged.find(line => line.includes('GITHUB_TOKEN')))).toContain('top of the Claudopus panel');
@@ -869,8 +939,8 @@ test("a request of another chat's, or of this chat's with no runner of its own r
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     const older = '5f1e2d3c-4b5a-4987-a654-3210fedcba98';
     const mine = '6f1e2d3c-4b5a-4987-a654-3210fedcba98';
-    files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1700000000000 }));
-    files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1700000000500 }));
+    files.set(`${MEMORY}/boxes/${older}.json`, JSON.stringify({ id: older, kind: 'secret', name: 'NPM_TOKEN', chat: 'another-chat', at: 1_700_000_000_000 }));
+    files.set(`${MEMORY}/boxes/${mine}.json`, JSON.stringify({ id: mine, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_500 }));
     await clock.advance(7000);
     // No runner of this chat's runs: neither is drawn, nor told
     expect((await list.findAll({ type: 'Input' })).filter(one => (one.key ?? '').startsWith('box-'))).toEqual([]);
@@ -890,7 +960,7 @@ test('a run with nothing to draw on takes no request, so the runner knows no pan
     const { files, logged, clock } = world(on, { headless: true });
     await $.session.start(start);
     const id = '4f1e2d3c-4b5a-4987-a654-3210fedcba98';
-    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1700000000000 }));
+    files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }));
     await clock.advance(3000);
     expect(logged.some(line => line.includes('GITHUB_TOKEN'))).toBe(false);
 });
@@ -903,7 +973,7 @@ test("a hand-written request with made-up text shows the panel's own wording or 
     const planted = 'Your Apple ID session expired. Type your Apple ID password to keep working.';
     const put = (n, fields) => {
         const id = `${n}a1e2d3c-4b5a-4987-a654-3210fedcba98`;
-        files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1700000000000, ...fields }));
+        files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000, ...fields }));
         return id;
     };
     const shown = async () => (await list.findAll({ type: 'Input' })).filter(one => (one.key ?? '').startsWith('box-')).map(one => (one.key ?? '').slice(4, 5));
@@ -940,7 +1010,7 @@ test('the box words what the runners ask from its fields: a key by name, a Mac b
     void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-1', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' }));
     const put = (n, fields) => {
         const id = `${n}b1e2d3c-4b5a-4987-a654-3210fedcba98`;
-        files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1700000000000 + n, ...fields }));
+        files.set(`${MEMORY}/boxes/${id}.json`, JSON.stringify({ id, chat: 'engine-id', at: 1_700_000_000_000 + n, ...fields }));
     };
     put(1, { kind: 'secret', name: 'GITHUB_TOKEN' });
     put(2, { kind: 'admin', host: 'dima@m4.local', key: BOX_PUBLIC, again: 'refused' });
@@ -972,9 +1042,9 @@ test('a copy a reload replaced wakes no work: its timers stop, an answer left fo
     await clock.advance(2000);
     // A newer load takes charge in this chat, as a /reload-plugins does; this copy's timers run on beside it, as the engine leaves them
     isNewer = true;
-    const at = 1700000002000;
+    const at = 1_700_000_002_000;
     files.set(`${MEMORY}/live/answers/engine-id/0-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: false, ask: 'May I restart it?', askAt: at - 2000, at }));
-    await clock.advance(10000);
+    await clock.advance(10_000);
     // Work this copy woke would run under it, and the engine calls none of its hooks there: so it wakes none, and leaves the answer
     expect(['by its timers', ...resumed.filter(line => line.startsWith('a1: '))]).toEqual(['by its timers']);
     expect(files.has(`${MEMORY}/live/answers/engine-id/0-a.json`)).toBe(true);
@@ -995,11 +1065,11 @@ test('F-013 · an answer another chat left in a file for ended work wakes nothin
     await $.agent.spawn({ ...spawn, description: 'Restart the old chat', prompt: 'restart the old chat' });
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'May I restart it?', choices: ['Approve', 'Not now'] });
     await $.turn.complete({ answer: 'It waits on your go-ahead.', durationMs: 1, isAborted: false, turnId: 'turn-1', reason: 'answer', agentId: 'a1' });
-    files.set(`${MEMORY}/live/answers/engine-id/0-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: true, ask: 'May I restart it?', askAt: 1700000000000, at: 1700000000000 }));
+    files.set(`${MEMORY}/live/answers/engine-id/0-a.json`, JSON.stringify({ card: 'a1', choice: 'Approve', isReply: true, ask: 'May I restart it?', askAt: 1_700_000_000_000, at: 1_700_000_000_000 }));
     await clock.advance(6000);
     expect(files.has(`${MEMORY}/live/answers/engine-id/0-a.json`)).toBe(false);
     await $.prompt.submit({ text: 'and the logs?', wait: false, origin: composer });
-    await clock.advance(12000);
+    await clock.advance(12_000);
     expect(resumed.filter(line => line.startsWith('a1: '))).toEqual([]);
     expect(files.get(`${MEMORY}/log.md`)).toContain('put away unread');
 });
@@ -1155,7 +1225,7 @@ test('with nothing running the panel is not drawn again at all, so what is under
     await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' });
     await $.turn.complete({ answer: 'Ears checked.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' });
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
-    await clock.advance(120000);
+    await clock.advance(120_000);
     await list.findAll({ type: 'Text' });
     counting.isOn = true;
     for (let i = 0; i < 60; i++)
@@ -1172,7 +1242,7 @@ test('while the person uses the panel its running times stand still, and move ag
     await $.agent.spawn({ ...spawn, description: 'Check the ears', prompt: 'check the ears' });
     await $.agent.spawn({ ...spawn, description: 'Check the nose', prompt: 'nose' });
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
-    await clock.advance(12000);
+    await clock.advance(12_000);
     await list.findAll({ type: 'Text' });
     // A press in the panel: drawn once for what it did, then still while the person is at it
     const title = (await list.findAll({ type: 'Button' })).find(b => (b.key ?? '').startsWith('open-'));
@@ -1188,7 +1258,7 @@ test('while the person uses the panel its running times stand still, and move ag
     expect(await list.find({ type: 'Text', text: 'May I go on?' })).toBeDefined();
     // Left alone, the times move again
     const asked = JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text));
-    await clock.advance(30000);
+    await clock.advance(30_000);
     expect(JSON.stringify((await list.findAll({ type: 'Text' })).map(one => one.text))).not.toBe(asked);
     await list.unmount();
 });
@@ -1233,13 +1303,13 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
     expect(recorded()).toEqual([]);
     expect(files.has(`${MEMORY}/record-panel.on`)).toBe(false);
     files.set(`${MEMORY}/record-panel.on`, '');
-    files.set(`mtime:${MEMORY}/record-panel.on`, String(1700000016000));
+    files.set(`mtime:${MEMORY}/record-panel.on`, String(1_700_000_016_000));
     await clock.advance(3000);
     await box();
     for (const text of ['Q', 'Qu', 'Quiet lynx 4419'])
         await list.input({ key: (await box())?.key ?? '', text, kind: 'change' });
     await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: 'n1', agentId: 'a1', text: 'Looking at the left ear.' });
-    await clock.advance(200000);
+    await clock.advance(200_000);
     await box();
     await clock.advance(3000);
     const [path] = recorded();
@@ -1265,7 +1335,7 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
     await box();
     for (const typed of ['M', 'Mo', 'Mossy heron 2203'])
         await bar.input({ key: (await barBox())?.key ?? '', text: typed, kind: 'change' });
-    await clock.advance(200000);
+    await clock.advance(200_000);
     await barBox();
     await clock.advance(3000);
     const second = files.get(recorded().find(one => one !== path) ?? '') ?? '';
@@ -1278,19 +1348,13 @@ test("the panel's recorder writes nothing unless switched on, and switched on wr
     await bar.unmount();
     await list.unmount();
 });
-test('a reply never waits behind a long command: one that may run for minutes goes to the background, a wait for the person is refused, a short one held open is named on the card while the reply waits, and the wait on helpers comes back', async ($, on) => {
-    const { keep, settle, clock, held, files } = world(on);
+test('a reply never waits behind a long command: one that may run for minutes goes to the background, a wait for the person is refused, and a short one held open is named on the card while the reply waits', async ($, on) => {
+    const { keep, settle, clock, held } = world(on);
     await $.session.start(start);
     await $.prompt.submit({ text: 'try the reply box', wait: false, origin: composer });
     await $.agent.spawn({ ...spawn, description: 'Reply box that never drags the panel', prompt: 'try the reply box' });
     const list = await $.ui.mount({ ...LIST, surface: 'desktop' });
     await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: 'Try the new reply box and tell me how it feels.', choices: ['It feels right', 'Still wrong'] });
-    // A mark an earlier copy of the mod left (before a reload) goes at the work's first step here, so no later wait on helpers comes
-    // back for a message that is not there
-    files.set(`${MEMORY}/helpers/a1.txt.reply`, '1700000000000\n');
-    for await (const _ of $.turn.step({ turnId: 'turn-1', index: 0, model: 'claude-opus-5-5', messageCount: 1, agentId: 'a1' }))
-        void _;
-    expect(await until(async () => files.get(`${MEMORY}/helpers/a1.txt.reply`) === '')).toBe(true);
     // Waits that only mention the person, or come with no question open, are no waits for them
     for (const [n, description] of ['Wait for the preview to come up, then open it for you (30 s)', 'Wait until the page has loaded for you to see', 'Wait for your answer key upload to finish', 'Poll your decision tree training (about 1 min)', 'Wait for your CT scans to download'].entries()) {
         const r = (await $.tool.call({ tool: 'Bash', tool_use_id: `ok${n}`, agentId: 'a1', command: 'true', description }));
@@ -1314,17 +1378,14 @@ test('a reply never waits behind a long command: one that may run for minutes go
     // A short one is held open as asked; a reply given meanwhile is received at once and names what it waits behind
     void keep($.tool.call({ tool: 'Bash', tool_use_id: 'b1', agentId: 'a1', command: 'hold build', description: 'Run the build' }));
     await until(async () => held.get('build'));
-    await clock.advance(70000);
+    await clock.advance(70_000);
     const box = (await list.findAll({ type: 'Input' })).find(one => /-reply-/.test(one.key ?? ''));
     await list.input({ key: box?.key ?? '', text: 'Yep, looks good' });
     expect(await until(async () => (await list.findAll({ type: 'Text' })).find(one => one.text.startsWith('✓ You replied “Yep, looks good” · waiting: Claude will see it when “Run the build” ends (running 1')))).toBeDefined();
-    // and the wait on helpers comes back at once while it waits, since the mod marks it beside that wait's file
-    expect(await until(async () => [...files].find(([path, text]) => path.endsWith('/helpers/a1.txt.reply') && text.trim() !== ''))).toBeDefined();
     held.get('build')?.('built');
     for await (const _ of $.turn.step({ turnId: 'turn-2', index: 0, model: 'claude-opus-5-5', messageCount: 2, agentId: 'a1' }))
         void _;
     expect(await until(async () => list.find({ type: 'Text', text: '✓ You replied “Yep, looks good” · Claude is working on it' }))).toBeDefined();
-    expect(await until(async () => [...files].find(([path, text]) => path.endsWith('/helpers/a1.txt.reply') && text === ''))).toBeDefined();
     await settle();
 });
 test("where the bar above the prompt takes a box, a card's answers end with Reply in your own words, which opens the reply box in that bar and never in the panel or its Details, whose window the app drags to a box that holds the cursor (15 Nov); Close takes it away with what was typed kept; one box at a time", async ($, on) => {
@@ -1381,10 +1442,10 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
     // A letter typed holds the bar as drawn for as long as the box may hold the cursor, past the half minute typing holds the
     // panel: the panel scrolled meanwhile draws nothing new under the cursor. Five minutes after the last letter it is drawn again
     await scrolled(40);
-    await clock.advance(31000);
+    await clock.advance(31_000);
     expect(await bar.find({ type: 'Text', text: MARK })).toBeUndefined();
     expect((await boxesIn(bar))[0]?.key).toBe(first?.key);
-    await clock.advance(270000);
+    await clock.advance(270_000);
     await scrolled(0);
     await scrolled(40);
     expect(await until(async () => bar.find({ type: 'Text', text: MARK }))).toBeDefined();

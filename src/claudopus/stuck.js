@@ -3,9 +3,9 @@
 // card of work under which nothing new has come back for STUCK_AFTER, and finished work that something it started still holds
 // Nothing new for this long anywhere under a piece of work, while it works, and its card says so and the chat is told once. Above
 // the longest one command can run (ten minutes) with a step either side of it, so a single long build or wait is not flagged
-const STUCK_AFTER = 12 * 60000;
+const STUCK_AFTER = 12 * 60_000;
 // One call running this long shows on its row, with its time
-const RUNNING_SHOWN = 2 * 60000;
+const RUNNING_SHOWN = 2 * 60_000;
 // Lines each agent has seen come back, so a wait that returns what it returned before is no news; kept to this many each
 const SEEN_KEPT = 5000;
 // Only this many lines of one result are looked at
@@ -101,7 +101,7 @@ const lookStuck = async ($) => {
     // started again at once with a message of the mod's own, rather than waiting for the chat or the person to notice
     const engine = told.length ? await $.agent.list().catch(() => undefined) : undefined;
     for (const one of told) {
-        const mins = Math.round((now - movedAt(await read($, todos), one)) / 60000);
+        const mins = Math.round((now - movedAt(await read($, todos), one)) / 60_000);
         const status = engine?.find(agent => agent.id === one.id)?.status;
         // Not work that only waits: on a helper the engine still runs, or on background work it holds
         const helpers = underOf(await read($, todos), one.id).map(kid => kid.id);
@@ -129,7 +129,7 @@ const lookStuck = async ($) => {
 const stuckLine = (list, one, at) => {
     if (!one.stuckAt)
         return '';
-    const mins = Math.max(1, Math.round((at - one.stuckAt) / 60000));
+    const mins = Math.max(1, Math.round((at - one.stuckAt) / 60_000));
     const isLong = (kid) => Boolean(kid.running && at - kid.running.at >= RUNNING_SHOWN);
     const helpers = underOf(list, one.id).filter(kid => kid.status === 'working');
     const tail = helpers.length
@@ -164,7 +164,7 @@ const keepBackground = async ($, agent, call, result) => {
     await changeTodos($, list => list.map(one => (one.id === agent ? { ...one, bg: [...(one.bg ?? []).filter(b => b.id !== id), { id, what, at: now, ...(cmd ? { cmd } : {}), ...(call.tool === 'Monitor' ? { isWatch: true } : {}), ...(limit ? { expiresAt: now + limit } : {}) }].slice(-BG_KEPT) } : one)));
 };
 // The longest the engine lets a watch run before it ends it
-const WATCH_MOST = 30 * 60000;
+const WATCH_MOST = 30 * 60_000;
 // How a run ended, said plainly: on its card's summary and in Details
 const endedWord = (run) => (run.how === 'failed' ? `failed${run.code ? ` (exit code ${run.code})` : ''}` : run.how === 'stopped' ? 'stopped' : run.how);
 // The closing row under a card: how many helpers and runs have ended, then how many of the runs did not finish well, in words
@@ -199,7 +199,7 @@ const dropBackground = async ($, ids, how = 'ended') => {
                 // time limit it set ran out of time (within a tenth of its limit, at most a minute, as its limit is counted from when the mod saw it start); one killed
                 // before it was killed
                 const endedAt = end.at && end.at >= b.at && end.at <= now ? end.at : now;
-                const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how;
+                const how = end.how === 'killed' && b.expiresAt && endedAt >= b.expiresAt - Math.min(60_000, (b.expiresAt - b.at) / 10) ? 'timed out' : end.how;
                 return { id: b.id, what: b.what, at: b.at, endedAt, how, ...(end.code ? { code: end.code } : {}) };
             });
             return { ...one, bg: bg?.length ? bg : undefined, waitsSince: bg?.some(b => !b.isWatch) ? one.waitsSince : undefined, ...keepEnded(one, runs) };

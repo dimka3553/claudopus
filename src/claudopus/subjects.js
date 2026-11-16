@@ -30,4 +30,4 @@ const appTitle = async ($) => {
     }
 };
 // Tells one version of the role text from another
-const mark = (text) => `${text.length}:${[...text].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) % 1000003, 7)}`;
+const mark = (text) => `${text.length}:${[...text].reduce((sum, ch) => (sum * 31 + ch.charCodeAt(0)) % 1_000_003, 7)}`;

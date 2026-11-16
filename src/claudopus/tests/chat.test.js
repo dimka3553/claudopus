@@ -19,7 +19,7 @@ test('a chat gets its role once, is told to start a fresh agent from a brief for
     expect(words).toContain('and the nose');
 });
 test('work starts as a copy of the chat only for a small job and as the settings allow: else a fork or an agent with no model is refused, and a brief gets the rules for the work', async ($, on) => {
-    const { files } = world(on, { tokens: 400000, chatRole: 'CHAT ROLE {lanes}' });
+    const { files } = world(on, { tokens: 400_000, chatRole: 'CHAT ROLE {lanes}' });
     await $.session.start(start);
     // As shipped, a small job goes to a copy of the chat, which is told it is a task now and how long it may go
     const shipped = await $.prompt.submit({ text: 'push it', wait: false, origin: composer });
@@ -127,10 +127,12 @@ test('every start is held to a current model: an older id, a parent on an older 
     expect(files.get(`${MEMORY}/log.md`)).toContain('a workflow agent asked to run on Sonnet 4.5 starts on Sonnet 5.5');
 });
 test("the mod's own kinds start as the settings say: a reader on the legwork model or its parent's, a check never weaker than its parent and at least Opus or always Fable, a quick task on its model, and every kind with everything when chosen", async ($, on) => {
-    const { asked, types, files, registered } = world(on, { model: 'claude-opus-5-5' });
+    const { asked, types, files, registered, kindTools } = world(on, { model: 'claude-opus-5-5' });
     await $.session.start(start);
     // The kinds are the engine's own from the session's start
     expect(await until(async () => (registered.length >= 5 ? [...registered].sort() : undefined))).toEqual(['check', 'helper', 'quick', 'reader', 'task']);
+    // Each kind told to call wake_me rather than wait has it (16 Nov: a task had none, and had the chat start it again by hand)
+    expect(Object.keys(kindTools).filter(kind => kindTools[kind]?.includes('mcp__claudopus__wake_me')).sort()).toEqual(['helper', 'quick', 'task']);
     await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer });
     const go = async (subagentType, e = {}) => {
         await $.agent.spawn({ ...spawn, subagentType, prompt: 'p', description: 'The nose', parentModel: 'claude-opus-5-5', parentAgentId: 'a0', ...e });
@@ -360,7 +362,7 @@ test('work reaches main only through the release runner: its rules name it, and 
 test('a large paste is saved to a file and left out of the chat', async ($, on) => {
     const { files } = world(on);
     await $.session.start(start);
-    const paste = `start ${'x'.repeat(20000)} end`;
+    const paste = `start ${'x'.repeat(20_000)} end`;
     const r = await $.prompt.submit({ text: paste, wait: false, origin: composer });
     expect(r.text?.length ?? 0).toBeLessThan(2000);
     expect(r.text).toContain('were saved to');

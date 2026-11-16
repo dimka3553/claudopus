@@ -1217,6 +1217,36 @@ test('once the person has answered, by a button or in their own words, the card 
   await list.unmount()
 })
 
+test('a button answer pressed by mistake is taken back from its card while the card says it: the question comes back with its buttons, the work is told not to act on it, and the next press answers; gone once the work asks again: the 16 Nov "Not now" pressed while reaching for the picture', async ($, on) => {
+  const { appended, clock } = world(on)
+  await $.session.start(start)
+  await $.agent.spawn({ ...spawn, description: 'Make the banner', prompt: 'banner' } as never)
+  const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  const ASK = 'Use banner 5 on your page?'
+  const labels = async () => (await list.findAll({ type: 'Button' })).map(b => String(b.props.label))
+  const press = async (label: string) => list.press({ key: (await list.findAll({ type: 'Button' })).find(b => String(b.props.label) === label)?.key ?? '' })
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k1', agentId: 'a1', text: ASK, choices: ['Use it', 'Not now'] } as never)
+  expect(await until(async () => ((await labels()).includes('Not now') ? true : undefined))).toBe(true)
+  await press('Not now')
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Not now"')))).toBeDefined()
+  expect(await until(async () => ((await labels()).includes('↶ Take back “Not now”') ? true : undefined))).toBe(true)
+  await press('↶ Take back “Not now”')
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('took back their answer "Not now"')))).toBeDefined()
+  expect(await until(async () => ((await labels()).includes('Use it') ? true : undefined))).toBe(true)
+  expect(await labels()).not.toContain('↶ Take back “Not now”')
+  expect(await list.find({ type: 'Text', text: ASK })).toBeDefined()
+  // Answered again, it goes as any answer
+  await press('Use it')
+  expect(await until(async () => appended.find(line => line.startsWith('a1: ') && line.includes('"Use it"')))).toBeDefined()
+  expect(await until(async () => ((await labels()).includes('↶ Take back “Use it”') ? true : undefined))).toBe(true)
+  // The work asks something else: the old answer can no longer be taken back
+  await clock.advance(1000)
+  await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k2', agentId: 'a1', text: 'Upload it now?', choices: ['Upload', 'Not now'] } as never)
+  expect(await until(async () => ((await labels()).includes('Upload') ? true : undefined))).toBe(true)
+  expect(await labels()).not.toContain('↶ Take back “Use it”')
+  await list.unmount()
+})
+
 test('work acting on a reply in words to an ask it keeps open is purple, in the panel and the terminal, with its question and no buttons; stopped again it is amber with them: the 13 Nov "Explain to me the exact differences first." to "Release PR 54 to production?"', async ($, on) => {
   // What the engine lists of the work, as the terminal's engine does: running while it waits on a command it left running
   const agents: Record<string, string> = {}

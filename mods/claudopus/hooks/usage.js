@@ -3,10 +3,10 @@
 // chat on the computer through a small file; the figures come from two looks in a row. Nothing here touches the engine
 // How often the computer is looked at, and how often (on a Mac) top is asked for each process's own memory, which costs about half
 // a second of the processor where ps costs a hundredth
-export const USAGE_EVERY = 5000;
-export const FOOTPRINT_EVERY = 60000;
+export const USAGE_EVERY = 5_000;
+export const FOOTPRINT_EVERY = 60_000;
 // Two looks further apart than this give no rates
-const USAGE_GAP = 120000;
+const USAGE_GAP = 120_000;
 // Memory past this part of the whole turns amber
 export const MEMORY_WARN = 0.9;
 // One look on a Mac: the engine's own process, every process with its parent, memory and processor time, the memory as Activity
@@ -259,7 +259,7 @@ const loadOf = (text) => {
     };
     const [load, powerIn, mv, ma] = [of('SystemLoad'), of('SystemPowerIn'), of('Voltage', ' = '), of('InstantAmperage', ' = ')];
     const mw = powerIn ? load : mv !== undefined && ma !== undefined ? (mv * -ma) / 1000 : powerIn === undefined ? load : undefined;
-    return mw !== undefined && mw > 0 && mw <= 2000000 ? mw : undefined;
+    return mw !== undefined && mw > 0 && mw <= 2_000_000 ? mw : undefined;
 };
 // A Linux look: processes from /proc/<pid>/stat (Claude's memory is each process's resident memory less what it shares)
 export const rawOfLinux = (text, at) => {

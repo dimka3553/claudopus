@@ -265,7 +265,8 @@ const readDrafts = async ($: EngineInterface) => {
 }
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
-type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number }
+// A button's answer keeps the ask it answered and the work it went to (asked, target), so it can be taken back (takeBack)
+type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -448,7 +449,8 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   answeredAt.set(one.id, ask.at)
   dropDrafts($, one.id)
   replies.set(one.id, (replies.get(one.id) ?? 0) + 1)
-  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at, line, isCard: true, askAt: ask.at })
+  const back = isReply ? {} : { asked: ask, target }
+  sentReplies.set(one.id, { text: said, ask: ask.text, to: 'sending', at, line, isCard: true, askAt: ask.at, ...back })
   redraw($)
   // The card stays where it was while it says the answer (answeredSince), then takes its place among the others
   $.clock.after(ANSWER_SHOWN + 50, () => drawAgain($))
@@ -466,12 +468,48 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   const told = working ? await tell($, target, to) : undefined
   if (told && !told.deny) {
     writtenIn($, target, one.id)
-    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at })
+    sentReplies.set(one.id, { text: said, ask: ask.text, to: 'work', at, line, isCard: true, askAt: ask.at, ...back })
     redraw($)
-  } else await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at })
+  } else await toEnded($, one, target, `${to}\n${RESUMED_BY_ANSWER}`, { text: said, ask: ask.text, at, line, isCard: true, askAt: ask.at, ...back })
   // Said in the chat only once the answer is on its way
   void askGone($, one, said)
 }
+// A button's answer can be taken back while the card says it (heldAnswer, ANSWER_SHOWN), unless the work has asked again since: a press
+// meant for something else lands on an answer (16 Nov: "Not now" pressed while reaching for the picture above it, as the panel
+// jumped). The ask is put back on the card with its buttons, to be answered again, and the work is told not to act on the answer:
+// written in while it runs, dropped from a message still waiting to start it again, and nothing when it has since ended (its
+// card then waits on the person again). An answer that did a last step, such as a release, has no way back
+const canTakeBack = (one: Todo, now: number) => {
+  const sent = heldAnswer(one, now)
+  return Boolean(sent?.asked && !sent.isHeld && sent.to !== 'other' && sent.to !== 'sending' && !one.ask && !one.chat)
+}
+const takeBack = async ($: EngineInterface, one: Todo) => {
+  const sent = sentReplies.get(one.id)
+  const ask = sent?.asked
+  if (!sent || !ask || !canTakeBack(one, await $.clock.now())) return
+  sentReplies.delete(one.id)
+  answeredAsks.delete(`${one.id}:${ask.at}:${ask.text}`)
+  if (answeredAt.get(one.id) === ask.at) answeredAt.delete(one.id)
+  const target = sent.target ?? one.id
+  if (pending.get(target) === one.id) pending.delete(target)
+  for (const key of startedBy) if (key === `${one.id}:${sent.at}`) startedBy.delete(key)
+  const at = await $.clock.now()
+  await changeTodos($, list => list.map(card => (card.id === one.id && !card.ask ? { ...card, ask, entries: [...card.entries, { at, kind: 'steer' as const, text: `took back “${sent.text}”` }].slice(-ENTRIES_KEPT) } : card)))
+  redraw($)
+  void log($, `answer "${cut(sent.text, 40)}" for ${one.id} taken back`)
+  // A message still waiting to start the work again loses this answer; one that carries only this answer goes
+  const waiting = wakes.find(w => w.target === target && w.answers.some(a => a.one.id === one.id && a.sent.at === sent.at))
+  if (waiting) {
+    waiting.answers = waiting.answers.filter(a => !(a.one.id === one.id && a.sent.at === sent.at))
+    if (!waiting.answers.length && !waiting.spawn) return void wakes.splice(wakes.indexOf(waiting), 1)
+    waiting.text = `${waiting.text}\n\n${TAKEN_BACK(sent.text, ask.text)}`
+    return
+  }
+  const working = (await read($, todos)).find(card => card.id === target)?.status === 'working'
+  if (working) await tell($, target, TAKEN_BACK(sent.text, ask.text)).catch(err => log($, `work not told of an answer taken back: ${String(err)}`))
+}
+const TAKEN_BACK = (said: string, asked: string) =>
+  `${who(true)} took back their answer "${said}" to your question ("${asked}"): it was pressed by mistake. Do not act on it, and undo what you already did on it if you can. The question is on your card again, and their answer comes to you as a message.`
 // A reply in the person's own words that does not settle the ask: the ask stays on the card, its question with the reply under it,
 // and the work is told so; its card stays among the running cards while the work acts on it. The person has answered, so its
 // buttons and box go at once, and come back only when the work asks again, or ends with the ask still open

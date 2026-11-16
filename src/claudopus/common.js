@@ -25,16 +25,16 @@ const OLD_TOOLS = 'mcp__progress__';
 const isTool = (tool, name) => tool === `${TOOLS}${name}` || tool === `${OLD_TOOLS}${name}`;
 const OWN_SERVERS = [TOOLS, 'mcp__ccd_'];
 // A message longer than this is a dump: the chat keeps the file's path, not the text
-const PASTE_CHARS = 12000;
+const PASTE_CHARS = 12_000;
 // Pieces of work kept in the list, ended ones included, and lines kept in the log of each
 const KEPT = 40;
 const ENTRIES_KEPT = 200;
 // How many of the to-dos not yet started an open card lists before "more"
 // What else a Details tab can unfold, kept beside its chat's numbers, far from them: the person's words whole, every to-do
 // not yet started, and those done or dropped
-const OPEN_ASK = -1000001;
-const OPEN_DONE = -1000003;
-const OPEN_RESULT = -1000004;
+const OPEN_ASK = -1_000_001;
+const OPEN_DONE = -1_000_003;
+const OPEN_RESULT = -1_000_004;
 // Under a command's row in Details, its last lines sit on a darker ground, as a terminal's
 const OUTPUT_FILL = '#0000003D';
 // How much of what work reported at its end its Details shows before Show all
@@ -43,11 +43,11 @@ const RESULT_SHOWN = 600;
 const DONE_FOLDED = 8;
 // How much of a piece of work's chat the panel draws, the newest: this many lines, and this many characters, which one drawing has room for
 const TALK_KEPT = 300;
-const TALK_CHARS = 40000;
+const TALK_CHARS = 40_000;
 // The most characters the app draws in one tab: it counts every text and every picture's source, and a drawing of more is thrown
 // away whole, so the tab keeps its old drawing, or after a switch away and back says "Nothing to show yet". The pictures a tab draws
 // keep well under it (262144), with room for its text
-const PICTURES_CHARS = 150000;
+const PICTURES_CHARS = 150_000;
 // How long one message of that chat may be
 const SAID_CHARS = 8000;
 // How much of a long message to the work is drawn before it is opened
@@ -62,7 +62,7 @@ const EDGE_PARTS = 14;
 // How long a line of the log may be
 const NOTE_CHARS = 200;
 // How much of an answer the panel keeps
-const ANSWER_CHARS = 30000;
+const ANSWER_CHARS = 30_000;
 // While the servers panel is open it looks again this often
 const TICK = 3000;
 // Work that has just ended stays in its place among the running cards this long, in its ended look, before it goes to Finished
@@ -71,7 +71,7 @@ const LINGER = 2000;
 // after the load instead (Infinity until then), by `<id>:<endedAt>`: a finish is never over before the panel could show it
 const lateFrom = new Map();
 // Ended work this long before a load may not have been drawn ended at all
-const RELOAD_GRACE = 30000;
+const RELOAD_GRACE = 30_000;
 // When ended work's pause begins
 const pauseFrom = (one) => Math.max(one.endedAt, lateFrom.get(`${one.id}:${one.endedAt}`) ?? 0);
 // Whether ended work is still in that pause at a time: a card that ended in the future, as from another clock, is not
@@ -86,7 +86,7 @@ const needsPerson = (one) => Boolean(one.admins?.length) || (Boolean(one.ask) &&
 // The moments a pause ends that a redraw is already set for, so each pause gets one
 const lingerSet = new Set();
 // The engine's list of agents is read again this often, and the minutes move on
-const FOLLOW_EVERY = 20000;
+const FOLLOW_EVERY = 20_000;
 // An agent in one of these states, as the engine names them, is still working
 const WORKING = ['pending', 'running', 'waiting'];
 // These listen on a port but serve no pages to open
@@ -236,7 +236,7 @@ const took = (ms) => {
     return hrs ? `${hrs}h ${two(m)}m ${two(sec)}s` : m ? `${m}m ${two(sec)}s` : `${sec}s`;
 };
 // A count of tokens as the app writes it
-const thousands = (tokens) => isRunFromAfar ? (tokens < 10000 ? '<10k' : `${Math.round(tokens / 10000) * 10}k`) : `${(tokens / 1000).toFixed(tokens < 100000 ? 1 : 0)}k`;
+const thousands = (tokens) => isRunFromAfar ? (tokens < 10_000 ? '<10k' : `${Math.round(tokens / 10_000) * 10}k`) : `${(tokens / 1000).toFixed(tokens < 100_000 ? 1 : 0)}k`;
 // How full a context window is: the share when the window is known, and the tokens
 const fill = (tokens, window) => (window ? `${percent(tokens, window)}% · ${thousands(tokens)} of ${thousands(window)}` : thousands(tokens));
 // The same for a piece of work, short enough for its status line
@@ -345,7 +345,7 @@ const readOr = ($, path) => $.fs.read(path).catch(() => '').then(text => (listDr
 let listDrawing = 0;
 // Another hook may read while the panel is drawn: what grows as work runs (transcripts, logs, other chats' live files, words, asks,
 // keep files) and anything large is never watched, so it cannot draw the panel again each second
-const isWatched = (path, text) => text.length < 64000 && !/\.jsonl$|\/log\.md$|\/live\/|\/words\/|\/asks\/|\/keep\/|\/helpers\//.test(path);
+const isWatched = (path, text) => text.length < 64_000 && !/\.jsonl$|\/log\.md$|\/live\/|\/words\/|\/asks\/|\/keep\/|\/helpers\//.test(path);
 const drawnFiles = new Map();
 // Every file the mod writes is in its memory folder, ~/.claude/claudopus, each call naming its folder and kind of file
 // One line in ~/.claude/claudopus/log.md: each session's start, and anything that failed
@@ -421,7 +421,7 @@ let hasDesktop = true;
 let keyringRoot = '';
 let keyringOldRoot = '';
 const knowSystem = async ($) => {
-    const r = await $.process.run(['uname', '-s'], { timeoutMs: 5000 }).catch(() => undefined);
+    const r = await $.process.run(['uname', '-s'], { timeoutMs: 5_000 }).catch(() => undefined);
     isLinux = r?.exitCode === 0 && r.stdout.trim() === 'Linux';
     hasDesktop = !isLinux || Boolean((await $.env.get('DISPLAY')) || (await $.env.get('WAYLAND_DISPLAY')));
     const data = (await $.env.get('XDG_DATA_HOME')) ?? '';

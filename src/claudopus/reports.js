@@ -11,11 +11,11 @@ const PICTURE = /\.(png|jpe?g|gif|webp|svg|pdf|html?)$/i;
 const TEMP = /^\/(private\/)?(tmp|var\/folders)\//;
 // The most copies one report keeps, and how much of its text one drawing shows
 const COPIES_KEPT = 40;
-const REPORT_CHARS = 40000;
+const REPORT_CHARS = 40_000;
 // A shorter answer with no picture is a confirmation, not a report worth coming back to
 const REPORT_LEAST = 500;
 // The panel draws a picture as a small copy inside an Svg, one at a time: one drawing holds 100,000 characters
-const THUMB_BYTES = 36000;
+const THUMB_BYTES = 36_000;
 const THUMB_SIZES = ['640', '480', '360'];
 const RASTER = /\.(png|jpe?g|gif|webp)$/i;
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -39,7 +39,7 @@ const dated = (at, now) => {
 };
 // How old it is, in the largest unit that fits
 const ago = (at, now) => {
-    const minutes = Math.floor(Math.max(0, now - at) / 60000);
+    const minutes = Math.floor(Math.max(0, now - at) / 60_000);
     const [hours, days] = [Math.floor(minutes / 60), Math.floor(minutes / 1440)];
     return minutes < 1 ? 'just now' : minutes < 60 ? `${minutes}m ago` : hours < 24 ? `${hours}h ago` : days < 60 ? `${days}d ago` : `${Math.floor(days / 30)} months ago`;
 };
@@ -204,7 +204,7 @@ const thumbOf = async ($, path) => {
         const sized = (await $.process.run([sips($), '-g', 'pixelWidth', '-g', 'pixelHeight', path])).stdout;
         const width = Number(/pixelWidth:\s*(\d+)/.exec(sized)?.[1] ?? 0);
         const height = Number(/pixelHeight:\s*(\d+)/.exec(sized)?.[1] ?? 0);
-        if (width && height && read.base64.length < 50000) {
+        if (width && height && read.base64.length < 50_000) {
             one = {
                 source: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><image href="data:image/jpeg;base64,${read.base64}" width="${width}" height="${height}"/></svg>`,
                 width,

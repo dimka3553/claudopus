@@ -36,7 +36,7 @@ test('in the terminal each header button has a key, and a line says how to reach
     await app.unmount();
 });
 test('the Stats timeline in cells: a row a lane, each run of cells in its model, the times under it', () => {
-    const h = 3600000;
+    const h = 3_600_000;
     const at = Date.UTC(2026, 10, 13, 9);
     const piece = (id, from, to, model) => ({ id, title: id, isFlow: false, isFinished: true, spans: [[from, to]], bars: [{ from, to, model }], calls: [], ended: to });
     const { rows, from, to } = timelineRows([piece('a', at, at + 2 * h, 'claude-opus-5-5'), piece('b', at + h, at + 3 * h, 'claude-sonnet-5-5')], 30);

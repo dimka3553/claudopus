@@ -491,6 +491,12 @@ const panelHooks = (on: On) => {
                 )}
               </Box>
             </Box>
+            {/* A button's answer, while the card says it: a press to take it back, the question back on the card */}
+            {canTakeBack(one, at) ? (
+              <Box key={`take-back-${one.id}`} paddingLeft={lead} flexDirection="row">
+                <Button key={`take-back-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one).catch(err => log($, `answer not taken back: ${String(err)}`)))} />
+              </Box>
+            ) : null}
             {/* Finished, with something it started still running: what, how long, and a way to stop it */}
             {leftLine(one, at) && !one.chat ? (
               <Box key={`left-${one.id}`} flexDirection="column" gap={1} paddingLeft={lead}>
@@ -1358,7 +1364,10 @@ const panelHooks = (on: On) => {
             </Box>
           ) : sentLine(one, at) ? (
             <Box key="part-answered" flexDirection="row" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
-              <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
+              <Box flexDirection="column" gap={1} minWidth={0}>
+                <Text dimColor wrap="wrap">{sentLine(one, at)}</Text>
+                {canTakeBack(one, at) ? <Button key={`take-back-big-${one.id}-${heldAnswer(one, at)?.at ?? 0}`} label={`↶ Take back “${cut(heldAnswer(one, at)?.text ?? '', 30)}”`} plain onPress={() => void ((presses += 1), takeBack($, one).catch(err => log($, `answer not taken back: ${String(err)}`)))} /> : null}
+              </Box>
             </Box>
           ) : null}
           {resultPart(one)}

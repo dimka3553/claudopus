@@ -19,7 +19,7 @@ const runnerEnded = (id, isBackground, at) => {
 };
 // The command that asked: the one of this chat's running runners begun last before the request
 const runnerOf = (at, now) => [...runnerCalls].map(([call, one]) => ({ ...one, call })).filter(one => one.until >= now && one.at <= at + BOX_SKEW).sort((a, b) => b.at - a.at)[0];
-const BOX_SKEW = 60000;
+const BOX_SKEW = 60_000;
 // What the runners take as a Mac (an ssh host or alias, perhaps with a user) and as a key's name
 const BOX_HOST = /^(?:here|[A-Za-z0-9_][A-Za-z0-9._:@-]{0,199})$/;
 const BOX_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,199}$/;
@@ -32,7 +32,7 @@ const boxKeys = new Map();
 // on openssl's stdin, the key on a pipe of its own, so neither is ever in a file or a command line but the key, which is public
 const SEAL_FOR = 'PATH=/usr/bin:/bin; openssl pkeyutl -encrypt -pubin -keyform DER -inkey <(printf %s "$1" | openssl base64 -d -A) -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | openssl base64 -A';
 const sealedFor = async ($, key, value) => {
-    const r = await $.process.run(['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15000 }).catch(() => undefined);
+    const r = await $.process.run(['/bin/bash', '-c', SEAL_FOR, 'sh', key], { stdin: value, timeoutMs: 15_000 }).catch(() => undefined);
     const out = r?.exitCode === 0 ? r.stdout.trim() : '';
     return /^[A-Za-z0-9+/]{300,}={0,2}$/.test(out) ? out : '';
 };
@@ -66,9 +66,9 @@ const boxWording = (one) => {
 };
 let boxes = [];
 let doneNotes = [];
-const DONE_SHOWN = 60000;
-const DONE_LEAST = 15000;
-const DONE_LONGEST = 30 * 60000;
+const DONE_SHOWN = 60_000;
+const DONE_LEAST = 15_000;
+const DONE_LONGEST = 30 * 60_000;
 const isNoteShown = (one, at) => !one.call ? at - one.at < DONE_SHOWN : one.endedAt === undefined ? at - one.at < DONE_LONGEST : at < Math.max(one.endedAt, one.at + DONE_LEAST);
 // The calls that have ended, so a note made after its call ended (a runner sent to the background) is over from the start
 const callsEnded = new Set();
@@ -136,7 +136,7 @@ const boxSaid = new Map();
 const boxSent = new Set();
 let boxPresses = 0;
 // A request older than the runner's own wait there (590 s, under the longest a Bash call may run) is one whose runner is gone
-const BOX_OLD = 11 * 60000;
+const BOX_OLD = 11 * 60_000;
 // What security reads as one line (it cuts a line at about 4095, seen), and gives back as typed: plain printable characters (others it
 // prints as hex). The longest value, escaped, leaves room for the rest of the line
 const BOX_LONGEST = 3800;
@@ -233,9 +233,9 @@ const lookBoxes = async ($) => {
 // A box's entry in the keychain: on Linux bin/keyring, which keeps it in a file only this user reads; on a Mac security itself,
 // which sendBox calls as before for set and has, so only delete goes through here
 const boxKeyring = ($, what, id, stdin) => isLinux
-    ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))
+    ? $.process.run([`${$.plugin.root}/bin/keyring`, what, BOX_SERVICE, id, ...(what === 'set' ? ['Claudopus box'] : [])], { stdin, timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
     : what === 'delete'
-        ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))
+        ? $.process.run(['/usr/bin/security', 'delete-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))
         : Promise.resolve({ exitCode: -1 });
 // Into the keychain under the box's id, on security's stdin as bin/secret keeps a value, so it is never in a command line
 const sendBox = async ($, id, value) => {
@@ -265,10 +265,10 @@ const sendBox = async ($, id, value) => {
     const r = isLinux
         ? await boxKeyring($, 'set', id, `${sent}\n`)
         : await $.process
-            .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15000 })
+            .run(['/usr/bin/security', '-i'], { stdin: `add-generic-password -U -s "${BOX_SERVICE}" -a "${id}" -l "Claudopus box" -w "${escaped}"\n`, timeoutMs: 15_000 })
             .catch(() => ({ exitCode: -1 }));
     // security -i can end well when the add failed: the entry is looked for by its attributes, never its value
-    const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0;
+    const isKept = r.exitCode === 0 && (isLinux ? await boxKeyring($, 'has', id) : await $.process.run(['/usr/bin/security', 'find-generic-password', '-s', BOX_SERVICE, '-a', id], { timeoutMs: 15_000 }).catch(() => ({ exitCode: -1 }))).exitCode === 0;
     // and one whose runner stopped meanwhile is taken out again
     if (isKept && !(await $.fs.exists(request).catch(() => false)))
         await boxKeyring($, 'delete', id);
@@ -315,7 +315,7 @@ const boxModes = new Map();
 const boxHeldReply = new Map();
 // When a response was left for its runner, which takes it within a second or two: until BOX_REPLY_TAKEN after, it is never removed
 const boxRepliedAt = new Map();
-const BOX_REPLY_TAKEN = 60000;
+const BOX_REPLY_TAKEN = 60_000;
 // The name a key box asks for, none for the box that asks a key's name
 const boxNameOf = (one) => one.text.match(/Claudopus needs ([A-Za-z_][A-Za-z0-9_]*)\./)?.[1];
 const isNameBox = (one) => one.text.startsWith('Name of the key to save');

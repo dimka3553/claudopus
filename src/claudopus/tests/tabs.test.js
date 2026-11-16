@@ -2,14 +2,14 @@
 // The Stats and About tabs, and the bar of buttons
 test('Stats opens in front from its button beside Results, and adds up this chat\'s work from its records: tokens, work, time saved, cost', async ($, on) => {
     const { files, opened, tabs } = world(on);
-    const M = 60000;
-    const now = 1700000000000;
+    const M = 60_000;
+    const now = 1_700_000_000_000;
     const chat = `${HOME}/.claude/projects/-repo`;
     const subs = `${chat}/engine-id/subagents`;
     files.set(`${chat}/engine-id.jsonl`, '{}');
-    files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [], d: [], turns: [[now - 30 * M, now - 30 * M + 20000]] }));
+    files.set(`${chat}/engine-id.jsonl.sum`, JSON.stringify({ s: [[now - 30 * M, now]], u: [], d: [], turns: [[now - 30 * M, now - 30 * M + 20_000]] }));
     // Two pieces of work that ran side by side for ten minutes
-    for (const [id, from, to, output] of [['w1', now - 30 * M, now - 10 * M, 1000000], ['w2', now - 20 * M, now - 10 * M, 500000]]) {
+    for (const [id, from, to, output] of [['w1', now - 30 * M, now - 10 * M, 1_000_000], ['w2', now - 20 * M, now - 10 * M, 500_000]]) {
         files.set(`${subs}/agent-${id}.jsonl`, '{}');
         files.set(`${subs}/agent-${id}.meta.json`, JSON.stringify({ description: `Work ${id}`, spawnDepth: 1, finished: true }));
         files.set(`${subs}/agent-${id}.jsonl.sum`, JSON.stringify({ s: [[from, to]], u: [[`m-${id}`, 'claude-opus-5-5', from + M, 0, 0, 0, 0, 0, 0, output]], d: [[from + M, 'Do it', 'done', '']] }));
@@ -49,8 +49,8 @@ test('Stats opens in front from its button beside Results, and adds up this chat
 });
 test('Stats draws whatever the history: the timeline of 240 pieces of work at once, each busy a minute in ten, in one drawing the app takes, and the rest of the tab as ever', async ($, on) => {
     const { files } = world(on);
-    const M = 60000;
-    const t0 = 1700000000000 - 1000 * M;
+    const M = 60_000;
+    const t0 = 1_700_000_000_000 - 1000 * M;
     const chat = `${HOME}/.claude/projects/-repo`;
     const subs = `${chat}/engine-id/subagents`;
     files.set(`${chat}/engine-id.jsonl`, '{}');
@@ -69,7 +69,7 @@ test('Stats draws whatever the history: the timeline of 240 pieces of work at on
     // The timeline is drawn, its bars on a coarser grid, in one drawing the app takes
     const timeline = await until(async () => (await stats.findAll({ type: 'Svg' })).find(one => String(one.props.alt) === '240 tasks on a time axis'));
     expect(String(timeline?.props.source)).toContain('#8A63F0');
-    expect((await stats.findAll({ type: 'Svg' })).filter(one => String(one.props.source).length > 131072)).toEqual([]);
+    expect((await stats.findAll({ type: 'Svg' })).filter(one => String(one.props.source).length > 131_072)).toEqual([]);
     // The rest of the tab is drawn as ever
     expect(await stats.find({ type: 'Text', text: 'Saved by running side by side' })).toBeDefined();
     expect(await stats.find({ type: 'Text', text: '240k' })).toBeDefined();
@@ -203,7 +203,7 @@ test('a tab opened but not asked for its drawing is drawn again within seconds, 
     await clock.advance(500);
     const before = redraws;
     // The app's ask for About never came: two seconds on, the mod draws again, and asks the app to
-    await clock.advance(2000);
+    await clock.advance(2_000);
     expect(redraws).toBeGreaterThan(before);
     // Opened again and asked for at once: no redraw of its own follows
     await pressed(pane, 'about-open');
@@ -211,7 +211,7 @@ test('a tab opened but not asked for its drawing is drawn again within seconds, 
     await $.ui.mount({ ...LIST, requestId: 'about', props: { ...LIST.props, title: 'About', bodyColumns: 80 }, surface: 'desktop' });
     await clock.advance(500);
     const asked = redraws;
-    await clock.advance(20000);
+    await clock.advance(20_000);
     expect(redraws).toBe(asked);
 });
 test('a tab left open as the mod loads, after an update or a reload, is drawn again if the app does not ask for it', async ($, on) => {
@@ -222,9 +222,9 @@ test('a tab left open as the mod loads, after an update or a reload, is drawn ag
     await $.session.start(start);
     await clock.advance(500);
     const before = redraws;
-    await clock.advance(2000);
+    await clock.advance(2_000);
     expect(redraws).toBeGreaterThan(before);
     // Four times at most, while nothing asks for it: a tab behind the others is never asked for
-    await clock.advance(60000);
+    await clock.advance(60_000);
     expect(redraws - before).toBeLessThanOrEqual(4);
 });

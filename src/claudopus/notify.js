@@ -6,9 +6,9 @@ const READY_SOUND = 'sounds/ready.wav';
 // Ends this close together are one sound and one notification
 const SETTLE = 800;
 // Work that ends again this soon after it was announced is not announced again
-const AGAIN = 10000;
+const AGAIN = 10_000;
 // An end the mod learns of this long after it happened, as work read back after a restart, is not announced
-const STALE_END = 60000;
+const STALE_END = 60_000;
 // How each card and workflow of this chat's stood when last looked at, by id. Unset until the first look after the mod loads,
 // which only takes note, so a reload announces nothing
 let lastSeen;
@@ -158,7 +158,7 @@ const alertPerson = async ($, what, title, text, key, asks, opens) => {
     return false;
 };
 // The mod's own chime for what needs the person, as bin/notify's for the notification: asks within this long of it are not heard again
-const QUIET_CHIME = 5000;
+const QUIET_CHIME = 5_000;
 let lastChime = -Infinity;
 // Work that needs the person's hands says so at once: the panel comes up with its card standing out, and a notification with the
 // "needs you" sound. config.json's sound off makes it silent; its notifications off leaves only the mod's own chime. The chime
