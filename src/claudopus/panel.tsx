@@ -198,7 +198,7 @@ const panelHooks = (on: On) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
       const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? "").trim()) : []
       const run = runs.length === 1 ? runs[0] : undefined
-      return run ? `${runWords(String(run.what))} ${RUN_ENDED_AS[run.how]}` : runs.length ? `${runs.length} runs have ended` : (entry?.text ?? '')
+      return run ? `${runWords(String(run.what))} ${RUN_ENDED_AS[run.how]}` : runs.length ? `${runs.length} commands have ended` : (entry?.text ?? '')
     }
 
     const table = uiOf($, e)

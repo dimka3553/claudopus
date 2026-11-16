@@ -9331,7 +9331,7 @@ const stopJob = async ($: EngineInterface, owner: string, job: Job) => {
 }
 // A run that only watches (a tail or grep left going) outlives what it watches once no run of its work, the work above it or the
 // helpers under that one still goes, or once its work has ended: it is stopped then, and its work told while it is at work
-const WATCHER_STOPPED = (what: string) => `Your run "${what}" only watched runs that have all ended, so it was stopped. Do not start a run that only watches another: you are woken the moment a run of yours ends.`
+const WATCHER_STOPPED = (what: string) => `Claudopus stopped your command "${what}": it only watched commands that have all ended. Don't start a command that only watches another; you are woken the moment a command of yours ends.`
 const watchersTried = new Set<string>()
 const endWatchers = async ($: EngineInterface, list: Todo[], now: number) => {
   const runsOf = (one: Todo) => [...(one.bg ?? []).filter(b => !b.isWatch).map(b => ({ id: b.id, cmd: b.cmd ?? '' })), ...(one.detached ?? []).map(d => ({ id: d.id, cmd: d.cmd }))]
@@ -9404,8 +9404,8 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
 // A run of a piece of work that has given no word for a minute is named to that work once, in its own chat: a run is never to be
 // stuck or silent, so it stops it or makes it report. Not a server or a watch, which speak only when there is something to say
 const RUN_ENDED = (what: string, log: string) =>
-  `Your run "${what}" has ended. Look at how it ended${log ? ` in its log, ${log},` : ''} and carry on with the next step now.`
-const RUNS_ENDED = (whats: string[]) => `Your runs ${whats.map(what => `"${what}"`).join(', ')} have ended. Look at how each ended in its log and carry on with the next step now.`
+  `Your command "${what}" has ended. Look at how it ended${log ? ` in its log, ${log},` : ''} and carry on with the next step now.`
+const RUNS_ENDED = (whats: string[]) => `Your commands ${whats.map(what => `"${what}"`).join(', ')} have ended. Look at how each ended in its log and carry on with the next step now.`
 const RUN_SILENT_TOLD = 60_000
 const silentTold = new Set<string>()
 const RUN_SILENT = (what: string, silent: string) =>
@@ -11748,7 +11748,7 @@ const panelHooks = (on: On) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
       const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? "").trim()) : []
       const run = runs.length === 1 ? runs[0] : undefined
-      return run ? `${runWords(String(run.what))} ${RUN_ENDED_AS[run.how]}` : runs.length ? `${runs.length} runs have ended` : (entry?.text ?? '')
+      return run ? `${runWords(String(run.what))} ${RUN_ENDED_AS[run.how]}` : runs.length ? `${runs.length} commands have ended` : (entry?.text ?? '')
     }
 
     const table = uiOf($, e)

@@ -1801,10 +1801,10 @@ test('a run of a work\'s own wakes it the moment it ends: a wait on it is refuse
   // A wait on it, by its process or its log, does not run
   for (const command of ['for i in $(seq 1 55); do kill -0 48213 2>/dev/null || break; echo "progress: $i/55 tries waiting for the upload"; sleep 10; done; grep -E "ERROR|Copied" /w/upload.log | tail -5', "until ! pgrep -f 'curl -T zips.zip' >/dev/null; do echo \"progress: 1 tries\"; sleep 10; done"]) {
     const r = (await $.tool.call({ tool: 'Bash', tool_use_id: 'w1', agentId: 'a1', command, description: 'Wait for the upload to finish (about 9 min)', run_in_background: true } as never)) as { deny?: string }
-    expect(r.deny).toBe('Not run: this only waits for your own run "Upload both zips to the folder", and you are woken the moment it ends, so carry on with what needs nothing from it or end your step now.')
+    expect(r.deny).toBe('Not run: this only waits for your own command "Upload both zips to the folder" to end, and you are woken the moment it ends, so carry on with what needs nothing from it or end your step now.')
   }
   // A Monitor that only waits for it to end, as a helper's would, is refused the same
-  expect(((await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'while kill -0 48213; do sleep 10; done', description: 'Wait for the upload' } as never)) as { deny?: string }).deny).toMatch(/^Not run: this only waits for your own run "Upload both zips to the folder"/)
+  expect(((await $.tool.call({ tool: 'Monitor', tool_use_id: 'm1', agentId: 'a1', command: 'while kill -0 48213; do sleep 10; done', description: 'Wait for the upload' } as never)) as { deny?: string }).deny).toMatch(/^Not run: this only waits for your own command "Upload both zips to the folder" to end/)
   // A sifter left going beside it, which ends with nothing: let through while the upload goes
   expect(((await $.tool.call({ tool: 'Bash', tool_use_id: 'g1', agentId: 'a1', command: 'ugrep --line-buffered wrote', description: 'Run a look for written files', run_in_background: true } as never)) as { deny?: string }).deny).toBeUndefined()
   // A tail that waits for one line ends with it, and runs
@@ -1823,13 +1823,13 @@ test('a run of a work\'s own wakes it the moment it ends: a wait on it is refuse
   // It ends: the work is told at once, and the card says so in place of the line written while it ran
   isAlive = false
   await clock.advance(20_000)
-  expect(await until(async () => appended.find(one => one === 'a1: Your run "Upload both zips to the folder" has ended. Look at how it ended in its log, /w/upload.log, and carry on with the next step now.'))).toBeDefined()
+  expect(await until(async () => appended.find(one => one === 'a1: Your command "Upload both zips to the folder" has ended. Look at how it ended in its log, /w/upload.log, and carry on with the next step now.'))).toBeDefined()
   expect(await until(async () => ((await line()).some(text => text === 'Upload both zips to the folder has ended') || undefined))).toBe(true)
   expect((await line()).some(text => /about 40% done/.test(text))).toBe(false)
   // The sifter outlived what it watched: stopped a minute on, and the work told why
   await clock.advance(60_000)
   expect(await until(async () => stopped.includes('bg-g1') || undefined)).toBe(true)
-  expect(await until(async () => appended.find(one => /^a1: Your run ".*" only watched runs that have all ended, so it was stopped\./.test(one)))).toBeDefined()
+  expect(await until(async () => appended.find(one => /^a1: Claudopus stopped your command ".*": it only watched commands that have all ended\./.test(one)))).toBeDefined()
   // Told once, and a new line of the work's own stands again
   await clock.advance(20_000)
   expect(appended.filter(one => /has ended\. Look at how it ended/.test(one))).toHaveLength(1)
@@ -1843,7 +1843,7 @@ test('a run of a work\'s own wakes it the moment it ends: a wait on it is refuse
   expect(resumed.some(one => one.startsWith('a1: '))).toBe(false)
   isAlive = false
   await clock.advance(20_000)
-  expect(await until(async () => resumed.find(one => one === 'a1: Your run "Upload the rest" has ended. Look at how it ended in its log, /w/rest.log, and carry on with the next step now.'))).toBeDefined()
+  expect(await until(async () => resumed.find(one => one === 'a1: Your command "Upload the rest" has ended. Look at how it ended in its log, /w/rest.log, and carry on with the next step now.'))).toBeDefined()
 })
 
 test('every run under a card says how it stands: a command held open shows its progress, one that printed nothing says so, a watch its last event; 15 Nov rows said only "updated 9m ago"', SLOW, async ($, on) => {

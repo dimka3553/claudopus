@@ -1,5 +1,5 @@
-- A piece of work is woken the moment a run it left going on its own ends, even after it ended its step, and carries on at once.
-- A command that only waits for one of the work's own runs to end is refused, with one sentence saying it will be woken when the run ends; so is a tail that follows a log and would never end.
-- A wait on helpers lets go the moment a helper ends, and its row shows how many helpers are at work.
-- A tail or grep left watching runs that have all ended is stopped, and the work is told why.
-- Once a run has ended, the card's line says so in place of what the work wrote while it ran, until the work writes again.
+- When a task's own command ends (finished, failed or stopped), Claudopus wakes the task at once, even if it had ended its step, so it carries on right away instead of waiting.
+- A command that only waits for one of the task's own commands to end is refused, with one sentence saying the task will be woken when it ends; so is a `tail -f` that would follow a log forever.
+- A task waiting for its helpers is let go the moment one finishes, and its row shows how many helpers are still working.
+- A tail or grep left watching commands that have all ended is stopped, and the task is told why.
+- Once a command has ended, the card's line says so in place of what the task wrote while it ran, until the task writes again.
