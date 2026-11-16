@@ -1138,13 +1138,15 @@ test('work that ends in an error is kept as failed, time lying ended is not coun
   expect((await tab.find({ type: 'Text', text: /^2m/ }))?.text).toBe('2m 00s')
   await tab.unmount()
 
-  // Fifty more pieces of work start and end: the first is still listed
+  // Fifty more pieces of work start and end, with no panel drawing each step: the first is still listed
+  await pane.unmount()
   for (let n = 0; n < 50; n += 1) {
     const r = await $.agent.spawn({ ...spawn, description: `Other ${n}`, prompt: 'x' } as never)
     await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: `t-${n}`, reason: 'answer', agentId: r.agentId } as never)
   }
-  expect((await pane.find({ type: 'Text', text: /Fix the nose/ }))?.text).toBe('Fix the nose')
-  await pane.unmount()
+  const again = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
+  expect((await again.find({ type: 'Text', text: /Fix the nose/ }))?.text).toBe('Fix the nose')
+  await again.unmount()
 })
 
 test('a chat the app has not kept is said so, with the answer the work gave', async ($, on) => {
