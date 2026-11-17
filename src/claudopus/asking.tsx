@@ -323,7 +323,7 @@ const readDrafts = async ($: EngineInterface) => {
 // The last answer given to each work's ask, shown on its card for a while after: sent to the work (which reads a message only at
 // its next step, so it says so until that step starts), read by it, or sent to the chat when the work had ended
 // A button's answer keeps the ask it answered and the work it went to (asked, target), so it can be taken back (takeBack)
-type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
+type Sent = { text: string; ask: string; to: 'sending' | 'work' | 'read' | 'chat' | 'other' | 'ran' | 'lost' | 'failed'; at: number; line?: string; isHeld?: boolean; isCard?: boolean; askAt?: number; asked?: NonNullable<Todo['ask']>; target?: string }
 // The line the work last wrote about itself, as it stood when the answer was given: a newer one takes the answer's place
 const lineOf = (one: Todo) => { const last = [...one.entries].reverse().find(entry => entry.kind !== 'steer'); return last ? `${last.at}:${last.text}` : '' }
 // How long the card says what was answered, unless the work writes a newer line first
@@ -541,6 +541,13 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
   // A notice of a call Claude Code refused: the work it is for, still at work, is told to carry on without it, and work that has
   // ended is not started again for it, neither now nor as it ends without having read it (no answer waits for it)
   if (ask.refused) {
+    // Run it, pressed on this card in this chat's own panel: the command is run now, on that press (runit.tsx)
+    const run = !isReply && said === RUN_IT ? runAsked.get(one.id) : undefined
+    if (run && run.askAt === ask.at && run.command === ask.copy) {
+      sentReplies.set(one.id, { text: said, ask: ask.text, to: 'ran', at, line, isCard: true, askAt: ask.at })
+      await startRun($, one, run).catch(err => log($, `refused command not run: ${String(err)}`))
+      return void askGone($, one, said)
+    }
     const isWorking = (await read($, todos)).find(card => card.id === target)?.status === 'working'
     const told = isWorking ? await tell($, target, REFUSAL_ANSWERED(ask.text, said, isReply)) : undefined
     if (!told || told.deny) await log($, `answer to the refusal on ${one.id} not sent: ${target} is not at work, or could not be written to`)
@@ -569,7 +576,7 @@ const canTakeBack = (one: Todo, now: number) => {
   const sent = heldAnswer(one, now)
   // Only while the card still says it (sentLine), never for an answer left in the chat, whose model has it already, nor for a last
   // step such as a release, which the work cannot undo
-  return Boolean(sent?.asked && !sent.isHeld && !sent.asked.lastStep && !['other', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now))
+  return Boolean(sent?.asked && !sent.isHeld && !sent.asked.lastStep && !['other', 'ran', 'sending', 'chat'].includes(sent.to) && !one.ask && !one.chat && sentLine(one, now))
 }
 // (at: the answer the button was drawn for: a click on a drawing held from before takes back nothing newer)
 const takeBack = ($: EngineInterface, one: Todo, at: number) => {
@@ -858,6 +865,7 @@ const sentLine = (one: Todo, now: number) => {
     work: waitsBehind(one, sent.at, now) || 'Claude will see this after its current step',
     read: 'Claude has read it',
     chat: 'left in the chat, which continues the task',
+    ran: 'Claudopus is running it; Claude gets what it prints',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", whose task will see it after its current step`,
   }[sent.to]
   if (isHeld) return `✓ You replied “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : '; Claude still has this question'}`

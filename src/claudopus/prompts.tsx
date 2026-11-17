@@ -305,18 +305,22 @@ const refusedByClaudeCode = async ($: EngineInterface, agent: string, tool: stri
   const what = promptOf(tool, call, list, true)
   const who = own?.parentId ? `a helper of this task ("${titleOf(own)}")` : 'this task'
   const text = cut(`Claude Code refused ${who}: ${what.text}.`, ASK_TEXT)
+  // A command is shown whole, to copy or for the person to run on their own press (runit.tsx)
+  const runnable = runnableOf(tool, call)
   const details = [
-    what.detail ? `What it is: ${what.detail}` : '',
+    what.detail && !runnable ? `What it is: ${what.detail}` : '',
     `Why: ${refusal.who}${refusal.reason ? ` (${refusal.reason})` : ''}.`,
-    'The task carries on without it, and does not do it another way.',
+    runnable ? runDetails(runnable) : 'The task carries on without it, and does not do it another way.',
   ]
     .filter(Boolean)
     .join('\n\n')
   const at = await $.clock.now()
   // A question waiting on the person, there already or put up meanwhile, is never replaced: the refusal is in the task's own result
   let isPut = false
-  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text, details, choices: [CARRY_ON], from: agent, at, refused: true } }))
+  const command = runnable ? { copy: runnable.command, isCommand: true, cwd: runnable.cwd } : {}
+  await change($, agent, one => ((isPut = !one.ask), one.ask ? one : { ...one, ask: { text, details, ...command, choices: [CARRY_ON], from: agent, at, refused: true } }))
   if (!isPut) return void (await log($, `refusal of ${tool} for ${agent} not put on its card: its card asks something already`))
+  if (runnable) await offerRun($, top.id, agent, at, runnable)
   await log($, `refusal of ${tool} for ${agent} put to the person on its card`)
   const card = (await read($, todos)).find(one => one.id === top.id)
   if (card) await askAloud($, card, text).catch(err => log($, `ask not told: ${String(err)}`))

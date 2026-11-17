@@ -378,8 +378,10 @@ const panelHooks = (on: On) => {
               <Button key={`ask-${one.id}-copy-${presses}`} label={copiedKey === one.id ? '✓ Copied' : 'Copy'} plain onPress={press => copyAsk($, one.id, ask.copy ?? '', press.surface)} />
             </Box>
           ) : null}
-          {/* A command to type: Terminal opens with it typed, not run, only on this press */}
-          {canOpenTerminal(one) ? (
+          {/* A command Claude Code refused, to run on the person's press: where and for how long at most */}
+          {runWhere(table, one, key)}
+          {/* A command to type: Terminal opens with it typed, not run, only on this press; not beside Run it */}
+          {canOpenTerminal(one) && !offeredRun(one) ? (
             <Box flexDirection="row">
               <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Opened in Terminal, typed, not run' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
             </Box>
@@ -390,6 +392,7 @@ const panelHooks = (on: On) => {
           ) : null}
           {one.chat ? null : (
           <Box flexDirection="row" flexWrap="wrap" gap={1}>
+            {runButton($, table, one, key)}
             {answers.map((choice, n) => (
               <Button key={`${key}-choice-${n}-${askMark(ask)}-${loadMark}`} label={choice} onPress={() => void ((presses += 1), answerAsk($, one, choice).catch(err => log($, `answer not sent: ${String(err)}`)))} />
             ))}
@@ -507,6 +510,11 @@ const panelHooks = (on: On) => {
             {one.ask ? (
               <Box key={`ask-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
                 {askBlock(one, `ask-${one.id}`)}
+              </Box>
+            ) : null}
+            {runningOn(one.id).length && !one.chat ? (
+              <Box key={`run-lead-${one.id}`} flexDirection="column" paddingLeft={lead}>
+                {runBlock($, table, one, `runs-${one.id}`, at)}
               </Box>
             ) : null}
             {one.admins?.length || cardNotesOf(one.id, at).length ? (
@@ -1423,6 +1431,11 @@ const panelHooks = (on: On) => {
                 <Text bold dimColor>Needs you now</Text>
                 {adminBlock($, table, one, `gates-big-${one.id}`, at)}
               </Box>
+            </Box>
+          ) : null}
+          {runningOn(one.id).length && !one.chat ? (
+            <Box key="part-runs" flexDirection="column" backgroundColor={FILL} flexShrink={0} paddingX={2} paddingY={1}>
+              {runBlock($, table, one, `runs-big-${one.id}`, at, true)}
             </Box>
           ) : null}
           {one.ask ? (

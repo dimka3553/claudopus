@@ -76,6 +76,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
   const submitted: string[] = []
   // What the mod sent to an agent with $.session.send, which starts again one that has ended, as "<agent>: <text>"
   const resumed: string[] = []
+  const pressRuns: string[][] = []
   // How many lines the mod had written into chats as each SubagentHandback reached the engine
   const atHandback: number[] = []
   // The model each step of a piece of work was sent to
@@ -224,6 +225,11 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The chat's own process, as the shell the mod starts names its parent
     if (tool === '/bin/sh' && rest[1] === 'echo $PPID') return ok('4242\n')
     if (tool === '/bin/sleep') return new Promise(done => sleepers.push(() => done(ok()))) as never
+    // A command Claude Code refused, run on the person's press: started detached, it prints its process group's number; still
+    // running until the test lays run:gone; stopped, it is gone
+    if (tool === '/bin/sh' && String(rest[1]).startsWith('# claudopus run-it\n')) return (pressRuns.push([...e.argv]), ok('51234\n'))
+    if (tool === '/bin/sh' && String(rest[1]).startsWith('# claudopus run-it alive')) return ok('', files.has('run:gone') ? 1 : 0)
+    if (tool === '/bin/sh' && String(rest[1]).startsWith('# claudopus run-it stop')) return (pressRuns.push([...e.argv]), files.set('run:gone', ''), ok())
     // Every admin password an earlier version kept, taken out of the keychain as the mod loads
     if (tool === '/bin/sh' && String(rest[1]).includes('delete-generic-password -s claudopus-admin')) return (files.set('keychain:admin-forgotten', 'yes'), ok())
     // What a password box sends, sealed by openssl to the key of the runner that asked: the test's own stand-in for it
@@ -592,7 +598,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     return { messages: e.messages }
   })
 
-  return { files, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
+  return { files, pressRuns, titles, compacts, opened, tabs, stopped, killed, closed, logged, sent, appended, submitted, resumed, atHandback, clock, copied, stepped, played, notified, osa, own, shown, dropped, terminals, sshed, events, held, keep, settle, keychain, admins, wake, gitRan, backgrounds, agentModels, asked, types, registered, kindTools }
 }
 
 // A seal as the test world makes it: 64 hex digits from the key and the message, the same for the same two
