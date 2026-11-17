@@ -16,7 +16,7 @@ within() { local n=0; while ! eval "$1"; do sleep 0.2; n=$((n + 1)); [ "$n" -ge 
 head -c 3000000 /dev/urandom > "$tmp/big.mp4"
 printf 'hello' > "$tmp/small one.txt"
 
-"$here/pane-file" >/dev/null 2>&1; [ $? = 2 ] && ok "with no file it says how it is used" || no "with no file it says how it is used"
+use=$("$here/pane-file" 2>&1); [ $? = 2 ] && case $use in "Puts files"*"sends nothing over the network itself.") true ;; *) false ;; esac && ok "with no file it says how it is used, and only that" || no "with no file it says how it is used, and only that"
 "$here/pane-file" "$tmp/none.mp4" >/dev/null 2>&1; [ $? = 1 ] && ok "a missing file stops it" || no "a missing file stops it"
 python3 -c 'import sys; open(sys.argv[1], "wb").truncate(251 * 1024 * 1024)' "$tmp/huge.mp4"
 "$here/pane-file" "$tmp/huge.mp4" 2>&1 | grep -q "more than the 250 MB" && ok "a file over 250 MB stops it" || no "a file over 250 MB stops it"
@@ -56,7 +56,7 @@ meta = d[len('%s#cpf:%s:0:1:' % (to, small)):].split(':', 1)[0]
 import hashlib
 assert json.loads(urllib.parse.unquote(meta)) == {'name': 'small one.txt', 'type': 'text/plain', 'size': 5, 'sha': hashlib.sha256(b'hello').hexdigest()}, meta
 PY
-within 'grep -q "^progress: 4/4 parts sent" "$tmp/log"' 15 && ok "it counts the parts carried" || no "it counts the parts carried"
+within 'grep -q "^progress: 4/4 parts sent" "$tmp/log"' 15 && ok "it counts the parts sent" || no "it counts the parts sent"
 
 # Nothing else is answered: another path, an unknown file, a part past the end, a page that is not https
 for q in "/go?id=$big&i=0&to=https://user:pw@www.example.com/" "/x?id=$big&i=0&to=$to" "/go?id=000000000000&i=0&to=$to" "/go?id=$big&i=3&to=$to" "/go?id=$big&i=-1&to=$to" "/go?id=$big&i=0&to=http://www.example.com/" "/go?id=$big&i=0&to=javascript:alert(1)"; do
