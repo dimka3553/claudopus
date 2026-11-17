@@ -1,0 +1,103 @@
+#!/bin/bash
+# Puts files from this Mac into a page's file input in the Claude app's browser pane, where no tool opens the Mac's file
+# window and a pasted file never reaches the page. A site's own security rules stop its pages fetching from this Mac, but they
+# do not stop the pane opening a page here, and a page here may send the pane on to the site with a file's bytes in the address
+# after the # (which never leaves the browser). So the file goes over in parts of about a megabyte, each stored in the site's own
+# storage in the browser by a few lines of JavaScript run on the site, and on the upload page those parts become a file again,
+# set on its file input as if picked by hand.
+#
+#   pane-file FILE [FILE...]    serves the files on 127.0.0.1 until nothing has asked for a part for 20 minutes, and prints
+#                               the steps and the two pieces of JavaScript to run in the pane, filled in for these files
+#
+# Start it detached with its output to a log, then read the log for the steps. Nothing leaves this Mac: the server answers only
+# on 127.0.0.1, and only to the pane's own requests for a part.
+set -u
+[ $# -ge 1 ] || { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+for f in "$@"; do [ -f "$f" ] && [ -r "$f" ] || { echo "pane-file: no file $f" >&2; exit 1; }; done
+py=$(command -v python3) || { echo "pane-file: needs python3" >&2; exit 1; }
+exec "$py" -I -u - "$@" <<'PY'
+import base64, hashlib, http.server, json, mimetypes, os, socketserver, sys, threading, time, urllib.parse
+
+PART = 1_500_000          # characters of base64 in one address: Chromium takes addresses up to 2 MB
+IDLE = 20 * 60            # stops when no part was asked for this long
+
+files = {}
+for path in sys.argv[1:]:
+    data = open(path, 'rb').read()
+    b64 = base64.b64encode(data).decode()
+    fid = hashlib.sha256(data).hexdigest()[:12]
+    files[fid] = dict(name=os.path.basename(path), type=mimetypes.guess_type(path)[0] or 'application/octet-stream',
+                      size=len(data), sha=hashlib.sha256(data).hexdigest(),
+                      parts=[b64[i:i + PART] for i in range(0, len(b64), PART)] or [''], sent=set())
+
+last = [time.time()]
+total = sum(len(f['parts']) for f in files.values())
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        u = urllib.parse.urlparse(self.path)
+        q = urllib.parse.parse_qs(u.query)
+        fid, to = q.get('id', [''])[0], q.get('to', [''])[0]
+        try: i = int(q.get('i', ['0'])[0])
+        except ValueError: i = -1
+        f = files.get(fid)
+        if u.path != '/go' or not f or not (0 <= i < len(f['parts'])) or not to.startswith('https://'):
+            self.send_response(404); self.end_headers(); return
+        last[0] = time.time()
+        f['sent'].add(i)
+        meta = urllib.parse.quote(json.dumps(dict(name=f['name'], type=f['type'], size=f['size'])), safe='')
+        dest = to.split('#')[0] + '#cpf:' + fid + ':' + str(i) + ':' + str(len(f['parts'])) + ':' + meta + ':' + f['parts'][i]
+        body = ('<!doctype html><meta charset=utf-8><title>Carrying a file</title><script>location.replace('
+                + json.dumps(dest) + ')</script>').encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        try: self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError): pass   # the pane moved on before the part was read: it asks again
+
+class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+
+srv = Server(('127.0.0.1', 0), Handler)
+port = srv.server_address[1]
+base = 'http://127.0.0.1:%d' % port
+
+CARRY = r"""(async()=>{const m=/^#cpf:(\w+):(\d+):(\d+):([^:]*):(.*)$/s.exec(location.hash);if(!m)return 'no part in this address yet: '+location.href.slice(0,60);const[,id,i,n,meta,b]=m;const db=await new Promise((ok,no)=>{const r=indexedDB.open('claudopus-files',1);r.onupgradeneeded=()=>r.result.createObjectStore('parts');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});const s=atob(b),u=new Uint8Array(s.length);for(let k=0;k<s.length;k++)u[k]=s.charCodeAt(k);await new Promise((ok,no)=>{const t=db.transaction('parts','readwrite');t.objectStore('parts').put(u,id+':'+i);if(+i===0)t.objectStore('parts').put(JSON.parse(decodeURIComponent(meta)),id+':meta');t.oncomplete=ok;t.onerror=()=>no(t.error)});const next=+i+1;if(next<+n){location.replace('BASE/go?id='+id+'&i='+next+'&to='+encodeURIComponent(location.origin+location.pathname));return 'part '+next+' of '+n+' stored: run this again'}history.replaceState(null,'',location.pathname);return 'all '+n+' parts of '+id+' stored on '+location.origin})()"""
+CARRY = CARRY.replace('BASE', base)
+
+PUT = r"""(async()=>{const ids=IDS,sel=SEL;const db=await new Promise((ok,no)=>{const r=indexedDB.open('claudopus-files',1);r.onupgradeneeded=()=>r.result.createObjectStore('parts');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});const get=k=>new Promise((ok,no)=>{const q=db.transaction('parts').objectStore('parts').get(k);q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)});const dt=new DataTransfer(),out=[];for(const id of ids){const meta=await get(id+':meta');if(!meta)return 'not carried to '+location.origin+' yet: '+id;const parts=[];for(let i=0;;i++){const p=await get(id+':'+i);if(!p)break;parts.push(p)}const f=new File(parts,meta.name,{type:meta.type});if(f.size!==meta.size)return 'parts missing for '+meta.name+': '+f.size+' of '+meta.size+' bytes';const h=[...new Uint8Array(await crypto.subtle.digest('SHA-256',await f.arrayBuffer()))].map(x=>x.toString(16).padStart(2,'0')).join('');dt.items.add(f);out.push(meta.name+' '+f.size+' bytes sha256 '+h.slice(0,12))}const inp=sel?document.querySelector(sel):document.querySelector('[aria-modal=true] input[type=file],[role=dialog] input[type=file]')||[...document.querySelectorAll('input[type=file]')].pop();if(!inp)return 'no file input on this page yet: '+out.join(', ');inp.files=dt.files;inp.dispatchEvent(new Event('input',{bubbles:true}));inp.dispatchEvent(new Event('change',{bubbles:true}));db.close();indexedDB.deleteDatabase('claudopus-files');return 'set on the file input, and the parts cleared from this site: '+out.join(', ')})()"""
+
+lines = []
+for fid, f in files.items():
+    lines.append('file %s: %s, %d bytes, %d parts, sha256 %s' % (fid, f['name'], f['size'], len(f['parts']), f['sha'][:12]))
+ids = json.dumps(list(files))
+print('pane-file: serving on %s' % base)
+print('\n'.join(lines))
+print("""
+Steps, in one tab of the browser pane, signed in to the site:
+1. For each file, navigate the tab to
+     %s/go?id=<file>&i=0&to=<a plain https page on the upload page's own origin, such as https://www.tiktok.com/robots.txt>
+   The pane lands on that page with the first part in its address.
+2. Run the CARRY JavaScript below in that tab, and again each time it says to (once per part, a second or so apart), until it
+   says all parts are stored. The parts stay in that origin's own storage in the browser.
+3. Navigate to the upload page on the same origin, open its upload step so its file input exists, and run the PUT JavaScript
+   below, with IDS cut down to the files this input takes. It checks each file's size and sha256 against the ones above, sets
+   them on the file input of the open dialog, or else the page's last one, or the one SEL picks (a CSS selector instead of
+   null), fires the input's change as a hand pick does, and clears the parts from the site's storage. A page that takes files
+   only by drag and drop takes them from a drop event made with the same DataTransfer.
+4. Stop this server once the site shows the file (kill its process); it stops itself after 20 minutes with nothing asked.
+""" % base)
+print('CARRY:\n' + CARRY + '\n')
+print('PUT (IDS and SEL filled in for all these files):\n' + PUT.replace('IDS', ids).replace('SEL', 'null') + '\n')
+sys.stdout.flush()
+
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+while time.time() - last[0] < IDLE:
+    sent = sum(len(f['sent']) for f in files.values())
+    print('progress: %d/%d parts carried to the browser' % (sent, total), flush=True)
+    time.sleep(10)
+print('pane-file: nothing asked for 20 minutes, stopping', flush=True)
+PY

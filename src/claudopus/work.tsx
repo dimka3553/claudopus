@@ -158,7 +158,7 @@ const touchesKeyring = (e: { tool: string }) => {
 // The rules every piece of work a chat starts is handed after its brief, as they stand now: where the chat's words are, the work's
 // own rules, and its panel's
 const workRules = async ($: EngineInterface) => {
-  const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).trim()
+  const work = named(fillModels((await inForce($, $.plugin.root, dir, 'roles/work.md')).text, models, lean)).replace(/\{admin\}/g, `${$.plugin.root}/bin/admin`).replace(/\{secret\}/g, `${$.plugin.root}/bin/secret`).replace(/\{release\}/g, `${$.plugin.root}/bin/release`).replace(/\{pane-file\}/g, `${$.plugin.root}/bin/pane-file`).trim()
   const words = `- The chat's saved words, ${who()}'s messages word for word: ${dir}/words/${(await read($, me)).id}.md`
   return `${workHead()}\n${words}\n${work}\n\n${named(PANEL_RULE)}`
 }

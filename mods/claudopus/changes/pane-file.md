@@ -1,0 +1,1 @@
+- Claude can now put a file from your Mac into a page's upload box in the Claude app's browser, such as a video on TikTok, Instagram, YouTube or X, without you picking it in a file window.

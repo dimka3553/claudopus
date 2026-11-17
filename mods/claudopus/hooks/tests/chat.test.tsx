@@ -140,7 +140,7 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     // The texts the mod ships; a copy of one in the memory folder is the person's own, kept in files
     const isShipped = !e.path.startsWith(MEMORY)
     if (isShipped && e.path.endsWith('roles/chat.md')) return { value: options.chatRole ?? 'CHAT ROLE' }
-    if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`' }
+    if (isShipped && e.path.endsWith('roles/work.md')) return { value: 'WORK ROLE; an admin command runs through `{admin}`; a key runs as `{secret} NAME`; main is reached through `{release}`; a file goes into a page through `{pane-file}`' }
     if (isShipped && e.path.endsWith('rules/CLAUDE.md')) return { value: options.shipped ? SHIPPED_PRINCIPLES : PRINCIPLES }
     if (isShipped && options.changelog !== undefined && e.path.endsWith('/CHANGELOG.md')) return { value: options.changelog }
     // A release on GitHub, where the test gives one: the mod's folder is a main checkout, whose version a reload loads
@@ -911,7 +911,7 @@ test('with the handing-over switched off the mod refuses no model and moves no s
   expect(stepped).toEqual(['claude-opus-4-8'])
 })
 
-test("the work's rules name where the admin runner is, the one way work uses a Mac's password", async ($, on) => {
+test("the work's rules name where the admin runner is, the one way work uses a Mac's password, and the file carrier for the browser pane", async ($, on) => {
   world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'clear the disk', wait: false, origin: composer })
@@ -919,6 +919,8 @@ test("the work's rules name where the admin runner is, the one way work uses a M
   await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
   expect(prompts[0]).toMatch(/an admin command runs through `\/\S*mods\/claudopus\/bin\/admin`/)
   expect(prompts[0]).not.toContain('{admin}')
+  expect(prompts[0]).toMatch(/a file goes into a page through `\/\S*mods\/claudopus\/bin\/pane-file`/)
+  expect(prompts[0]).not.toContain('{pane-file}')
 })
 
 test('work uses a kept key without reading it: the keychain is not read, and what a tool answers comes back with the key hidden', async ($, on) => {
