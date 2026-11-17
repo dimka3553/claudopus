@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { heavyOf, leftoversOf, leftName, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
+import { heavyOf, leftoversOf, memOf, commandName, describedOf, detachedOf, endOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isOutputEnded, isWaitOnly, jobKindOf, labelOf, latestOf, pidOf, plainOf, portOf, procsOf, reportsOf, shellsOf, treeOf, waitOf, waitingOf, watcherOf, isWaiterTree, PLAIN_MOST } from './jobs'
 import type { WaitKind } from './jobs'
 import type { Job } from './jobs'
 
@@ -512,7 +512,6 @@ test('what a command left running is told by its group and by when it started: o
   expect(leftoversOf(ps(['5090 1 5090 Z 00:05 0 (mdworker_shared)']), [span]).length).toBe(0)
   // A call still open past the wrap holds back what it may have started
   expect(leftoversOf(ps(['20 1 20 S 00:05 1000 /u/bin/python daemon.py']), [{ ...span, from: 99_990, to: 40 }], new Set(), [{ from: 99_995, at: now - 8_000 }]).length).toBe(0)
-  expect(leftName('/opt/homebrew/Cellar/python/Python.app/Contents/MacOS/Python fig4.py page 3')).toBe('Run python fig4.py page 3')
 })
 
 test("a heavy command is one whose own program drives a browser, builds or renders, or runs a script that drives a browser; never a server, a word another program reads, or the mod's own release and tests (16 Nov: ten tasks shot pages with Playwright and headless Chrome at once)", async () => {

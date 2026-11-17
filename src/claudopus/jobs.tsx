@@ -5,7 +5,7 @@
 
 // What each job wrote last, by its task id: its latest line, when its output last changed, whether its processes are paused,
 // and for a wait, how what it waits for stands
-type Seen = { latest: string; mem?: string; isUntold?: boolean; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; mem?: string; memKb?: number; isUntold?: boolean; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 // When each card was last told that one of its jobs wrote something new
 const jobNews = new Map<string, number>()
@@ -55,9 +55,13 @@ const jobsOf = (one: Todo, at: number): Job[] =>
 // twice
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
-  const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
+  // What a command left going is said in that command's own words alone, as the person reads what it is doing first; how many
+  // programs it is goes on the line under it (17 Nov "Command · 12 programs · Test whe…" cut the words that said what it was)
+  if (leftCommandOf(job.id)) return job.label
+  const many = job.count && job.count > 1 ? ` ×${job.count}` : ''
+  const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`
   // Its own words alone when they say its kind already (Download the CT scans, Wait for the deploy)
-  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
+  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
   // A wait leads with what it waits for, its own words after
   const label = job.kind === 'wait' ? (job.waitsFor ?? job.label.replace(/^wait(s|ing)?\s+/i, '')) : job.label
   return `${kind} · ${label}`
@@ -304,8 +308,10 @@ let outputMoved = false
 
 // The memory a followed process and all it started hold, as the processes were last listed
 const memSeen = (pid?: string) => {
-  const mem = pid && jobProcs.length ? memOf(treeOf(jobProcs, pid)) : undefined
-  return mem ? { mem } : {}
+  const tree = pid && jobProcs.length ? treeOf(jobProcs, pid) : []
+  const mem = memOf(tree)
+  // (and in KB, so the programs of one command are added up exactly)
+  return mem ? { mem, memKb: tree.reduce((sum, p) => sum + (p.rss ?? 0), 0) } : {}
 }
 
 // Each piece of work's commands, by the process numbers handed out while each ran, kept a while so what one leaves going is
@@ -352,14 +358,36 @@ const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string;
   // Among every command kept, so a run held back while another ran goes to its own
   await adoptLeft($, procs, now)
 }
-// What commands left going becomes runs on their cards: each topmost process, with its command's words when it left one, else
-// its own program and script; its log where its output goes to a file, so its progress line is read as any other
+// Whose each process is, by its environment: `mine` where it carries this chat's session (every command the engine runs for this
+// chat does, and all it starts), `other` where its environment is there without it, `hidden` where it cannot be read
+const ownersOf = async ($: EngineInterface, pids: string[]) => {
+  const sid = await $.session.id().catch(() => '')
+  const out = new Map<string, 'mine' | 'other' | 'hidden'>()
+  if (!sid || !pids.length) return out
+  const script = `sid=$1; shift; for p; do if [ -r "/proc/$p/environ" ]; then e=$(tr '\\0' '\\n' < "/proc/$p/environ" 2>/dev/null); else e=$(ps -E -ww -o command= -p "$p" 2>/dev/null | tr ' ' '\\n'); fi; if printf '%s\\n' "$e" | grep -qxF "CLAUDE_CODE_SESSION_ID=$sid"; then echo "$p mine"; elif printf '%s\\n' "$e" | grep -qE '^(HOME|PATH|USER)='; then echo "$p other"; else echo "$p hidden"; fi; done # whose runs`
+  const r = await $.process.run(['sh', '-c', script, 'sh', sid, ...pids.filter(isPid)], { timeoutMs: 5000 }).catch(() => undefined)
+  for (const line of r?.stdout.split('\n') ?? []) {
+    const [pid = '', who = ''] = line.trim().split(' ')
+    if (who === 'mine' || who === 'other' || who === 'hidden') out.set(pid, who)
+  }
+  return out
+}
+// What commands left going becomes runs on their cards: each topmost process, in its command's words; its log where its output
+// goes to a file, so its progress line is read as any other
 const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: KeptSpan[]) => {
   const list = await read($, todos)
   // A process number gone from the list may be handed out again: it no longer stands for a run made already
   for (const pid of adopted) if (!procs.some(p => p.pid === pid)) adopted.delete(pid)
   const known = new Set([...adopted, ...list.flatMap(one => (one.detached ?? []).flatMap(d => (d.pid ? [d.pid] : [])))])
-  const left = leftoversOf(procs, only ?? spans, known, [...openCalls.values()])
+  const found = leftoversOf(procs, only ?? spans, known, [...openCalls.values()])
+  if (!found.length) return
+  // Only what this chat's commands started: a process whose environment can be read and does not carry this chat's session is some
+  // other program's (on 17 Nov a git push and a dig took the helpers of headless Chrome other work had started, and Grok's and
+  // Chrome's own crash reporters, as runs they had left: "Run Google Chrome" ×12 on cards that never opened a browser). Apple's
+  // own programs hide their environment, and are judged as before
+  const whose = await ownersOf($, found.map(l => l.top.pid))
+  const left = found.filter(l => whose.get(l.top.pid) !== 'other')
+  for (const l of found) if (whose.get(l.top.pid) === 'other') adopted.add(l.top.pid)
   if (!left.length) return
   const fd = await $.process
     .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...left.map(l => l.top.pid)], { timeoutMs: 5000 })
@@ -371,8 +399,9 @@ const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: 
     if (!span || !list.some(card => card.id === span.agent)) continue
     const file = logs.get(one.top.pid) ?? ''
     const log = file.startsWith('/') && !file.startsWith('/dev/') ? file : ''
-    const several = left.filter(l => l.span === one.span).length > 1
-    const what = several || !span.what ? leftName(one.top.command) : span.what
+    // Named by the command that left it, in the words the work gave it, never by the program it runs: the person reads what it is
+    // doing, not "Run Google Chrome" or "Run torch_shm_manager"; what one command left is one row (foldJobs)
+    const what = span.what || labelOf('', span.cmd)
     adopted.add(one.top.pid)
     added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true, ...(span.bgId ? { from: span.bgId } : {}) }])
   }
@@ -516,9 +545,11 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
   const procs = jobProcs.length ? jobProcs : procsOf((await $.process.run(['ps', '-axww', '-o', PS_COLUMNS], { timeoutMs: 5000 }).catch(() => ({ stdout: '' }))).stdout, now)
   // A background command's own shell, found as the look finds it, so it is ended even where the engine does not stop it
   const bgShell = bg && !bg.isWatch && procs.length ? shellsOf(procs, [{ id: bg.id, cmd: bg.cmd ?? '', at: bg.at }]).get(bg.id) : undefined
-  const top = detached?.pid ?? (typeof bgShell === 'string' ? bgShell : undefined) ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined)
+  // What one command left going is one row, so its Stop ends every program of it
+  const alike = detached ? (card?.detached ?? []).filter(d => d.id === detached.id || (leftCommandOf(d.id) !== '' && leftCommandOf(d.id) === leftCommandOf(detached.id) && d.what === detached.what)) : []
+  const tops = detached ? alike.flatMap(d => (d.pid ? [d.pid] : [])) : [(typeof bgShell === 'string' ? bgShell : undefined) ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined)].flatMap(p => (p ? [p] : []))
   // (the top one itself even where the processes could not be listed)
-  const pids = top ? [...new Set([top, ...treeOf(procs, top).map(p => p.pid)])].filter(isPid) : []
+  const pids = [...new Set(tops.flatMap(top => [top, ...treeOf(procs, top).map(p => p.pid)]))].filter(isPid)
   let isStopped = false
   if (bg) {
     const r = await $.tool.call({ tool: 'TaskStop', task_id: bg.id }).catch(err => ({ deny: String(err) }))
@@ -535,7 +566,8 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
   if (!isStopped) return void (await log($, `run ${job.id} of work ${owner} could not be stopped: nothing of it was found`))
   if (bg) await dropBackground($, [bg.id], 'stopped')
   if (detached) {
-    await changeTodos($, cards => cards.map(one => (one.id === owner && one.detached?.some(d => d.id === job.id) ? { ...one, detached: one.detached.filter(d => d.id !== job.id).length ? one.detached.filter(d => d.id !== job.id) : undefined, ...keepEnded(one, [{ id: detached.id, what: detached.what, at: detached.at, endedAt: now, how: 'stopped' }]) } : one)))
+    const isAlike = (d: { id: string }) => alike.some(a => a.id === d.id)
+    await changeTodos($, cards => cards.map(one => (one.id === owner && one.detached?.some(isAlike) ? { ...one, detached: one.detached.filter(d => !isAlike(d)).length ? one.detached.filter(d => !isAlike(d)) : undefined, ...keepEnded(one, alike.map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'stopped' as const }))) } : one)))
   }
   const silent = job.wroteAt && !job.isEmpty ? now - job.wroteAt : now - job.at
   if (said === undefined) void tell($, owner, RUN_STOPPED(job.label, silent >= SILENT_WARN ? shortAgo(silent) : ''))
@@ -585,7 +617,9 @@ const noteKills = (one: Todo | undefined, command: string) => {
 const wakeForRun = async ($: EngineInterface, one: Todo | undefined, runs: NonNullable<Todo['detached']>) => {
   const first = runs[0]
   if (!one || !first || isHeld(one) || one.status === 'stopped' || one.status === 'failed' || (one.status === 'done' && (one.handedBackAt !== undefined || endedByHandback.has(one.id) || one.endedAt < first.at))) return
-  const text = runs.length === 1 ? RUN_ENDED(runWords(first.what, first.cmd), first.log) : RUNS_ENDED(runs.map(d => runWords(d.what, d.cmd)))
+  // (what one command left going is named once, however many programs it was)
+  const words = [...new Set(runs.map(d => runWords(d.what, d.cmd)))]
+  const text = words.length === 1 ? RUN_ENDED(words[0] ?? '', runs.length === 1 ? first.log : '') : RUNS_ENDED(words)
   if (one.status === 'working' && !one.waitsSince) {
     await tell($, one.id, text)
     return void (await log($, `work ${one.id} told ${runs.length} run(s) of it ended`))

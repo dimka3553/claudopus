@@ -28,6 +28,8 @@ export type Job = {
   isUntold?: boolean
   // The memory it and all it started hold, in words
   mem?: string
+  // the same in KB, where it is known
+  memKb?: number
   isNamed?: boolean
   expect?: number
   expectText?: string
@@ -786,8 +788,13 @@ export const isWaiterTree = (procs: Proc[], top: string) => waiterLeavesOf(procs
 
 // Jobs alike (the same kind, words and command, or the same wait) are one row that says how many they are, from the first one's
 // start; the newest one's output stands for them
+// Memory in KB added up, said as memOf says it
+const memAdded = (kb: number) => (kb ? { memKb: kb, mem: kb >= 1024 * 1024 ? `${(kb / 1024 / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(kb / 1024))} MB` } : {})
+// The command a run left going came from, by its id (`left-<process>-<command>`); '' for any other run
+export const leftCommandOf = (id: string) => id.match(/^left-\d+-(.+)$/)?.[1] ?? ''
 export const foldJobs = (jobs: Job[]): Job[] => {
-  const keyOf = (job: Job) => (job.kind === 'wait' ? `wait|${job.label}|${job.waitsFor ?? ''}|${job.waitFile ?? ''}` : `${job.kind}|${job.label}|${job.cmd}`)
+  // (what one command left going is one row, whatever programs it is: a browser and its helpers are one test, not 12 rows)
+  const keyOf = (job: Job) => (job.kind === 'wait' ? `wait|${job.label}|${job.waitsFor ?? ''}|${job.waitFile ?? ''}` : leftCommandOf(job.id) ? `left|${job.label}|${leftCommandOf(job.id)}` : `${job.kind}|${job.label}|${job.cmd}`)
   const groups = new Map<string, Job[]>()
   for (const job of jobs) groups.set(keyOf(job), [...(groups.get(keyOf(job)) ?? []), job])
   return [...groups.values()].map(group => {
@@ -798,6 +805,7 @@ export const foldJobs = (jobs: Job[]): Job[] => {
       ...newest,
       at: Math.min(...group.map(job => job.at)),
       count: group.length,
+      ...(leftCommandOf(newest.id) && group.some(job => job.memKb) ? memAdded(group.reduce((sum, job) => sum + (job.memKb ?? 0), 0)) : {}),
       isPaused: group.every(job => job.isPaused),
       ...(wrote.length ? { wroteAt: Math.max(...wrote) } : {}),
     }
@@ -947,11 +955,4 @@ export const memOf = (tree: Proc[]) => {
   const kb = tree.reduce((sum, p) => sum + (p.rss ?? 0), 0)
   if (!kb) return undefined
   return kb >= 1024 * 1024 ? `${(kb / 1024 / 1024).toFixed(1)} GB` : `${Math.max(1, Math.round(kb / 1024))} MB`
-}
-// A left run's name when one command left several: its program, its script and the words after it, as `Run python fig4.py page 3`
-export const leftName = (command: string) => {
-  const words = command.trim().split(/\s+/)
-  const at = words.findIndex(word => /\.(py|sh|js|mjs|ts|rb|pl|R|jl)$/.test(word))
-  const name = (at >= 0 ? [commandName(command), ...words.slice(at + 1, at + 7)] : [commandName(command)]).join(' ').trim()
-  return `Run ${name.replace(/^Python\b/, 'python')}`.slice(0, 120)
 }
