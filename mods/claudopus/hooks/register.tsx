@@ -4748,7 +4748,7 @@ const freeTimes = ($: EngineInterface) => {
   if (wasHeld) drawAgain($)
 }
 let isRedrawOwed = false
-const isBoxHeld = (at: number) => isTyping || (Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
+const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < TYPING
 const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
   if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
   isRedrawOwed = false
@@ -11196,7 +11196,7 @@ let isBarSettling = false
 const settleBar = ($: EngineInterface) => {
   if (isBarSettling) return void (isBarSettling = false)
   isBarSettling = true
-  drawAgain($, true)
+  void drawFresh($, true)
 }
 let barFlipAt = 0
 const BAND_TERM_MARK = 3

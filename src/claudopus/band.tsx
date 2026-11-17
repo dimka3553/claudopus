@@ -115,7 +115,8 @@ let isBarSettling = false
 const settleBar = ($: EngineInterface) => {
   if (isBarSettling) return void (isBarSettling = false)
   isBarSettling = true
-  drawAgain($, true)
+  // (the panes' own drawings are still good: they are given again as they were)
+  void drawFresh($, true)
 }
 // When this surface's bar last asked for the cards to be drawn again as its box came or went: at most once a second, so two
 // windows of one chat that differ never ask in turn without end

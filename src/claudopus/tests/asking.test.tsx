@@ -1766,17 +1766,21 @@ test("where the bar above the prompt takes a box, a card's answers end with Repl
   expect(await barDrawings()).toBe(drawnBefore)
   expect((await boxesIn(bar))[0]?.props.rows).toBe(4)
   expect((await boxesIn(bar))[0]?.key).toBe(growing?.key)
-  // and while the box keeps the cursor after the typing has stopped, past the half minute typing holds the panel
+  // Half a minute after the last letter the hold ends by itself, as the app may say nothing when the cursor leaves: what was put
+  // off is drawn then, once. A letter typed holds it again at once
   await clock.advance(31_000)
+  const drawnAfter = await barDrawings()
+  expect(drawnAfter).toBeGreaterThan(drawnBefore)
+  await bar.input({ key: growing?.key ?? '', text: `${typed} More.`, kind: 'change' } as never)
   for (const n of [1, 2, 3]) {
     await $.tool.call({ tool: 'mcp__claudopus__note', tool_use_id: `s${n}`, agentId: 'a1', text: `Later step ${n}` } as never)
     await clock.advance(5000)
   }
-  expect(await barDrawings()).toBe(drawnBefore)
+  expect(await barDrawings()).toBe(drawnAfter)
   // What newly waits on the person still shows at once: a key box asked for meanwhile is in the panel within a second or two
   void keep($.tool.call({ tool: 'Bash', tool_use_id: 'run-k', agentId: 'a1', command: 'hold /plug/claudopus/bin/secret GITHUB_TOKEN here deploy' } as never))
   const keyBox = '7c1e2d3c-4b5a-4987-a654-3210fedcba98'
-  files.set(`${MEMORY}/boxes/${keyBox}.json`, JSON.stringify({ id: keyBox, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: 1_700_000_000_000 }))
+  files.set(`${MEMORY}/boxes/${keyBox}.json`, JSON.stringify({ id: keyBox, kind: 'secret', name: 'GITHUB_TOKEN', chat: 'engine-id', at: clock.now() }))
   await clock.advance(2000)
   expect(await until(async () => list.find({ type: 'Text', text: GITHUB_BOX }))).toBeDefined()
   files.delete(`${MEMORY}/boxes/${keyBox}.json`)

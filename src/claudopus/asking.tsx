@@ -154,14 +154,16 @@ const freeTimes = ($: EngineInterface) => {
   if (wasHeld) drawAgain($)
 }
 // Every pane of the mod's is drawn again, from the values as they are now
-// Not while the person types into a box, nor while the bar's box holds the cursor (isBoxHeld): the app asks again for every
+// Not while the person types into the bar's box, or put the cursor in it, within TYPING (isBoxHeld): the app asks again for every
 // drawing of the mod's at each redraw, the bar above the prompt too, and builds each one anew, the box with the cursor in it too,
 // whose ring then fades in again; holding the drawing does not spare that (17 Nov: the box flashed blue several times a second
 // while tasks wrote their cards, each a redraw the app answered with a box built anew; its own renderer, headless, measured).
 // Asked for meanwhile, it is made once the hold ends (lookBar, each second). What must show at once goes through
 // (isThroughTyping): a box whose card stopped asking, and what newly waits on the person (urgentSign)
 let isRedrawOwed = false
-const isBoxHeld = (at: number) => isTyping || (Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < BAR_BOX_HELD)
+// Only the bar's box: a box in a pane is drawn again with its pane as before. The hold ends TYPING after the last letter or focus,
+// as the app may say nothing when the cursor leaves; a letter typed after that holds it again at once
+const isBoxHeld = (at: number) => Boolean(replyTo || boxOpen) && barBoxAt > 0 && at - barBoxAt < TYPING
 const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
   if (!isThroughTyping && isBoxHeld(await $.clock.now())) return void ((isRedrawOwed = true), recordEvent($, 'redraw-owed'))
   isRedrawOwed = false
