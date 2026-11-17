@@ -202,6 +202,8 @@ const BEHIND_HELD = 30_000
 // A hold this long is written in the log with the steps begun meanwhile, so a switch-off can be traced to the step that caused it
 const HOLD_SAID = 1500
 let holdAt = 0
+// The chat whose helper it is: on a Mac with many chats a long hold in the shared log names its own
+let heldChat = ''
 // Looks left while behind: each late one starts the count again
 let behindLooks = 0
 let longestHold = 0
@@ -225,7 +227,7 @@ const lookHold = ($: EngineInterface) => {
   longestHold = Math.max(longestHold, late)
   if (late < HOLD_SAID) return
   const steps = [...new Set(begun.filter(one => one.at >= now - late - HOLD_LOOK - 1000).map(one => one.name))]
-  void log($, `Claude's helper was held ${late} ms${steps.length ? `; steps begun then: ${steps.join(', ')}` : ''}`)
+  void log($, `Claude's helper was held ${late} ms${heldChat ? ` in chat ${heldChat}` : ''}${steps.length ? `; steps begun then: ${steps.join(', ')}` : ''}`)
 }
 // A step that goes through much at once hands the helper back every BREATH ms, so the engine's question is answered meanwhile
 const BREATH = 40
@@ -9063,6 +9065,12 @@ const chatHooks = (on: On) => {
     const begun = await next(e)
     const home = (await $.env.get('HOME')) ?? ''
     dir = `${home}/.claude/claudopus`
+    // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold). From the start of the load, so a
+    // long hold in the load's own reads is logged with them too
+    holdAt = 0
+    // (not in the test kit, whose clock a test moves by hours at once: there only a test that asks for it has it)
+    isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
+    if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     // The mod's own kinds of agent, each starting with only the tools its work takes
     void registerKinds($)
     termLive = /truecolor|24bit/i.test((await $.env.get('COLORTERM')) ?? '') ? LIVE : DEEP_LIVE
@@ -9094,6 +9102,7 @@ const chatHooks = (on: On) => {
 
     // The engine's id names this chat's files, as its transcript is named
     const id = await $.session.id()
+    heldChat = id
     const title = await appTitle($)
     // The first load of a session sends the role text; a reload keeps what stands
     await update($, me, m => ({ ...m, id, title: title ?? m.title, needsContext: m.id ? m.needsContext : true }))
@@ -9101,6 +9110,7 @@ const chatHooks = (on: On) => {
     await noteCut($, id).catch(err => log($, `cut-off work not looked for: ${String(err)}`))
     // The other chats, on this Mac and the others, are read before the panel is drawn: a chat that starts, or comes back, showed
     // its panel without them until the rest of its start was done, and they seemed to drop out of it for a while
+    during('load: read the other chats')
     await readOthers($).catch(() => undefined)
     keysOnStart($)
 
@@ -9216,9 +9226,12 @@ const chatHooks = (on: On) => {
     if (isNew) await $.fs.write(`${dir}/index.md`, INDEX_HEAD)
     await settleWelcome($, isNew, id).catch(err => log($, `welcome not settled: ${String(err)}`))
     await measure($).catch(() => undefined)
+    during('load: read finished work')
     await loadFinished($).catch(err => log($, `finished work not read: ${String(err)}`))
     void recoverEnded($).catch(err => log($, `ended work not read back: ${String(err)}`))
+    during('load: sync the memory')
     await sync($).catch(() => undefined)
+    during('load: read the results')
     await loadReports($).catch(() => undefined)
     // What the person had typed into a reply box before a reload of the mod is in its box again
     await readDrafts($).catch(() => undefined)
@@ -9249,11 +9262,6 @@ const chatHooks = (on: On) => {
       for (const one of [...(await read($, flows)), ...(await read($, todos)).filter(card => !card.parentId)])
         if (one.status !== 'working' && one.endedAt > last && one.endedAt <= now && now - one.endedAt < RELOAD_GRACE) lateFrom.set(`${one.id}:${one.endedAt}`, Infinity)
     }
-    // How late the mod's own timer comes: behind, it does less until it has caught up (lookHold)
-    holdAt = 0
-    // (not in the test kit, whose clock a test moves by hours at once: there only a test that asks for it has it)
-    isTimed = (await $.env.get('CLAUDOPUS_TIMING')) !== 'test'
-    if (isTimed) everyLoad($, HOLD_LOOK, () => lookHold($))
     let seconds = 0
     everyLoad($, 1000, async () => {
       if (drawnNow > (await read($, lastDrawn))) await update($, lastDrawn, () => drawnNow)
@@ -9312,6 +9320,7 @@ const chatHooks = (on: On) => {
     await readOthers($).catch(() => undefined)
     // The workflows kept, read back, and followed while they run
     await knowSession($)
+    during('load: read back workflows')
     await loadFlows($).catch(err => log($, `workflows not read back: ${String(err)}`))
     everyLoad($, FLOW_EVERY, () => followFlows($).catch(err => log($, `workflows not followed: ${String(err)}`)))
     // Every hour one chat looks at the version page, and only looks: an update is installed, and a chat reloaded to it, only by a press
@@ -10947,7 +10956,9 @@ const startReviver = async ($: EngineInterface, id: string) => {
   const config = await configDir($)
   const settings = `${config}/settings.json`
   if (/[\t\n]/.test(settings)) return
-  beatLine = `${enginePid}\t${await ownKey($, config)}\t${settings}\n`
+  // and, on a line of its own, the load that writes it: one that beats again after the watcher's change was never off, only slow
+  // (bin/revive; a watcher of an older version reads the first line as before)
+  beatLine = `${enginePid}\t${await ownKey($, config)}\t${settings}\n${thisLoad}\n`
   await beat($, id)
   everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined))
   // In a session of its own, so it outlives the chat's process; it leaves at once when one of this copy already runs
