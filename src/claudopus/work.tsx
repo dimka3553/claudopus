@@ -20,19 +20,25 @@ const isBoxesTouched = async ($: EngineInterface, e: { tool: string }): Promise<
   return false
 }
 // A piece of work reads a message only between its calls, so a command it holds open keeps the person's reply from it until the
-// command ends (16 Nov: a reply waited 8 minutes behind a 9-minute wait for the person). One that may run past this long, by the
-// time limit it asks for or the time its words give it, is refused with the same call to send in the background: the work is told
-// when it ends, and reads a reply at once meanwhile. Not turned to the background by the mod: auto mode reviews a call as the model
-// writes it, and refuses one a hook has changed since (16-17 Nov: 484 calls). Not the mod's own waits on helpers (which come back
-// when a reply waits), a password or a key
+// command ends (16 Nov: a reply waited 8 minutes behind a 9-minute wait for the person). One known to run past this long, by the
+// time its words give it, or a build, render, browser run or download that asks for a longer time limit, is refused with the same
+// call to send in the background: the work is told when it ends, and reads a reply at once meanwhile. A long time limit alone says
+// nothing (16-17 Nov: most were a push, a short test or a look), so any other runs as sent. Never turned to the background by the
+// mod: auto mode reviews a call as the model writes it, and refuses one a hook has changed since (16-17 Nov: 484 calls). Not the
+// mod's own runners: its waits on helpers (which come back when a reply waits), a release, a password or a key
 const HELD_LONGEST = 2 * 60_000
-const isLongHeld = (call: { tool: string; command?: unknown; description?: unknown; timeout?: unknown; run_in_background?: unknown }) =>
-  call.tool === 'Bash' &&
-  !call.run_in_background &&
-  !/\bbin\/(?:helpers|admin|secret)\b|(?:^|[\s;&|(])\.\/(?:helpers|admin|secret)\b/.test(String(call.command ?? '')) &&
-  // A launcher that leaves its runs going and comes back is followed by what it started while it ran, so it is left as it is
-  !/\b(?:nohup|setsid|disown)\b|(?<![&>|])&(?![&>])/.test(String(call.command ?? '')) &&
-  (Number(call.timeout ?? 0) > HELD_LONGEST || (/^\s*(?:wait|watch|poll)(?:ing)?\b/i.test(String(call.description ?? '')) && (describedOf(String(call.description ?? '')).expect ?? 0) >= HELD_LONGEST))
+const isLongHeld = (call: { tool: string; command?: unknown; description?: unknown; timeout?: unknown; run_in_background?: unknown }) => {
+  const command = String(call.command ?? '')
+  const description = String(call.description ?? '')
+  return (
+    call.tool === 'Bash' &&
+    !call.run_in_background &&
+    !/\bbin\/(?:helpers|admin|secret|release)\b|(?:^|[\s;&|(])\.\/(?:helpers|admin|secret|release)\b/.test(command) &&
+    // A launcher that leaves its runs going and comes back is followed by what it started while it ran, so it is left as it is
+    !/\b(?:nohup|setsid|disown)\b|(?<![&>|])&(?![&>])/.test(command) &&
+    ((describedOf(description).expect ?? 0) >= HELD_LONGEST || (Number(call.timeout ?? 0) > HELD_LONGEST && (Boolean(heavyOf(command)) || jobKindOf(command, description) === 'download')))
+  )
+}
 // A wait for the person themselves, by the words the work gives its command: there is no time to give them. Their answer to an ask
 // comes as a message the moment they give it and starts the work then, however long it takes, so the work ends its step instead
 const isPersonWait = (call: { tool: string; command?: unknown; description?: unknown }, name: string) => {
@@ -82,8 +88,6 @@ const SEND_BACKGROUND = (name: string) =>
   `Not run: this command may run for minutes, and held open it keeps ${name}'s replies from you until it ends. Send the same call again with \`run_in_background: true\` and nothing else changed: Claudopus tells you when it ends, and ${name}'s replies reach you while it runs. Never wait for ${name}'s own answer with a command: it comes to you as a message.`
 // The chat's own command, which runs only in the background
 const CHAT_SEND_BACKGROUND = 'Not run: the chat runs its own command only in the background. Send the same call again with `run_in_background: true` and nothing else changed.'
-// An agent named on an older model or on Haiku, told the alias to name instead
-const SEND_MODEL = (asked: string, better: string, alias: string) => `Not started: ${asked} is not used here. Send the same call again with \`model: "${alias}"\` (${better}) and nothing else changed.`
 
 // The files a command runs, as filesRun finds them, each read (the first megabyte): the mod's own runners (bin/admin, bin/secret,
 // bin/release, bin/keyring) are let through unread
@@ -379,17 +383,8 @@ const workHooks = (on: On) => {
         return { deny: named(STOPPED_REFUSED(titleOf(held))) }
       }
     }
-    // No agent, the chat's or a work's helper, is started on an older model or on Haiku: one named so is refused with its family's
-    // newest (Haiku's is Sonnet) to name, by its alias, which the Agent tool takes. One of the mod's kinds that starts on its kind's own
-    // model whatever is named (a quick task, a reader, a check) is left as written
-    const kindModel = ['quick', 'reader', 'check'].includes(KIND_OF(String((e as { subagent_type?: unknown }).subagent_type ?? '')) ?? '')
-    const askedModel = !isOff && e.tool === 'Agent' && (e as { subagent_type?: unknown }).subagent_type !== 'fork' && !kindModel ? String((e as { model?: unknown }).model ?? '') : ''
-    const better = askedModel ? rightModel(askedModel) : undefined
-    if (better) {
-      const alias = (modelName(better).split(' ')[0] ?? '').toLowerCase()
-      await log($, `refused an Agent call on ${modelName(askedModel)}: told to name ${modelName(better)}`)
-      return { deny: SEND_MODEL(modelName(askedModel), modelName(better), alias) }
-    }
+    // No agent, the chat's or a work's helper, starts on an older model or on Haiku: agent.spawn starts one named so on its family's
+    // newest, which leaves the Agent call as written (auto mode refuses a call a hook changed after it reviewed it, never a start)
     // A message of the person's that the chat's own thread passes on to work under way is a steer: that work is told so, and owes
     // a line saying what it decided. It is kept by the card in their words. Any other message to work under way, a helper's reply,
     // one between pieces of work or the chat's own note, is told as its sender's

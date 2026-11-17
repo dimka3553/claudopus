@@ -52,29 +52,27 @@ test('work starts as a fresh agent from written instructions, never as a copy of
   expect(prompts[0]).toContain(`${MEMORY}/words/engine-id.md`)
 })
 
-test('no agent is started on an older model or on Haiku, by the chat or by a piece of work: one named so is refused with its family\'s newest to name, its input never changed; the aliases and their newest versions pass as named', async ($, on) => {
-  const { files, agentModels } = world(on)
+test('no agent starts on an older model or on Haiku, by the chat or by a piece of work: its Agent call passes as written and its start runs on its family\'s newest; the aliases and their newest versions start as named', async ($, on) => {
+  const { agentModels, asked } = world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
+  // The call as the engine gets it, never changed (auto mode refuses a call a hook changed after it reviewed it), and the model its start asks for
   const call = async (model: string, agentId?: string) => {
-    const before = agentModels.length
     const r = await $.tool.call({ tool: 'Agent', tool_use_id: `m-${model}-${agentId ?? ''}`, prompt: 'fix the nose', subagent_type: 'general-purpose', model, ...(agentId ? { agentId } : {}) } as never)
-    const deny = (r as { deny?: string }).deny
-    return deny ? { deny: /`model: "(\w+)"`/.exec(deny)?.[1] ? `send ${/`model: "(\w+)"`/.exec(deny)?.[1]}` : deny, model: agentModels.length > before ? agentModels.at(-1) : 'not started' } : { deny, model: agentModels.at(-1) }
+    await $.agent.spawn({ ...spawn, prompt: 'fix the nose', model, ...(agentId ? { parentAgentId: agentId } : {}) } as never)
+    return { deny: (r as { deny?: string }).deny, call: agentModels.at(-1), start: asked.at(-1) }
   }
 
   // A newer version than the mod knows is no older model; nor is an id with a date, a window or a provider around it
-  for (const model of ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5.5', 'claude-opus-5-6', 'claude-opus-6', 'claude-fable-5-3', 'claude-sonnet-6', 'claude-opus-5-5-20261001', 'opus[1m]', 'us.anthropic.claude-opus-5-5-v1:0', 'inherit']) expect(await call(model)).toEqual({ deny: undefined, model })
-  // An older version, a full id or not, starts on its family's newest by its alias, and Haiku on Sonnet
-  for (const [model, alias] of [['haiku', 'sonnet'], ['claude-haiku-5-5', 'sonnet'], ['claude-opus-4-8', 'opus'], ['claude-opus-5', 'opus'], ['claude-sonnet-5', 'sonnet'], ['claude-fable-5-1', 'fable'], ['claude-3-5-sonnet-20241022', 'sonnet'], ['claude-sonnet-4-5-20250929', 'sonnet'], ['claude-opus-4-8[1m]', 'opus']]) expect(await call(model!)).toEqual({ deny: `send ${alias}`, model: 'not started' })
-  // A helper a piece of work starts is held to the same, and one that names no model keeps its work's
-  expect(await call('haiku', 'a1')).toEqual({ deny: 'send sonnet', model: 'not started' })
-  expect(await call('claude-opus-4-8', 'a1')).toEqual({ deny: 'send opus', model: 'not started' })
-  expect(await call('sonnet', 'a1')).toEqual({ deny: undefined, model: 'sonnet' })
+  for (const model of ['opus', 'sonnet', 'fable', 'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-fable-5-2', 'claude-opus-5.5', 'claude-opus-5-6', 'claude-opus-6', 'claude-fable-5-3', 'claude-sonnet-6', 'claude-opus-5-5-20261001', 'opus[1m]', 'us.anthropic.claude-opus-5-5-v1:0']) expect(await call(model)).toEqual({ deny: undefined, call: model, start: model })
+  // An older version, a full id or not, starts on its family's newest, and Haiku on Sonnet, its call left as written; so does a helper
+  for (const [model, family, agentId] of [['haiku', 'sonnet'], ['claude-haiku-5-5', 'sonnet'], ['claude-opus-4-8', 'opus'], ['claude-opus-5', 'opus'], ['claude-sonnet-5', 'sonnet'], ['claude-fable-5-1', 'fable'], ['claude-3-5-sonnet-20241022', 'sonnet'], ['claude-sonnet-4-5-20250929', 'sonnet'], ['claude-opus-4-8[1m]', 'opus'], ['haiku', 'sonnet', 'a1'], ['claude-opus-4-8', 'opus', 'a1']]) {
+    const r = await call(model!, agentId)
+    expect([model, r.deny, r.call]).toEqual([model, undefined, model])
+    expect([model, r.start?.includes(family!) && r.start !== model]).toEqual([model, true])
+  }
+  expect(await call('sonnet', 'a1')).toEqual({ deny: undefined, call: 'sonnet', start: 'sonnet' })
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'h0', prompt: 'look it up', subagent_type: 'general-purpose', agentId: 'a1' } as never)).deny).toBeUndefined()
-  // A kind that starts on its own kind's model whatever is named is left as written
-  for (const type of ['claudopus:quick', 'claudopus:reader', 'claudopus:check']) expect((await $.tool.call({ tool: 'Agent', tool_use_id: `k-${type}`, prompt: 'p', subagent_type: type, model: 'haiku' } as never)).deny).toBeUndefined()
-  expect(files.get(`${MEMORY}/log.md`)).toContain('refused an Agent call on Opus 4.8: told to name Opus 5.5')
 })
 
 test('every start is held to a current model: an older id, a parent on an older model, a checker weaker than its builder, a workflow agent and a copy', async ($, on) => {
@@ -171,20 +169,24 @@ test('what counts as current follows the newest model the engine offers, never a
   for await (const _ of $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-6', messageCount: 2, agentId: 'a1' })) void _
   await $.agent.spawn({ ...spawn, prompt: 'p', model: 'claude-opus-5-5', parentModel: 'claude-opus-6', parentAgentId: 'a1' } as never)
   expect(asked.at(-1)).toBe('claude-opus-6')
-  const n1 = (await $.tool.call({ tool: 'Agent', tool_use_id: 'n1', prompt: 'p', subagent_type: 'general-purpose', model: 'claude-opus-5-5', agentId: 'a1' } as never)) as { deny?: string }
-  expect(n1.deny).toContain('`model: "opus"` (Opus 6)')
-  expect(agentModels).toEqual([])
+  // and the Agent call naming it passes as written
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'n1', prompt: 'p', subagent_type: 'general-purpose', model: 'claude-opus-5-5', agentId: 'a1' } as never)).deny).toBeUndefined()
+  expect(agentModels).toEqual(['claude-opus-5-5'])
 })
 
 test('with Haiku named in the settings for a kind of work, an agent on Haiku is let through; an older model still is not', async ($, on) => {
-  const { files, agentModels } = world(on)
+  const { files, agentModels, asked } = world(on)
   files.set(`${MEMORY}/config.json`, JSON.stringify({ models: { legwork: 'haiku' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'index the photos', wait: false, origin: composer })
   expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'haiku' } as never)).deny).toBeUndefined()
   expect(agentModels.at(-1)).toBe('haiku')
-  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)).deny).toContain('`model: "opus"`')
-  expect(agentModels).toEqual(['haiku'])
+  await $.agent.spawn({ ...spawn, prompt: 'index', model: 'haiku' } as never)
+  expect(asked.at(-1)).toBe('haiku')
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c2', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-opus-4-8' } as never)).deny).toBeUndefined()
+  await $.agent.spawn({ ...spawn, prompt: 'index', model: 'claude-opus-4-8' } as never)
+  expect(asked.at(-1)).toContain('opus')
+  expect(asked.at(-1)).not.toBe('claude-opus-4-8')
 })
 
 test('with the handing-over switched off the mod refuses no model and moves no step', async ($, on) => {
@@ -526,7 +528,7 @@ test("a chat's own thread may only read, run a single command in the background,
     expect([text, kept.drop]).toEqual([text, undefined])
     expect(kept.text).toBe(text)
   }
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1b', command: 'git add -A && git commit -m x' } as never)).deny).toContain('only a single command')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1b', command: 'git add -A && git commit -m x' } as never)).deny).toContain('sent with `run_in_background: true`')
   expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1c', command: 'git log > /tmp/x' } as never)).deny).toContain('only a single command')
   // A command run inside it, even inside double quotes, is more than one command; a shell handed one is a task's
   for (const [i, command] of ['echo "$(git add -A)"', 'git log "`rm -rf x`"', 'git log <(ls)'].entries())
@@ -601,8 +603,8 @@ test("a chat's own thread may only read, run a single command in the background,
   ].entries())
     expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `t1o${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('Start a fresh agent')])
   // A refusal of one of these says the shape the chat can run it in
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape', command: 'curl -sL http://localhost:3000/go' } as never)).deny).toContain('A `curl` the chat runs itself starts with -q')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape2', command: 'open /repo/scripts/deploy' } as never)).deny).toContain('An `open` the chat runs itself shows a page of a local server')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape', command: 'curl -sL http://localhost:3000/go' } as never)).deny).toMatch(/A `curl` the chat runs itself starts with -q.*sent with `run_in_background: true`/)
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape2', command: 'open /repo/scripts/deploy' } as never)).deny).toMatch(/An `open` the chat runs itself shows a page of a local server.*sent with `run_in_background: true`/)
   // The browser pane's preview of a local page, its list, its server's log and its tabs the chat calls itself; a preview that starts a
   // server by name or shows another site, a stop, and the pane's clicks and scripts are a task's
   for (const [i, call] of [
@@ -635,6 +637,7 @@ test("a chat's own thread may only read, run a single command in the background,
   const refused = await $.tool.call({ tool: 'Bash', tool_use_id: 't1d', command: '/plug/claudopus/bin/release' } as never)
   expect(refused.deny).toContain('Start a fresh agent')
   expect(refused.deny).toContain('changes no file')
+  expect(refused.deny).toContain('a local curl status check, sent with `run_in_background: true`')
   expect(files.get(`${MEMORY}/log.md`)).toContain('refused Bash')
 
   // It reads for itself: any file, a search, a list of names
@@ -807,9 +810,11 @@ test('with Haiku named in the settings, an older Haiku asked for by its full id 
   files.set(`${MEMORY}/config.json`, JSON.stringify({ models: { legwork: 'haiku' } }))
   await $.session.start(start)
   await $.prompt.submit({ text: 'index', wait: false, origin: composer })
-  await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-3-5-haiku-20241022' } as never)
-  await go2($, { model: 'claude-haiku-4-5', parentAgentId: 'a0' })
-  expect(agentModels.at(-1)).not.toBe('claude-3-5-haiku-20241022')
+  // its Agent call passes as written, and its start goes to a current model
+  expect((await $.tool.call({ tool: 'Agent', tool_use_id: 'c1', prompt: 'index', subagent_type: 'general-purpose', model: 'claude-3-5-haiku-20241022' } as never)).deny).toBeUndefined()
+  expect(agentModels.at(-1)).toBe('claude-3-5-haiku-20241022')
+  await go2($, { model: 'claude-3-5-haiku-20241022', parentAgentId: 'a0' })
+  expect(asked.at(-1)).not.toBe('claude-3-5-haiku-20241022')
 })
 
 test('a checker the chat\'s own thread starts on Sonnet under an Opus chat runs on Opus', async ($, on) => {
