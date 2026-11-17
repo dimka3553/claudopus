@@ -224,7 +224,9 @@ const startReviver = async ($: EngineInterface, id: string) => {
   const config = await configDir($)
   const settings = `${config}/settings.json`
   if (/[\t\n]/.test(settings)) return
-  beatLine = `${enginePid}\t${await ownKey($, config)}\t${settings}\n`
+  // and, on a line of its own, the load that writes it: one that beats again after the watcher's change was never off, only slow
+  // (bin/revive; a watcher of an older version reads the first line as before)
+  beatLine = `${enginePid}\t${await ownKey($, config)}\t${settings}\n${thisLoad}\n`
   await beat($, id)
   everyLoad($, BEAT_EVERY, () => beat($, id).catch(() => undefined))
   // In a session of its own, so it outlives the chat's process; it leaves at once when one of this copy already runs

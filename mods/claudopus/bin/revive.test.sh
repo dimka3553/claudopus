@@ -15,7 +15,7 @@ fails=0
 ok() { printf 'ok   %s\n' "$1"; }
 no() { printf 'FAIL %s\n' "$1"; fails=$((fails + 1)); }
 within() { local n=0; while ! eval "$1"; do sleep 0.2; n=$((n + 1)); [ "$n" -ge $(($2 * 5)) ] && return 1; done; return 0; }
-export CLAUDOPUS_REVIVE_STEP=1 CLAUDOPUS_REVIVE_QUIET=2 CLAUDOPUS_REVIVE_WOKE_QUIET=2 CLAUDOPUS_REVIVE_GAP=2 CLAUDOPUS_REVIVE_TRIES=2 CLAUDOPUS_REVIVE_IDLE=60
+export CLAUDOPUS_REVIVE_STEP=1 CLAUDOPUS_REVIVE_QUIET=2 CLAUDOPUS_REVIVE_WOKE_QUIET=2 CLAUDOPUS_REVIVE_GAP=2 CLAUDOPUS_REVIVE_TRIES=2 CLAUDOPUS_REVIVE_IDLE=60 CLAUDOPUS_REVIVE_SLOW_QUIET=10000000000
 # A chat's process: runs until its file is removed
 cat > "$tmp/chat" <<'EOF'
 #!/bin/bash
@@ -54,6 +54,22 @@ n=$(tries s1); sleep 6
 touch "$mem/keep/s1.beat"
 within '[ ! -e "$mem/keep/s1.gaveup" ] && [ ! -e "$mem/keep/s1.revived" ]' 5 && ok "a chat that comes back has its tries afresh" || no "a chat that comes back has its tries afresh"
 
+# A chat whose own load beats again after a change was never off, only slow: it is left alone, so the other chats are not reloaded
+# again and again, until a newer load beats or it stays quiet SLOW_QUIET
+beatl() { printf '%s\t%s\t%s\n%s\n' "$1" "$2" "$3" "$5" > "$mem/keep/$4.beat"; }
+slowset=$tmp/slow.json
+printf '{ "enabledPlugins": { "claudopus@claudopus": true } }\n' > "$slowset"
+beatl "$chat" claudopus@claudopus "$slowset" s8 load-a; stale s8
+within '[ "$(revived "$slowset")" = 1 ]' 8 && ok "a quiet load is changed for once" || no "a quiet load is changed for once"
+c1=$(grep -c "chat s8: quiet" "$mem/keep/revive.log")
+touch "$mem/keep/s8.beat"
+within 'grep -q "chat s8: beats again from the same load" "$mem/keep/revive.log"' 5 && ok "the same load beating again is seen as slow, not off" || no "the same load beating again is seen as slow, not off"
+stale s8; sleep 6
+[ "$(grep -c "chat s8: quiet" "$mem/keep/revive.log")" = "$c1" ] && ok "a slow load quiet again changes nothing" || no "a slow load quiet again changes nothing"
+beatl "$chat" claudopus@claudopus "$slowset" s8 load-b; sleep 2; stale s8
+within '[ "$(grep -c "chat s8: quiet" "$mem/keep/revive.log")" -gt "$c1" ]' 8 && ok "a newer load quiet is changed again" || no "a newer load quiet is changed again"
+rm -f "$mem/keep/s8.beat"
+
 # A copy loaded from a folder has its own key, with no entry in enabledPlugins
 beat "$chat" claudopus@inline "$settings" s2
 stale s2
@@ -91,6 +107,13 @@ touch "$tmp/chat.run"; "$tmp/chat" & chat=$!
 printf '{ "enabledPlugins": { "claudopus@claudopus": false } }\n' > "$tmp/off.json"
 beat "$chat" claudopus@claudopus "$tmp/off.json" s7; stale s7
 within 'grep -q "chat s7: quiet .* turned off" "$mem/keep/revive.log"' 8 && [ "$(revived "$tmp/off.json")" = 0 ] && ok "Claudopus turned off is left off" || no "Claudopus turned off is left off"
+
+# A watcher whose own file an update rewrote since it started (one path for every version) gives way to one started from it now
+kill -0 "$watcher" 2>/dev/null || no "the first watcher still runs"
+touch -t 203001010000 "$revive"
+"$revive" "$mem" & fresh=$!
+within '! kill -0 $watcher 2>/dev/null' 5 && kill -0 "$fresh" 2>/dev/null && [ "$(head -n 1 "$mem/keep/revive.pid")" = "$fresh" ] && ok "a watcher of an older file at the same path gives way" || no "a watcher of an older file at the same path gives way"
+watcher=$fresh
 
 # A newer copy's watcher takes over from an older one's
 cp "$revive" "$tmp/revive-newer"

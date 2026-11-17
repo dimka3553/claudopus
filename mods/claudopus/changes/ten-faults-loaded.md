@@ -1,0 +1,3 @@
+- When one chat's Claude Code process is only slow (not switched off), the watcher that brings Claudopus back no longer reloads Claudopus in every other chat again and again: it sees that chat's own copy beat again and leaves it alone until it loads anew or stays silent for 15 minutes. On 16 Nov this reloaded three other chats eleven times in one night.
+- After an update, the watcher of the older version gives way to the new one, even where every version runs from the same folder.
+- The watcher's log is in UTC, as Claudopus's own log is, and a long hold of Claude's helper in the log now names its chat and the load's own reads, so the next switch-off can be traced to its step.
