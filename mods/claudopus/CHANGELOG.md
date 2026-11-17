@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.187 · 17 November 2026
+- Claude can now put a file from your Mac into a page's upload box in the Claude app's browser, such as a video on TikTok, Instagram, YouTube or X, without you picking it in a file window.
+
 ## 0.2.186 · 17 November 2026
 - The tree on a task's card no longer breaks under a helper that has a line of what it's doing: the line from the helper down to its own commands and helpers runs unbroken at every depth, in Details too, past a command's last lines
 

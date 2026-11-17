@@ -198,7 +198,7 @@ test('with the handing-over switched off the mod refuses no model and moves no s
   expect(stepped).toEqual(['claude-opus-4-8'])
 })
 
-test("the work's rules name where the admin runner is, the one way work uses a Mac's password", async ($, on) => {
+test("the work's rules name where the admin runner is, the one way work uses a Mac's password, and the file carrier for the browser pane", async ($, on) => {
   world(on)
   await $.session.start(start)
   await $.prompt.submit({ text: 'clear the disk', wait: false, origin: composer })
@@ -206,6 +206,8 @@ test("the work's rules name where the admin runner is, the one way work uses a M
   await $.agent.spawn({ ...spawn, model: 'opus', prompt: 'BRIEF' } as never)
   expect(prompts[0]).toMatch(/an admin command runs through `\/\S*mods\/claudopus\/bin\/admin`/)
   expect(prompts[0]).not.toContain('{admin}')
+  expect(prompts[0]).toMatch(/a file goes into a page through `\/\S*mods\/claudopus\/bin\/pane-file`/)
+  expect(prompts[0]).not.toContain('{pane-file}')
 })
 
 test('work uses a kept key without reading it: the keychain is not read, and what a tool answers comes back with the key hidden', async ($, on) => {
