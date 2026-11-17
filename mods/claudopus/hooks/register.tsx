@@ -815,7 +815,7 @@ async function writeOwnText($: EngineInterface, memory: string, path: string, te
   if (path === 'rules/CLAUDE.md') return $.fs.write(`${memory}/rules/CLAUDE.md`, text)
   if (path === 'roles/chat.md') return $.fs.write(`${memory}/roles/chat.md`, text)
   if (path === 'roles/work.md') return $.fs.write(`${memory}/roles/work.md`, text)
-  throw new Error(`${path} is not one of the texts Claudopus ships`)
+  throw new Error(`${path} isn't one of Claudopus's rules files`)
 }
 async function inForce($: EngineInterface, root: string, memory: string, path: string) {
   const own = memory ? await personText($, memory, path) : ''
@@ -839,7 +839,7 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
       return undefined
     }
   })()
-  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('config.json is not valid JSON')
+  if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error("Claudopus can't read config.json")
   if ((key === 'models' || key === 'lean') && role) {
     const models = { ...((config[key] as Record<string, unknown>) ?? {}) }
     if (value === undefined) delete models[role]
@@ -854,7 +854,7 @@ async function setConfig($: EngineInterface, memory: string, key: keyof Config, 
 
 async function openedInEditor($: EngineInterface, path: string) {
   const r = await openOn($, path, true)
-  return r.exitCode === 0 ? '' : r.stderr || 'no editor opened'
+  return r.exitCode === 0 ? '' : r.stderr || 'no editor opened it'
 }
 async function editText($: EngineInterface, root: string, memory: string, path: string) {
   const own = `${memory}/${path}`
@@ -866,7 +866,7 @@ async function putBack($: EngineInterface, memory: string, path: string) {
   const at = new Date(await $.clock.now()).toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-')
   await personWrote($, memory, path, null)
   const r = await $.process.run(['mv', '-n', own, `${own}.${at}.old`]).catch(err => ({ exitCode: 1, stderr: String(err) }))
-  return r.exitCode === 0 ? '' : r.stderr || 'could not be undone'
+  return r.exitCode === 0 ? '' : r.stderr || "Claudopus couldn't move your copy aside"
 }
 
 async function saveText($: EngineInterface, root: string, memory: string, path: string, text: string) {
@@ -951,7 +951,7 @@ const configShown = async ($: EngineInterface): Promise<ConfigShown> => ({
         JSON.parse(text || '{}')
         return ''
       } catch {
-        return `${dir}/config.json is not valid JSON, so Claudopus uses the default for every setting. Fix it or delete it.`
+        return `Claudopus can't read ${dir}/config.json, so every setting is at its default. Fix the file or delete it.`
       }
     })),
 })
@@ -959,10 +959,10 @@ const configAct = ($: EngineInterface, what: string, act: () => Promise<string |
   presses += 1
   void act()
     .then(failed => {
-      configFailed = failed ? `${what}: ${failed}` : ''
+      configFailed = failed ? `${what}: ${failed}${/[.!?]$/.test(failed) ? '' : '.'}` : ''
     })
     .catch(err => {
-      configFailed = `${what}: ${String(err instanceof Error ? err.message : err)}`
+      configFailed = `${what}: ${String(err instanceof Error ? err.message : err).replace(/([^.!?])$/, '$1.')}`
     })
     .then(async () => {
       if (configFailed) await log($, `config: ${configFailed}`)
@@ -971,24 +971,24 @@ const configAct = ($: EngineInterface, what: string, act: () => Promise<string |
     })
 }
 const configActs = ($: EngineInterface) => ({
-  open: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not opened`, () => editText($, $.plugin.root, dir, text.path)),
+  open: (text: (typeof TEXTS)[number]) => configAct($, `Couldn't open ${text.name}`, () => editText($, $.plugin.root, dir, text.path)),
   edit: (text: (typeof TEXTS)[number], body: string) => configAct($, '', async () => void Object.assign(editing, { key: text.key, draft: body })),
   save: (text: (typeof TEXTS)[number], body: string) =>
-    configAct($, `${text.name} not saved`, async () => {
+    configAct($, `Couldn't save ${text.name}`, async () => {
       const failed = body.trim() ? await saveText($, $.plugin.root, dir, text.path, body) : 'the text was empty, so nothing changed'
       Object.assign(editing, { key: '', draft: '' })
       return failed
     }),
   cancel: () => configAct($, '', async () => void Object.assign(editing, { key: '', draft: '' })),
-  putBack: (text: (typeof TEXTS)[number]) => configAct($, `${text.name} not reset`, () => putBack($, dir, text.path)),
+  putBack: (text: (typeof TEXTS)[number]) => configAct($, `Couldn't reset ${text.name}`, () => putBack($, dir, text.path)),
   set: (key: Parameters<typeof setConfig>[2], value: unknown, role?: Parameters<typeof setConfig>[4]) =>
-    configAct($, 'Not saved', async () => {
+    configAct($, "Couldn't save the setting", async () => {
       await setConfig($, dir, key, value, role)
     }),
-  gateMode: (mode: 'each' | 'work' | 'never') => configAct($, 'Not saved', () => regate($, { mode })),
-  gateRemove: (host: string, command: string) => configAct($, 'Not removed', () => regate($, { remove: { host, command } })),
+  gateMode: (mode: 'each' | 'work' | 'never') => configAct($, "Couldn't save the setting", () => regate($, { mode })),
+  gateRemove: (host: string, command: string) => configAct($, "Couldn't remove the command", () => regate($, { remove: { host, command } })),
   lookEvery: (hours: number) =>
-    configAct($, 'Not saved', async () => {
+    configAct($, "Couldn't save the setting", async () => {
       await setConfig($, dir, 'updates', hours ? undefined : false)
       await setConfig($, dir, 'updateEvery', hours && hours !== 1 ? hours : undefined)
     }),
@@ -1009,7 +1009,7 @@ const configActs = ($: EngineInterface) => ({
 
 
 
-const INDEX_HEAD = '# Streams\n\nname | repo | session | state | summary\n\n'
+const INDEX_HEAD = '# Topics\n\nname | repo | session | state | summary\n\n'
 
 const parseIndex = (text: string): Stream[] =>
   text
@@ -1572,11 +1572,11 @@ const stepOf = (use: ToolUseSummary): Line => {
   const given = (key: string) => (typeof input[key] === 'string' ? String(input[key]) : '')
   if (isTool(use.tool, 'note')) return { kind: 'said', text: given('text'), isUse: true }
   if (use.tool === 'SubagentHandback') return { kind: 'said', text: whole(given('message')), isUse: true }
-  if (use.tool === 'Agent') return { kind: 'step', text: `Started a helper: ${given('description') || 'no name'}`, isError: use.isError, isUse: true, tool: use.tool, name: given('description') }
+  if (use.tool === 'Agent') return { kind: 'step', text: `Started a helper: ${given('description') || 'unnamed'}`, isError: use.isError, isUse: true, tool: use.tool, name: given('description') }
   const file = given('file_path') || given('notebook_path')
   const text =
     isTool(use.tool, 'todo')
-      ? `${{ doing: 'Started on', done: 'Ticked', dropped: 'Dropped' }[given('state')] ?? 'To-do'}: ${given('item')}`
+      ? `${{ doing: 'Started', done: 'Done', dropped: 'Dropped' }[given('state')] ?? 'To-do'}: ${given('item')}`
       : given('description')
         ? oneLine(given('description'))
         : file
@@ -1631,7 +1631,7 @@ const folded = (steps: Line[]) => {
     some(count(['Grep', 'Glob']), 'made', 'search'),
     some(count(['Agent']), 'started', 'helper'),
     count([`${TOOLS}todo`, `${OLD_TOOLS}todo`]) ? 'updated its to-dos' : '',
-    some(steps.filter(line => !known.includes(line.tool ?? '')).length, 'took', 'other step'),
+    some(steps.filter(line => !known.includes(line.tool ?? '')).length, 'used', 'other tool'),
     steps.some(line => line.isError) ? `${steps.filter(line => line.isError).length} failed` : '',
   ]
     .filter(Boolean)
@@ -2122,7 +2122,7 @@ const closeWelcome = async ($: EngineInterface) => {
 }
 const indexAsk = (root: string) =>
   [
-    'Index my old chats (pressed in the Claudopus panel).',
+    'Bring in my old chats (pressed in the Claudopus panel).',
     `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it saves each past chat's messages under ${dir}/words and writes digests of them, one or more per project, into ${dir}/onboard.`,
     'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
     `Then for each digest file it wrote, have a helper follow ${root}/onboard/reader.md on it, writing its streams to ${dir}/onboard/streams/<the digest's file name>.`,
@@ -2138,9 +2138,9 @@ const welcomeCard = ($: EngineInterface, ui: Ui) => (
     <ui.Text wrap="wrap">Each message you send in a chat starts a background task, and its card shows here while it runs.</ui.Text>
     <ui.Text wrap="wrap">Closed this panel? Type /claudopus to bring it back.</ui.Text>
     <ui.Text bold wrap="wrap">Bring in your old chats</ui.Text>
-    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on {thisMac()} into its memory, so it knows what you were working on. It runs as a background task and takes a few minutes.</ui.Text>
+    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on {thisMac()} into Memory, so it knows what you work on. A task does it in a few minutes.</ui.Text>
     <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-      <ui.Button key={`welcome-index-${presses}`} label="Index my old chats" onPress={() => void indexOldChats($).catch(err => log($, `old chats not indexed: ${String(err)}`))} />
+      <ui.Button key={`welcome-index-${presses}`} label="Bring in old chats" onPress={() => void indexOldChats($).catch(err => log($, `old chats not indexed: ${String(err)}`))} />
       <ui.Button key={`welcome-later-${presses}`} label="Not now" plain dimColor onPress={() => void closeWelcome($).catch(err => log($, `welcome not put away: ${String(err)}`))} />
     </ui.Box>
   </ui.Box>
@@ -2396,11 +2396,11 @@ const reportsView = ($: EngineInterface, ui: Ui, all: Report[], now: number, lin
           <Text bold>Results</Text>
           <Text dimColor>{`${entries.length}`}</Text>
         </Box>
-        {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
+        {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new ${fresh === 1 ? 'result' : 'results'}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
       </Box>
-      {!shown.length && !gone.length ? <Text dimColor>Nothing yet.</Text> : null}
-      {waiting.length ? band(ui, 'reports-waiting', 'Waiting on you', `${waiting.length}`, rows(waiting)) : null}
-      {recent.length ? band(ui, 'reports-recent', waiting.length ? 'Recent' : 'Newest', '', rows(recent)) : null}
+      {!shown.length && !gone.length ? <Text dimColor>No results yet.</Text> : null}
+      {waiting.length ? band(ui, 'reports-waiting', 'Waiting for you', `${waiting.length}`, rows(waiting)) : null}
+      {recent.length ? band(ui, 'reports-recent', 'Newest', '', rows(recent)) : null}
       {earlier.length || gone.length ? (
         <Box key="reports-folded" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
           {earlier.length ? fold('earlier-fold', `Earlier ${earlier.length}`, isEarlierOpen, () => (isEarlierOpen = !isEarlierOpen)) : null}
@@ -2439,7 +2439,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
   const kin = [...rounds, ...others.slice(0, Math.max(0, 8 - rounds.length))]
   const pictures = r.files.map(file => ({ file, path: `${reportPath(r)}/${file}`, href: `file://${encodeURI(`${reportPath(r)}/${file}`)}` }))
   const how = (one: Report) =>
-    [one.id === r.from ? 'this started from it' : one.from === r.id ? 'started from this' : rounds.includes(one) ? (one.at < r.at ? 'earlier round' : 'later round') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
+    [one.id === r.from ? 'this result came from it' : one.from === r.id ? 'came from this result' : rounds.includes(one) ? (one.at < r.at ? 'earlier result' : 'later result') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ')
   const pane = paneOf(r)
   const gen = drawingMark(pane, [presses, height, r, mark(text), at, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)])
   const show = (to: number) => void ((presses += 1), pictureAt.set(pane, to), redraw($))
@@ -2457,7 +2457,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         ? band(
             ui,
             'report-ask',
-            isOpenQuestion(r) ? 'Waiting on you' : 'Answered',
+            isOpenQuestion(r) ? 'Waiting for you' : 'Answered',
             openWaits(r).length > 1 ? `${openWaits(r).length}` : '',
             <Box flexDirection="column" gap={2}>
               {waitsOf(r).map((wait, index) =>
@@ -2481,7 +2481,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
         ? band(
             ui,
             'report-finding',
-            'Finding',
+            'Summary',
             '',
             <Text wrap="wrap">{r.gist}</Text>,
           )
@@ -2500,7 +2500,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
                     {pictureSaidRow($, ui, `report-pic-said-${n}-${gen}`, one.path)}
                   </Box>
                 ))}
-                <Text dimColor wrap="wrap">{termFrom ? 'Press a picture to send it to the device you’re using' : 'Press a picture to open it'}</Text>
+                <Text dimColor wrap="wrap">{termFrom ? 'Press a picture to send it to the device you’re using.' : 'Press a picture to open it.'}</Text>
               </Box>
             ) : (
             <Box flexDirection="column" gap={1}>
@@ -2510,8 +2510,8 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
               {pictures.length > 1 ? (
                 <Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-                  <Button key={`report-prev-${gen}`} label="‹ Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
-                  <Button key={`report-next-${gen}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)} />
+                  <Button key={`report-prev-${gen}`} label="Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)} />
+                  <Button key={`report-next-${gen}`} label="Next" onPress={() => show((at + 1) % pictures.length)} />
                 </Box>
               ) : null}
             </Box>
@@ -2521,7 +2521,7 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
       {band(
         ui,
         'report-text',
-        'In full',
+        'Result',
         '',
         <Markdown
             key={`report-text-${r.id}`}
@@ -2535,11 +2535,11 @@ const reportShown = ($: EngineInterface, ui: Ui, r: Report, text: string, list: 
       {band(
         ui,
         'report-carry',
-        'Continue',
+        'Follow-up',
         '',
         <Box flexDirection="column" alignItems="flex-start" gap={1}>
-          <Text dimColor wrap="wrap">Claudopus puts a line naming this result in the chat's box, for you to finish and send.</Text>
-          <Button key={`report-carry-${gen}`} label="Continue from this" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
+          <Text dimColor wrap="wrap">Claudopus writes a line about this result where you type in the chat, for you to finish and send.</Text>
+          <Button key={`report-carry-${gen}`} label="Continue" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))} />
           {kin.length ? (
             <Box flexDirection="column" alignItems="flex-start">
               {kin.map(one => (
@@ -2685,7 +2685,7 @@ const memoryHooks = (on: On) => {
             }}
           />
         ) : (
-          <Text dimColor>This file is not there any more.</Text>
+          <Text dimColor>This file is no longer available.</Text>
         )}
       </Box>
     )
@@ -2770,7 +2770,7 @@ async function loadStats($: EngineInterface, scope: Scope, home: string, memory:
     const runs = (await Promise.all(ids.map(id => runsOf($, home, memory, id, id === chatId ? hint : '')))).flat()
     held.set(scope, { runs, at: now })
   } catch (err) {
-    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Stats reads Claude’s records with jq, and jq was not found on ${thisMac()}.` : `Claudopus couldn’t read the records: ${String(err)}` })
+    held.set(scope, { runs: was?.runs ?? [], at: now, error: String(err).includes('jq') ? `Claudopus couldn’t read Claude’s logs because jq isn’t installed on ${thisMac()}. Install jq, then open Stats again.` : `Claudopus couldn’t read Claude’s logs: ${String(err)}. Open Stats again to try once more.` })
   } finally {
     reading.delete(scope)
     drawAgain($)
@@ -2791,7 +2791,7 @@ async function loadMemorySizes($: EngineInterface, memory: string) {
     { name: 'Results', count: reports.filter(e => e.kind === 'dir').length, bytes: kb.get('reports') ?? 0 },
     { name: 'Finished tasks, by chat', count: (await names('finished')).length, bytes: kb.get('finished') ?? 0 },
     { name: 'Workflows', count: (await names('flows')).length, bytes: kb.get('flows') ?? 0 },
-    { name: 'Thumbnails and sums', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
+    { name: 'Picture previews and Stats', count: (await names('thumbs')).length + (await names('stats')).length, bytes: (kb.get('thumbs') ?? 0) + (kb.get('stats') ?? 0) },
   ]
   const bytes = [...kb.values()].reduce((sum, n) => sum + n, 0)
   memoryHeld.now = { parts, bytes }
@@ -2865,7 +2865,7 @@ const aboutView = async ($: EngineInterface, ui: Ui, surface?: string) => {
         {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving', $, { surface, requestId: ABOUT_PANE })}
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold>Claudopus</Text>
-          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} ready, type /reload-plugins` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
+          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `v${installed} is ready: type /reload-plugins to use it` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A plugin for Claude Code'}</Text>
         </Box>
       </Box>
       {band(
@@ -2875,7 +2875,7 @@ const aboutView = async ($: EngineInterface, ui: Ui, surface?: string) => {
         '',
         <Box flexDirection="column" gap={1}>
           <Text wrap="wrap">Each message you send in a chat starts a task that Claude does in the background, so the chat stays small and free for your next message.</Text>
-          <Text wrap="wrap">This panel shows each task as a card with its to-dos. When a task finishes, Claudopus saves what it found under Results.</Text>
+          <Text wrap="wrap">This panel shows each task as a card with its to-dos. When a task finishes, Claudopus saves its result under Results.</Text>
           <Text wrap="wrap">Claudopus saves your words, the topics you work on and every result as plain files under Memory. Stats adds up what your tasks cost and the time they saved.</Text>
         </Box>,
       )}
@@ -3170,7 +3170,7 @@ const TAILSCALES = ['tailscale', '/Applications/Tailscale.app/Contents/MacOS/Tai
 const shQuoted = (text: string) => `'${text.replaceAll("'", "'\\''")}'`
 const sendPicture = async ($: EngineInterface, path: string) => {
   const say = (text: string, copy?: string) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), drawAgain($))
-  if (!termFrom) return say(`It is at ${path} on ${thisMac()}`)
+  if (!termFrom) return say(`It’s at ${path} on ${thisMac()}.`)
   say('Sending it to your device…')
   for (const bin of TAILSCALES) {
     const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8_000 }).catch(() => undefined)
@@ -3178,14 +3178,14 @@ const sendPicture = async ($: EngineInterface, path: string) => {
     const [, name = '', ...state] = targets.stdout.split('\n').map(line => line.trim().split(/\s+/)).find(parts => parts[0] === termFrom) ?? []
     if (!name || state.join(' ').startsWith('offline')) break
     const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60_000 }).catch(err => ({ exitCode: 1, stderr: String(err) }))
-    if (sent.exitCode === 0) return say(`✓ Sent to ${name} by Tailscale, which keeps what it is sent in Downloads`)
+    if (sent.exitCode === 0) return say(`✓ Claudopus sent it to ${name} with Tailscale. It’s in Downloads there.`)
     await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`)
     break
   }
   const user = (await $.env.get('USER')) ?? ''
   const port = termPort && termPort !== '22' ? `-P ${termPort} ` : ''
   const command = `scp ${port}${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`
-  say('Run this on your own device (a Mac), and it opens there:', command)
+  say('Run this on your Mac to open it there:', command)
 }
 const pictureSaidRow = ($: EngineInterface, ui: Ui, key: string, path: string) => {
   const said = pictureSaid.get(path)
@@ -3316,7 +3316,7 @@ const largeOf = ($: EngineInterface, path: string, id: string): Large | undefine
 }
 const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui']['resolve']>[0], path = pictureShown) => {
   const ui = uiOf($, e)
-  if (!path) return <ui.Text dimColor>Pictures now open large in the Details tab they are pressed in. This tab can be closed.</ui.Text>
+  if (!path) return <ui.Text dimColor>Pictures now open in the Details tab where you press them. You can close this tab.</ui.Text>
   const name = fileName(path)
   const stat = await $.fs.stat(path).catch(() => undefined)
   const said = (text: string) => (
@@ -3334,10 +3334,10 @@ const pictureView = async ($: EngineInterface, e: Parameters<EngineInterface['ui
       </ui.Box>
     )
   }
-  if (!('Svg' in ui)) return said(`This screen cannot draw pictures. It is at ${path}`)
+  if (!('Svg' in ui)) return said(`This screen can’t show pictures. It’s at ${path}.`)
   const large = largeOf($, path, `${path}:${stat.mtimeMs}:${stat.size}`)
   if (large === undefined) return said('Making a large copy…')
-  if (!large) return said(`This picture could not be drawn here. Press its row again to try again. It is at ${path}`)
+  if (!large) return said(`Claudopus couldn’t show this picture. Press its row to try again. It’s at ${path}.`)
   return (
     <ui.Box flexDirection="column" gap={1} width="100%">
       <ui.Text bold wrap="wrap">{name}</ui.Text>
@@ -3995,7 +3995,7 @@ const readPage = async ($: EngineInterface): Promise<{ page?: Published; why: st
   const answer = await lookIo($).page()
   const page = answer.ok ? publishedOf(answer.text) : undefined
   if (page) pageRead = { page, at: await $.clock.now() }
-  return { page, why: page ? '' : answer.ok ? (versionOnPage(answer.text) ? FAILS.unchecked : 'claudopus.ai named no version') : answer.status ? `claudopus.ai answered ${answer.status}` : 'claudopus.ai did not answer' }
+  return { page, why: page ? '' : answer.ok ? (versionOnPage(answer.text) ? FAILS.unchecked : "claudopus.ai didn't name a version") : answer.status ? `claudopus.ai answered with error ${answer.status}` : "claudopus.ai didn't answer" }
 }
 const lookOnly = async ($: EngineInterface) => {
   const now = await $.clock.now()
@@ -4023,7 +4023,7 @@ const lookForNew = async ($: EngineInterface) => {
   }
 }
 const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: boolean; isOut?: boolean }> => {
-  if (!dir) return { text: "Couldn't check: Claudopus has no memory folder in this chat.", isError: true }
+  if (!dir) return { text: "Couldn't check: this chat has no Memory folder.", isError: true }
   const loaded = (await versionsOf($)).version
   for (let tries = 0; tries < 20; tries++) {
     if (!isUpdating) {
@@ -4034,7 +4034,7 @@ const checkNow = async ($: EngineInterface): Promise<{ text: string; isError: bo
           await log($, `Claudopus looked for a new version from Config: ${got.page?.version ?? got.why}`)
           if (!got.page) return { text: `Couldn't check: ${got.why}. Try again later.`, isError: true }
           await knowSource($, true)
-          if (!loaded || !isNewer(got.page.version, loaded)) return { text: `You're on the newest version (v${got.page.version}).`, isError: false }
+          if (!loaded || !isNewer(got.page.version, loaded)) return { text: `You have the newest version, v${got.page.version}.`, isError: false }
           if ((await readOr($, laterPath())).trim()) await $.fs.write(laterPath(), JSON.stringify({ version: got.page.version, until: 0 }))
           return { text: `v${got.page.version} is out.`, isError: false, isOut: true }
         }
@@ -4083,7 +4083,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
       return done({
         src: { kind: 'folder', repo, sub: 'mods/claudopus', runs: 'copy', record },
         cannot: ready.ok ? undefined : { what: `Claude Code's copy is made from ${ready.what}`, why: ready.why },
-        where: ready.ok ? "Claude Code's installed copy, made from Claudopus's released code on this Mac" : `Claude Code's installed copy, made from ${ready.what}`,
+        where: ready.ok ? "Claude Code's copy of the released code on this Mac" : `Claude Code's copy of ${ready.what}`,
       })
     }
     const location = typeof entry?.installLocation === 'string' ? entry.installLocation.replace(/\/+$/, '') : ''
@@ -4116,7 +4116,7 @@ const knowSource = async ($: EngineInterface, isAgain = false) => {
   return done({
     src: { kind: 'folder', repo: top || root, sub, runs: 'folder', ...(marketplace && scope ? { record: { plugins, marketplace, plugin: 'claudopus', scope } } : {}) },
     cannot: ready.ok ? undefined : { what: `This chat runs ${ready.what}`, why: ready.why },
-    where: ready.ok ? "Claudopus's released code on this Mac" : ready.what,
+    where: ready.ok ? 'the released code on this Mac' : ready.what,
   })
 }
 
@@ -4347,7 +4347,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     </ui.Text>
   )
   const v = n.version
-  if (isOne && (n.kind === 'installing' || (n.kind === 'downloaded' && (isStepping || isUpdatePress)))) return box('installing', [title(`Updating Claudopus ${v}…`), track(0)], [])
+  if (isOne && (n.kind === 'installing' || (n.kind === 'downloaded' && (isStepping || isUpdatePress)))) return box('installing', [title(`Updating Claudopus v${v}…`), track(0)], [])
   if (n.kind === 'available' || n.kind === 'cannot' || (isOne && n.kind === 'downloaded')) {
     const page = await pageFor($, v)
     const missed = page && page.version === v ? missedOn(page, loaded) : []
@@ -4355,7 +4355,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const more = missed.reduce((sum, one) => sum + 1 + one.more, 0) - 1
     const count = n.kind === 'available' ? n.count : missed.length || 1
     const what = newest?.line ? `${newest.line}${more > 0 ? ` · and ${more} more ${more === 1 ? 'change' : 'changes'}` : ''}` : ''
-    const head = title(`Claudopus ${v} is out`, count > 1 ? `· ${count} versions since v${loaded}` : '')
+    const head = title(`Claudopus v${v} is out`, count > 1 ? `· ${count} versions since v${loaded}` : '')
     if (n.kind === 'cannot') return box('cannot', [head, line('why', `${n.what}: ${n.why}.`)], quiet('cannot', v))
     return box(
       'available',
@@ -4374,18 +4374,18 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
     const live = downloadProgress?.version === v ? downloadProgress : undefined
     const pct = live?.pct ?? n.pct
     const got = live?.got ?? n.got
-    const said = live?.phase === 'checking' ? 'checking it against what the release published' : [pct !== undefined ? `${Math.round(pct)}%` : '', got ? sizeText(got) : '', live?.phase === 'resolving' ? 'unpacking' : ''].filter(Boolean).join(' · ')
-    return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus ${v}…`, said ? `· ${said}` : ''), track(0)], [])
+    const said = live?.phase === 'checking' ? 'checking the download' : [pct !== undefined ? `${Math.round(pct)}%` : '', got ? sizeText(got) : '', live?.phase === 'resolving' ? 'unpacking' : ''].filter(Boolean).join(' · ')
+    return box('downloading', [title(`${isOne ? 'Updating' : 'Downloading'} Claudopus v${v}…`, said ? `· ${said}` : ''), track(0)], [])
   }
   if (n.kind === 'downloaded') {
-    const replaces = `Claudopus checked it against the release. Install replaces v${loaded}, and new chats start on v${v}.`
+    const replaces = `Install puts v${v} on this Mac in place of v${loaded}. Then type /reload-plugins to use it.`
     return box(
       'downloaded',
-      [title(`Claudopus ${v} downloaded`), line('replaces', replaces), track(1)],
+      [title(`Claudopus v${v} downloaded`), line('replaces', replaces), track(1)],
       [<ui.Button key={`update-install-${presses}`} label="Install" onPress={() => installPress($, v, n.commit)} />, ...quiet('downloaded', v, false)],
     )
   }
-  if (n.kind === 'installing') return box('installing', [title(`Installing Claudopus ${v}…`), track(1)], [])
+  if (n.kind === 'installing') return box('installing', [title(`Installing Claudopus v${v}…`), track(1)], [])
   if (n.kind === 'reload') return null
   const detail = ''
   const which = isOne ? 'update' : n.step === 'download' ? 'download' : 'install'
@@ -4398,7 +4398,7 @@ const noticeCard = async ($: EngineInterface, ui: Ui, n: Notice | undefined, loa
         : `Nothing changed: this chat still runs v${loaded}.`
   return box(
     'failed',
-    [title(`Couldn't ${which} Claudopus ${v}`), line('why', `${why.replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
+    [title(`Couldn't ${which} Claudopus v${v}`), line('why', `${why.replace(/^./, c => c.toUpperCase())}${detail}. ${kept}`)],
     [<ui.Button key={`update-again-${presses}`} label="Try again" onPress={() => downloadPress($, v)} />, ...quiet('failed', v)],
   )
 }
@@ -4407,7 +4407,7 @@ const configUpdateBox = async ($: EngineInterface, ui: Ui) => {
   const versions = await versionsOf($)
   if (!versions.version) return null
   const n = await noticeNow($, versions.version, versions.installed).catch(() => undefined)
-  if (n?.kind === 'reload') return <ui.Text key="update-ready" wrap="wrap">{`Claudopus ${n.version} is ready: type /reload-plugins to switch this chat to it.`}</ui.Text>
+  if (n?.kind === 'reload') return <ui.Text key="update-ready" wrap="wrap">{`Claudopus v${n.version} is ready: type /reload-plugins to use it.`}</ui.Text>
   return noticeCard($, ui, n, versions.version).catch(() => null)
 }
 
@@ -4578,7 +4578,7 @@ const changelogView = async ($: EngineInterface, ui: Ui, surface?: string) => {
         </ui.Box>
       </ui.Box>
       {shown.length ? null : <ui.Text dimColor>This copy of Claudopus has no changelog.</ui.Text>}
-      {shown.map(v => versionBand(ui, `changelog-${v.version}`, v, [v.date, v.version === version ? 'this chat' : ''].filter(Boolean).join(' · ')))}
+      {shown.map(v => versionBand(ui, `changelog-${v.version}`, v, [v.date, v.version === version ? 'this chat runs it' : ''].filter(Boolean).join(' · ')))}
       {olderLine(ui, 'changelog-older', left)}
     </ui.Box>
   )
@@ -4621,13 +4621,13 @@ const updateScreen = async ($: EngineInterface, ui: Ui, loaded: string, _asks: n
     <ui.Box key="update-notice" flexDirection="column" borderStyle="round" borderColor={NOTICE_EDGE} paddingX={1} flexShrink={0}>
       <ui.Box key="update-title" flexDirection="row" gap={1} minWidth={0}>
         <ui.Box flexShrink={0}>
-          <ui.Text color={FLOW}>{`Updated to Claudopus ${loaded}`}</ui.Text>
+          <ui.Text color={FLOW}>{`Updated to Claudopus v${loaded}`}</ui.Text>
         </ui.Box>
         <ui.Text dimColor wrap="truncate-end">{`· from v${seen}${count > 1 ? `, ${count} versions` : ''}`}</ui.Text>
       </ui.Box>
       {shown[0]?.changes[0] ? <ui.Text key="update-what" dimColor wrap="wrap">{firstClause(shown[0].changes[0])}</ui.Text> : null}
       <ui.Box key="update-done-buttons" flexDirection="row" flexWrap="wrap" columnGap={2}>
-        <ui.Button key={`update-new-${presses}`} label="What's new" onPress={() => void ((presses += 1), closeScreen($, loaded).then(() => openChangelog($))).catch(err => log($, `changelog not opened: ${String(err)}`))} />
+        <ui.Button key={`update-new-${presses}`} label="See changes" onPress={() => void ((presses += 1), closeScreen($, loaded).then(() => openChangelog($))).catch(err => log($, `changelog not opened: ${String(err)}`))} />
         <ui.Button key={`update-close-${presses}`} label="Close" plain dimColor onPress={() => void closeScreen($, loaded).catch(err => log($, `update note not closed: ${String(err)}`))} />
       </ui.Box>
     </ui.Box>
@@ -13131,16 +13131,16 @@ const tabFailed = async ($: EngineInterface, e: Parameters<EngineInterface['ui']
   const now = await $.clock.now()
   const fails = [...(tabFails.get(id) ?? []).filter(at => now - at < 60_000), now]
   tabFails.set(id, fails)
-  const why = error?.kind === 'timeout' ? 'It took too long to draw.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.'
+  const why = error?.kind === 'timeout' ? 'It took too long.' : (error?.message ?? '').replace(/^\w*Error:\s*/, '') || 'No reason was given.'
   await log($, `tab ${id} not drawn (${error?.kind ?? 'unknown'}): ${why}`)
   const isAgain = fails.length < 3
   if (isAgain) await watchTabs($, [id], 'its drawing failed')
   const { Box, Text } = uiOf($, e)
   return (
     <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
-      <Text bold>Claudopus couldn't draw this tab</Text>
+      <Text bold>Claudopus couldn't show this tab</Text>
       <Text dimColor wrap="wrap">{cut(why, 300)}</Text>
-      <Text dimColor wrap="wrap">{isAgain ? 'Trying again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
+      <Text dimColor wrap="wrap">{isAgain ? 'Claudopus tries again in a few seconds.' : 'It failed three times in a minute. Open it again to try once more.'}</Text>
     </Box>
   )
 }

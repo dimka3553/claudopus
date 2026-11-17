@@ -709,7 +709,7 @@ test('a new person gets a welcome once: it opens the panel, names /claudopus, an
     const pane = await $.ui.mount({ ...LIST, surface } as never)
     expect((await pane.find({ type: 'Text', text: 'Welcome to Claudopus' }))?.props.bold).toBe(true)
     expect(await pane.find({ type: 'Text', text: /Type \/claudopus to bring it back/ })).toBeDefined()
-    expect((await pane.findAll({ type: 'Button' })).some(b => b.props.label === 'Index my old chats')).toBe(true)
+    expect((await pane.findAll({ type: 'Button' })).some(b => b.props.label === 'Bring in old chats')).toBe(true)
     await pane.unmount()
   }
   // A reload of the same session keeps it
@@ -717,7 +717,7 @@ test('a new person gets a welcome once: it opens the panel, names /claudopus, an
   const pane = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await pane.find({ type: 'Text', text: 'Welcome to Claudopus' })).toBeDefined()
   await pressed(pane, 'welcome-index')
-  const asked = await until(async () => submitted.find(text => text.startsWith('Index my old chats')))
+  const asked = await until(async () => submitted.find(text => text.startsWith('Bring in my old chats')))
   expect(asked).toContain('/onboard/extract.py" "/home/sam/.claude/claudopus/onboard"')
   expect(asked).toContain('/onboard/reader.md')
   expect(asked).toContain('`update` tool')

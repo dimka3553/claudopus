@@ -873,7 +873,7 @@ test('Always allow this command keeps the exact command for its Mac, sealed; Con
   expect(await config.find({ type: 'Text', text: 'Always allowed' })).toBeDefined()
   expect((await config.find({ type: 'Text', text: 'softwareupdate -l' }))?.props.mono).toBe(true)
   expect(await config.find({ type: 'Text', text: 'rm -rf /' })).toBeUndefined()
-  expect(await config.find({ type: 'Text', text: /2 more in the file were not added by your press and allow nothing/ })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: /2 more in the file weren't added here, so they allow nothing/ })).toBeDefined()
   const before = files.get('keychain:gate')
   const stale = JSON.stringify(kept)
   await pressed(config, 'config-admin-remove-0')
@@ -911,7 +911,7 @@ test('asked once per piece of work: one Allow covers that work and its helpers u
   await pressed(list, 'config-open')
   expect(await until(async () => tabs.find(tab => tab === 'config: Config'))).toBeDefined()
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-  expect(await config.find({ type: 'Text', text: 'Ask before an admin command' })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: 'Permission' })).toBeDefined()
   await config.select({ key: 'config-admin-mode-pick', value: 'work' })
   const sealedAs = await until(async () => (JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}') as { admin?: string; adminSealed?: string }).adminSealed)
   expect(JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}')).toEqual({ name: 'Sam', admin: 'work', adminSealed: fakeSeal(files.get('keychain:gate') ?? '', 'mode\nwork') })
@@ -953,7 +953,7 @@ for (const admin of ['never', 'work'])
     await press('gate-b1-0-deny')
     await call
     const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
-    expect(await config.find({ type: 'Text', text: new RegExp(`config\\.json says "${admin}", but it was not chosen here, so every command asks`) })).toBeDefined()
+    expect(await config.find({ type: 'Text', text: new RegExp(`Your settings file says "${admin}", but you didn't choose it here, so every command asks`) })).toBeDefined()
   })
 
 test('never asked, as Config sealed it: the call goes through as it was made, with no hold, no grant and nothing on the card', async ($, on) => {
@@ -990,7 +990,7 @@ test('F-008 F-009 · no admin password is kept: Config has no setting to keep on
   expect(await until(async () => (JSON.parse(files.get(`${MEMORY}/config.json`) ?? '{}').adminPassword === undefined ? true : undefined))).toBe(true)
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   expect(await config.find({ type: 'Text', text: 'Admin password' })).toBeUndefined()
-  expect(await config.find({ type: 'Text', text: /each one also asks for the admin password, which is never saved/ })).toBeDefined()
+  expect(await config.find({ type: 'Text', text: /Each one still asks for the admin password, which Claudopus never saves/ })).toBeDefined()
   // Another Mac's admin command is held on its card as this Mac's is: its password is asked when it runs
   const call = bash('b2', `${ADMIN} m4 'id -u'`)
   expect(await held('b2')).toBeDefined()

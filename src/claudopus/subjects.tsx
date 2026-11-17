@@ -2,7 +2,7 @@
 
 // ---- The index: one line per subject, "- name | repo | session | state | summary" ----
 
-const INDEX_HEAD = '# Streams\n\nname | repo | session | state | summary\n\n'
+const INDEX_HEAD = '# Topics\n\nname | repo | session | state | summary\n\n'
 
 const parseIndex = (text: string): Stream[] =>
   text
