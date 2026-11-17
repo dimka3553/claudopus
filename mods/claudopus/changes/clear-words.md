@@ -2,5 +2,5 @@
 - A quiet command never says only "nothing printed for 29m" any more: its line keeps the last thing it said ("Last: 2 of 6 stills · nothing new for 29m"), says "No output yet" when it has shown nothing, and adds "Claude was told to check it" once Claudopus has told Claude.
 - Each helper at work has a second line saying what it is doing now, in plain words ("Reading files", "Rendering the song stills · 4m", "Waiting for its commands"), in place of its token count.
 - A command's time says "of about 5m", in amber once it runs past that; ended commands say "Done in 1m 05s", "Failed after 2m 05s" or "Stopped after 1m", with no exit codes.
-- The panel's header says "2 tasks working" or "1 task waiting for you · 2 working", and how full the chat is as "This chat is 45% full"; cards say "45% full" in place of context and token figures.
+- The panel's header says "2 tasks working" or "1 question waiting for you · 2 working", and how full the chat is as "This chat is 45% full"; cards say "45% full" in place of context and token figures.
 - A task's card line says what Claude is doing now ("Reading files", "Rendering the song stills · 4m") instead of "Starting" until it writes a note; a helper quiet for minutes says what it did last and for how long.

@@ -1308,7 +1308,7 @@ test('scrolled down, a finish at the top is pointed at in green above the prompt
   // With an ask waiting, the amber line says both
   await $.tool.call({ tool: 'mcp__claudopus__ask', tool_use_id: 'k3', agentId: 'a3', text: 'May I delete the old repo?', choices: ['Approve', 'Not now'] } as never)
   await $.turn.complete({ answer: 'Done.', durationMs: 1, isAborted: false, turnId: 't9', reason: 'answer', agentId: 'a9' } as never)
-  expect((await until(async () => band.find({ type: 'Text', text: / · 1 done$/ })))?.text).toBe('↑ 1 waiting for you at the top of the panel · 1 done')
+  expect((await until(async () => band.find({ type: 'Text', text: / · 1 done$/ })))?.text).toBe('↑ 1 question waiting for you at the top of the panel · 1 done')
   await band.unmount()
   await down.unmount()
 })

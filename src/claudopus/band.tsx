@@ -21,7 +21,7 @@ const waitMarker = async ($: EngineInterface, ui: Ui, surface: string) =>
         onPress={() => ((presses += 1), void (recordEvent($, 'scroll-call', { to: 'start' }), $.ui.scroll({ in: LIST, to: 'start', block: 'start' })).catch(() => undefined))}
       >
         {waitsAtTop > 0 ? (
-          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} done` : ''}`}</ui.Text>
+          <ui.Text color={NEEDS} bold wrap="truncate-end">{`↑ ${waitsAtTop} ${waitsAtTop === 1 ? 'question' : 'questions'} waiting for you at the top of the panel${finishedAtTop.length ? ` · ${finishedAtTop.length} done` : ''}`}</ui.Text>
         ) : (
           <ui.Text color={DONE} bold wrap="truncate-end">{`↑ ${finishedAtTop.length === 1 ? `${finishedAtTop[0]} is done` : `${finishedAtTop.length} tasks are done`}, at the top of the panel`}</ui.Text>
         )}

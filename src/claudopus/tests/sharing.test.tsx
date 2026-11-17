@@ -25,7 +25,7 @@ test("the panel shows every open chat's running work under that chat's name, thi
   expect(bold).not.toContain('Old landing page')
   expect(await list.find({ type: 'Text', text: 'billing' })).toBeDefined()
   // The header counts every chat's: the ask first, then all that runs, here and there
-  expect(await list.find({ type: 'Text', text: '1 task waiting for you · 2 working' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 question waiting for you · 2 working' })).toBeDefined()
   // Another chat's work is stopped in its own chat: no Stop here, and its model is no control
   const buttons = (await list.findAll({ type: 'Button' })).map(one => one.key ?? '')
   expect(buttons.filter(key => key.startsWith('stop-'))).toEqual(['stop-a1'])
@@ -114,10 +114,10 @@ test("the header says in one line what every chat's cards say, and the octopus b
   expect(head(0, 3, 2)).toEqual(['3 tasks working in 2 other chats', 'working'])
   expect(head(1, 1, 1)).toEqual(['2 tasks working, here and in 1 other chat', 'working'])
   expect(head(2, 3, 2)).toEqual(['5 tasks working, here and in 2 other chats', 'working'])
-  expect(head(0, 0, 0, 1)).toEqual(['1 task waiting for you', 'asking'])
-  expect(head(1, 2, 1, 2)).toEqual(['2 tasks waiting for you · 3 working', 'asking'])
+  expect(head(0, 0, 0, 1)).toEqual(['1 question waiting for you', 'asking'])
+  expect(head(1, 2, 1, 2)).toEqual(['2 questions waiting for you · 3 working', 'asking'])
   // A finish shows on the octopus for its moment whatever else goes on, the line still saying what needs the person or runs
-  expect(head(0, 0, 0, 1, true)).toEqual(['1 task waiting for you', 'happy'])
+  expect(head(0, 0, 0, 1, true)).toEqual(['1 question waiting for you', 'happy'])
   expect(head(0, 1, 1, 0, true)).toEqual(['1 task working in another chat', 'happy'])
   expect(head(0, 0, 0, 0, true)).toEqual(['Just finished', 'happy'])
 })
@@ -138,7 +138,7 @@ test("with work only in another chat the header and octopus are at work, amber w
   // It asks: the line turns amber and says so, and the octopus waves amber
   files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 5000 }))
   await clock.advance(5000)
-  const asks = await until(async () => list.find({ type: 'Text', text: '1 task waiting for you · 1 working' }))
+  const asks = await until(async () => list.find({ type: 'Text', text: '1 question waiting for you · 1 working' }))
   expect(asks?.props.color).toBe('#E5A50A')
   expect(await drawn(list)).toEqual(['wave'])
   // Both finish: happy, "Just finished", for the pause; then at rest, "Nothing is running"
@@ -164,7 +164,7 @@ test("open chats with nothing going on are listed nowhere, on any Mac and howeve
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'billing · on m4' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: '1 task waiting for you · 1 working' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 question waiting for you · 1 working' })).toBeDefined()
   // No idle chat by name, no row or count of them, and this chat, with nothing going on, gets no heading
   const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(texts.filter(one => /^Quiet \d+$|^M4 idle$|^[▸▾]? ?\d+ other chats?$/.test(one))).toEqual([])

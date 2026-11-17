@@ -50,7 +50,7 @@ const callWords = (tool: string, input?: { description?: unknown; command?: unkn
   if (tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit' || tool === 'NotebookEdit') return 'Changing files'
   if (tool === 'WebFetch') return 'Reading a web page'
   if (tool === 'WebSearch') return 'Searching the web'
-  if (tool === 'Agent' || tool === 'Task') return said ? `Starting a helper: ${said}` : 'Starting a helper'
+  if (tool === 'Agent' || tool === 'Task') return said ? `Starting the helper “${said}”` : 'Starting a helper'
   if (tool === 'SendMessage') return 'Sending a message'
   if (tool === 'TaskStop' || tool === 'KillShell') return 'Stopping a command'
   if (tool === 'TaskOutput' || tool === 'BashOutput') return "Reading a command's output"
@@ -63,19 +63,25 @@ const callWords = (tool: string, input?: { description?: unknown; command?: unkn
 }
 // What a helper is doing now: its own latest note where that is newer than its latest action; else the action, with how long it
 // has run once that is a minute; between actions, thinking
-const helperNow = (one: Todo, at: number, commands = 0) => {
+const helperNow = (one: Todo, at: number, commands = 0, most = 200) => {
   const call = lastCall.get(one.id)
   const note = [...one.entries].reverse().find(entry => entry.kind !== 'steer' && entry.text)
-  // (a note that has stood for minutes with nothing since, and no command of its own running, is the last thing it said)
-  if (note && (!call || (note.at ?? 0) >= call.at)) return !commands && at - (note.at ?? at) >= 3 * 60_000 ? `Last: ${note.text} · nothing new for ${took(at - (note.at ?? at))}` : note.text
+  // The last thing it said, cut so how long it has been quiet always stays in sight
+  const last = (words: string, tail: string) => `Last: ${cut(words, Math.max(8, most - tail.length - 9))} · ${tail}`
+  const waits = (idle: number) => `${commands === 1 ? 'Waiting for its command' : 'Waiting for its commands'} · ${took(idle)}`
+  // (a note that has stood for minutes with nothing since is the last thing it said, or it waits for its commands)
+  if (note && (!call || (note.at ?? 0) >= call.at)) {
+    const quiet = at - (note.at ?? at)
+    return quiet < 3 * 60_000 ? cut(note.text, most) : commands ? waits(quiet) : last(note.text, `nothing new for ${took(quiet)}`)
+  }
   if (!call) return ''
-  if (!call.endedAt) return at - call.at >= 60_000 ? `${call.what} · ${took(at - call.at)}` : call.what
+  if (!call.endedAt) return at - call.at >= 60_000 ? `${cut(call.what, Math.max(8, most - 12))} · ${took(at - call.at)}` : cut(call.what, most)
   // Between actions it is thinking; long after its last one, with commands of its own running in the background, it waits for
-  // them, as their rows under it show; long after with none, only that nothing new has come
+  // them, as their rows under it show; long after with none, what it did last and how long nothing new has come
   const idle = at - call.endedAt
   if (idle < 60_000) return 'Thinking'
-  if (commands) return `${commands === 1 ? 'Waiting for its command' : 'Waiting for its commands'} · ${took(idle)}`
-  return idle < 3 * 60_000 ? `Thinking · ${took(idle)}` : `Last: ${call.what} · nothing new for ${took(idle)}`
+  if (commands) return waits(idle)
+  return idle < 3 * 60_000 ? `Thinking · ${took(idle)}` : last(call.what, `nothing new for ${took(idle)}`)
 }
 
 // What a running call is, in a few words, for its row

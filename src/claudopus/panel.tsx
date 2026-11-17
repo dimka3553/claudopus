@@ -268,6 +268,8 @@ const panelHooks = (on: On) => {
       const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${said[r.how] ?? 'ended'}`)
       return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} · ${second}` : `${first} · ${second} · ${runs.length - 2} more ended`
     }
+    // Whether the card's line is commands that ended since its last word, which stays above what it does now
+    const endedNow = (one: Todo) => now(one) !== ([...one.entries].reverse().find(one => one.kind !== 'steer')?.text ?? '')
 
     const table = uiOf($, e)
     // How much text two rows of a small card hold: the pane's cells less the card's bar, padding and dots. The app's letters are
@@ -557,7 +559,7 @@ const panelHooks = (on: On) => {
                   </Text>
                 ) : (
                   <Box flexDirection="column" minWidth={0}>
-                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || cut(now(one), room) || (one.status === 'working' ? helperNow(one, at, jobsOf(one, at).length) || 'Starting' : "Claude hasn't said what it's doing")}</Text>
+                    <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || (one.status === 'working' && !one.ask && !endedNow(one) ? helperNow(one, at, jobsOf(one, at).length, room) : '') || cut(now(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : 'Starting') : "Claude hasn't said what it's doing")}</Text>
                     {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
                     {!one.ask && !sentLine(one, at) && heldAnswer(one, at) ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
                   </Box>
@@ -665,7 +667,7 @@ const panelHooks = (on: On) => {
       const row = twigRowOf(t, `${scope}-${one.id}`, cut(titleOf(one), Math.max(12, width - side.length)), one.status !== 'working', side, () => openWork($, one.id), one.status)
       // Under a helper at work, what it is doing now in plain words, as a command's second line says how it goes (17 Nov: a
       // helper's row said only its model, tokens and time, nothing of what it did)
-      const doing = one.status === 'working' && !one.chat ? helperNow(one, at, jobsOf(one, at).length) : ''
+      const doing = one.status === 'working' && !one.chat ? helperNow(one, at, jobsOf(one, at).length, Math.max(12, width)) : ''
       if (!doing) return row
       return (
         <Box key={`twig-pair-${scope}-${one.id}`} flexDirection="column" flexShrink={0}>
@@ -673,7 +675,7 @@ const panelHooks = (on: On) => {
           <Box key={`twig-now-${scope}-${one.id}`} flexDirection="row" gap={1} height={1} overflow="hidden" flexShrink={0}>
             {jobRails(t, `twig-rails-${scope}-${one.id}`)}
             <Box flexGrow={1} flexShrink={1} minWidth={0} paddingLeft={lead}>
-              <Text dimColor wrap="truncate-end">{cut(doing, Math.max(12, width))}</Text>
+              <Text dimColor wrap="truncate-end">{doing}</Text>
             </Box>
           </Box>
         </Box>
@@ -767,12 +769,12 @@ const panelHooks = (on: On) => {
       const told = isSilent && silentTold.has(job.id) ? 'Claude was told to check it' : ''
       const [state, short]: [string, string] =
         job.isPaused ? ['Paused', 'Paused']
-        : job.target ? [job.target, job.target.replace(/^What it waits for hasn't changed for /, 'No change for ')]
+        : job.target ? [job.target, job.target.replace(/^What it waits for hasn't changed for /, 'No change for ').replace(/^What it waits for /, 'Its target ')]
         : job.kind === 'server' || job.kind === 'watch' ? ['', '']
         : !isSilent ? ['', '']
         : hasSaid ? [`nothing new for ${ago(still)}`, `nothing new for ${shortAgo(still)}`]
-        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago`, `No output for ${shortAgo(ran)}`]
-        : [`No progress shown · nothing new for ${ago(still)}`, `Nothing new for ${shortAgo(still)}`]
+        : !job.wroteAt || job.isEmpty ? [`No output yet · started ${shortAgo(ran)} ago`, `No output yet · ${shortAgo(ran)}`]
+        : [`No progress shown · nothing new for ${ago(still)}`, `No progress for ${shortAgo(still)}`]
       const isWarn = job.isPaused || Boolean(job.target) || isSilent
       // A server or a watch leads with what it does, then the last thing it said
       const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving · ') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching · ') : isSilent && hasSaid ? 'Last: ' : ''
@@ -794,7 +796,12 @@ const panelHooks = (on: On) => {
         const said = words && room >= 12 ? (words.length <= room ? words : `${words.slice(0, room - 1).replace(/\s+\S*$/, '')}…`) : ''
         const text = [...nums, said, ...tail].filter(Boolean).join(' · ')
         // A run that gives word but says nothing plain of how far it is or what it does: that it is at work, and its kind's word
-        return { text: text ? `${lead && (nums.length || said) ? lead : ''}${text}` : lead === 'Serving · ' || lead === 'Watching · ' ? lead.slice(0, -3) : job.kind === 'wait' ? 'Waiting' : job.kind === 'download' ? 'Downloading' : 'Working', isWarn }
+        // (a server's or watch's "last:" only before its own words; "Last:" before how far it got or its words, else the tail alone
+        // with a capital)
+        const kindLead = job.kind === 'server' ? 'Serving' : job.kind === 'watch' ? 'Watching' : ''
+        const shownLead = kindLead ? `${kindLead} · ${said ? 'last: ' : ''}` : lead && (nums.length || said) ? lead : ''
+        const line = `${shownLead}${text}`
+        return { text: text ? line.charAt(0).toUpperCase() + line.slice(1) : kindLead || (job.kind === 'wait' ? 'Waiting' : job.kind === 'download' ? 'Downloading' : 'Working'), isWarn }
       }
       return { text: short, isWarn }
     }

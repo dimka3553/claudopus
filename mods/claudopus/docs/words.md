@@ -37,7 +37,7 @@ A running command or helper is two lines:
 1. **What it does**, in Claude's words, with its time: `Render the song stills · 4m 10s of about 5m`
 2. **Now**: how far · how fast · time left · what it is doing now: `2 of 6 · 33% · 2m left · rendering still 3`
 
-- After three minutes with nothing new, line 2 keeps the last thing it said and adds how long: `Last: 2 of 6 stills rendered · nothing new for 29m`. With nothing ever said: `No output yet · started 29m ago`. Never "nothing new" alone.
+- After three minutes with nothing new, line 2 keeps the last thing it said and adds how long: `Last: 2 of 6 stills rendered · nothing new for 29m`. With nothing ever said: `No output yet · started 29m ago`. Never "nothing new" alone. A narrow row keeps the time: `No output yet · 29m`, `No progress for 29m`.
 - Once Claudopus has told Claude about the quiet, the line says so: `· Claude was told to check it`.
 - A server: `Serving`. A watch: `Watching · last: series arrived`.
 - A helper's line 2 is what it is doing now, in plain words: `Reading files`, `Rendering the song stills · 4m`, `Searching the web`, `Waiting for its commands`, or its own last note. Quiet for three minutes, it is `Last: Reading files · nothing new for 29m`. A task's own card line says the same of the task.

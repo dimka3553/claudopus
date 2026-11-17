@@ -348,7 +348,7 @@ export type Head = { here: number; there: number; chats: number; asks: number; i
 const tasks = (n: number) => (n === 1 ? '1 task' : `${n} tasks`)
 export const headLine = ({ here, there, chats, asks, isDone }: Head) => {
   const running = here + there
-  if (asks) return `${asks} ${asks === 1 ? 'task' : 'tasks'} waiting for you${running ? ` · ${running} working` : ''}`
+  if (asks) return `${asks} ${asks === 1 ? 'question' : 'questions'} waiting for you${running ? ` · ${running} working` : ''}`
   const others = chats === 1 ? '1 other chat' : `${chats} other chats`
   if (here && there) return `${tasks(running)} working, here and in ${others}`
   if (there) return `${tasks(there)} working in ${chats === 1 ? 'another chat' : others}`
