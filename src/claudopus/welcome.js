@@ -29,7 +29,7 @@ const closeWelcome = async ($) => {
 };
 // What the chat is sent when the person presses Index my old chats: the two onboarding steps the mod ships, then the subjects recorded
 const indexAsk = (root) => [
-    'Bring in my old chats (pressed in the Claudopus panel).',
+    'Index my old chats (pressed in the Claudopus panel).',
     `Run python3 "${root}/onboard/extract.py" "${dir}/onboard": it saves each past chat's messages under ${dir}/words and writes digests of them, one or more per project, into ${dir}/onboard.`,
     'If python3 is missing (macOS asks to install the Command Line Tools), say so with the command xcode-select --install and stop.',
     `Then for each digest file it wrote, have a helper follow ${root}/onboard/reader.md on it, writing its streams to ${dir}/onboard/streams/<the digest's file name>.`,
@@ -44,9 +44,9 @@ const welcomeCard = ($, ui) => (<ui.Box key="welcome" flexDirection="column" gap
     <ui.Text wrap="wrap">Each message you send in a chat starts a background task, and its card shows here while it runs.</ui.Text>
     <ui.Text wrap="wrap">Closed this panel? Type /claudopus to bring it back.</ui.Text>
     <ui.Text bold wrap="wrap">Bring in your old chats</ui.Text>
-    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on {thisMac()} into Memory, so it knows what you work on. A task does it in a few minutes.</ui.Text>
+    <ui.Text wrap="wrap">Claudopus can read your past Claude Code chats on {thisMac()} into its memory, so it knows what you were working on. It runs as a background task and takes a few minutes.</ui.Text>
     <ui.Box flexDirection="row" flexWrap="wrap" gap={1}>
-      <ui.Button key={`welcome-index-${presses}`} label="Bring in old chats" onPress={() => void indexOldChats($).catch(err => log($, `old chats not indexed: ${String(err)}`))}/>
+      <ui.Button key={`welcome-index-${presses}`} label="Index my old chats" onPress={() => void indexOldChats($).catch(err => log($, `old chats not indexed: ${String(err)}`))}/>
       <ui.Button key={`welcome-later-${presses}`} label="Not now" plain dimColor onPress={() => void closeWelcome($).catch(err => log($, `welcome not put away: ${String(err)}`))}/>
     </ui.Box>
   </ui.Box>);

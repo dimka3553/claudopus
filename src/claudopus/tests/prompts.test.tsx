@@ -425,18 +425,28 @@ test("a command Claude Code refuses a task is shown whole on its card with where
   // Running: one quiet line with how long it has run, and Stop it; the command is not shown again
   files.set(String(out), 'ns1.example.net.\n')
   await clock.advance(5000)
-  expect(await until(async () => (await list.findAll({ type: 'Text' })).find(t => /^Running your command · \d+s$/.test(t.text)))).toBeDefined()
+  const runTime = async () => (await list.findAll({ type: 'Text' })).find(t => /^ · \d+[hms]/.test(t.text))?.text
+  expect(await until(async () => list.find({ type: 'Text', text: 'Running your command' }))).toBeDefined()
+  expect(await runTime()).toBeDefined()
+  // and nothing else about it: not the command, nor the answer said again on the card's line
   expect(await list.find({ type: 'Text', text: command })).toBeUndefined()
+  expect((await list.findAll({ type: 'Text' })).filter(t => /Run it”|Claudopus is running it/.test(t.text)).map(t => t.text)).toEqual([])
   expect(await buttons()).toEqual(['Stop it'])
   // While it prints, each look at it every 5 s draws nothing: the whole panel is drawn again only as calmly as for any running
   // work, every ten seconds at most
   redraws.count = 0
   for (let i = 0; i < 12; i++) (files.set(String(out), `ns1.example.net.\nline ${i}\n`), await clock.advance(5000))
-  expect(redraws.count).toBeLessThanOrEqual(7)
+  expect(redraws.count).toBeLessThanOrEqual(8)
   // The task ends meanwhile. The command's end starts it again with what it printed and where the whole is, from no timer: its card
   // says the output waits, and the person's press sends it
   agents.a1 = 'completed'
   await $.turn.complete({ answer: 'Waiting on the name servers.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', agentId: 'a1' } as never)
+  // Its running time still moves, calmly, with the task ended
+  await clock.advance(15_000)
+  const ranThen = await runTime()
+  expect(ranThen).toBeDefined()
+  await clock.advance(15_000)
+  expect(await until(async () => ((await runTime()) !== ranThen ? true : undefined))).toBe(true)
   files.set(String(out), 'ns1.example.net.\nns2.example.net.\nclaudopus-exit 0\n')
   await clock.advance(5000)
   await clock.advance(30_000)

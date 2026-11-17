@@ -52,12 +52,12 @@ const aboutView = async ($, ui, surface) => {
         {octopus(ui, `about-mark-${aboutOpens}`, 'wave', HEAD_MARK, 'Claudopus waving', $, { surface, requestId: ABOUT_PANE })}
         <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text bold>Claudopus</Text>
-          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `v${installed} is ready: type /reload-plugins to use it` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A plugin for Claude Code'}</Text>
+          <Text dimColor wrap="wrap">{[version ? `Version ${version}` : '', isWaiting ? `${installed} ready, type /reload-plugins` : '', app ? `Claude Code ${app}` : ''].filter(Boolean).join(' · ') || 'A mod for Claude Code'}</Text>
         </Box>
       </Box>
       {band(ui, 'about-what', 'What it does', '', <Box flexDirection="column" gap={1}>
           <Text wrap="wrap">Each message you send in a chat starts a task that Claude does in the background, so the chat stays small and free for your next message.</Text>
-          <Text wrap="wrap">This panel shows each task as a card with its to-dos. When a task finishes, Claudopus saves its result under Results.</Text>
+          <Text wrap="wrap">This panel shows each task as a card with its to-dos. When a task finishes, Claudopus saves what it found under Results.</Text>
           <Text wrap="wrap">Claudopus saves your words, the topics you work on and every result as plain files under Memory. Stats adds up what your tasks cost and the time they saved.</Text>
         </Box>)}
       {band(ui, 'about-links', 'Links', '', <Box flexDirection="column" gap={1}>

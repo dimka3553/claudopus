@@ -45,7 +45,7 @@ const changelogView = async ($, ui, surface) => {
         </ui.Box>
       </ui.Box>
       {shown.length ? null : <ui.Text dimColor>This copy of Claudopus has no changelog.</ui.Text>}
-      {shown.map(v => versionBand(ui, `changelog-${v.version}`, v, [v.date, v.version === version ? 'this chat runs it' : ''].filter(Boolean).join(' · ')))}
+      {shown.map(v => versionBand(ui, `changelog-${v.version}`, v, [v.date, v.version === version ? 'this chat' : ''].filter(Boolean).join(' · ')))}
       {olderLine(ui, 'changelog-older', left)}
     </ui.Box>);
 };
@@ -106,13 +106,13 @@ const updateScreen = async ($, ui, loaded, _asks, _surface) => {
     return (<ui.Box key="update-notice" flexDirection="column" borderStyle="round" borderColor={NOTICE_EDGE} paddingX={1} flexShrink={0}>
       <ui.Box key="update-title" flexDirection="row" gap={1} minWidth={0}>
         <ui.Box flexShrink={0}>
-          <ui.Text color={FLOW}>{`Updated to Claudopus v${loaded}`}</ui.Text>
+          <ui.Text color={FLOW}>{`Updated to Claudopus ${loaded}`}</ui.Text>
         </ui.Box>
         <ui.Text dimColor wrap="truncate-end">{`· from v${seen}${count > 1 ? `, ${count} versions` : ''}`}</ui.Text>
       </ui.Box>
       {shown[0]?.changes[0] ? <ui.Text key="update-what" dimColor wrap="wrap">{firstClause(shown[0].changes[0])}</ui.Text> : null}
       <ui.Box key="update-done-buttons" flexDirection="row" flexWrap="wrap" columnGap={2}>
-        <ui.Button key={`update-new-${presses}`} label="See changes" onPress={() => void ((presses += 1), closeScreen($, loaded).then(() => openChangelog($))).catch(err => log($, `changelog not opened: ${String(err)}`))}/>
+        <ui.Button key={`update-new-${presses}`} label="What's new" onPress={() => void ((presses += 1), closeScreen($, loaded).then(() => openChangelog($))).catch(err => log($, `changelog not opened: ${String(err)}`))}/>
         <ui.Button key={`update-close-${presses}`} label="Close" plain dimColor onPress={() => void closeScreen($, loaded).catch(err => log($, `update note not closed: ${String(err)}`))}/>
       </ui.Box>
     </ui.Box>);

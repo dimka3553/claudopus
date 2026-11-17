@@ -20,9 +20,9 @@ const started = (id, parentId, title, words, at, isFork = false) => ({
 // What it kept of its own background work goes with it: started again, it keeps what it starts from then
 // What the person allowed it under "Ask once per piece of work" ends with it
 // A reply its ask was held with has been acted on once the run it started ends: the ask waits on the person again, every answer back
-const ended = (one, status, at) => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined, ...(status === 'done' ? {} : { wakeWhen: undefined, waitsSet: undefined }) });
+const ended = (one, status, at) => (workAllowed.delete(one.id), { ...one, ...(one.ask?.replied?.isWaking ? { ask: { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } } : {}), status, endedAt: at, bg: undefined, waitsSince: undefined });
 // Work that is sent a message goes on under its id: its card is back as it was, and the time it lay ended is not counted as work
-const resumed = (one, at) => ({ ...one, carryOn: one.carryOn?.gaveUp ? undefined : one.carryOn, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, helperWait: undefined, mayHandBack: undefined, endedStepAt: undefined, stuckTold: undefined, newAt: at });
+const resumed = (one, at) => ({ ...one, byYou: undefined, begunAt: one.begunAt ?? one.startedAt, ask: one.ask?.replied?.isWaking ? { ...one.ask, replied: { text: one.ask.replied.text, at: one.ask.replied.at } } : one.ask, status: 'working', startedAt: one.endedAt ? at - (one.endedAt - one.startedAt) : one.startedAt || at, endedAt: 0, answeredAt: undefined, handedBackAt: undefined, leftSince: undefined, stuckAt: undefined, waitsSince: undefined, newAt: at });
 // Work that ended a turn while a command it started in the background itself, or a helper of its, still runs, and has not finished:
 // a to-do of its is still being done. It is still at work; an answer it handed back on the way is no report. A watch it set is no
 // such command: it may run until stopped
@@ -116,8 +116,6 @@ const twigsOf = (branches, isMore = false, depth = 1, rails = []) => branches.fl
     return [{ one: b.one, ...(b.job ? { job: b.job } : {}), depth, rails, isLast, hasKids: b.kids.length > 0 }, ...twigsOf(b.kids, false, depth + 1, [...rails, !isLast])];
 });
 // The lines that join a row to the tree, as text. Each level is two letters wide; a row's own helpers hang from the second
-// and as text carried down past a row, as wide as its lines and mark, for each line of its own under it
-const railText = (t) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '  ' : '│ '}${t.hasKids ? '│ ' : '  '} `;
 const twigText = (t) => `${t.rails.map(isOn => (isOn ? '│ ' : '  ')).join('')}${t.isLast ? '└─' : '├─'}${t.hasKids ? '┬─' : '──'}`;
 // The same lines drawn thin, for a surface that draws, as tall as one line of text: the last row under a parent turns to it in a
 // curve, the line ends in a dot in the colour of how the row stands (a ring for the row of those that ended), and a row's own
@@ -150,16 +148,11 @@ const twigSvg = (t, line, dot, isMoving = false, shape = 'circle') => {
         : `<circle cx="${at}" cy="${mid}" r="3" fill="none" stroke="#808080" stroke-width="1.5"/>`;
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('')}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/>${mark}</svg>`;
 };
-// The same tree's lines carried down past a row, for each line of its own under it: the levels above that go on, its own line when
-// rows under the same parent follow, and the line from its dot down to its own rows when it has them (17 Nov that one stopped at
-// a helper's second line, so its commands hung from nothing)
+// The same tree's lines carried down past a row, for a second line of its own: the levels above that go on, and its own line when
+// rows under the same parent follow
 const railSvg = (t, line) => {
     const x = (level) => level * TWIG_STEP + 9;
-    const paths = [
-        ...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])),
-        ...(t.isLast ? [] : [`M${x(t.rails.length)} 0V${line}`]),
-        ...(t.hasKids ? [`M${x(t.rails.length + 1)} 0V${line}`] : []),
-    ];
+    const paths = [...t.rails.flatMap((isOn, level) => (isOn ? [`M${x(level)} 0V${line}`] : [])), ...(t.isLast ? [] : [`M${x(t.rails.length)} 0V${line}`])];
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${twigWidth(t)}" height="${line}" viewBox="0 0 ${twigWidth(t)} ${line}"><path d="${paths.join('') || 'M0 0'}" fill="none" stroke="#808080" stroke-opacity="0.7" stroke-width="1.5"/></svg>`;
 };
 // Work the chat's own record was already looked through for
@@ -174,8 +167,6 @@ const sync = async ($) => {
     // A card taken for a helper that way is looked at again
     const known = new Map((await read($, todos)).map(one => [one.id, one.parentId]));
     const isUnseen = live.some(one => (!known.has(one.id) || known.get(one.id) === HELPER) && !helpersChecked.has(one.id) && (one.status === 'running' || one.status === 'pending') && !one.parentId && one.type !== 'fork');
-    if (isUnseen)
-        during('read the chat for its tasks');
     const rows = isUnseen ? await $.session.messages().catch(() => []) : [];
     const ownCalls = new Set((Array.isArray(rows) ? rows : []).flatMap(row => (row.toolUses ?? []).filter(use => use.tool === 'Agent').map(use => String(use.input?.description ?? ''))).filter(Boolean));
     // The chat is read once for each such work, not at every look
@@ -183,9 +174,7 @@ const sync = async ($) => {
         for (const one of live)
             if (!one.parentId)
                 helpersChecked.add(one.id);
-    const unheardEnds = new Set();
     await changeTodos($, list => {
-        unheardEnds.clear();
         const cards = new Map(list.map(one => [one.id, one]));
         let isChanged = false;
         for (const one of live) {
@@ -196,30 +185,20 @@ const sync = async ($) => {
                         ? // Work the mod never saw start: a copy of the chat was started for a message of the person's, anything else is some work's helper
                             started(one.id, one.parentId ?? (one.type === 'fork' || ownCalls.has(one.description) ? '' : HELPER), one.description, '', now, one.type === 'fork')
                         : undefined
-                : // Work that ended its step to let its helpers work, or for what it asked Claudopus to look for, is still at work: the engine
-                    // lists it as completed, but a helper's result or the thing it waits for starts it again (16 Nov its card vanished meanwhile)
-                    card.status === 'working' && one.status === 'completed' && !handedBack.has(card.id) && card.handedBackAt === undefined && (card.wakeWhen !== undefined || isTurnWaited(list, card.id) || list.some(kid => kid.parentId === card.id && kid.status === 'working'))
-                        ? undefined
-                        : // A task Claudopus starts again to carry on is left to that
-                            card.status === 'working' && card.carryOn && !card.carryOn.gaveUp && card.endedStepAt === card.carryOn.at && (one.status === 'completed' || one.status === 'failed' || one.status === 'idle')
-                                ? undefined
-                                : // A task whose end the mod did not hear may have stopped partway: its last words are read first (below)
-                                    card.status === 'working' && one.status !== 'killed' && (one.status === 'completed' || one.status === 'failed') && !turnEnding.has(card.id) && card.wakeWhen === undefined && !isTurnWaited(list, card.id) && isStoppedShort(card, '') && !carryTaken.has(carryKey(card)) && ownsNothing(list, card.id)
-                                        ? ((unheardEnds.add(card.id)), undefined)
-                                        : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
-                                            ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
-                                            : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
-                                                card.status === 'working' && !card.steps && !card.entries.length && !card.words && one.status === 'idle' && !cutPending.has(card.id)
-                                                    ? ended(card, 'done', now)
-                                                    : // Work that handed in its report and that the engine still holds on its own background work left something running;
-                                                        // once nothing does, or it was stopped, not
-                                                        !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id) && !leftNothing.has(card.id)) !== Boolean(card.leftSince)
-                                                            ? { ...card, leftSince: card.leftSince ? undefined : now }
-                                                            : card.parentId === HELPER && !one.parentId && ownCalls.has(one.description)
-                                                                ? { ...card, parentId: '', title: card.title || oneLine(one.description) }
-                                                                : !card.title && one.description
-                                                                    ? { ...card, title: oneLine(one.description) }
-                                                                    : undefined;
+                : card.status === 'working' && (one.status === 'completed' || one.status === 'failed' || one.status === 'killed')
+                    ? ended(card, one.status === 'failed' ? 'failed' : one.status === 'killed' ? stoppedAs(card) : 'done', now)
+                    : // A card listed from the engine alone, for work that is only held and has made no step since: its turn had ended
+                        card.status === 'working' && !card.steps && !card.entries.length && !card.words && one.status === 'idle' && !cutPending.has(card.id)
+                            ? ended(card, 'done', now)
+                            : // Work that handed in its report and that the engine still holds on its own background work left something running;
+                                // once nothing does, or it was stopped, not
+                                !card.parentId && card.status === 'done' && (one.status === 'waiting' && endedByHandback.has(card.id) && !stoppedHere.has(card.id) && !leftNothing.has(card.id)) !== Boolean(card.leftSince)
+                                    ? { ...card, leftSince: card.leftSince ? undefined : now }
+                                    : card.parentId === HELPER && !one.parentId && ownCalls.has(one.description)
+                                        ? { ...card, parentId: '', title: card.title || oneLine(one.description) }
+                                        : !card.title && one.description
+                                            ? { ...card, title: oneLine(one.description) }
+                                            : undefined;
             if (next)
                 cards.set(one.id, next);
             isChanged ||= Boolean(next);
@@ -230,130 +209,9 @@ const sync = async ($) => {
                 ((isChanged = true), cards.set(card.id, { ...card, leftSince: undefined }));
         return isChanged ? capped([...cards.values()]) : list;
     });
-    await carryDue($, now).catch(err => log($, `carry-on notes not looked at: ${String(err)}`));
-    if (unheardEnds.size)
-        await endedUnheardShort($, unheardEnds, live, now).catch(err => log($, `ends not heard not looked at: ${String(err)}`));
-    if (listed)
-        await endUnheard($, live, now).catch(err => log($, `work that ended unheard not looked for: ${String(err)}`));
-    // A go-ahead pressed during a turn whose end only the engine's list showed does its last step now
-    await stepsAtEnd($).catch(err => log($, `last step not done: ${String(err)}`));
-    // A command run on the person's press that a reload left running is followed again by this load
-    await followRuns($).catch(err => log($, `commands run on a press not followed: ${String(err)}`));
     await keepStoppedReports($, now);
     await lookEnds($);
     await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`));
-};
-// Tasks the engine lists as ended whose end the mod did not hear (it was reloading): one whose last words are no result is started
-// again to carry on, any other ends as the engine says, with its last words
-const endedUnheardShort = async ($, ids, live, now) => {
-    const { id: chat } = await read($, me);
-    const folder = chat ? await agentsFolder($, chat) : '';
-    for (const id of ids) {
-        const card = (await read($, todos)).find(one => one.id === id);
-        if (!card || card.status !== 'working' || carryTaken.has(carryKey(card)))
-            continue;
-        const f = folder ? await lastWordsOf($, folder, id, now) : { at: now, answer: '', isReport: false, isPressed: false };
-        if (!f.isReport && f.isPressed && isStoppedShort(card, f.answer)) {
-            await goOn($, id, 'its step ended while Claudopus was away');
-            continue;
-        }
-        const how = live.find(one => one.id === id)?.status === 'failed' ? 'failed' : 'done';
-        await changeTodos($, list => list.map(one => (one.id === id && one.status === 'working' ? { ...ended(one, how, now), answer: f.answer || one.answer, ...(f.isReport ? { answeredAt: one.answeredAt ?? now } : {}) } : one)));
-    }
-};
-// Work, or a helper, that ended while the mod was unloaded is never heard to end, and the engine drops it from its list a while
-// later: its card would be drawn at work, and warned about as stuck, for good (16 Nov a second look that handed back its report at
-// 17:25, while the mod was out from 17:24 to 17:26, was drawn at work for 47 minutes and held its task open). A card at work that
-// the engine no longer lists at all and whose saved record says it finished has ended: helpers first, then work with no helper at
-// work left and nothing it asked to be started again for. Looked at once a minute for each
-// The folder the engine keeps this chat's agents' records in
-const agentsFolder = async ($, chat) => `${(await $.env.get('HOME')) ?? ''}/.claude/projects/${cwd.replace(/[^a-zA-Z0-9]/g, '-')}/${chat}/subagents`;
-// An agent's last words from the end of its record: what it handed back, or the text of its last reply, whether that is a report,
-// and when the record was last written
-const lastWordsOf = async ($, folder, agent, now) => {
-    const path = `${folder}/agent-${agent}.jsonl`;
-    const stat = await $.fs.stat(path).catch(() => undefined);
-    const at = stat?.mtimeMs || now;
-    const size = stat?.size ?? 0;
-    const tail = (size > 0 && size < 2000000 ? await readOr($, path) : ((await $.process.run(['tail', '-c', '400000', path]).catch(() => undefined))?.stdout ?? '')).split('\n');
-    let answer = '';
-    let isHandback = false;
-    const isPressed = isPressedAtEnd(tail.map(row => parsedOr(row, {})));
-    for (const row of tail.reverse()) {
-        const o = parsedOr(row, {});
-        if (o.type !== 'assistant' || !Array.isArray(o.message?.content))
-            continue;
-        const blocks = o.message.content;
-        isHandback = blocks.some(b => b.type === 'tool_use' && b.name === 'SubagentHandback');
-        answer = blocks.map(b => (b.type === 'tool_use' && b.name === 'SubagentHandback' && typeof b.input?.message === 'string' ? b.input.message : b.type === 'text' ? (b.text ?? '') : '')).join('').trim();
-        if (answer)
-            break;
-    }
-    return { at, answer: answer.slice(0, ANSWER_CHARS), isReport: isHandback || answer.length >= REPORT_LEAST, isPressed };
-};
-const UNHEARD_LOOK = 60000;
-const UNHEARD_QUIET = 60000;
-const unheardLooked = new Map();
-const endUnheard = async ($, live, now) => {
-    const { id } = await read($, me);
-    if (!id || !dir)
-        return;
-    const isUnlisted = (one) => one.status === 'working' && !one.chat && !live.some(agent => agent.id === one.id) && !cutPending.has(one.id) && !isHeld(one) && now - Math.max(one.startedAt, one.newAt ?? 0) >= UNHEARD_QUIET;
-    const list = await read($, todos);
-    const due = list.filter(one => isUnlisted(one) && now - (unheardLooked.get(one.id) ?? -Infinity) >= UNHEARD_LOOK);
-    if (!due.length)
-        return;
-    const folder = await agentsFolder($, id);
-    const finished = new Map();
-    for (const one of due) {
-        unheardLooked.set(one.id, now);
-        const meta = parsedOr(await readOr($, `${folder}/agent-${one.id}.meta.json`), {});
-        if (meta.finished !== true)
-            continue;
-        finished.set(one.id, await lastWordsOf($, folder, one.id, now));
-    }
-    if (!finished.size)
-        return;
-    // The deepest first: a card with a helper still at work, or one that ends now, or with something it asked to be started again for,
-    // waits; one whose helper ends now is passed that helper's result below, which starts it again, as passOnHelper does when heard.
-    // Work the chat started ends now, so the chat is told and a report it gave is kept; a helper keeps the time it really ended
-    let endedNow = [];
-    const short = new Set();
-    await changeTodos($, all => {
-        short.clear();
-        const gone = new Set();
-        let list = all;
-        for (let isMoved = true; isMoved;) {
-            isMoved = false;
-            list = list.map(one => {
-                const f = finished.get(one.id);
-                if (!f || one.status !== 'working' || one.wakeWhen || isTurnWaited(list, one.id) || list.some(kid => kid.parentId === one.id && (kid.status === 'working' || gone.has(kid.id))))
-                    return one;
-                // (a task left stopped partway is started again to carry on, below)
-                if (!one.parentId && !f.isReport && f.isPressed && isStoppedShort(one, f.answer))
-                    return (short.add(one.id), one);
-                gone.add(one.id);
-                isMoved = true;
-                // (its words count as a report only when it handed one back or wrote one as long, as at a heard end)
-                const isTop = !one.parentId;
-                const answer = f.answer || one.answer;
-                return { ...ended(one, 'done', isTop ? now : Math.min(f.at, now)), answer, ...(isTop && f.isReport ? { answeredAt: one.answeredAt ?? now } : {}), stuckAt: undefined };
-            });
-        }
-        endedNow = [...gone];
-        return gone.size ? list : all;
-    });
-    for (const one of short)
-        await goOn($, one, 'its step ended while Claudopus was away');
-    if (!endedNow.length)
-        return;
-    await log($, `work that ended while the mod was out ended on its card: ${endedNow.join(', ')}`);
-    for (const one of endedNow) {
-        const card = (await read($, todos)).find(todo => todo.id === one);
-        if (card?.parentId && card.parentId !== HELPER)
-            await passOnHelper($, one, card.answer, 'done', true).catch(err => log($, `helper ${one}'s result not passed on: ${String(err)}`));
-    }
-    redraw($);
 };
 // Changes the to-do a piece of work belongs to; work the mod never saw start is looked up first, and a helper of unknown work changes nothing
 const change = async ($, agentId, fn) => {
@@ -409,7 +267,6 @@ const stop = async ($, id) => {
         stopLeft.set(id, left);
     await keepStoppedReports($, now);
     await lookEnds($);
-    await saveKeep($).catch(err => log($, `work at work not kept for the keeper: ${String(err)}`));
 };
 // Work the person stopped, started again by their press on its card: a message from the panel in their name, which lifts the hold
 const startAgain = async ($, id) => {
@@ -524,7 +381,6 @@ const recoverEnded = async ($) => {
         .filter(({ one }) => !list.some(card => card.id === one && !isBare(card)) && !live.some(agent => agent.id === one && WORKING.includes(agent.status)));
     if (!fresh.length)
         return;
-    during('read back ended work');
     const found = [];
     for (const { one: agentId, meta } of fresh) {
         try {
@@ -546,7 +402,6 @@ const recoverEnded = async ($) => {
             let items = [];
             const entries = [];
             for (const row of text.split('\n')) {
-                await breathe($);
                 const o = (() => {
                     try {
                         return JSON.parse(row);
@@ -610,8 +465,7 @@ const follow = async ($) => {
     await lookJobs($).catch(err => log($, `jobs not read: ${String(err)}`));
     await lookStuck($).catch(err => log($, `stuck work not looked for: ${String(err)}`));
     await lookInDue($).catch(err => log($, `helpers not looked in on: ${String(err)}`));
-    await lookHeld($).catch(err => log($, `held commands not looked at: ${String(err)}`));
-    await lookWakes($).catch(err => log($, `wakes not looked at: ${String(err)}`));
+    await writeRolls($).catch(err => log($, `helpers not written: ${String(err)}`));
     await saveFinished($).catch(err => log($, `finished work not kept: ${String(err)}`));
     const isShown = (await $.ui.panes().catch(() => [])).some(pane => pane.id === LIST);
     if (isShown !== (await read($, paneShown)))

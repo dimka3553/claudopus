@@ -8,17 +8,15 @@ const commandHooks = (on) => {
         // Asked for where it can be drawn, it is open in every chat from now on
         if (opened.isPlaced)
             await choosePanel($, true);
-        return { text: opened.isPlaced ? 'Claudopus opened its panel.' : nowhere('Claudopus') };
+        return { text: opened.isPlaced ? 'Claudopus panel opened.' : nowhere('Claudopus') };
     });
     // A box the person moves the focus into holds the panel's drawing, so nothing is drawn under them as they start typing; the focus
     // moved by them anywhere else, or out of the pane, lets it go
     on('ui.focus', async ($, e, next) => {
-        // The bar holds its drawing for as long as its reply box has the cursor (band.tsx), however the cursor came there first: by the
-        // person's click in the box, as the box takes it when they click into the bar (autoFocus), or by the mod's own call. After that
-        // only the person's own focus renews it (and each letter): the app may give the box the cursor again each time it builds it
-        // anew, and each redraw would renew the hold that puts redraws off (asking.tsx, isBoxHeld)
+        // The bar holds its drawing for as long as its reply box has the cursor (band.tsx), however the cursor came there: by the
+        // person's click in the box, as the box takes it when they click into the bar (autoFocus), or by the mod's own call
         const isInBarBox = e.plugin === 'claudopus' && isBarBox(e.element);
-        if (isInBarBox && (e.origin.kind === 'person' || barBoxAt === 0))
+        if (isInBarBox)
             barBoxAt = await $.clock.now();
         if (e.origin.kind === 'person' && (e.plugin === 'claudopus' || e.plugin === undefined)) {
             // A press begins with the focus moving onto the button: from then the panel holds still for it (engage)
@@ -30,11 +28,7 @@ const commandHooks = (on) => {
             else
                 freeTimes($);
             // after the let-go above, whose own drawing would end the hold
-            // and so does a button of the bar above the prompt on the desktop, which is redrawn as often (band.tsx)
-            const isBarButton = e.plugin === 'claudopus' && e.component === 'AbovePrompt' && barIds.get('desktop') === e.requestId && !isBarBox(e.element);
-            // and a button of a tab of the mod's on the desktop, such as Settings' Reset, which every drawing of the panel draws again too
-            const isTabButton = e.plugin === 'claudopus' && heldTabs.has(e.requestId ?? '') && !isTypedBox(e.element);
-            if ((e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element)) || isBarButton || isTabButton)
+            if (e.plugin === 'claudopus' && e.requestId === LIST && listSurface === 'desktop' && !isTypedBox(e.element))
                 await holdForPress($);
             else
                 pressFrom = 0;
@@ -58,9 +52,8 @@ const commandHooks = (on) => {
     on('ui.close', async ($, e, next) => {
         const r = await next(e);
         // The list closed, by anyone: nothing of where it stood is kept, so the line above the prompt no longer points into it
-        // and where what waited stood at its top: opened again, it is put together afresh
         if (e.id === LIST)
-            (listOffsets.clear(), topPlaces.clear(), topClosed.clear(), drawAgain($));
+            (listOffsets.clear(), drawAgain($));
         if (e.id === LIST && e.origin.kind === 'person' && dir)
             await choosePanel($, false);
         return r;
@@ -68,7 +61,6 @@ const commandHooks = (on) => {
     on('command.run', { command: 'servers' }, async ($) => {
         await scanServers($).catch(err => log($, `servers not read: ${String(err)}`));
         const opened = await $.ui.open({ id: PANE, title: PANE_TITLE });
-        return { text: opened.isPlaced ? 'Claudopus opened the Servers panel.'
-                : nowhere('Servers') };
+        return { text: opened.isPlaced ? 'Servers panel opened.' : nowhere('Servers') };
     });
 };

@@ -38,11 +38,11 @@ const afarPart = (ui) => {
         return null;
     const there = macs.length === 1 ? macName(macs[0] ?? '') : 'the Mac it runs chats on over SSH';
     const lines = [
-        ...(stuckAt ? [`New chats on ${there} start without Claudopus. At ${stuckAt} this Mac's Claude app decided Claudopus didn't load there, so it starts every new chat there without it: no panel, tools or rules. Quit the Claude app and open it again to end this.`] : []),
-        ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ' on this Mac'} runs without Claudopus, so its tasks, questions and results don't reach any panel. A chat you start after reopening the app has Claudopus.`),
+        ...(stuckAt ? [`New chats on ${there} start without Claudopus. This Mac's Claude app decided at ${stuckAt} that Claudopus didn't load there, and since then it gives every new chat there its own copy, which has no Claudopus code: no panel, tools or rules. The app forgets this only when it is quit and opened again.`] : []),
+        ...offChats.map(one => `“${offName(one)}”${one.host ? ` on ${macName(one.host)}` : ' on this Mac'} runs without Claudopus: its tasks, questions and results don't reach any panel. A chat started after the app is reopened has it.`),
     ];
     return (<ui.Box key="afar" flexDirection="column" gap={1} backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
-      <ui.Text bold color={NEEDS} wrap="wrap">{offChats.length === 1 && !stuckAt ? "Claudopus isn't running in a chat" : "Claudopus isn't running in some chats"}</ui.Text>
+      <ui.Text bold color={NEEDS} wrap="wrap">{offChats.length === 1 && !stuckAt ? 'Claudopus is off in a chat' : 'Claudopus is off in some chats'}</ui.Text>
       {lines.map((line, i) => (<ui.Text key={`afar-${i}`} wrap="wrap">
           {line}
         </ui.Text>))}
@@ -89,6 +89,6 @@ const tellAfar = async ($, list, now) => {
         }
         for (const p of s.prompts ?? [])
             if (Math.abs(now - p.at) < AFAR_FRESH)
-                await tellOnce($, `prompt-${s.host}-${s.chat}-${p.id}`, () => aloud($, 'prompt', `${p.title ?? chatName(s)} has a question for you`, `${p.text} · ${where}`, `prompt-${s.chat}-${p.id}`, opens));
+                await tellOnce($, `prompt-${s.host}-${s.chat}-${p.id}`, () => aloud($, 'prompt', `${p.title ?? chatName(s)} needs your OK`, `${p.text} · ${where}`, `prompt-${s.chat}-${p.id}`, opens));
     }
 };

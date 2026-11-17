@@ -887,12 +887,14 @@ const sentLine = (one: Todo, now: number) => {
   const newer = lineOf(one) !== sent.line
   const isHeld = Boolean(one.ask && one.ask.text === sent.ask && (sent.isHeld || one.ask.replied?.text === sent.text))
   if ((one.ask && !isHeld) || (!isHeld && (newer || now - sent.at > ANSWER_SHOWN))) return ''
+  // Run it pressed: the card's one quiet line of the command running says it (runBlock), nothing more
+  if (sent.to === 'ran') return ''
   const how = {
     sending: 'Sending to Claude…',
     work: waitsBehind(one, sent.at, now) || 'Claude reads it next',
     read: 'Claude has read it',
     chat: 'sent to the chat, which carries on the task',
-    ran: 'Claudopus is running it; Claude gets what it prints',
+    ran: '',
     other: `sent to the chat "${cut(one.chat ? chatName(one.chat) : 'it runs in', 40)}", which passes it on`,
   }[sent.to]
   if (isHeld) return `✓ You answered “${cut(sent.text, 60)}” · ${sent.to === 'read' ? (one.status === 'working' ? 'Claude is working on it' : 'Claude has read it') : how}${isActingOnReply(one) ? '' : ' · the question is still open'}`

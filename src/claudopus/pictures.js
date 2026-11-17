@@ -42,7 +42,7 @@ const sendPicture = async ($, path) => {
     const say = (text, copy) => (pictureSaid.size > 100 && pictureSaid.clear(), pictureSaid.set(path, { text, copy }), drawAgain($));
     // A terminal with no word of where it is watched from: where the picture is, and no more
     if (!termFrom)
-        return say(`It’s at ${path} on ${thisMac()}.`);
+        return say(`It is at ${path} on ${thisMac()}`);
     say('Sending it to your device…');
     for (const bin of TAILSCALES) {
         const targets = await $.process.run([bin, 'file', 'cp', '--targets'], { timeoutMs: 8000 }).catch(() => undefined);
@@ -54,14 +54,14 @@ const sendPicture = async ($, path) => {
             break;
         const sent = await $.process.run([bin, 'file', 'cp', path, `${termFrom}:`], { timeoutMs: 60000 }).catch(err => ({ exitCode: 1, stderr: String(err) }));
         if (sent.exitCode === 0)
-            return say(`✓ Claudopus sent it to ${name} with Tailscale. It’s in Downloads there.`);
+            return say(`✓ Sent to ${name} by Tailscale, which keeps what it is sent in Downloads`);
         await log($, `picture ${path} not sent to ${termFrom}: ${sent.stderr}`);
         break;
     }
     const user = (await $.env.get('USER')) ?? '';
     const port = termPort && termPort !== '22' ? `-P ${termPort} ` : '';
     const command = `scp ${port}${shQuoted(`${user ? `${user}@` : ''}${termHere.includes(':') ? `[${termHere}]` : termHere}:${path}`)} ~/Downloads/ && open ~/Downloads/${shQuoted(fileName(path))}`;
-    say('Run this on your Mac to open it there:', command);
+    say('Run this on your own device (a Mac), and it opens there:', command);
 };
 // Under a picture's row in the terminal: what its press came to, with the command to copy when there is one
 const pictureSaidRow = ($, ui, key, path) => {
@@ -226,7 +226,7 @@ const largeOf = ($, path, id) => {
 const pictureView = async ($, e, path = pictureShown) => {
     const ui = uiOf($, e);
     if (!path)
-        return <ui.Text dimColor>Pictures now open in the Details tab where you press them. You can close this tab.</ui.Text>;
+        return <ui.Text dimColor>Pictures now open large in the Details tab they are pressed in. This tab can be closed.</ui.Text>;
     const name = fileName(path);
     const stat = await $.fs.stat(path).catch(() => undefined);
     const said = (text) => (<ui.Box flexDirection="column" gap={1} width="100%">
@@ -243,12 +243,12 @@ const pictureView = async ($, e, path = pictureShown) => {
       </ui.Box>);
     }
     if (!('Svg' in ui))
-        return said(`This screen can’t show pictures. It’s at ${path}.`);
+        return said(`This screen cannot draw pictures. It is at ${path}`);
     const large = largeOf($, path, `${path}:${stat.mtimeMs}:${stat.size}`);
     if (large === undefined)
         return said('Making a large copy…');
     if (!large)
-        return said(`Claudopus couldn’t show this picture. Press its row to try again. It’s at ${path}.`);
+        return said(`This picture could not be drawn here. Press its row again to try again. It is at ${path}`);
     return (<ui.Box flexDirection="column" gap={1} width="100%">
       <ui.Text bold wrap="wrap">{name}</ui.Text>
       <ui.Box flexDirection="column" width="100%">
@@ -360,7 +360,6 @@ const loadWork = async ($, id) => {
         const now = await $.clock.now();
         const was = talks.get(id);
         if (was?.key !== key || (!was.lines && now - (was.at ?? 0) >= RETRY_READ)) {
-            during('read a task for its Details');
             const rows = await $.session.messages({ agentId: id }).catch(() => undefined);
             talks.set(id, { key, lines: Array.isArray(rows) ? withSteers(talkOf(rows), one.entries) : undefined, at: now });
             isChanged = true;
@@ -449,7 +448,6 @@ const loadTheirs = async ($, one) => {
         // Its folder named as the engine names its projects, and failing that any project that holds that chat
         const slug = c.folder.replace(/[^A-Za-z0-9]/g, '-');
         const name = `${c.id}/subagents/agent-${c.agent}.jsonl`;
-        during("read another chat's task");
         const r = await $.process
             .run(['sh', '-c', 'for f in "$1/$2/$3" "$1"/*/"$3"; do [ -f "$f" ] && { tail -c "$4" "$f"; exit 0; }; done; exit 1', 'sh', `${home}/.claude/projects`, slug, name, String(THEIR_TAIL)], { timeoutMs: 5000 })
             .catch(() => undefined);

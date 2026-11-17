@@ -616,7 +616,7 @@ const panelHooks = (on: On) => {
                   <Box flexDirection="column" minWidth={0}>
                     <Text wrap={one.ask ? 'truncate-end' : 'wrap'} dimColor={one.status !== 'working' || needsPerson(one)}>{(!one.ask && sentLine(one, at)) || (one.status === 'working' && !one.ask && !endedNow(one) && !isFreshNote(one) ? helperNow(one, at, jobsOf(one, at).length, room) : '') || cut(now(one), room) || (one.status === 'working' ? (one.ask ? 'Waiting for you' : 'Starting') : "Claude hasn't said what it's doing")}</Text>
                     {/* Held where it was after an answer, once a newer line of the work's took the answer's place: why it is still up there */}
-                    {!one.ask && !sentLine(one, at) && heldAnswer(one, at) ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
+                    {!one.ask && !sentLine(one, at) && heldAnswer(one, at) && heldAnswer(one, at)?.to !== 'ran' ? <Text key={`held-answer-${one.id}`} dimColor wrap="truncate-end">{`✓ You answered “${cut(heldAnswer(one, at)?.text ?? '', 60)}”`}</Text> : null}
                   </Box>
                 )}
               </Box>

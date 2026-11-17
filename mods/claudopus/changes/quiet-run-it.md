@@ -1,2 +1,2 @@
 - After you press Run it, the task's card shows one quiet line, "Running your command" with how long it has run and Stop it, instead of the whole command in a box.
-- The card no longer flashes while that command runs: the panel was redrawn whole every five seconds to show what the command last wrote, even while you were using it.
+- The card no longer flashes while that command runs.

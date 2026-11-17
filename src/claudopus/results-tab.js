@@ -9,17 +9,14 @@ const carryOn = async ($, r, now) => {
     if (!filled.isFilled)
         await log($, 'the chat box was not filled from a report');
 };
-// The person's answer to one thing a report waits on them for: Yes, No or one of its own answers goes to the chat as their message;
-// Not now sets it aside. It clears that one alone. One only words answer puts a line naming it in the chat's box, for them to finish:
-// their message, sent, answers it (answeredInMessage)
+// The person's answer to one thing a report waits on them for: Yes and No go to the chat as their message; Not now sets it aside.
+// It clears that one alone
 const answering = new Set();
 const answerWait = async ($, r, index, said, now) => {
     const wait = waitsOf(r)[index];
     // A second press before the answer is kept sends nothing more
     if (!wait || wait.answer || answering.has(`${r.id}:${index}`))
         return;
-    if (said === ANSWER_IN_WORDS)
-        return answerInWords($, r, index, now);
     answering.add(`${r.id}:${index}`);
     if (said !== 'Not now')
         await sendForPerson($, `From the Claudopus panel: ${who(true)} pressed "${said}" to answer the question in the result "${r.title}" (${dated(r.at, now)}): ${wait.text}\nThe result: ${reportPath(r)}/report.md`);
@@ -29,13 +26,6 @@ const answerWait = async ($, r, index, said, now) => {
             answering.delete(`${r.id}:${index}`);
         throw err;
     });
-};
-const answerInWords = async ($, r, index, now) => {
-    const text = wordsLine(r, index + 1, now);
-    const typed = (await $.prompt.read().catch(() => ({ text: '' }))).text;
-    const filled = await $.prompt.fill(typed.trim() ? { text: `\n${text}`, mode: 'append' } : { text, mode: 'replace' }).catch(() => ({ isFilled: false }));
-    if (!filled.isFilled)
-        await log($, 'the chat box was not filled to answer a result in words');
 };
 // ---- Reports in panes of their own: the list as "Reports", and each report opened as a pane titled with its name ----
 // The list's pane; a report's pane is named after the report. At most this many reports are open as panes: opening one more
@@ -334,11 +324,11 @@ const reportsView = ($, ui, all, now, line, height = 0) => {
           <Text bold>Results</Text>
           <Text dimColor>{`${entries.length}`}</Text>
         </Box>
-        {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new ${fresh === 1 ? 'result' : 'results'}`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))}/> : null}
+        {fresh ? <Button key={`reports-fresh-${gen}`} label={`Show ${fresh} new`} onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))}/> : null}
       </Box>
-      {!shown.length && !gone.length ? <Text dimColor>No results yet.</Text> : null}
-      {waiting.length ? band(ui, 'reports-waiting', 'Waiting for you', `${waiting.length}`, rows(waiting)) : null}
-      {recent.length ? band(ui, 'reports-recent', 'Newest', '', rows(recent)) : null}
+      {!shown.length && !gone.length ? <Text dimColor>Nothing yet.</Text> : null}
+      {waiting.length ? band(ui, 'reports-waiting', 'Waiting on you', `${waiting.length}`, rows(waiting)) : null}
+      {recent.length ? band(ui, 'reports-recent', waiting.length ? 'Recent' : 'Newest', '', rows(recent)) : null}
       {earlier.length || gone.length ? (<Box key="reports-folded" flexDirection="column" backgroundColor={FILL} paddingX={2} paddingY={1} flexShrink={0}>
           {earlier.length ? fold('earlier-fold', `Earlier ${earlier.length}`, isEarlierOpen, () => (isEarlierOpen = !isEarlierOpen)) : null}
           {earlier.length && isEarlierOpen ? rows(earlier) : null}
@@ -371,7 +361,7 @@ const reportShown = ($, ui, r, text, list, now, at, thumb, height = 0) => {
     const others = list.filter(one => one.id !== r.id && !rounds.includes(one) && (one.id === r.from || one.from === r.id || subjectOf(one) === subjectOf(r)));
     const kin = [...rounds, ...others.slice(0, Math.max(0, 8 - rounds.length))];
     const pictures = r.files.map(file => ({ file, path: `${reportPath(r)}/${file}`, href: `file://${encodeURI(`${reportPath(r)}/${file}`)}` }));
-    const how = (one) => [one.id === r.from ? 'this result came from it' : one.from === r.id ? 'came from this result' : rounds.includes(one) ? (one.at < r.at ? 'earlier result' : 'later result') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ');
+    const how = (one) => [one.id === r.from ? 'this started from it' : one.from === r.id ? 'started from this' : rounds.includes(one) ? (one.at < r.at ? 'earlier round' : 'later round') : '', one.archived ? 'archived' : ''].filter(Boolean).join(' · ');
     const pane = paneOf(r);
     // As in the list: each key carries a mark of what this drawing shows, so the app never keeps a button whose handle is gone
     const gen = drawingMark(pane, [presses, height, r, mark(text), at, thumb?.source.length ?? 0, ...pictures.map(one => pictureSaid.get(one.path) ?? null), dated(r.at, now), 'isTerminal' in ui, ...kin.map(one => `${one.id}|${one.title}|${dated(one.at, now)}|${how(one)}`)]);
@@ -385,20 +375,20 @@ const reportShown = ($, ui, r, text, list, now, at, thumb, height = 0) => {
         </Box>
         <Button key={`report-archive-${gen}`} label={r.archived ? 'Bring back' : 'Archive'} onPress={() => archiveReport($, r, !r.archived)}/>
       </Box>
-      {isOpenQuestion(r) || (!r.archived && waitsOf(r).some(byPerson))
-            ? band(ui, 'report-ask', isOpenQuestion(r) ? 'Waiting for you' : 'Answered', openWaits(r).length > 1 ? `${openWaits(r).length}` : '', 
-            // Each thing it waits on with its own answers; one answered says what was answered, and leaves the others
+      {isOpenQuestion(r)
+            ? band(ui, 'report-ask', 'Waiting on you', openWaits(r).length > 1 ? `${openWaits(r).length}` : '', 
+            // Each thing it waits on with its own answers; one answered leaves the others
             <Box flexDirection="column" gap={2}>
-              {waitsOf(r).map((wait, index) => wait.answer ? (<Text key={`report-waited-${index}`} dimColor wrap="wrap">{`${wait.text} · ${answeredWords(wait)}`}</Text>) : (<Box key={`report-wait-${index}`} flexDirection="column" gap={1}>
+              {waitsOf(r).map((wait, index) => wait.answer ? null : (<Box key={`report-wait-${index}`} flexDirection="column" gap={1}>
                     <Text wrap="wrap">{wait.text}</Text>
                     <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                      {answersOf(wait).map(said => (<Button key={`report-say-${index}-${said}-${gen}`} label={said} onPress={() => void ((presses += 1), answerWait($, r, index, said, now).catch(err => log($, `answer not kept: ${String(err)}`)))}/>))}
+                      {['Yes', 'No', 'Not now'].map(said => (<Button key={`report-say-${index}-${said}-${gen}`} label={said} onPress={() => void ((presses += 1), answerWait($, r, index, said, now).catch(err => log($, `answer not kept: ${String(err)}`)))}/>))}
                     </Box>
                   </Box>))}
             </Box>)
             : null}
       {r.gist
-            ? band(ui, 'report-finding', 'Summary', '', <Text wrap="wrap">{r.gist}</Text>)
+            ? band(ui, 'report-finding', 'Finding', '', <Text wrap="wrap">{r.gist}</Text>)
             : null}
       {pictures.length
             ? band(ui, 'report-pictures', 'Pictures', 'isTerminal' in ui ? `${pictures.length}` : pictures.length > 1 ? `${at + 1} of ${pictures.length}` : '', 'isTerminal' in ui ? (
@@ -408,15 +398,15 @@ const reportShown = ($, ui, r, text, list, now, at, thumb, height = 0) => {
                     <Button key={`report-pic-open-${n}-${gen}`} label={one.file} plain hotkey={n < 9 ? String(n + 1) : undefined} onPress={press => void showPicture($, one.path, '', '', press.surface)}/>
                     {pictureSaidRow($, ui, `report-pic-said-${n}-${gen}`, one.path)}
                   </Box>))}
-                <Text dimColor wrap="wrap">{termFrom ? 'Press a picture to send it to the device you’re using.' : 'Press a picture to open it.'}</Text>
+                <Text dimColor wrap="wrap">{termFrom ? 'Press a picture to send it to the device you’re using' : 'Press a picture to open it'}</Text>
               </Box>) : (<Box flexDirection="column" gap={1}>
               {thumb && table.Svg ? <table.Svg key={`report-picture-${r.id}-${at}`} source={thumb.source} alt={pictures[at]?.file ?? 'Picture'}/> : null}
               {/* Shown here, never handed to another app: that would take the person out of Claude and switch their desktop. Where the
                     picture cannot be drawn, its path is given as text */}
               <Text dimColor wrap="wrap">{thumb && table.Svg ? (pictures[at]?.file ?? '') : (pictures[at]?.path ?? '')}</Text>
               {pictures.length > 1 ? (<Box flexDirection="row" flexWrap="wrap" alignItems="center" gap={1}>
-                  <Button key={`report-prev-${gen}`} label="Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)}/>
-                  <Button key={`report-next-${gen}`} label="Next" onPress={() => show((at + 1) % pictures.length)}/>
+                  <Button key={`report-prev-${gen}`} label="‹ Previous" onPress={() => show((at + pictures.length - 1) % pictures.length)}/>
+                  <Button key={`report-next-${gen}`} label="Next ›" onPress={() => show((at + 1) % pictures.length)}/>
                 </Box>) : null}
             </Box>))
             : null}
@@ -427,9 +417,9 @@ const reportShown = ($, ui, r, text, list, now, at, thumb, height = 0) => {
                 if (to >= 0)
                     show(to);
             }}/>)}
-      {band(ui, 'report-carry', 'Follow-up', '', <Box flexDirection="column" alignItems="flex-start" gap={1}>
-          <Text dimColor wrap="wrap">Claudopus writes a line about this result where you type in the chat, for you to finish and send.</Text>
-          <Button key={`report-carry-${gen}`} label="Continue" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))}/>
+      {band(ui, 'report-carry', 'Continue', '', <Box flexDirection="column" alignItems="flex-start" gap={1}>
+          <Text dimColor wrap="wrap">Claudopus puts a line naming this result in the chat's box, for you to finish and send.</Text>
+          <Button key={`report-carry-${gen}`} label="Continue from this" onPress={() => void ((presses += 1), redraw($), carryOn($, r, now))}/>
           {kin.length ? (<Box flexDirection="column" alignItems="flex-start">
               {kin.map(one => (<Button key={`report-kin-${one.id}-${gen}`} label={[dated(one.at, now), one.title, how(one)].filter(Boolean).join(' · ')} plain dimColor onPress={() => openReport($, one.id)}/>))}
             </Box>) : null}

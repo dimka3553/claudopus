@@ -322,19 +322,19 @@ export const openUrl = (c, held = '') => {
     const app = APP_ID.test(held) ? held : !c.host ? (c.link?.app ?? '') : '';
     return app ? `claude://code/continue?session=${app}` : c.link?.bridge ? `claude://code/${c.link.bridge}` : '';
 };
-const tasks = (n) => (n === 1 ? '1 task' : `${n} tasks`);
+const things = (n) => (n === 1 ? '1 thing' : `${n} things`);
 export const headLine = ({ here, there, chats, asks, isDone }) => {
     const running = here + there;
     if (asks)
-        return `${asks} ${asks === 1 ? 'question' : 'questions'} waiting for you${running ? ` · ${running} working` : ''}`;
+        return `${things(asks)} ${asks === 1 ? 'needs' : 'need'} you${running ? `, ${running} running` : ''}`;
     const others = chats === 1 ? '1 other chat' : `${chats} other chats`;
     if (here && there)
-        return `${tasks(running)} working, here and in ${others}`;
+        return `Working on ${things(running)} here and in ${others}`;
     if (there)
-        return `${tasks(there)} working in ${chats === 1 ? 'another chat' : others}`;
+        return `Working on ${things(there)} in ${chats === 1 ? 'another chat' : others}`;
     if (here)
-        return `${tasks(here)} working`;
-    return isDone ? 'Just finished' : 'Nothing running';
+        return `Working on ${things(here)}`;
+    return isDone ? 'Just finished' : 'Nothing is running';
 };
 // The octopus beside it: happy for the moment work finishes, whatever else goes on, so no finish passes unseen; else amber while
 // anything needs the person, at work while anything runs, resting only when nothing goes on anywhere
