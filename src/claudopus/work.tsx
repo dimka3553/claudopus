@@ -62,7 +62,7 @@ const NO_PROGRESS_SCRIPT =
 // The note the engine adds when work ends its step without its report, and what such a step says instead while the work's own
 // detached command runs or it waits to be woken: what it said before was no report (a report goes on to the engine's press)
 const HANDBACK_PRESS = '[handback-send-enforce]'
-const LEFT_AT_WORK = 'My own work is still going; I am started again when it is done, and give my report then.'
+const LEFT_AT_WORK = "My command is still running. Claudopus starts me again when it's done, and I'll send my result then."
 const isPressedForReport = async ($: EngineInterface, id: string) => {
   const talk = await $.session.messages({ as: 'api', agentId: id }).catch(() => [])
   if (!Array.isArray(talk)) return false

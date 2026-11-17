@@ -103,7 +103,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const before = stepped.length
   const said: string[] = []
   for await (const chunk of $.turn.step({ turnId: 'h1p', index: 1, model: 'm', messageCount: 2, agentId: 'a1' })) if (chunk.kind === 'text') said.push((chunk as { text: string }).text)
-  expect([stepped.length - before, said]).toEqual([0, ['My own work is still going; I am started again when it is done, and give my report then.']])
+  expect([stepped.length - before, said]).toEqual([0, ["My command is still running. Claudopus starts me again when it's done, and I'll send my result then."]])
   await $.turn.complete({ answer: 'Waiting for the drawing.', durationMs: 1, isAborted: false, turnId: 'h1', reason: 'answer', agentId: 'a1' } as never)
   // The engine then tells the chat it ended without its report. Claudopus adds no note of its own, which would ride into a later
   // turn of the chat's; at rest, the chat takes the notice as a prompt of its own, which is left out (16 Nov evening: 67 of 152 turns)
@@ -156,7 +156,7 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const list = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 140 }, surface: 'terminal' } as never)
   const texts = (await list.findAll({ type: 'Text' })).map(one => one.text)
   await list.unmount()
-  expect(texts).toContain('Working on 1 thing')
+  expect(texts).toContain('1 task working')
   expect(texts).toContain('Fix the nose')
   agents.a3 = 'completed'
   await $.tool.call({ tool: 'SubagentHandback', tool_use_id: 'hb3', agentId: 'a3', message: 'The nose is drawn at every size.' } as never)
@@ -248,7 +248,7 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
     await list.unmount()
     return texts
   }
-  expect(await until(async () => (await lines()).find(text => /^Claudopus starts Claude again when this is there: the deploy marker; at \d\d:\d\d if it never comes$/.test(text)))).toBeDefined()
+  expect(await until(async () => (await lines()).find(text => /^Waiting for the deploy marker · Claudopus starts Claude again when it comes, or at \d\d:\d\d$/.test(text)))).toBeDefined()
   // A helper that ended its step would have ended: it hands back what it waits for, and its task asks
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w2', agentId: 'a2', what: 'the build to finish', file: '/w/build.log', text: 'BUILD DONE' } as never)) as { result?: string }).result).toContain('hand back your result now')
   await clock.advance(40_000)
@@ -257,7 +257,7 @@ test("what nothing of the work's own makes, a file, a line in it, a page or a ti
   files.set('/w/deployed.flag', '')
   await clock.advance(40_000)
   expect(await until(async () => resumed.find(one => one === 'a1: From Claudopus: what you asked to be started again for is there: the deploy marker. Carry on from it.'))).toBeDefined()
-  expect(await until(async () => !(await lines()).some(text => text.startsWith('Claudopus starts Claude again')) || undefined)).toBe(true)
+  expect(await until(async () => !(await lines()).some(text => text.includes('Claudopus starts Claude again')) || undefined)).toBe(true)
   // A time only, and a file that never comes: started when the time comes, or told it never came
   agents.a1 = 'completed'
   expect(((await $.tool.call({ tool: 'mcp__claudopus__wake_me', tool_use_id: 'w3l', agentId: 'a1', what: 'a look much later', minutes: 500 } as never)) as { result?: string }).result).toContain('in 60 min (at most 60 min).')
@@ -313,7 +313,7 @@ test('a helper quiet for five minutes is named to its work once, and the card sa
   expect(await pane.find({ type: 'Text', text: /looked in on|helper running/ })).toBeUndefined()
   await clock.advance(5 * 60_000)
   expect(appended.filter(line => line.startsWith('a1: Your helper "Read the nose code" (a2) has shown nothing new'))).toHaveLength(1)
-  expect((await pane.find({ type: 'Text', text: /^1 helper quiet for 5\+ min, Claudopus told Claude$/ }))?.text).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: /^1 helper has shown nothing new for over 5m · Claude was told to check it$/ }))?.text).toBeDefined()
   await clock.advance(3 * 60_000)
   expect(appended.filter(line => line.includes('has shown nothing new'))).toHaveLength(1)
 })

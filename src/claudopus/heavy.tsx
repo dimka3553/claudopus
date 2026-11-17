@@ -49,7 +49,7 @@ const busyWords = (f: UsageFigures | undefined) =>
 const placeWords = (n: number) => (n === 1 ? 'next in line' : `${n}${n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : n % 10 === 1 && n % 100 !== 11 ? 'st' : 'th'} in line`)
 const HEAVY_HELD = (what: string, place: number, f: UsageFigures | undefined, isHelper: boolean) =>
   `Not run yet: the Mac is busy (${busyWords(f)}) and other heavy commands of Claudopus's tasks run, so this one ("${what}") waits its turn, ${placeWords(place)}. Do other work that does not need it, or end your step${isHelper ? ' without handing back' : ''}: Claudopus starts you again when its turn comes, in 15 minutes at the latest. Then send the same command again.`
-const HEAVY_LOST = (title: string, what: string) => `The task "${title}" could not be told that its command "${what}" may run now. Send it a message to carry on.`
+const HEAVY_LOST = (title: string, what: string) => `Claudopus couldn't tell the task "${title}" that its command "${what}" can run now. Send the task a message so it carries on.`
 const HEAVY_TURN = (what: string, isLate: boolean) =>
   isLate
     ? `Your command "${what}" has waited 15 minutes for room on the Mac: send it again now, and it runs whatever the load. If it fails or times out for lack of room, try it again later.`
@@ -68,7 +68,7 @@ const showHeld = ($: EngineInterface) =>
   ).then(() => redraw($))
 // A held row as the card's tree draws it: a wait for its turn, with how it stands
 const heldJobs = (one: Todo): Job[] =>
-  (one.heldCalls ?? []).map(call => ({ ...jobOf(`held-${call.id}`, call.what, call.cmd, call.at), kind: 'wait' as const, waitsFor: `its turn: ${labelOf(call.what, call.cmd)}`, target: `waits for room on the Mac · ${placeWords(call.place)}` }))
+  (one.heldCalls ?? []).map(call => ({ ...jobOf(`held-${call.id}`, call.what, call.cmd, call.at), kind: 'wait' as const, waitsFor: `its turn to run ${labelOf(call.what, call.cmd)}`, target: `Waiting until the Mac is less busy · ${placeWords(call.place)}` }))
 
 // Whether a piece of work's Bash call runs now or waits its turn: a deny with its place in the line, else the call's id, to take
 // out of heavyOpen as the call ends. Nothing waits here: the answer is given at once

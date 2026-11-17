@@ -10,4 +10,5 @@
 - `README.md` and `mods/claudopus/README.md` are the same text; the plugin's copy has paths relative to the plugin folder. Change both together.
 - Each piece of work says what it changed for the person in `mods/claudopus/changes/<its branch>.md`, a `- ` line each in plain words; the release makes it that version's entry in `mods/claudopus/CHANGELOG.md` (which About, the update screen and claudopus.ai/changelog.html read), and a release without one fails its build.
 - Never push `main` or raise `version` by hand: commit on your own branch in your own worktree and run `mods/claudopus/bin/release` from it. `.release` says how: it numbers `mods/claudopus/.claude-plugin/plugin.json` from main, builds (`site/version.json` is made from it, and every install updates when that page differs from its version), runs the build check and the strict checks, and pushes, within a minute of the press.
+- Every word the person sees follows `mods/claudopus/docs/words.md` (one page): read it before changing any text on screen.
 - Everything here is public: no keys, private paths, names or notes.

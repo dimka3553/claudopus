@@ -858,7 +858,7 @@ test("a Mac handed another Mac's chats lists them by name and Mac with its own, 
   expect(await list.find({ type: 'Text', text: /^This chat$/ })).toBeUndefined()
   expect((await list.findAll({ type: 'Text' })).filter(one => one.text === 'Robot arm')).toHaveLength(1)
   // Its running time is told on this Mac's clock
-  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ done · )?(\d+s|1m \d\ds)$/ })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^Opus 5\.5 · (\d+ of \d+ to-dos done · )?(\d+s|1m \d\ds)$/ })).toBeDefined()
   // Its ask has nothing to press here, and nothing waits in the outbox for that Mac
   expect((await list.findAll({ type: 'Button' })).some(b => b.props.label === 'Send')).toBe(false)
   expect([...files.keys()].filter(path => path.startsWith(`${MEMORY}/live/outbox/sams-m5/`) && path.endsWith('.json'))).toEqual([])
@@ -881,13 +881,13 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
   await clock.advance(10_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Check the totals' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: 'Working on 1 thing in another chat' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 task working in another chat' })).toBeDefined()
   // The work ends: that chat, still open, writes its file with no card at all
   const quiet = JSON.stringify({ chat: 'chat-old', title: 'Remote connector', folder: '/repo/billing', host: '', at: NOW + 11_000, cards: [] })
   files.set('ssh:fetch', `${(NOW + 11_000) / 1000}\n---claudopus-live---\n${quiet}\n`)
   // It is seen at the next fetch, a second at a time so its pause is not passed over
   let seen
-  for (let n = 0; n < 20 && !seen; n += 1) (await clock.advance(1000), (seen = await list.find({ type: 'Text', text: '✓ Finished' })))
+  for (let n = 0; n < 20 && !seen; n += 1) (await clock.advance(1000), (seen = await list.find({ type: 'Text', text: '✓ Done' })))
   expect(seen).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Check the totals' })).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'Just finished' })).toBeDefined()
@@ -895,7 +895,7 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
   // After its pause it is gone, and not kept under Finished, since its chat said nothing of how it ended
   await clock.advance(3000)
   expect(await until(async () => ((await list.find({ type: 'Text', text: 'Check the totals' })) ? undefined : true))).toBe(true)
-  expect(await list.find({ type: 'Text', text: 'Nothing is running' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: 'Nothing running' })).toBeDefined()
   expect(await drawn(list)).toEqual(['mark'])
   expect((await list.findAll({ type: 'Button' })).some(b => /Finished/.test(String(b.props.label)))).toBe(false)
   // A chat that closes with its work running shows nothing finished: its work just leaves
@@ -905,7 +905,7 @@ test("work on another Mac whose chat runs a version that drops a card as it ends
   expect(back).toBeDefined()
   files.set('ssh:fetch', `${(NOW + 60_000) / 1000}\n`)
   let finished
-  for (let n = 0; n < 20; n += 1) (await clock.advance(1000), (finished ||= await list.find({ type: 'Text', text: '✓ Finished' })))
+  for (let n = 0; n < 20; n += 1) (await clock.advance(1000), (finished ||= await list.find({ type: 'Text', text: '✓ Done' })))
   expect(finished).toBeUndefined()
   expect(await list.find({ type: 'Text', text: 'Check the totals' })).toBeUndefined()
   await list.unmount()
@@ -1141,15 +1141,15 @@ test("a chat on the other Mac running without Claudopus, and this Mac's app havi
   await $.session.start(start)
   await clock.advance(40_000)
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
-  expect(await until(async () => list.find({ type: 'Text', text: 'Claudopus is off in some chats' }))).toBeDefined()
-  expect(await list.find({ type: 'Text', text: /^New chats on m4 start without Claudopus\. .* at 2026-11-12 13:57 .*quit and opened again\.$/ })).toBeDefined()
+  expect(await until(async () => list.find({ type: 'Text', text: "Claudopus isn't running in some chats" }))).toBeDefined()
+  expect(await list.find({ type: 'Text', text: /^New chats on m4 start without Claudopus\. At 2026-11-12 13:57 .*Quit the Claude app and open it again to end this\.$/ })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /^“FaceIQ email plan” on m4 runs without Claudopus/ })).toBeDefined()
   expect(await list.find({ type: 'Text', text: /bad;id/ })).toBeUndefined()
   // The app is quit and opened again, and the chat there has gone: the warning goes
   files.set('sh:applog', '2026-11-13 09:00:00 [info] Starting app {\n')
   files.set('ssh:fetch', `${NOW / 1000}\n`)
   await clock.advance(40_000)
-  expect(await until(async () => ((await list.find({ type: 'Text', text: /^Claudopus is off/ })) ? undefined : true))).toBe(true)
+  expect(await until(async () => ((await list.find({ type: 'Text', text: /^Claudopus isn't running/ })) ? undefined : true))).toBe(true)
   await list.unmount()
 })
 
@@ -1208,7 +1208,7 @@ test("in a chat over ssh the panel's text stays the same from second to second w
   const texts = async () => (await pane.findAll({ type: 'Text' })).map(t => t.text).join('|')
   const first = await texts()
   expect(first).toContain('<1m')
-  expect(first).toMatch(/context \d*[05]% \(310k\)|context 310k/)
+  expect(first).toMatch(/\d*[05]% full/)
   await clock.advance(20_000)
   expect(await texts()).toBe(first)
   await clock.advance(41_000)

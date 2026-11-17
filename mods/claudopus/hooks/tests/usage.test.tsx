@@ -763,9 +763,9 @@ test('while work runs, the line above the prompt shows memory, the processor, th
   // The octopus, then memory and the processor with Claude's part in purple, the disk and the network
   expect(drawings.length).toBeGreaterThanOrEqual(4)
   const memory = drawings.find(d => String(d.props.alt).startsWith('Memory'))
-  expect(memory?.props.alt).toBe('Memory: 29 of 64 GB in use, Claude 3.3 GB')
+  expect(memory?.props.alt).toBe('Memory: 29 of 64 GB in use, 3.3 GB by Claude and what it started')
   expect(String(memory?.props.source)).toContain('#8A63F0')
-  expect(drawings.find(d => String(d.props.alt).startsWith('Processor'))?.props.alt).toBe('Processor: 50% busy, Claude 20% of the whole')
+  expect(drawings.find(d => String(d.props.alt).startsWith('Processor'))?.props.alt).toBe('Processor: 50% busy, 20% by Claude and what it started')
   expect(await desk.find({ type: 'Text', text: /fix the nose|Fix the nose/ })).toBeUndefined()
   await desk.unmount()
 
@@ -807,16 +807,16 @@ const gpuAt = (pct: number) => `@@GPU@@\n"Device Utilization %"=${pct}`
 const batt = (line: string) => `@@BATT@@\nNow drawing from 'Battery Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`
 const ac = (line: string) => `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t${line} present: true`
 const BATTERIES: { name: string; extra: string; desk: string[]; term: RegExp; alt: string }[] = [
-  { name: 'on battery with a time left', extra: `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`, desk: ['37%', '85% 4:12 left'], term: / gpu[▰▱]{3} 37% bat 85% 4:12 disk/, alt: 'Battery: 85%, 4:12 left' },
+  { name: 'on battery with a time left', extra: `${gpuAt(37)}\n${batt('85%; discharging; 4:12 remaining')}`, desk: ['37%', '85% 4h 12m left'], term: / gpu[▰▱]{3} 37% bat 85% 4h12m disk/, alt: 'Battery: 85%, 4h 12m left' },
   { name: 'on battery while the system still estimates', extra: batt('64%; discharging; (no estimate)'), desk: ['64%'], term: / bat 64% disk/, alt: 'Battery: 64%, on battery' },
-  { name: 'charging', extra: batt('62%; charging; 1:05 remaining'), desk: ['62% 1:05 to full'], term: / bat 62% ↑1:05 disk/, alt: 'Battery: 62%, charging, 1:05 to full' },
-  { name: 'fully charged on power', extra: `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t100%; charged; 0:00 remaining present: true`, desk: ['100%'], term: / bat 100% ac disk/, alt: 'Battery: 100%, on power' },
-  { name: 'low on battery', extra: batt('12%; discharging; 0:41 remaining'), desk: ['12% 0:41 left'], term: / bat 12% 0:41 disk/, alt: 'Battery: 12%, 0:41 left' },
+  { name: 'charging', extra: batt('62%; charging; 1:05 remaining'), desk: ['62% 1h 05m to full'], term: / bat 62% ↑1h05m disk/, alt: 'Battery: 62%, charging, 1h 05m to full' },
+  { name: 'fully charged on power', extra: `@@BATT@@\nNow drawing from 'AC Power'\n -InternalBattery-0 (id=22872163)\t100%; charged; 0:00 remaining present: true`, desk: ['100%'], term: / bat 100% on power disk/, alt: 'Battery: 100%, on power' },
+  { name: 'low on battery', extra: batt('12%; discharging; 0:41 remaining'), desk: ['12% 41m left'], term: / bat 12% 41m disk/, alt: 'Battery: 12%, 41m left' },
   // macOS calls the charge 100% while it still tops the cells up, and still gives a time to full: the time beside 100% is dropped
-  { name: 'called full while it finishes the charge', extra: ac('100%; finishing charge; 0:36 remaining'), desk: ['100% finishing'], term: / bat 100% finishing disk/, alt: 'Battery: 100%, finishing charge' },
+  { name: 'called full while it finishes the charge', extra: ac('100%; finishing charge; 0:36 remaining'), desk: ['100% finishing'], term: / bat 100% finishing disk/, alt: 'Battery: 100%, finishing the charge' },
   { name: 'called full while it still says charging', extra: ac('100%; charging; 0:12 remaining'), desk: ['100%'], term: / bat 100% ↑ disk/, alt: 'Battery: 100%, charging' },
-  { name: 'nearly full, finishing the charge', extra: ac('99%; finishing charge; 0:05 remaining'), desk: ['99% 0:05 to full'], term: / bat 99% ↑0:05 disk/, alt: 'Battery: 99%, charging, 0:05 to full' },
-  { name: 'held at 80% by optimised charging, or on a charger too weak to charge', extra: ac('80%; AC attached; not charging'), desk: ['80%'], term: / bat 80% ac disk/, alt: 'Battery: 80%, on power' },
+  { name: 'nearly full, finishing the charge', extra: ac('99%; finishing charge; 0:05 remaining'), desk: ['99% 5m to full'], term: / bat 99% ↑5m disk/, alt: 'Battery: 99%, charging, 5m to full' },
+  { name: 'held at 80% by optimised charging, or on a charger too weak to charge', extra: ac('80%; AC attached; not charging'), desk: ['80%'], term: / bat 80% on power disk/, alt: 'Battery: 80%, on power' },
   { name: 'charging while the system still estimates', extra: ac('45%; charging; (no estimate)'), desk: ['45%'], term: / bat 45% ↑ disk/, alt: 'Battery: 45%, charging' },
   // The low end the same way: a charge the system calls 0% has no time left beside it
   { name: 'called empty with a time left', extra: batt('0%; discharging; 0:09 remaining'), desk: ['0%'], term: / bat 0% disk/, alt: 'Battery: 0%, on battery' },
@@ -836,8 +836,8 @@ for (const one of BATTERIES)
     const drawings = await desk.findAll({ type: 'Svg' })
     expect(drawings.find(d => String(d.props.alt).startsWith('Battery'))?.props.alt).toBe(one.alt)
     // Never a figure the system did not give
-    if (/no estimate|charged|\t(100|0)%|not charging/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\d:\d\d (left|to full)/ })).toBeUndefined()
-    if (one.name === 'low on battery') expect((await desk.find({ type: 'Text', text: /^12% 0:41 left$/ }))?.props.color).toBe('#E5A50A')
+    if (/no estimate|charged|\t(100|0)%|not charging/.test(one.extra)) expect(await desk.find({ type: 'Text', text: /\dm (left|to full)/ })).toBeUndefined()
+    if (one.name === 'low on battery') expect((await desk.find({ type: 'Text', text: /^12% 41m left$/ }))?.props.color).toBe('#E5A50A')
     await desk.unmount()
     const term = await $.ui.mount({ ...BAND, surface: 'terminal' } as never)
     expect((await term.find({ type: 'Text', text: /^mem/ }))?.text).toMatch(one.term)
@@ -879,8 +879,8 @@ test('a pointer resting on a figure shows its card: who uses the most, the parts
     memory: ['Memory', '29 of 64 GB', 'Claude and what it started', '3.3 GB', 'Using the most', 'Safari', '0.4 GB'],
     cpu: ['Processor', '50% busy', 'Cores', '10', 'Claude and what it started', '20%', 'Using the most', 'Safari', '30%'],
     gpu: ['Graphics processor', '37% busy', 'Graphics memory in use', '1.2 GB'],
-    battery: ['Battery', '85%', 'On battery, 4:12 left as the system estimates it'],
-    disk: ['Disk, read and write', '63 MB/s'],
+    battery: ['Battery', '85%', 'On battery · about 4h 12m left'],
+    disk: ['Disk, read and written', '63 MB/s'],
     net: ['Network', '1 MB/s', 'Download', 'Upload'],
   }
   // The drawn tree as the surface gets it: each element's props, its hover, its children
@@ -972,9 +972,9 @@ test('in a narrow terminal a figure that does not fit is left out whole, the net
     return text
   }
   // A phone's 50 columns: memory, the processor and the battery whole; a little more room, the graphics processor too
-  expect(await line(44)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 85% 4:12$/)
-  expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4:12$/)
-  expect(await line(80)).toMatch(/bat 85% 4:12 disk 63M\/s net 1M\/s$/)
+  expect(await line(44)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% bat 85% 4h12m$/)
+  expect(await line(50)).toMatch(/^mem[▰▱]{3} 29G cpu[▰▱]{3} 50% gpu[▰▱]{3} 37% bat 85% 4h12m$/)
+  expect(await line(80)).toMatch(/bat 85% 4h12m disk 63M\/s net 1M\/s$/)
 })
 test('in a phone-narrow terminal the word for a charge the system calls full while it finishes is shown whole', async ($, on) => {
   let n = 0
@@ -992,7 +992,7 @@ test('in a phone-narrow terminal the word for a charge the system calls full whi
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
   await until(async () => ((await desk.find({ type: 'Text', text: /^63 MB\/s$/ })) ? true : undefined))
   // Its card says it in full
-  expect(await desk.find({ type: 'Text', text: 'Finishing the charge: the system calls it full and still tops it up' })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: 'Finishing the charge · the system calls it full and still tops it up' })).toBeDefined()
   await desk.unmount()
 })
 
@@ -1022,15 +1022,15 @@ test('the battery card says what the Mac draws, the processors and graphics each
   await clock.advance(6000)
   await clock.advance(1000)
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' } as never)
-  await until(async () => ((await desk.find({ type: 'Text', text: 'The whole Mac draws' })) ? true : undefined))
-  for (const text of ['The whole Mac draws', '80 W', 'Processors, every program', "Claude's own processes", 'Graphics, every program', 'Claude of that, estimated'])
+  await until(async () => ((await desk.find({ type: 'Text', text: 'Power use, whole Mac' })) ? true : undefined))
+  for (const text of ['Power use, whole Mac', '80 W', 'Power use, processors', 'Claude, processors', 'Power use, graphics', 'Claude, graphics', /^about [\d.]+ W$/])
     expect(await desk.find({ type: 'Text', text })).toBeDefined()
   expect(await desk.find({ type: 'Text', text: "Claude's processors draw" })).toBeUndefined()
   // The cards are their rows alone: no paragraph under them on what the figures cover, and no line on what busy means
   expect(await desk.find({ type: 'Text', text: /^Claude: the app/ })).toBeUndefined()
   expect(await desk.find({ type: 'Text', text: 'Time at work, at any speed' })).toBeUndefined()
   // The graphics card: what it draws, and who uses it most
-  for (const text of ['Drawing', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
+  for (const text of ['Power use', 'Safari', '45%', '15%']) expect(await desk.find({ type: 'Text', text })).toBeDefined()
   await desk.unmount()
 })
 
@@ -1054,11 +1054,11 @@ test("a task's heavy command waits its turn while the Mac is busy and another ru
     await list.unmount()
     return all
   }
-  expect(await until(async () => ((await texts()).some(text => /^waits for room on the Mac · 2nd in line/.test(text)) || undefined))).toBe(true)
+  expect(await until(async () => ((await texts()).some(text => /^Waiting until the Mac is less busy · 2nd in line/.test(text)) || undefined))).toBe(true)
   const held = await texts()
-  expect(held.some(text => /^Wait · its turn: Take the card shots/.test(text))).toBe(true)
-  expect(held.some(text => /^waits for room on the Mac · next in line/.test(text))).toBe(true)
-  expect(held.some(text => /^Wait · its turn: Take the menu shots/.test(text))).toBe(true)
+  expect(held.some(text => /^Wait · its turn to run Take the card shots/.test(text))).toBe(true)
+  expect(held.some(text => /^Waiting until the Mac is less busy · next in line/.test(text))).toBe(true)
+  expect(held.some(text => /^Wait · its turn to run Take the menu shots/.test(text))).toBe(true)
   // (said once, on the row: the card's line does not say a time it is started again by)
   expect(held.some(text => /starts Claude again/.test(text))).toBe(false)
   // The same command sent again before its turn keeps its place
@@ -1071,7 +1071,7 @@ test("a task's heavy command waits its turn while the Mac is busy and another ru
   for (const agentId of ['a2', 'a4']) await $.turn.complete({ answer: 'Waiting my turn.', durationMs: 1, isAborted: false, turnId: `t-${agentId}`, reason: 'answer', agentId } as never)
   await clock.advance(90_000)
   const waited = await texts()
-  expect(waited.filter(text => /^Wait · its turn: Take the (card|footer) shots/.test(text))).toHaveLength(2)
+  expect(waited.filter(text => /^Wait · its turn to run Take the (card|footer) shots/.test(text))).toHaveLength(2)
   expect(waited.some(text => /^Shoot the cards$/.test(text))).toBe(true)
   // Nobody is woken while the load stays
   const woken = () => [...appended, ...resumed].filter(line => /your command's turn|has waited 15 minutes/.test(line))
