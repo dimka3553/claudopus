@@ -497,11 +497,11 @@ const answerCleared = async ($: EngineInterface, one: Todo, ask: NonNullable<Tod
     redraw($)
     if (!working) await lastStep($, one, ask, said).catch(err => log($, `last step of ${one.id} not done: ${String(err)}`))
     else {
+      // Kept on the card first, so a reload meanwhile keeps it too, and done once the card has ended (stepsAtEnd); a write that fails
+      // here tells the work nothing and puts the question back (answerNow). The rest is caught, as the work has been told by then
+      await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card)))
       await tell($, one.id, `${who(true)} pressed "${said}" in answer to your question: ${ask.text}\nClaudopus does that step (${cut(ask.lastStep, 160)}) once you end this turn: do not do it or start it yourself. Commit anything left on the branch now, change nothing on it after that, and end with your report.`)
-      // Kept on the card, so a reload meanwhile keeps it too, and done once the card has ended (stepsAtEnd). Each part caught, as the
-      // work has been told already: a throw here would put the ask back for a second press while the step is still held
       const held = (err: unknown) => log($, `last step of ${one.id} not held: ${String(err)}`)
-      await changeTodos($, list => list.map(card => (card.id === one.id ? { ...card, stepOnEnd: { ask, said } } : card))).catch(held)
       await stepLine($, one.id, `On your "${said}", Claudopus does the last step once Claude finishes`).catch(held)
       // (a turn that ended while this was written has had its end's look already)
       await stepsAtEnd($).catch(held)
