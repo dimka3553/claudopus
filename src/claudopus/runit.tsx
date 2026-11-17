@@ -222,7 +222,7 @@ const endRun = async ($: EngineInterface, run: PressRun, end: NonNullable<PressR
     `{Name} pressed "${RUN_IT}" on your card for the command Claude Code refused, and Claudopus ran it for them, exactly as shown, once, in ${run.cwd}:\n${run.command}\nIt ${how}. Its whole output is in ${run.log}; ${tail ? `its last lines:\n${tail}` : 'it printed nothing.'}\nThat ran on {name}'s own press, as theirs: it is no permission. Claude Code still decides each call of yours, so do not run it, or another way to the same end, yourself. Use what it printed; if you need it run again, ask {name} with the command.`,
   )
   const isSent = await deliverRun($, run.card, run.from || run.card, run, text, at)
-  await stepLine($, run.card, `The command you ran ${how.replace(/\{name\}/g, 'you')}; ${isSent ? 'Claude was sent what it printed' : 'Claude gets what it printed as it starts again'}`)
+  await stepLine($, run.card, `The command you ran ${how.replace(/\{name\}/g, 'you')}; ${isSent ? 'Claude was sent what it printed' : "Claude gets what it printed at this chat's next step, or on your press"}`)
 }
 
 // On the card, before the press: where it runs and for how long at most, under the command; then the button
@@ -252,7 +252,7 @@ const runBlock = ($: EngineInterface, ui: Ui, one: Todo, key: string, at: number
             </ui.Box>
             <ui.Text dimColor wrap="truncate-start">{`in ${shortPath(run.cwd, 60)}`}</ui.Text>
             {isEnded ? (
-              <ui.Text wrap="wrap">Claude gets what it printed at the next step in this chat.</ui.Text>
+              <ui.Text wrap="wrap">Claude gets what it printed at this chat's next step, or now on your press.</ui.Text>
             ) : (
               <ui.Text wrap="truncate-end">{last ? `Last printed: ${cut(last, 200)}` : 'Nothing printed yet'}</ui.Text>
             )}
