@@ -1661,7 +1661,8 @@ test('work that ended before the mod kept it is read back from the chat\'s own r
 })
 
 test('helpers hang inside their work\'s card as a tree, one slim row each that opens its Details; ended ones fold into one row laid out the same, and Details lists every one', async ($, on) => {
-  const { clock, opened } = world(on)
+  // (what a helper's command printed, for its last lines under it in Details)
+  const { clock, opened } = world(on, { jobs: { output: file => (/m1/.test(file) ? 'bridge 12 mm\nnostril 9 mm\n' : ''), wroteAt: () => 1_700_000_000_000 } })
   await $.session.start(start)
   await $.prompt.submit({ text: 'fix the nose', wait: false, origin: composer })
   await $.agent.spawn({ ...spawn, prompt: 'fix the nose' } as never)
@@ -1721,10 +1722,33 @@ test('helpers hang inside their work\'s card as a tree, one slim row each that o
   const narrow = await $.ui.mount({ ...LIST, props: { ...LIST.props, bodyColumns: 20 }, surface: 'desktop' } as never)
   expect((await keyed(narrow, 'open-list-a2'))?.props.label).toBe('Measure the nose')
   await narrow.unmount()
+  // A helper with helpers of its own and a line of what it does under its name: the line from its dot down to them runs on beside
+  // that line, as the line of the level above does (17 Nov it stopped there, so its rows hung from nothing), drawn and as text
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'm1', agentId: 'a2', command: 'python3 measure.py', description: 'Size the bridge', run_in_background: true } as never)
+  // (its output is read on the calm redraw)
+  await clock.advance(30_000)
+  await clock.advance(30_000)
+  const rails = async (surface: 'desktop' | 'terminal', requestId?: string) => {
+    const view = await $.ui.mount({ ...LIST, ...(requestId ? { requestId } : {}), props: { ...LIST.props, bodyColumns: 80 }, surface } as never)
+    const boxes = await view.findAll({ type: 'Box' })
+    type Drawn = { type?: string; text?: string; props: Record<string, unknown>; children?: readonly unknown[] }
+    const inside = (node: Drawn, type: string): Drawn | undefined => (node.type === type ? node : (node.children ?? []).map(kid => inside(kid as Drawn, type)).find(Boolean))
+    const found = (boxes as unknown as (Drawn & { key?: string })[])
+      .filter(box => /^(twig-rails-(list|details)-a2|tail-.+-\d+-rails)$/.test(String(box.key)))
+      .map(box => (surface === 'desktop' ? String(inside(box, 'Svg')?.props.source) : (inside(box, 'Text')?.children ?? []).join('')))
+    await view.unmount()
+    return found
+  }
+  expect((await rails('desktop')).map(svg => svg.match(/d="([^"]*)"/)?.[1])).toEqual(['M9 0V20M27 0V20'])
+  expect(await rails('terminal')).toEqual(['│ │  '])
+  // and so in Details, past each line under it there, the last lines its command printed too
+  const inDetails = await rails('desktop', 'work-a1')
+  expect(inDetails.length).toBeGreaterThan(1)
+  expect(inDetails.map(svg => svg.match(/d="([^"]*)"/)?.[1])).toEqual(inDetails.map(() => 'M9 0V20M27 0V20'))
 
   // The work's Details lists every helper, ended or not, as the same tree
   const tab = await $.ui.mount({ ...LIST, requestId: 'work-a1', props: { ...LIST.props, bodyColumns: 80 }, surface: 'terminal' } as never)
-  expect((await tab.find({ type: 'Text', text: / helpers? working$/ }))?.text).toBe('2 of 4 helpers working')
+  expect((await tab.find({ type: 'Text', text: / helpers? working$/ }))?.text).toBe('1 command running · 2 of 4 helpers working')
   expect((await tab.findAll({ type: 'Button' })).map(one => String(one.props.label)).filter(text => /manual|appendix|Measure/.test(text))).toEqual(['Measure the nose', 'Read the manual', 'Read the appendix', 'Measure the ears'])
   // One at work has a dot at the end of its line, a ring growing out of it (cells the terminal repaints), one that finished a tick
   expect((await tab.findAll({ type: 'Raster' })).filter(one => String(one.key).endsWith('-ring')).length).toBe(2)

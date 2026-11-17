@@ -2,6 +2,9 @@
 
 What changed in each version of Claudopus, newest first.
 
+## 0.2.186 · 17 November 2026
+- The tree on a task's card no longer breaks under a helper that has a line of what it's doing: the line from the helper down to its own commands and helpers runs unbroken at every depth, in Details too, past a command's last lines
+
 ## 0.2.185 · 17 November 2026
 - claudopus.ai asks before it counts visits: a small cookie banner offers Accept and Decline, and only Accept loads Microsoft Clarity. The footer's Cookies link changes the choice, and a new Privacy page says what Clarity records.
 
