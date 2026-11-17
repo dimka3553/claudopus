@@ -127,7 +127,7 @@ test("F-007 F-014 F-021 · work's change to config.json, the rules or the roles 
   await press('gate-w2-f-once')
   expect((await edit).result).toBe('ran')
   // By a command, it is refused outright; reading it is not
-  for (const command of [`echo '{"admin":"never"}' > ~/.claude/claudopus/config.json`, `sed -i '' s/a/b/ "$HOME/.claude/claudopus/roles/work.md"`, `cd ~/.claude/claudopus && cp /tmp/x rules/CLAUDE.md`, `python3 -c "open('/home/sam/.claude/claudopus/config.json','w')"`,
+  for (const [i, command] of [`echo '{"admin":"never"}' > ~/.claude/claudopus/config.json`, `sed -i '' s/a/b/ "$HOME/.claude/claudopus/roles/work.md"`, `cd ~/.claude/claudopus && cp /tmp/x rules/CLAUDE.md`, `python3 -c "open('/home/sam/.claude/claudopus/config.json','w')"`,
     `python3 -c "import json;json.dump({},open('/home/sam/.claude/claudopus/config.json','w'))"`,
     `python3 -c "import pathlib;pathlib.Path('/home/sam/.claude/claudopus/config.json').write_text('{}')"`,
     `python3 -c "import os;os.remove('/home/sam/.claude/claudopus/config.json')"`,
@@ -154,17 +154,28 @@ test("F-007 F-014 F-021 · work's change to config.json, the rules or the roles 
     `python3 -c "import shelve;shelve.open('/home/sam/.claude/claudopus/config.json')"`,
     `python3 -c "import os;os.chflags('/home/sam/.claude/claudopus/config.json',2)"`,
     `python3 -c "import pathlib;pathlib.Path('/home/sam/.claude/claudopus/config.json').replace('/tmp/x')"`,
-    `python3 -c "import os;os.__dict__['sys'+'tem']('true')" /home/sam/.claude/claudopus/config.json`])
-    expect(((await $.tool.call({ tool: 'Bash', tool_use_id: `b${command.length}`, agentId: 'a1', command } as never)) as { deny?: string }).deny).toContain('only with the Edit or Write tool')
+    `python3 -c "import os;os.__dict__['sys'+'tem']('true')" /home/sam/.claude/claudopus/config.json`,
+    // a function under another name, a move with two arguments, an escaped quote around a redirect, Node's optional call
+    `python3 -c "max=exec;max('x=1')" /home/sam/.claude/claudopus/config.json`,
+    `python3 -c "import os;get=getattr;get(os,'remove')('/home/sam/.claude/claudopus/config.json')"`,
+    `node -e "const log=eval;log('1')" /home/sam/.claude/claudopus/config.json`,
+    `node -e "Object.entries(require('fs')).find(e=>e[0]=='rmSync')[1]('/home/sam/.claude/claudopus/config.json')"`,
+    `python3 -c "import os;os.replace('/tmp/x','/home/sam/.claude/claudopus/config.json')"`,
+    `python3 -c "import pathlib;pathlib.Path('/tmp/x').replace('/home/sam/.claude/claudopus/config.json')"`,
+    `python3 -c "import os;list(map(os.replace,['/tmp/x'],['/home/sam/.claude/claudopus/config.json']))"`,
+    `python3 -c "print(1)\\" > /home/sam/.claude/claudopus/config.json \\""`,
+    `node -e "require('fs')['rmSync']?.('/home/sam/.claude/claudopus/config.json')"`,
+    // and a read by a program's own code, which Claudopus cannot prove only reads: the refusal says how to read it
+    `python3 -c "import json;print(json.load(open('/home/sam/.claude/claudopus/config.json'))['macs'][0])"`,
+    `node -pe "require('fs').readFileSync('/home/sam/.claude/claudopus/config.json','utf8')"`,
+  ].entries()) {
+    const said = ((await $.tool.call({ tool: 'Bash', tool_use_id: `b${i}`, agentId: 'a1', command } as never)) as { deny?: string }).deny ?? ''
+    expect([command, said.includes('only with the Edit or Write tool'), said.includes('use the Read tool, or cat or jq')]).toEqual([command, true, true])
+  }
   for (const [i, command] of [
     'cat ~/.claude/claudopus/config.json',
-    `python3 -c "import json;print(json.load(open('/home/sam/.claude/claudopus/config.json'))['macs'][0])"`,
-    `python3 -c "import sys;sys.stdout.write(open('/home/sam/.claude/claudopus/rules/CLAUDE.md', encoding='utf-8').read())"`,
-    `node -e "console.log(JSON.parse(require('fs').readFileSync('/home/sam/.claude/claudopus/config.json','utf8')).name)"`,
-    `python3 -c "import json,os;print(json.load(open(os.path.join(os.path.expanduser('~'),'.claude/claudopus/config.json'))).get('name'))" 2>/dev/null`,
-    `python3 -c "print(open('/home/sam/.claude/claudopus/rules/CLAUDE.md').read().replace('a','b'))" | head -5`,
-    `python3 -I -c "from pathlib import Path;print(Path('/home/sam/.claude/claudopus/config.json').read_text())"`,
-    `node -pe "require('fs').readFileSync('/home/sam/.claude/claudopus/config.json','utf8')"`,
+    `jq -r '.macs[0]' /home/sam/.claude/claudopus/config.json`,
+    'head -5 /home/sam/.claude/claudopus/rules/CLAUDE.md',
   ].entries())
     expect([command, ((await $.tool.call({ tool: 'Bash', tool_use_id: `r${i}`, agentId: 'a1', command } as never)) as { result?: unknown }).result]).toEqual([command, 'ran'])
   void files

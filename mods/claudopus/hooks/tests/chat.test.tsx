@@ -1209,14 +1209,19 @@ test("a chat's own thread may only read, run a single command in the background,
     'open -a Vivaldi "/repo/out/before after [1].png"',
     'open /repo/out/shot.png',
     'open http://localhost:3000/pricing',
-    'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/pricing',
-    'curl -sSI --max-time 5 http://127.0.0.1:8080/',
-    'curl -s -o /dev/null -w "%{http_code}\\n" http://localhost:3000',
-    'curl -so /dev/null -m5 localhost:3000/health',
-    'curl -sI http://[::1]:3000/',
-    'curl -s --url http://localhost:3000/ -o /dev/null',
-    'open https://github.com/o/r/blob/main/tools/run.py',
+    'curl -q -s -o /dev/null -w "%{http_code}" http://localhost:3000/pricing',
+    'curl -q -sSI --max-time 5 http://127.0.0.1:8080/',
+    'curl -q -s -o /dev/null -w "%{http_code}\\n" http://localhost:3000',
+    'curl -q -so /dev/null -m5 localhost:3000/health',
+    'curl -q -sI http://[::1]:3000/',
+    'curl -q -s --url http://localhost:3000/ -o /dev/null',
+    'open http://localhost:3000/tools/run.py',
     'open http://localhost:3000/main.js',
+    'open .',
+    'open /repo/out/',
+    'open ~',
+    'open ~/Downloads/shot.png',
+    'open -a Vivaldi "$HOME/x.png"',
     'open -R /repo/run.sh',
     'open -e /repo/notes.txt',
   ].entries())
@@ -1228,21 +1233,25 @@ test("a chat's own thread may only read, run a single command in the background,
     'open /Applications/Calculator.app',
     'open x-apple.systempreferences:com.apple.preference.security',
     'open --stdout /repo/out.txt /repo/a.png',
-    'open -a Vivaldi "$HOME/x.png"',
-    'curl -s -o /repo/page.html http://localhost:3000/',
-    'curl -O http://localhost:3000/a.js',
-    'curl -X POST http://localhost:3000/api/reset',
-    'curl -d x=1 http://localhost:3000/api',
-    'curl -s -w "%output{/repo/x}%{http_code}" http://localhost:3000/',
-    'curl -K /repo/curlrc http://localhost:3000/',
-    'curl -s https://example.com/',
-    'curl -s http://localhost@example.com/',
-    'curl -sL http://localhost:3000/go',
-    'curl -s -w @/repo/fmt.txt http://localhost:3000/',
-    'curl -X GET http://localhost:3000/',
-    'curl -H "X-HTTP-Method-Override: DELETE" http://localhost:3000/',
-    'curl -T /repo/a http://localhost:3000/',
-    'curl -F a=@/repo/a http://localhost:3000/',
+    'open "$HOMEX/x.png"',
+    'open https://github.com/o/r',
+    'open /repo/song.mp3',
+    'open /Applications/Calculator.app/',
+    'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/pricing',
+    'curl -q -s -o /repo/page.html http://localhost:3000/',
+    'curl -q -O http://localhost:3000/a.js',
+    'curl -q -X POST http://localhost:3000/api/reset',
+    'curl -q -d x=1 http://localhost:3000/api',
+    'curl -q -s -w "%output{/repo/x}%{http_code}" http://localhost:3000/',
+    'curl -q -K /repo/curlrc http://localhost:3000/',
+    'curl -q -s https://example.com/',
+    'curl -q -s http://localhost@example.com/',
+    'curl -q -sL http://localhost:3000/go',
+    'curl -q -s -w @/repo/fmt.txt http://localhost:3000/',
+    'curl -q -X GET http://localhost:3000/',
+    'curl -q -H "X-HTTP-Method-Override: DELETE" http://localhost:3000/',
+    'curl -q -T /repo/a http://localhost:3000/',
+    'curl -q -F a=@/repo/a http://localhost:3000/',
     'open /repo/scripts/deploy',
     'open /Applications/Calculator.app/Contents/MacOS/Calculator',
     'open -a /repo/build/Release/Foo.app /repo/x.png',
@@ -1255,13 +1264,8 @@ test("a chat's own thread may only read, run a single command in the background,
   ].entries())
     expect([command, (await $.tool.call({ tool: 'Bash', tool_use_id: `t1o${i}`, command } as never)).deny]).toEqual([command, expect.stringContaining('Start a fresh agent')])
   // A refusal of one of these says the shape the chat can run it in
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape', command: 'curl -sL http://localhost:3000/go' } as never)).deny).toContain('A `curl` the chat runs itself is a plain GET or HEAD')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape2', command: 'open /repo/scripts/deploy' } as never)).deny).toContain('An `open` the chat runs itself shows a web page')
-  // A .curlrc in the home folder, which may send curl's output into a file, is kept out with -q first
-  files.set('/home/sam/.curlrc', 'output = /repo/x')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1rc', command: 'curl -s http://localhost:3000/' } as never)).deny).toContain('-q comes first')
-  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1rc-q', command: 'curl -q -s http://localhost:3000/' } as never)).deny).toBeUndefined()
-  files.delete('/home/sam/.curlrc')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape', command: 'curl -sL http://localhost:3000/go' } as never)).deny).toContain('A `curl` the chat runs itself starts with -q')
+  expect((await $.tool.call({ tool: 'Bash', tool_use_id: 't1o-shape2', command: 'open /repo/scripts/deploy' } as never)).deny).toContain('An `open` the chat runs itself shows a page of a local server')
   // The browser pane's preview of a local page, its list, its server's log and its tabs the chat calls itself; a preview that starts a
   // server by name or shows another site, a stop, and the pane's clicks and scripts are a task's
   for (const [i, call] of [
