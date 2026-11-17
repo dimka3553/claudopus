@@ -16,7 +16,7 @@ import { changelogOf, fitted, isScreenDue, missedOf, previousOf, seenIn, TAB_BUD
 import type { Version } from './changelog'
 import { tabMoveQueue } from './tabmoves'
 import { detachedOf, DOWNLOAD_CMD, describedOf, endOf as runEndOf, expiresIn, leftSeconds, foldJobs, heldShellOf, isKindSaid, isPausedProc, isPid, isWaitOnly, labelOf, leftText as timeLeftText, JOB_COLOR, JOB_GLYPH, JOB_HEAD, JOB_SHAPE, JOB_LOOK, JOB_NEWS, JOB_QUIET, JOB_TAIL, JOB_UNREAD, JOB_WORD, jobKindOf, JOBS_SHOWN, latestOf, tailOf, OUTPUT_LINES, pidOf, portOf, procsOf, SERVER_CMD, shellsOf, treeOf, waitOf } from './jobs'
-import { leftoversOf, memOf, leftName, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
+import { leftoversOf, leftCommandOf, isNamedBy, memOf, PS_COLUMNS, plainOf, reportsOf, SILENT_AFTER, SILENT_WARN } from './jobs'
 import { heavyOf, isWaiterTree, waiterLeavesOf, waitingOf, watcherOf } from './jobs'
 import type { HeavyKind, OpenCall, Proc, Span, WaitKind } from './jobs'
 import type { Job, JobKind } from './jobs'
@@ -8413,7 +8413,17 @@ const endedSummary = (helpers: number, runs: Pick<EndedRun, 'how'>[]) => {
   })
   return bad.length ? `${head} · ${bad.join(', ')}` : head
 }
-const keepEnded = (one: Todo, runs: EndedRun[]) => (runs.length ? { endedRuns: [...(one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id)), ...runs].slice(-BG_KEPT) } : {})
+const keepEnded = (one: Todo, runs: EndedRun[]) => {
+  if (!runs.length) return {}
+  const keyOf = (run: EndedRun) => (leftCommandOf(run.id) ? `${leftCommandOf(run.id)}|${run.what}` : '')
+  const kept = (one.endedRuns ?? []).filter(r => !runs.some(n => n.id === r.id))
+  const joined = runs.reduce<EndedRun[]>((all, run) => {
+    const same = keyOf(run) ? all.find(r => keyOf(r) === keyOf(run)) : undefined
+    if (!same) return [...all, run]
+    return all.map(r => (r === same ? { ...r, at: Math.min(r.at, run.at), endedAt: Math.max(r.endedAt, run.endedAt), how: run.endedAt >= r.endedAt ? run.how : r.how, ...(run.endedAt >= r.endedAt ? (run.code ? { code: run.code } : { code: undefined }) : {}), count: (r.count ?? 1) + (run.count ?? 1) } : r))
+  }, kept)
+  return { endedRuns: [...joined.filter(r => !runs.some(n => keyOf(n) && keyOf(n) === keyOf(r)) && !runs.some(n => n.id === r.id)), ...joined.filter(r => runs.some(n => (keyOf(n) && keyOf(n) === keyOf(r)) || n.id === r.id))].slice(-BG_KEPT) }
+}
 type EndAs = EndedRun['how'] | { how: EndedRun['how']; code?: string; at?: number }
 const dropBackground = async ($: EngineInterface, ids: string[], how: EndAs | Record<string, EndAs> = 'ended') => {
   const now = await $.clock.now()
@@ -8451,7 +8461,7 @@ const leftLine = (one: Todo, at: number) => (one.leftSince && one.status !== 'wo
 
 
 
-type Seen = { latest: string; mem?: string; isUntold?: boolean; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
+type Seen = { latest: string; mem?: string; memKb?: number; isUntold?: boolean; tail?: string[]; pct?: string; done?: string; total?: string; rate?: string; left?: string; isEarlier?: boolean; isOwn?: boolean; words?: string; isEmpty?: boolean; port?: string; wroteAt?: number; isPaused?: boolean; target?: string }
 const jobLog = new Map<string, Seen>()
 const jobNews = new Map<string, number>()
 let jobsLookedAt = 0
@@ -8478,7 +8488,7 @@ const jobOf = (id: string, what: string, cmd: string, at: number, isWatch = fals
 const jobsOf = (one: Todo, at: number): Job[] =>
   foldJobs([
     ...(one.bg ?? []).map(b => jobOf(b.id, b.what, b.cmd ?? b.what, b.at, b.isWatch, one.seenJobs?.[b.id])),
-    ...(one.detached ?? []).map(d => jobOf(d.id, d.what, d.cmd, d.at, false, one.seenJobs?.[d.id])),
+    ...(one.detached ?? []).map(d => jobOf(d.id, d.from && one.bg?.some(b => b.id === d.from) ? `What “${runWords(d.what, d.cmd)}” started` : d.what, d.cmd, d.at, false, one.seenJobs?.[d.id])),
     ...(one.status === 'working' && one.running?.cmd && at - one.running.at >= ROW_SHOWN
       ? [jobOf(`call-${one.id}`, one.running.label ?? '', one.running.cmd, one.running.at)]
       : []),
@@ -8487,8 +8497,10 @@ const jobsOf = (one: Todo, at: number): Job[] =>
 
 const jobHead = (job: Job) => {
   if (job.id.startsWith('more-')) return job.label
-  const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
-  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${job.count && job.count > 1 ? ` ×${job.count}` : ''}`
+  if (leftCommandOf(job.id) && job.count && job.count > 1) return job.label
+  const many = job.count && job.count > 1 ? ` ×${job.count}` : ''
+  const kind = `${JOB_HEAD[job.kind]}${job.kind === 'server' && job.port ? ` :${job.port}` : ''}${many}`
+  if (job.isNamed && isKindSaid(job.label)) return `${job.label}${job.kind === 'server' && job.port && !job.label.includes(job.port) ? ` :${job.port}` : ''}${many}`
   const label = job.kind === 'wait' ? (job.waitsFor ?? job.label.replace(/^wait(s|ing)?\s+/i, '')) : job.label
   return `${kind} · ${label}`
 }
@@ -8584,7 +8596,7 @@ const lookJobs = async ($: EngineInterface) => {
   if (psText !== undefined && spans.length) await adoptLeft($, jobProcs, now).catch(err => log($, `left runs not followed: ${String(err)}`))
   const alive = new Set(aliveText.trim().split(/\s+/).filter(Boolean))
   const changed = new Map([...body.matchAll(/\n@@AT@@ (\d+) ([^\n]*)/g)].map(m => [m[2] ?? '', Number(m[1]) * 1000]))
-  const gone = owned.filter(o => o.pid && !alive.has(o.pid)).map(o => o.id)
+  const gone = owned.filter(o => o.pid && !alive.has(o.pid) && !stoppingJobs.has(o.id)).map(o => o.id)
   if (gone.length && /@@ALIVE@@/.test(r.stdout)) {
     const runsOf = (one: Todo) => (one.detached ?? []).filter(d => gone.includes(d.id)).map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'ended' as const }))
     const taken = new Map<string, NonNullable<Todo['detached']>>()
@@ -8592,8 +8604,9 @@ const lookJobs = async ($: EngineInterface) => {
       cards.map(one => {
         const ended = (one.detached ?? []).filter(d => gone.includes(d.id))
         if (!ended.length) return one
-        taken.set(one.id, ended.filter(d => !stoppingJobs.has(d.id)))
         const left = (one.detached ?? []).filter(d => !gone.includes(d.id))
+        const isRest = (d: { id: string }) => leftCommandOf(d.id) !== '' && left.some(l => leftCommandOf(l.id) === leftCommandOf(d.id))
+        taken.set(one.id, ended.filter(d => !stoppingJobs.has(d.id) && !isRest(d)))
         return { ...one, detached: left.length ? left : undefined, ...keepEnded(one, runsOf(one)) }
       }),
     )
@@ -8689,8 +8702,9 @@ const lookJobs = async ($: EngineInterface) => {
 let outputMoved = false
 
 const memSeen = (pid?: string) => {
-  const mem = pid && jobProcs.length ? memOf(treeOf(jobProcs, pid)) : undefined
-  return mem ? { mem } : {}
+  const tree = pid && jobProcs.length ? treeOf(jobProcs, pid) : []
+  const mem = memOf(tree)
+  return mem ? { mem, memKb: tree.reduce((sum, p) => sum + (p.rss ?? 0), 0) } : {}
 }
 
 type KeptSpan = Span & { agent: string; what: string; bgId?: string }
@@ -8720,18 +8734,38 @@ const keepSpan = async ($: EngineInterface, agent: string, call: { tool: string;
   const bgId = (result as { backgroundTaskId?: unknown } | undefined)?.backgroundTaskId
   const isBackground = Boolean(call.run_in_background) && typeof bgId === 'string'
   const span: KeptSpan = { id: String(call.tool_use_id ?? now), agent, what: oneLine(String(call.description ?? '')).slice(0, 160), cmd: oneLine(command).slice(0, 4000), from, to, at, endAt: now, ...(isBackground ? { bgId: String(bgId) } : { until: now }) }
-  spans = [...spans.filter(s => s.id !== span.id), span].slice(-SPANS_KEPT)
+  const rest = [...spans.filter(s => s.id !== span.id), span]
+  const open = rest.filter(s => s.bgId && s.until === undefined)
+  spans = [...open, ...rest.filter(s => !(s.bgId && s.until === undefined)).slice(-Math.max(0, SPANS_KEPT - open.length))].sort((a, b) => a.at - b.at)
   if (call.run_in_background) return
   const r = await $.process.run(['sh', '-c', `printf '@@LEFT@@\\n'; ps -axww -o ${PS_COLUMNS}`], { timeoutMs: 5000 }).catch(() => undefined)
   if (!r || r.exitCode !== 0 || !r.stdout.includes('@@LEFT@@')) return
   const procs = procsOf(r.stdout.split('@@LEFT@@\n')[1] ?? '', now)
   await adoptLeft($, procs, now)
 }
+const ownersOf = async ($: EngineInterface, pids: string[]) => {
+  const sid = await $.session.id().catch(() => '')
+  const out = new Map<string, 'mine' | 'other' | 'hidden'>()
+  if (!sid || !pids.length) return out
+  const script = `sid=$1; shift; for p; do if [ -r "/proc/$p/environ" ]; then e=$(tr '\\0' '\\n' < "/proc/$p/environ" 2>/dev/null); else e=$(ps -E -ww -o command= -p "$p" 2>/dev/null | tr ' ' '\\n'); fi; if printf '%s\\n' "$e" | grep -qxF "CLAUDE_CODE_SESSION_ID=$sid"; then echo "$p mine"; elif printf '%s\\n' "$e" | grep -qE '^(HOME|PATH|USER)='; then echo "$p other"; else echo "$p hidden"; fi; done # whose runs`
+  const r = await $.process.run(['sh', '-c', script, 'sh', sid, ...pids.filter(isPid)], { timeoutMs: 5000 }).catch(() => undefined)
+  for (const line of r?.stdout.split('\n') ?? []) {
+    const [pid = '', who = ''] = line.trim().split(' ')
+    if (who === 'mine' || who === 'other' || who === 'hidden') out.set(pid, who)
+  }
+  return out
+}
 const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: KeptSpan[]) => {
   const list = await read($, todos)
   for (const pid of adopted) if (!procs.some(p => p.pid === pid)) adopted.delete(pid)
   const known = new Set([...adopted, ...list.flatMap(one => (one.detached ?? []).flatMap(d => (d.pid ? [d.pid] : [])))])
-  const left = leftoversOf(procs, only ?? spans, known, [...openCalls.values()])
+  const found = leftoversOf(procs, only ?? spans, known, [...openCalls.values()])
+  if (!found.length) return
+  const whose = await ownersOf($, found.map(l => l.top.pid))
+  const spanOfLeft = (l: (typeof found)[number]) => spans.find(s => s.id === l.span) ?? only?.find(s => s.id === l.span)
+  const isTheirs = (l: (typeof found)[number]) => whose.get(l.top.pid) === 'other' || (whose.get(l.top.pid) === 'hidden' && !isNamedBy(l.top.command, spanOfLeft(l)?.cmd ?? ''))
+  const left = found.filter(l => !isTheirs(l))
+  for (const l of found) if (isTheirs(l)) adopted.add(l.top.pid)
   if (!left.length) return
   const fd = await $.process
     .run(['sh', '-c', 'for p; do f=$(readlink "/proc/$p/fd/1" 2>/dev/null || lsof -a -p "$p" -d 1 -Fn 2>/dev/null | sed -n "s/^n//p" | head -1); printf "%s %s\\n" "$p" "$f"; done', 'sh', ...left.map(l => l.top.pid)], { timeoutMs: 5000 })
@@ -8743,8 +8777,7 @@ const adoptLeft = async ($: EngineInterface, procs: Proc[], now: number, only?: 
     if (!span || !list.some(card => card.id === span.agent)) continue
     const file = logs.get(one.top.pid) ?? ''
     const log = file.startsWith('/') && !file.startsWith('/dev/') ? file : ''
-    const several = left.filter(l => l.span === one.span).length > 1
-    const what = several || !span.what ? leftName(one.top.command) : span.what
+    const what = span.what || labelOf('', span.cmd)
     adopted.add(one.top.pid)
     added.set(span.agent, [...(added.get(span.agent) ?? []), { id: `left-${one.top.pid}-${span.id}`, what, at: Math.min(now, Math.max(span.at, one.top.startAt)), cmd: oneLine(one.top.command).slice(0, 400), log, pid: one.top.pid, isLeft: true, ...(span.bgId ? { from: span.bgId } : {}) }])
   }
@@ -8864,10 +8897,20 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
   const card = list.find(one => one.id === owner)
   const bg = card?.bg?.find(b => b.id === job.id)
   const detached = card?.detached?.find(d => d.id === job.id)
+  const alike = detached ? (card?.detached ?? []).filter(d => d.id === detached.id || (said === undefined && leftCommandOf(d.id) !== '' && leftCommandOf(d.id) === leftCommandOf(detached.id) && d.what === detached.what)) : []
+  const marked = alike.filter(d => !stoppingJobs.has(d.id)).map(d => d.id)
+  for (const id of marked) stoppingJobs.add(id)
+  try {
+    await stoppingNow($, owner, job, said, now, card, bg, detached, alike)
+  } finally {
+    for (const id of marked) stoppingJobs.delete(id)
+  }
+}
+const stoppingNow = async ($: EngineInterface, owner: string, job: Job, said: string | undefined, now: number, card: Todo | undefined, bg: NonNullable<Todo['bg']>[number] | undefined, detached: NonNullable<Todo['detached']>[number] | undefined, alike: NonNullable<Todo['detached']>) => {
   const procs = jobProcs.length ? jobProcs : procsOf((await $.process.run(['ps', '-axww', '-o', PS_COLUMNS], { timeoutMs: 5000 }).catch(() => ({ stdout: '' }))).stdout, now)
   const bgShell = bg && !bg.isWatch && procs.length ? shellsOf(procs, [{ id: bg.id, cmd: bg.cmd ?? '', at: bg.at }]).get(bg.id) : undefined
-  const top = detached?.pid ?? (typeof bgShell === 'string' ? bgShell : undefined) ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined)
-  const pids = top ? [...new Set([top, ...treeOf(procs, top).map(p => p.pid)])].filter(isPid) : []
+  const tops = detached ? alike.flatMap(d => (d.pid ? [d.pid] : [])) : [(typeof bgShell === 'string' ? bgShell : undefined) ?? (job.id.startsWith('call-') && card?.running?.cmd ? heldShellOf(procs, card.running.cmd, card.running.at) : undefined)].flatMap(p => (p ? [p] : []))
+  const pids = [...new Set(tops.flatMap(top => [top, ...treeOf(procs, top).map(p => p.pid)]))].filter(isPid)
   let isStopped = false
   if (bg) {
     const r = await $.tool.call({ tool: 'TaskStop', task_id: bg.id }).catch(err => ({ deny: String(err) }))
@@ -8882,7 +8925,8 @@ const stopping = async ($: EngineInterface, owner: string, job: Job, said?: stri
   if (!isStopped) return void (await log($, `run ${job.id} of work ${owner} could not be stopped: nothing of it was found`))
   if (bg) await dropBackground($, [bg.id], 'stopped')
   if (detached) {
-    await changeTodos($, cards => cards.map(one => (one.id === owner && one.detached?.some(d => d.id === job.id) ? { ...one, detached: one.detached.filter(d => d.id !== job.id).length ? one.detached.filter(d => d.id !== job.id) : undefined, ...keepEnded(one, [{ id: detached.id, what: detached.what, at: detached.at, endedAt: now, how: 'stopped' }]) } : one)))
+    const isAlike = (d: { id: string }) => alike.some(a => a.id === d.id)
+    await changeTodos($, cards => cards.map(one => (one.id === owner && one.detached?.some(isAlike) ? { ...one, detached: one.detached.filter(d => !isAlike(d)).length ? one.detached.filter(d => !isAlike(d)) : undefined, ...keepEnded(one, alike.map(d => ({ id: d.id, what: d.what, at: d.at, endedAt: now, how: 'stopped' as const }))) } : one)))
   }
   const silent = job.wroteAt && !job.isEmpty ? now - job.wroteAt : now - job.at
   if (said === undefined) void tell($, owner, RUN_STOPPED(job.label, silent >= SILENT_WARN ? shortAgo(silent) : ''))
@@ -8925,7 +8969,9 @@ const noteKills = (one: Todo | undefined, command: string) => {
 const wakeForRun = async ($: EngineInterface, one: Todo | undefined, runs: NonNullable<Todo['detached']>) => {
   const first = runs[0]
   if (!one || !first || isHeld(one) || one.status === 'stopped' || one.status === 'failed' || (one.status === 'done' && (one.handedBackAt !== undefined || endedByHandback.has(one.id) || one.endedAt < first.at))) return
-  const text = runs.length === 1 ? RUN_ENDED(runWords(first.what, first.cmd), first.log) : RUNS_ENDED(runs.map(d => runWords(d.what, d.cmd)))
+  const words = [...new Set(runs.map(d => runWords(d.what, d.cmd)))]
+  const isAlone = runs.length === 1 && (!leftCommandOf(first.id) || (one.endedRuns?.find(r => leftCommandOf(r.id) === leftCommandOf(first.id))?.count ?? 1) === 1)
+  const text = words.length === 1 ? RUN_ENDED(words[0] ?? '', isAlone ? first.log : '') : RUNS_ENDED(words)
   if (one.status === 'working' && !one.waitsSince) {
     await tell($, one.id, text)
     return void (await log($, `work ${one.id} told ${runs.length} run(s) of it ended`))
@@ -11022,9 +11068,9 @@ const usageCards = (f: UsageFigures): Record<string, UsageCard | undefined> => {
       rows: [
         ...(f.watts !== undefined ? [['Power use, whole Mac', `${wattText(f.watts)} W`] as [string, string]] : []),
         ...(f.wattsCpu !== undefined ? [['Power use, processors', `${wattText(f.wattsCpu)} W`] as [string, string]] : []),
-        ...(f.wattsClaude !== undefined ? [[CLAUDE_ALL, `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
+        ...(f.wattsClaude !== undefined ? [['Claude, processors', `${wattText(f.wattsClaude)} W`] as [string, string]] : []),
         ...(f.wattsGpu !== undefined ? [['Power use, graphics', `${wattText(f.wattsGpu)} W`] as [string, string]] : []),
-        ...(f.wattsGpuClaude !== undefined ? [[CLAUDE_ALL, `about ${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
+        ...(f.wattsGpuClaude !== undefined ? [['Claude, graphics', `about ${wattText(f.wattsGpuClaude)} W`] as [string, string]] : []),
       ],
     },
     disk: f.disk === undefined ? undefined : {
@@ -11493,7 +11539,7 @@ const panelHooks = (on: On) => {
         <Box key="tab-back-row" flexDirection="row" gap={2} height={1} flexShrink={0} paddingX={2}>
           <Button key="tab-back" label="Close" plain hotkey="x" onPress={() => void backToPanel($, id).catch(err => log($, `not back to the panel: ${String(err)}`))} />
           {id.startsWith('report-') ? <Button key="tab-results" label="Results" plain hotkey="r" onPress={() => void openReports($).catch(err => log($, `reports not opened: ${String(err)}`))} /> : null}
-          <Text dimColor wrap="truncate-end">{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x Tab for keys'}</Text>
+          <Text dimColor wrap="truncate-end">{e.props.isFocused ? 'Esc: back to the chat' : 'ctrl+x then Tab to use the keys'}</Text>
         </Box>
         {body}
       </Box>
@@ -11628,8 +11674,9 @@ const panelHooks = (on: On) => {
     }
     const now = (one: Todo) => {
       const entry = [...one.entries].reverse().find(one => one.kind !== 'steer')
-      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id)) : []
-      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${endedWord(r)}`)
+      const runs = one.status === 'working' && !one.ask ? (one.endedRuns ?? []).filter(r => r.endedAt > (entry?.at ?? 0) && r.how !== 'timed out' && String(r.what ?? '').trim() && !one.detached?.some(d => d.from === r.id || (leftCommandOf(r.id) !== '' && leftCommandOf(d.id) === leftCommandOf(r.id)))) : []
+      const said: Record<string, string> = { finished: 'done', failed: 'failed', killed: 'stopped', stopped: 'stopped', ended: 'ended' }
+      const [first = '', second = ''] = runs.map(r => `${runWords(String(r.what))}: ${said[r.how] ?? 'ended'}`)
       return !first ? (entry?.text ?? '') : !second ? first : runs.length === 2 ? `${first} · ${second}` : `${first} · ${second} · ${runs.length - 2} more ended`
     }
 
@@ -11727,7 +11774,7 @@ const panelHooks = (on: On) => {
           {/* A command to type: Terminal opens with it typed, not run, only on this press */}
           {canOpenTerminal(one) ? (
             <Box flexDirection="row">
-              <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Opened in Terminal, typed, not run' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
+              <Button key={`${key}-terminal-${presses}`} label={openedKey === `${one.id}:${ask.at}:${ask.copy}` ? '✓ Typed into Terminal, not run yet' : 'Open in Terminal'} onPress={() => void openTerminal($, one).catch(err => log($, `terminal not opened: ${String(err)}`))} />
             </Box>
           ) : null}
           {/* Another chat's ask is answered only in its own chat: no file carries an answer there */}
@@ -12058,7 +12105,8 @@ const panelHooks = (on: On) => {
         : [`No progress shown · nothing new for ${ago(still)}`, `nothing new ${ago(still)}`]
       const isWarn = job.isPaused || Boolean(job.target) || isSilent
       const lead = job.kind === 'server' ? (words ? 'Serving · last: ' : 'Serving') : job.kind === 'watch' ? (words ? 'Watching · last: ' : 'Watching') : isSilent && hasSaid ? 'Last: ' : ''
-      const numbers = [[...full, ...pct, ...rate, ...left, ...mem], [...full, ...pct, ...rate, ...left], [...full, ...pct, ...left], [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...bare, ...left]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
+      const programs = leftCommandOf(job.id) && job.count && job.count > 1 ? [`${job.count} programs`] : []
+      const numbers = [[...full, ...pct, ...rate, ...left, ...programs, ...mem], [...full, ...pct, ...left, ...programs, ...mem], [...full, ...pct, ...rate, ...left, ...mem], [...full, ...pct, ...rate, ...left], [...full, ...pct, ...left], [...compact, ...pct, ...left], ...(left.length ? [[...compact, ...left], [...bare, ...left]] : []), [...compact, ...pct], [...bare, ...pct], [...pct], []]
       const tails = [[state, told], [state], [short, told], [short]].map(t => t.filter(Boolean))
       const tries = [...numbers.slice(0, 3).flatMap(nums => tails.map(tail => ({ nums, tail }))), ...tails.flatMap(tail => numbers.map(nums => ({ nums, tail })))]
       for (const { nums, tail } of tries) {
@@ -12141,13 +12189,13 @@ const panelHooks = (on: On) => {
       if (isAll || jobs.length <= JOBS_SHOWN) return jobs.map(job => ({ one: card, job, kids: [] }))
       const more = jobs.length - JOBS_SHOWN + 1
       const shown = jobs.slice(-(JOBS_SHOWN - 1))
-      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (job.count ?? 1), 0)} more commands`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
+      const rest: Job = { id: `more-${card.id}`, label: `${jobs.slice(0, more).reduce((n, job) => n + (leftCommandOf(job.id) ? 1 : (job.count ?? 1)), 0)} more commands`, cmd: '', kind: 'watch', at: Math.min(...jobs.slice(0, more).map(job => job.at)) }
       return [...shown, rest].map(job => ({ one: card, job, kids: [] }))
     }
     const withJobs = (branches: Branch[], isAll = false): Branch[] =>
       branches.map(b => (b.job ? b : { ...b, kids: [...jobBranches(b.one, isAll), ...withJobs(b.kids, isAll)] }))
     const rowOf = (t: Twig) => (t.job ? jobRow(t, 'list') : twigRow(t, 'list'))
-    const endedRunsOf = (one: Todo, list = all) => [one, ...underOf(list, one.id)].flatMap(kid => kid.endedRuns ?? []).sort((a, b) => a.endedAt - b.endedAt)
+    const endedRunsOf = (one: Todo, list = all) => [one, ...underOf(list, one.id)].flatMap(kid => (kid.endedRuns ?? []).filter(r => !leftCommandOf(r.id) || !kid.detached?.some(d => leftCommandOf(d.id) === leftCommandOf(r.id)))).sort((a, b) => a.endedAt - b.endedAt)
     const treeUnder = (one: Todo) => {
       const under = underOf(all, one.id)
       const own = jobBranches(one)
@@ -12469,7 +12517,7 @@ const panelHooks = (on: On) => {
       const list = one.chat ? helpersThere : all
       const under = underOf(list, one.id)
       const branches = [...jobBranches(one, true), ...withJobs(branchesOf(list, one.id, () => true), true)]
-      const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid, at).reduce((sum, job) => sum + (job.count ?? 1), 0), 0)
+      const jobs = [one, ...under].reduce((n, kid) => n + jobsOf(kid, at).reduce((sum, job) => sum + (leftCommandOf(job.id) ? 1 : (job.count ?? 1)), 0), 0)
       if (!under.length && !jobs) return null
       const running = under.filter(kid => kid.status === 'working').length
       const helpers = running === under.length ? `${running} ${running === 1 ? 'helper' : 'helpers'} working` : running ? `${running} of ${under.length} helpers working` : `${under.length} ${under.length === 1 ? 'helper' : 'helpers'}`
@@ -13022,13 +13070,13 @@ const panelHooks = (on: On) => {
               {memoryButton($, ui, isKeyed)}
               {configButton($, ui, isKeyed)}
               {aboutButton($, ui, isKeyed)}
-              {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x Tab for keys</Text> : null}
+              {isInline && !e.props.isFocused ? <Text key="head-keys-short" dimColor>ctrl+x then Tab to use the keys</Text> : null}
             </Box>
             {/* The terminal reaches a pane from the keys only after ctrl+x Tab, which nothing else tells; once it holds them each
                 button above answers its first letter */}
             {e.surface === 'terminal' && (e.props.isFocused || !isInline) ? (
               <Text key="head-keys" dimColor wrap="wrap">
-                {!e.props.isFocused ? 'ctrl+x Tab for keys' : [...own, ...elsewhere].some(one => one.ask) ? 'What you type goes in the reply box · Tab leaves it for the keys shown · Esc: back to the chat' : 'Esc: back to the chat'}
+                {!e.props.isFocused ? 'ctrl+x then Tab to use the keys' : [...own, ...elsewhere].some(one => one.ask) ? 'What you type goes in the reply box · Tab leaves it for the keys shown · Esc: back to the chat' : 'Esc: back to the chat'}
               </Text>
             ) : null}
           </Box>

@@ -57,7 +57,7 @@ const prompts: string[] = []
 // own, or uncommitted changes the move would overwrite
 type Release = { version: string; commit: string; tree: string; got?: string; manifest?: string; online?: string; fetchFails?: boolean; ownCommits?: boolean; overwrite?: boolean; worktree?: boolean; noBranch?: boolean }
 // The world beneath the mod: files in memory, the app's session tools, a cheap model
-const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
+const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: number; agents?: Record<string, string>; kinds?: Record<string, string>; parents?: Record<string, string>; panes?: string[]; talk?: unknown; model?: string; answered?: { by?: string }; art?: boolean; chatRole?: string; app?: { noSurface: boolean; claudopus?: number; asks?: number }; isNew?: boolean; ended?: Set<string>; unresumable?: Set<string>; env?: Record<string, string>; sips?: (argv: string[]) => string | undefined; bytes?: (path: string) => string | undefined; unplaced?: boolean; blind?: boolean; live?: { id: string; isShown: boolean; isPlaced: boolean; isFocused?: boolean }[]; changelog?: string; drawings?: (name: string) => string | undefined; headless?: boolean; shipped?: boolean; narrow?: { isPressing: boolean }; jobs?: { output: (file: string) => string; wroteAt: (file: string) => number; ps?: () => string; fd?: () => string; pid?: () => string; alive?: (pid: string) => boolean; owner?: (pid: string) => 'mine' | 'other' | 'hidden' }; usage?: (script: string) => string; startedOn?: Record<string, string>; release?: Release } = {}) => {
   const files = new Map<string, string>()
   files.set(KEYCHAIN, '')
   // Someone already set up has an index.md; a new person has no memory folder at all
@@ -272,6 +272,8 @@ const world = (on: On, options: { tailscale?: string; reply?: string; tokens?: n
     if (options.jobs?.pid && tool === 'sh' && String(rest[1]).includes('# pid now')) return ok(`${options.jobs.pid()}\n`)
     if (options.jobs?.ps && tool === 'sh' && String(rest[1]).includes('@@LEFT@@')) return ok(`@@LEFT@@\n${options.jobs.ps()}\n`)
     if (options.jobs?.fd && tool === 'sh' && String(rest[1]).includes('/proc/$p/fd/1')) return ok(options.jobs.fd())
+    // Whose each process is by its environment, as the test says (this chat's where it says nothing)
+    if (options.jobs && tool === 'sh' && String(rest[1]).includes('# whose runs')) return ok(rest.slice(4).map(p => `${p} ${options.jobs?.owner?.(String(p)) ?? 'mine'}\n`).join(''))
     // The engine's tasks folder, where the test reads jobs
     if (options.jobs && tool === 'sh' && String(rest[1]).includes('"$1"/tasks')) return ok('/tmp/claude-501/x/s1/tasks\n')
     // What sips says of a picture, where the test gives it
@@ -726,7 +728,7 @@ test("the panel shows every open chat's running work under that chat's name, thi
   expect(bold).not.toContain('Old landing page')
   expect(await list.find({ type: 'Text', text: 'billing' })).toBeDefined()
   // The header counts every chat's: the ask first, then all that runs, here and there
-  expect(await list.find({ type: 'Text', text: '1 task waiting for you · 2 working' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 waiting for you · 2 working' })).toBeDefined()
   // Another chat's work is stopped in its own chat: no Stop here, and its model is no control
   const buttons = (await list.findAll({ type: 'Button' })).map(one => one.key ?? '')
   expect(buttons.filter(key => key.startsWith('stop-'))).toEqual(['stop-a1'])
@@ -815,10 +817,10 @@ test("the header says in one line what every chat's cards say, and the octopus b
   expect(head(0, 3, 2)).toEqual(['3 tasks working in 2 other chats', 'working'])
   expect(head(1, 1, 1)).toEqual(['2 tasks working, here and in 1 other chat', 'working'])
   expect(head(2, 3, 2)).toEqual(['5 tasks working, here and in 2 other chats', 'working'])
-  expect(head(0, 0, 0, 1)).toEqual(['1 task waiting for you', 'asking'])
-  expect(head(1, 2, 1, 2)).toEqual(['2 tasks waiting for you · 3 working', 'asking'])
+  expect(head(0, 0, 0, 1)).toEqual(['1 waiting for you', 'asking'])
+  expect(head(1, 2, 1, 2)).toEqual(['2 waiting for you · 3 working', 'asking'])
   // A finish shows on the octopus for its moment whatever else goes on, the line still saying what needs the person or runs
-  expect(head(0, 0, 0, 1, true)).toEqual(['1 task waiting for you', 'happy'])
+  expect(head(0, 0, 0, 1, true)).toEqual(['1 waiting for you', 'happy'])
   expect(head(0, 1, 1, 0, true)).toEqual(['1 task working in another chat', 'happy'])
   expect(head(0, 0, 0, 0, true)).toEqual(['Just finished', 'happy'])
 })
@@ -839,7 +841,7 @@ test("with work only in another chat the header and octopus are at work, amber w
   // It asks: the line turns amber and says so, and the octopus waves amber
   files.set(`${MEMORY}/live/chat-b.json`, JSON.stringify({ ...file, at: NOW + 5000 }))
   await clock.advance(5000)
-  const asks = await until(async () => list.find({ type: 'Text', text: '1 task waiting for you · 1 working' }))
+  const asks = await until(async () => list.find({ type: 'Text', text: '1 waiting for you · 1 working' }))
   expect(asks?.props.color).toBe('#E5A50A')
   expect(await drawn(list)).toEqual(['wave'])
   // Both finish: happy, "Just finished", for the pause; then at rest, "Nothing is running"
@@ -865,7 +867,7 @@ test("open chats with nothing going on are listed nowhere, on any Mac and howeve
   const list = await $.ui.mount({ ...LIST, surface: 'desktop' } as never)
   expect(await until(async () => list.find({ type: 'Text', text: 'Robot arm' }))).toBeDefined()
   expect(await list.find({ type: 'Text', text: 'billing · on m4' })).toBeDefined()
-  expect(await list.find({ type: 'Text', text: '1 task waiting for you · 1 working' })).toBeDefined()
+  expect(await list.find({ type: 'Text', text: '1 waiting for you · 1 working' })).toBeDefined()
   // No idle chat by name, no row or count of them, and this chat, with nothing going on, gets no heading
   const texts = (await list.findAll({ type: 'Text' })).map(one => String(one.text ?? ''))
   expect(texts.filter(one => /^Quiet \d+$|^M4 idle$|^[▸▾]? ?\d+ other chats?$/.test(one))).toEqual([])
