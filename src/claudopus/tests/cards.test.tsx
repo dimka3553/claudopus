@@ -1458,7 +1458,7 @@ test('only runs really running are listed: a watch the engine killed at its time
   expect(details.filter(text => text === 'Wait for first screening pass').length).toBe(2)
   expect(details.filter(text => /^Ran out of time after (29|30)m \d\ds · /.test(text)).length).toBe(2)
   expect(details.some(text => /^Failed after \dm \d\ds · /.test(text))).toBe(true)
-  expect(details.some(text => /^finished after \dm \d\ds · /.test(text))).toBe(true)
+  expect(details.some(text => /^Done in \dm \d\ds · /.test(text))).toBe(true)
   // Later the wait passes its time too, with nothing printed: it says so
   for (let n = 0; n < 8; n++) await advance(MIN)
   expect((await texts()).some(text => /^57m 00s · 2m over$/.test(text))).toBe(true)

@@ -1012,20 +1012,20 @@ test('the bar above the prompt on the desktop, drawn as often as the panel under
   const config = await $.ui.mount({ ...LIST, requestId: 'config', props: { ...LIST.props, title: 'Config', bodyColumns: 70 }, surface: 'desktop' } as never)
   const says = async () => {
     await config.redraw()
-    return (await config.findAll({ type: 'Text' })).map(one => one.text ?? '').map(text => /Last checked (\d+ min)/.exec(text)?.[1]).find(Boolean)
+    return (await config.findAll({ type: 'Text' })).map(one => one.text ?? '').map(text => /Last checked (\d+m) ago/.exec(text)?.[1]).find(Boolean)
   }
-  expect(await says()).toBe('5 min')
+  expect(await says()).toBe('5m')
   // From the focus on one of its buttons until the press, the drawing on screen stays, so the press names that button
   const reset = (await config.findAll({ type: 'Button' })).find(one => one.props.label === 'Reset')
   expect(reset).toBeDefined()
   await ($.ui as any).focus({ component: 'Pane', requestId: 'config', plugin: 'claudopus', element: reset?.key, isHeld: true, origin: { kind: 'person' } }).catch(() => undefined)
   looked(20)
   await clock.advance(1200)
-  expect(await says()).toBe('5 min')
+  expect(await says()).toBe('5m')
   expect((await config.findAll({ type: 'Button' })).some(one => one.key === reset?.key)).toBe(true)
   // and once the click is over, drawn afresh
   await clock.advance(1000)
-  expect(await says()).toBe('20 min')
+  expect(await says()).toBe('20m')
   await config.unmount()
   await list.unmount()
 })
