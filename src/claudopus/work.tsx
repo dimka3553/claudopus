@@ -580,8 +580,9 @@ const workHooks = (on: On) => {
     }
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
-    // A helper started again ends again with a result of its own, passed on even if its words are the same, or none
-    if (id !== undefined) passedOn.delete(id)
+    // A helper started again ends again with a result of its own, passed on even if its words are the same, or none; a hand-back
+    // of its earlier run no prompt of the chat's came for is forgotten
+    if (id !== undefined) (passedOn.delete(id), handingBack.delete(id))
     // Work that takes a step again after its report is working again: stopped from now, it is stopped
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined

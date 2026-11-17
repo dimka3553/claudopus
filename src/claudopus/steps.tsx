@@ -375,6 +375,10 @@ const isQuietHandback = async ($: EngineInterface, origin: { kind: string }, tex
   if (!helperId || !handingBack.has(helperId)) return false
   const to = passedTo(await read($, todos), helperId)
   if (!to || handedBackLetGo.has(to.parent.id)) return false
+  // A task the engine lists at work may be given the result by the engine, so Claudopus may not pass it on (passOnHelper): the
+  // chat, which has it, is the one to act then, as noteHandback leaves it untold
+  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
+  if (listed === 'running' || listed === 'waiting') return false
   handingBack.delete(helperId)
   return true
 }

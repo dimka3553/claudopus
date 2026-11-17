@@ -166,6 +166,10 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   const handbackOf = (id: string, report: string) => `<agent-message from="${id}">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:\n  ${report}\n</agent-message>`
   const asPeer = (text: string) => $.prompt.submit({ text, wait: false, origin: { kind: 'peer' } } as never) as Promise<{ drop?: string }>
   const nose = handbackOf('a3', 'The nose is drawn at every size.')
+  // While the engine lists the task at work it may hand the task the result itself, so Claudopus may not pass it on: the chat's turn
+  agents.a1 = 'waiting'
+  expect([(await asPeer(nose)).drop, await answeredQuietly(nose)]).toEqual([undefined, false])
+  agents.a1 = 'completed'
   expect([(await asPeer(nose)).drop, await answeredQuietly(nose)]).toEqual([undefined, true])
   expect([(await asPeer(nose)).drop, await answeredQuietly(nose)]).toEqual([undefined, false])
   const words = '<agent-message from="a3">\nThe nose is drawn.\n</agent-message>'

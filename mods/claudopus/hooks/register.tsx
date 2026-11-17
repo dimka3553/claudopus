@@ -9381,6 +9381,8 @@ const isQuietHandback = async ($: EngineInterface, origin: { kind: string }, tex
   if (!helperId || !handingBack.has(helperId)) return false
   const to = passedTo(await read($, todos), helperId)
   if (!to || handedBackLetGo.has(to.parent.id)) return false
+  const listed = (await $.agent.list().catch(() => [])).find(one => one.id === to.parent.id)?.status
+  if (listed === 'running' || listed === 'waiting') return false
   handingBack.delete(helperId)
   return true
 }
@@ -10599,7 +10601,7 @@ const workHooks = (on: On) => {
     }
     const id = e.agentId
     if (id !== undefined) replyRead($, id)
-    if (id !== undefined) passedOn.delete(id)
+    if (id !== undefined) (passedOn.delete(id), handingBack.delete(id))
     if (id !== undefined && dir && (await read($, todos)).some(one => one.id === id && one.answeredAt)) await changeTodos($, list => list.map(one => (one.id === id ? { ...one, answeredAt: undefined } : one)))
     const chosen = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id)?.chosen : undefined
     const card = id !== undefined && dir ? (await read($, todos)).find(one => one.id === id) : undefined
