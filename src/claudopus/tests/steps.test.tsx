@@ -166,6 +166,12 @@ test("work never waits for its helpers: it is told it may end its step, it is le
   await $.turn.complete({ answer: 'The chin is drawn.', durationMs: 1, isAborted: false, turnId: 'h4b', reason: 'error', agentId: 'a4' } as never)
   await clock.advance(2_000)
   expect(resumed.filter(one => one.startsWith('a1: From Claudopus: your helper "Draw the chin"'))).toHaveLength(1)
+  // Sent a message, it takes a step and ends again with the same words: that is a result of its own, passed on again
+  talk.splice(0, talk.length, { role: 'user', content: 'Draw it once more.' })
+  for await (const _ of $.turn.step({ turnId: 'h4c', index: 1, model: 'm', messageCount: 1, agentId: 'a4' })) void _
+  await $.turn.complete({ answer: 'The chin is drawn.', durationMs: 1, isAborted: false, turnId: 'h4c', reason: 'answer', agentId: 'a4' } as never)
+  await clock.advance(2_000)
+  expect(await until(async () => resumed.filter(one => one.startsWith('a1: From Claudopus: your helper "Draw the chin"')).length === 2 || undefined)).toBe(true)
   // One that cannot be passed on leaves the chat told to send it on itself
   agents.a1 = 'completed'
   unresumable.add('a1')

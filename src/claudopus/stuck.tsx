@@ -127,6 +127,8 @@ const lookStuck = async ($: EngineInterface) => {
     const isPrompted = (one: Todo) => waiting.some(p => p.agent && topOf(list, p.agent) === one.id)
     const next = list.map(one => {
       if (one.parentId || one.chat) return one
+      // Work that moved again since the chat was told it is stuck is no longer what the chat was told: flagged and told afresh if it is stuck again
+      if (one.stuckTold !== undefined && movedAt(list, one) > one.stuckTold) ((isChanged = true), (one = { ...one, stuckTold: undefined, stuckAt: undefined }))
       // Nor work that waits for a command of its own it started in the background: a long copy is not stuck
       const isWaitingOwn = Boolean(one.waitsSince && one.bg?.some(b => !b.isWatch))
       // Nor work that asked Claudopus to start it again: that look has its own end, which starts it (lookWakes)
