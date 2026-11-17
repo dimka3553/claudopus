@@ -81,19 +81,13 @@ const drafts = new Map<string, string>()
 const draftOf = (id: string, ask: NonNullable<Todo['ask']>) => `${id}|${askMark(ask)}`
 // Whether the person has typed something not sent into a work's reply box
 const hasDraft = (id: string) => [...drafts].some(([key, value]) => key.startsWith(`${id}|`) && Boolean(value))
-// How many lines tall a box for words is drawn, for what it holds: as the chat's own box it grows with the text, from BOX_LEAST
-// lines up to BOX_MOST, then scrolls within (the bar above the prompt is at most 11 lines and 40px tall, its title, buttons and
-// the panel's marker included). The app draws a box of `rows` that tall whatever it holds and never grows one by itself
-// (its renderer: a textarea of fixed rows), so the mod draws it again with more rows as the text needs them; the text is the box's
-// own then, as the drawing keeps the value it was last drawn with (17 Nov, the person: "it doesn't extend taller").
-// A line is counted as wrapping at the columns the box has, less a margin, so it grows a little before the text reaches its edge
-const BOX_LEAST = 2
-const BOX_MOST = 6
-const boxLines = (text: string, columns: number) => {
-  const wide = Math.max(12, columns - 6)
-  const lines = text.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil([...line].length / wide)), 0)
-  return Math.min(BOX_MOST, Math.max(BOX_LEAST, lines))
-}
+// How many lines tall a box for words is drawn: always the same, and the text scrolls within once it is longer. The app draws a
+// box of `rows` that tall whatever it holds and never grows one by itself, so a box that grew was a new drawing for each line,
+// and each drawing of a site is a new box under the cursor: the app gives it the cursor again and its ring fades in again
+// (17 Nov, the person, typing a reply of several lines: "it starts jittering and flashing blue, not blue, blue, not blue"; the bar
+// also grew under the chat at each line). Four lines hold a reply of a few sentences; the bar holds them, its title, the gap,
+// Send and the panel's marker within its 13 rows
+const BOX_ROWS = 4
 // While the person types into a reply box or a key box the panel and every Details tab hold their drawing whole. The app builds a
 // pane afresh at each drawing, the box in it too: a pane drawn every few seconds under the person's typing flickered the box's ring,
 // put older letters over newer ones, and, as Markdown came or went above, threw the panel to its bottom, out of the person's reach
@@ -112,9 +106,9 @@ const CALM = 10_000
 const heldDrawings = new Map<string, { shape: string; content: string; at: number; fresh: number; drawing: unknown }>()
 // Counts the mod's own calls for a drawing: a press, a reply, a picture made, a box that came. Each one is drawn at once
 let freshness = 0
-const drawAgain = ($: EngineInterface) => {
+const drawAgain = ($: EngineInterface, isThroughTyping = false) => {
   freshness += 1
-  void drawFresh($)
+  void drawFresh($, isThroughTyping)
 }
 // The text each reply box was last drawn with: while the person types it is drawn with that again, never with the letters as they
 // arrive, so a drawing never puts older letters over the newer ones the box already holds
@@ -126,7 +120,7 @@ const draftDrawn = (key: string) => {
   drawnDrafts.set(key, value)
   return value
 }
-// What a pane shows, as far as it moves while the person types: a box that grows a line too (growths); work that starts, finishes, asks, waits on an admin command, is cut
+// What a pane shows, as far as it moves while the person types: work that starts, finishes, asks, waits on an admin command, is cut
 // or stuck, or leaves after its pause, here or in another chat; workflows; boxes, gates and prompts that come or go; a Details
 // tab's own to-dos
 const paneShape = async ($: EngineInterface, paneId: string) => {
@@ -137,7 +131,7 @@ const paneShape = async ($: EngineInterface, paneId: string) => {
   const theirs = [cardsOf(chats).map(card), helpersOf(chats).map(card), chats.map(c => [c.host, c.chat, c.prompts?.length ?? 0, c.answeredPrompts?.length ?? 0])]
   const flowsNow = (await read($, flows)).map(f => [f.id, f.status, isLingering(f, at), f.agents.length])
   const mine = paneId === LIST ? null : own.find(other => paneId.endsWith(other.id))?.items.map(item => item.state)
-  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark, growths])
+  return JSON.stringify([own.map(card), theirs, flowsNow, [...lastRunning.keys()], boxes.map(one => one.id), [...boxSaid.keys()], looseGates.map(one => one.id), mine, paneId === LIST ? await updateShape($) : '', [...gatePressed.keys()], [...askPressed], [...barBoxes], replyTo, replyMark])
 }
 // and in full, but for what moves on its own as work runs: its running times, its tokens, its commands and their output, which are
 // drawn again at most every CALM
@@ -160,7 +154,17 @@ const freeTimes = ($: EngineInterface) => {
   if (wasHeld) drawAgain($)
 }
 // Every pane of the mod's is drawn again, from the values as they are now
-const drawFresh = async ($: EngineInterface) => (recordEvent($, 'redraw-all'), $.ui.invalidate('ui.render'))
+// Not while the person types into a box (isTyping): the app asks again for every drawing of the mod's at each redraw, the bar
+// above the prompt too, and builds each one anew, the box with the cursor in it too, whose ring then fades in again; holding the
+// drawing does not spare that (17 Nov: the box flashed blue several times a second while tasks wrote their cards, each a redraw
+// the app answered with a box built anew; its own renderer, headless, measured). Asked for meanwhile, it is made as the typing
+// hold ends, which draws everything again anyway: a send, a press, the focus leaving the boxes, or TYPING after the last letter
+// A box whose card stopped asking goes at once, typed in or not (isThroughTyping)
+const drawFresh = async ($: EngineInterface, isThroughTyping = false) => {
+  if (isTyping && !isThroughTyping) return void recordEvent($, 'redraw-owed')
+  recordEvent($, 'redraw-all')
+  $.ui.invalidate('ui.render')
+}
 // What each pane showed when last drawn afresh: its shape, its content and when, so calmLook knows what has moved since
 const drawnPanes = new Map<string, { shape: string; content: string; at: number; side: string }>()
 // What the panel shows from the mod's own memory rather than its values: what the app's prompts, the admin and file gates, the boxes,
@@ -442,8 +446,6 @@ const openReply = ($: EngineInterface, one: Todo | undefined, surface: string) =
   if (one?.ask) boxOpen = undefined
   replyMark = one?.ask ? askMark(one.ask) : ''
   barBoxAt = 0
-  // a box opened is drawn at the height of what it holds: the next height it needs is asked for afresh
-  lastGrow = ''
   presses += 1
   redraw($)
   const ask = one?.ask

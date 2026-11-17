@@ -351,7 +351,6 @@ const openBox = ($: EngineInterface, id: string | undefined, mode: BoxMode, surf
   barKeyTyped.clear()
   if (id) (boxHeldReply.delete(id), boxSaid.delete(id))
   barBoxAt = 0
-  lastGrow = ''
   boxPresses += 1
   drawAgain($)
   const bar = barIds.get(surface)
@@ -431,11 +430,10 @@ const heldReplyButtons = ($: EngineInterface, ui: Ui, id: string, where: string)
 // as the bar, and Send, the big one, and Close, small, under that, as the reply box is (band.tsx, barReply). A key is one line; a
 // response grows with its text as the chat's own box does. No submitLabel: the app draws one as a second, small send button, and
 // with one a box of several lines sends only on Cmd+Enter
-const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode, columns: number) => {
+const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode) => {
   const name = boxNameOf(one)
   const head = mode === 'reply' ? `↳ Instead of ${name ?? (isNameBox(one) ? 'the name' : 'the key')}` : name ? `↳ ${name}` : `↳ The key's name`
   const key = barKeyBoxKey(one.id, mode)
-  const rows = barKeyRows(one.id, mode, columns)
   return (
     <ui.Box key="band-key" flexDirection="column" flexShrink={0} width="100%">
       <ui.Box flexDirection="row" height={1} overflow="hidden">
@@ -446,9 +444,9 @@ const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode, column
           <ui.Input
             key={key}
             placeholder={mode === 'reply' ? 'Type your response' : isNameBox(one) ? 'Type the name' : 'Paste the key'}
-            rows={rows}
+            rows={mode === 'reply' ? BOX_ROWS : undefined}
             autoFocus
-            onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)), mode === 'reply' ? growBox($, key, rows ?? 1, boxLines(value, columns)) : undefined)}
+            onInput={value => void ((value ? boxTyped.add(one.id) : boxTyped.delete(one.id)), barKeyTyped.set(one.id, value), holdTimes($), $.clock.now().then(at => (barBoxAt = at)))}
             onSubmit={value => submitBox($, one.id, mode, value)}
           />
         </ui.Box>
@@ -459,8 +457,6 @@ const barKeyRow = ($: EngineInterface, ui: Ui, one: Asked, mode: BoxMode, column
     </ui.Box>
   )
 }
-// How many lines the bar's key box is drawn: a key or a name one, a response as many as its text needs
-const barKeyRows = (id: string, mode: BoxMode, columns: number) => (mode === 'reply' ? boxLines(barKeyTyped.get(id) ?? '', columns) : undefined)
 // The key box open in the bar on a surface that takes one, none once it is answered, cancelled or gone
 const barKeyTarget = () => (boxOpen ? boxes.find(one => one.id === boxOpen?.id && !one.key) : undefined)
 
